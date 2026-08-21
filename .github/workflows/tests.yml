@@ -50,6 +50,318 @@ jobs:
             exit 1
           fi
 
+  queue:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 because `claims` measures this branch against its merge
+      # base with origin/main. A shallow clone has no merge base, and under
+      # --strict that is a failure rather than a skip.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # `lint` reports what the files alone cannot settle as a note at exit 0,
+      # which is most of what a row-completing PR gets wrong. Measured
+      # 2026-08-21 on a tree at b5c7207, by driving each case: a row linking a
+      # deleted row, and `status: blocked` with the blocker line removed, both
+      # exit 0. --strict promotes one named class, so the split below is the
+      # decision here -- wiring the linter in as-is would gate close to nothing.
+      #
+      # Bound on every event, because no state a sibling branch can reach
+      # produces them:
+      #   blocked-opener    a row saying `status: blocked` with nothing saying
+      #                     what it waits on. This is the frontmatter flip left
+      #                     half-applied -- the completion took the blocker line
+      #                     and the status stayed -- and nothing else caught it.
+      #   deferred-trigger  a parked row nothing can revive.
+      #   empty-store       a store that loaded nothing. Every other assertion
+      #                     here passes over zero items, so this is what stops
+      #                     the job reading green on a store it never found.
+      #
+      # Advisory on a pull request and bound on main:
+      #   dangling-link     a row may legitimately link an item a sibling PR is
+      #   stale-citation    still filing, or cite a line in a file that PR is
+      #                     still adding. Both PRs are correct and the merged
+      #                     set is correct; only the branch carrying the pointer
+      #                     is red, and only until the sibling lands. The merged
+      #                     tree holds both sides, so main is the first place
+      #                     the answer is not a guess -- one merge later than a
+      #                     PR gate and the earliest point it can be right.
+      - name: The store's format rules hold
+        env:
+          MERGED: ${{ github.event_name == 'push' }}
+        run: |
+          set -- --strict blocked-opener \
+                 --strict deferred-trigger \
+                 --strict empty-store
+          if [ "$MERGED" = "true" ]; then
+            set -- "$@" --strict dangling-link --strict stale-citation
+          fi
+          echo "queue.py lint $*"
+          python3 scripts/queue.py lint "$@"
+
+      # A hand-picked id collides at the rebase, by which point two rows share a
+      # filename and one of them has to be renamed. --strict because a runner
+      # has a network: without it an unreachable remote skips, and a skip here
+      # reads exactly like a pass. This binds on a pull request and is a no-op
+      # on a push, where the merge base with origin/main is HEAD and no branch
+      # adds anything -- by then the collision has already landed.
+      - name: Every id this branch adds holds a claim on the remote
+        run: python3 scripts/queue.py claims --strict
+
+      - name: No rendered index is committed
+        run: python3 scripts/check-queue-index.py
+
+      # Render on demand is the whole point, so render it here: the ordered
+      # backlog is readable from the Actions tab without a checkout. The item
+      # links are store-relative, which resolves nowhere in a summary, so they
+      # are rewritten at the blob for the commit under test.
+      - name: The ordered backlog, in the job summary
+        if: always()
+        continue-on-error: true
+        env:
+          BLOB: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/docs/queue
+        run: |
+          {
+            echo "## Backlog"
+            echo
+            python3 scripts/queue.py render --format table --all \
+              | sed "s|](\(Q[0-9]\{1,\}\)\.md)|]($BLOB/\1.md)|g"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Every assertion in the queue job has a spelling that passes on a store with
+  # nothing in it or a gate that skipped, and `blocked-opener` and
+  # `dangling-link` were both measured exiting 0 before the job promoted them.
+  # So each gate gets a mutation that breaks its property and has to come back
+  # red -- and, where the message is the deliverable, red for the stated reason.
+  #
+  # These steps edit the store and put it back with `git checkout -- docs/queue`,
+  # which is safe on a runner's clean checkout and will discard uncommitted work
+  # if you run one by hand. Commit first.
+  queue-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The measured failure: a completion applied to the prose and not to the
+      # frontmatter. Both halves are asserted -- that it fails, and that it
+      # offers the status flip. A message naming only `Blocked by …` sends the
+      # next completing session to restore a dependency that has shipped.
+      - name: A blocked row with no blocker line must fail the gate
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          for p in sorted(pathlib.Path("docs/queue").glob("Q*.md")):
+              text = p.read_text(encoding="utf-8")
+              if not re.search(r"^status: blocked$", text, re.M):
+                  continue
+              stripped = re.sub(r"\n[ \t]*Blocked (?:by|on)[^\n]*\n", "\n",
+                                text, count=1)
+              if stripped == text:
+                  continue
+              p.write_text(stripped, encoding="utf-8")
+              print(f"took the blocker line out of {p.name}")
+              sys.exit(0)
+          sys.exit("no blocked row carries an opener to strip")
+          PY
+          python3 scripts/queue.py lint --strict blocked-opener \
+            > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "lint exit: $rc"
+          cat mutant.log
+          git checkout -- docs/queue
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::lint passed with a blocked row that names no blocker" >&2
+            exit 1
+          fi
+          if ! grep -q 'set `status: ready` instead' mutant.log; then
+            echo "::error::lint failed, but did not offer the status flip" >&2
+            exit 1
+          fi
+
+      # The other half of the same defect: the frontmatter stayed blocked and
+      # the blocker line stayed too, so only the shipped row is missing. This is
+      # the class that is advisory on a PR, so the mutation runs main's set.
+      - name: A row waiting on a shipped item must fail the gate on main
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          store = pathlib.Path("docs/queue")
+          held = {p.stem for p in store.glob("Q*.md")}
+          for p in sorted(store.glob("Q*.md")):
+              text = p.read_text(encoding="utf-8")
+              if not re.search(r"^status: blocked$", text, re.M):
+                  continue
+              m = re.search(r"^[ \t]*Blocked (?:by|on)[^\n]*?\((Q\d+)\.md\)", text, re.M)
+              if not m or m.group(1) not in held:
+                  continue
+              (store / f"{m.group(1)}.md").unlink()
+              print(f"completed {m.group(1)}, which {p.stem} waits on")
+              sys.exit(0)
+          sys.exit("no blocked row links an item the store still holds")
+          PY
+          python3 scripts/queue.py lint --strict dangling-link \
+            > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "lint exit: $rc"
+          cat mutant.log
+          git checkout -- docs/queue
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::lint passed with a row waiting on an item that shipped" >&2
+            exit 1
+          fi
+          if ! grep -q 'set `status: ready` and drop the blocker line' mutant.log; then
+            echo "::error::lint failed, but did not name the frontmatter flip" >&2
+            exit 1
+          fi
+
+      # The other two classes the queue job promotes. Neither is load-bearing
+      # for a completion, and both are here for the same reason as the rest: a
+      # class promoted and never shown failing is a claim. stale-citation in
+      # particular fires on nothing in the store today -- there are no
+      # `file:line` pointers in it yet -- so this is the only evidence that
+      # promotion does anything at all.
+      - name: A parked row with no trigger, and a citation past a file's end
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          store = pathlib.Path("docs/queue")
+          parked = None
+          for p in sorted(store.glob("Q*.md")):
+              text = p.read_text(encoding="utf-8")
+              if not re.search(r"^status: deferred$", text, re.M):
+                  continue
+              stripped = re.sub(r"\*\*(?:Demand|Event|Decision)", "The", text, count=1)
+              if stripped == text:
+                  continue
+              p.write_text(stripped, encoding="utf-8")
+              parked = p.name
+              break
+          if parked is None:
+              sys.exit("no deferred row carries a trigger to strip")
+          print(f"took the revive trigger out of {parked}")
+          cited = sorted(store.glob("Q*.md"))[0]
+          cited.write_text(
+              cited.read_text(encoding="utf-8")
+              + "\n\nMeasured at scripts/queue.py:999999.\n", encoding="utf-8")
+          print(f"pointed {cited.name} past the end of scripts/queue.py")
+          PY
+          python3 scripts/queue.py lint --strict deferred-trigger \
+            > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "--- deferred-trigger -- lint exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::lint passed with a parked row nothing can revive" >&2
+            exit 1
+          fi
+          python3 scripts/queue.py lint --strict stale-citation \
+            > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "--- stale-citation -- lint exit: $rc"
+          cat mutant.log
+          git checkout -- docs/queue
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::lint passed with a citation past the end of its file" >&2
+            exit 1
+          fi
+          if ! grep -q 'past the end of a' mutant.log; then
+            echo "::error::lint failed, but not on the citation" >&2
+            exit 1
+          fi
+
+      # Nothing else in the job distinguishes "every rule holds" from "no item
+      # was read". A --store that resolves nowhere is how that happens in
+      # practice, and it is one typo away in every caller.
+      - name: A store with no items in it must fail the gate
+        run: |
+          mkdir -p mutant-store
+          python3 scripts/queue.py --store mutant-store lint --strict empty-store \
+            > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "lint exit: $rc"
+          cat mutant.log
+          rmdir mutant-store
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::lint passed over a store holding no items" >&2
+            exit 1
+          fi
+
+      # One mutation per signal. The rendered form is how an index actually gets
+      # committed -- someone runs render and saves it -- and a check that only
+      # catches that shape says nothing about an index somebody typed, which is
+      # the same contention with none of the same text in it.
+      - name: Each shape of committed index must fail the check
+        run: |
+          python3 scripts/queue.py render --format table --all > docs/queue/INDEX.md
+          git add -N docs/queue/INDEX.md
+          python3 scripts/check-queue-index.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "--- rendered index -- check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the index check passed with a rendered index committed" >&2
+            exit 1
+          fi
+          if ! grep -q 'carries the header' mutant.log; then
+            echo "::error::the index check failed, but not on the render signature" >&2
+            exit 1
+          fi
+
+          { echo "# Backlog"; echo; } > docs/queue/INDEX.md
+          for f in docs/queue/Q[0-9]*.md; do
+            id=$(basename "$f" .md)
+            echo "- [$id]($id.md)" >> docs/queue/INDEX.md
+          done
+          python3 scripts/check-queue-index.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "--- hand-rolled index -- check exit: $rc"
+          cat mutant.log
+          git rm -q --cached docs/queue/INDEX.md
+          rm -f docs/queue/INDEX.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the index check passed with a hand-rolled index committed" >&2
+            exit 1
+          fi
+          if ! grep -q 'reads as an enumeration' mutant.log; then
+            echo "::error::the index check failed, but not on the item count" >&2
+            exit 1
+          fi
+
+      # `claims` skips every read it cannot take, so the failure to guard
+      # against is a run that reached no remote and reported nothing. An id no
+      # allocator ever minted is what proves the read happened.
+      - name: An id holding no claim must fail the gate
+        run: |
+          python3 scripts/queue.py rank --tail > mutant.rank
+          {
+            echo "---"
+            echo "id: Q999999"
+            echo "rank: $(cat mutant.rank)"
+            echo "labels:"
+            echo "    - tests"
+            echo "status: ready"
+            echo "size: S"
+            echo "---"
+            echo
+            echo "# A row filing an id that no allocator minted"
+            echo
+            echo "The mutation control for queue.py claims."
+          } > docs/queue/Q999999.md
+          python3 scripts/queue.py claims --strict > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "claims exit: $rc"
+          cat mutant.log
+          rm -f docs/queue/Q999999.md mutant.rank
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::claims passed with an id holding no reservation" >&2
+            exit 1
+          fi
+          if ! grep -q 'Q999999.md files an id holding no' mutant.log; then
+            echo "::error::claims failed, but not on the unclaimed id" >&2
+            exit 1
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:

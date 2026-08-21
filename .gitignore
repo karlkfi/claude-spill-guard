@@ -15,3 +15,6 @@ __pycache__/
 .DS_Store
 tmp/
 .claude/settings.local.json
+
+# Mutation-control scratch
+mutant.log
