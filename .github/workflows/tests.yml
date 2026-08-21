@@ -5,20 +5,26 @@ on:
     branches: [main]
   pull_request:
 
-# The Go jobs the design calls for -- test, no-deps, no-network, cross-compile,
-# precision, mutation-control -- land with the implementation, not before. A job
-# that skips itself when `go.mod` is absent is a job that reports green for an
-# empty repo, which is the exact failure this project is about.
+# Every gate here is paired with a mutation control that breaks the property and
+# requires the gate to go red. A gate that has never failed is a claim, not
+# evidence, and every one of these has a spelling that passes on a tree with
+# nothing in it.
+#
+# The `precision` and rule `mutation-control` jobs the design calls for land with
+# the ruleset -- there is no corpus to run yet.
 # See docs/design/README.md, section "CI".
+
+env:
+  PYTHON_VERSION: '3.13'
 
 jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.13'
+          python-version: ${{ env.PYTHON_VERSION }}
       - name: Every relative link resolves
         run: python3 scripts/check-doc-links.py
 
@@ -28,10 +34,10 @@ jobs:
   docs-mutation-control:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.13'
+          python-version: ${{ env.PYTHON_VERSION }}
       - name: Point a link at a file that does not exist
         run: printf '\n[mutant](docs/design/no-such-file.md)\n' >> README.md
       - name: The link check must fail
@@ -41,5 +47,217 @@ jobs:
           cat mutant.log
           if [ "$rc" -eq 0 ]; then
             echo "::error::the link check passed with a broken link in README.md" >&2
+            exit 1
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: gofmt, go vet, go test
+        run: python3 scripts/check-go.py
+
+  # Two measured fail-opens, one job. `gofmt -l` lists every unformatted file
+  # and exits 0. `go test ./...` exits 0 for a package with no test files, so
+  # deleting the suite reads exactly like passing it -- which is what the second
+  # mutation catches, since it demands red from a tree that has nothing to say.
+  test-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: An unformatted file must fail the gate
+        run: |
+          printf 'package main\n\nfunc  unformatted()  {}\n' > cmd/spill-guard/mutant.go
+          python3 scripts/check-go.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          rm -f cmd/spill-guard/mutant.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the Go gates passed with an unformatted file in the tree" >&2
+            exit 1
+          fi
+          if ! grep -q 'failed: gofmt' mutant.log; then
+            echo "::error::the gate failed, but not on gofmt" >&2
+            exit 1
+          fi
+      - name: Making the binary exit zero on a bad command must fail the gate
+        run: |
+          sed -i 's/return 2$/return 0/' cmd/spill-guard/main.go
+          if git diff --quiet; then
+            echo "::error::the mutation changed nothing -- it no longer matches main.go" >&2
+            exit 1
+          fi
+          python3 scripts/check-go.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- cmd/spill-guard/main.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the Go gates passed with spill-guard failing open" >&2
+            exit 1
+          fi
+          if ! grep -q 'failed: go test' mutant.log; then
+            echo "::error::the gate failed, but not on go test" >&2
+            exit 1
+          fi
+
+  no-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The build graph is stdlib and this module only
+        run: python3 scripts/check-supply-chain.py no-deps
+
+  # The dependency is local and wired in with a `replace`, so the control needs
+  # no network and cannot be broken by an upstream module going away. It trips
+  # both halves of the gate at once, and both are asserted separately below --
+  # a run that only reports the `require` line has not exercised the graph walk.
+  no-deps-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Take a dependency
+        run: |
+          mkdir -p mutant-dep
+          printf 'module example.com/mutant\n\ngo 1.26.5\n' > mutant-dep/go.mod
+          printf 'package mutant\n\nfunc Name() string { return "mutant" }\n' > mutant-dep/mutant.go
+          printf 'package main\n\nimport _ "example.com/mutant"\n' > cmd/spill-guard/mutant.go
+          go mod edit -require=example.com/mutant@v0.0.0 -replace=example.com/mutant=./mutant-dep
+      - name: The no-deps check must fail, on both halves
+        run: |
+          python3 scripts/check-supply-chain.py no-deps > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::no-deps passed with a third-party module required and imported" >&2
+            exit 1
+          fi
+          if ! grep -q 'go.mod requires example.com/mutant' mutant.log; then
+            echo "::error::no-deps did not report the require block" >&2
+            exit 1
+          fi
+          if ! grep -q 'non-stdlib package in the build graph' mutant.log; then
+            echo "::error::no-deps did not report the import graph" >&2
+            exit 1
+          fi
+
+  no-network:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The build graph reaches no net, net/http or os/exec
+        run: python3 scripts/check-supply-chain.py no-network
+
+  # One mutation per forbidden package, because a check that happens to catch
+  # net/http says nothing about os/exec -- which is the one that gets added in
+  # good faith, to shell out to something helpful.
+  no-network-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Each forbidden import must fail the check
+        run: |
+          for pkg in net net/http os/exec; do
+            printf 'package main\n\nimport _ "%s"\n' "$pkg" > cmd/spill-guard/mutant.go
+            python3 scripts/check-supply-chain.py no-network > mutant.log 2>&1 && rc=0 || rc=$?
+            echo "--- import $pkg -- check exit: $rc"
+            cat mutant.log
+            rm -f cmd/spill-guard/mutant.go
+            if [ "$rc" -eq 0 ]; then
+              echo "::error::no-network passed with $pkg imported" >&2
+              exit 1
+            fi
+            if ! grep -q "^no-network: $pkg in the build graph" mutant.log; then
+              echo "::error::no-network failed, but did not name $pkg" >&2
+              exit 1
+            fi
+          done
+
+  cross-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: All five targets build
+        run: python3 scripts/cross-compile.py
+
+  # The mutation breaks darwin, which is first in the list, and leaves windows
+  # -- the last -- building. A loop that takes its status from the last target
+  # reports green here, which is the whole reason this job exists.
+  cross-compile-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Break a target that is not the last one
+        run: printf 'package main\n\nfunc mutant() { var x int = "not an int"; _ = x }\n' > cmd/spill-guard/mutant_darwin.go
+      - name: The cross-compile check must fail
+        run: |
+          python3 scripts/cross-compile.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::cross-compile passed with darwin broken" >&2
+            exit 1
+          fi
+          if ! grep -q 'darwin/arm64 failed to build' mutant.log; then
+            echo "::error::cross-compile failed, but not on darwin/arm64" >&2
+            exit 1
+          fi
+          if ! grep -q 'windows/amd64: ok' mutant.log; then
+            echo "::error::windows/amd64 did not build, so this run does not show the last target passing" >&2
             exit 1
           fi

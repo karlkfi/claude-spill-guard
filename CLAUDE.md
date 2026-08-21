@@ -3,8 +3,8 @@
 spill-guard is a Claude Code hook that stops secrets and PII from reaching the
 API through a session. It is a static Go binary with an empty supply chain.
 
-The design is in [`docs/design/`](docs/design/) and it is not built yet. Read
-`docs/design/README.md` before writing code; read
+The design is in [`docs/design/`](docs/design/) and the scanner is not built
+yet. Read `docs/design/README.md` before writing code; read
 `docs/design/language-choice.md` before re-opening any decision it already
 measured.
 
@@ -16,9 +16,12 @@ measured.
 | `docs/design/distribution.md` | The launcher, signed release assets, install channels. |
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
+| `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
+| `scripts/` | The gate scripts CI runs, plus the backlog tooling. |
 
-Everything under `cmd/`, `internal/`, `rules/`, and `hooks/` is proposed in the
-design doc and does not exist.
+Everything under `internal/`, `rules/`, and `hooks/` is proposed in the design
+doc and does not exist. `cmd/spill-guard/` is a skeleton: the subcommands the
+design names land with the pipeline that implements them.
 
 ## Rules that are not negotiable
 
@@ -88,6 +91,12 @@ Code reads empty stdout as no objection. Anything `hooks.json` invokes ships
 executable, with the mode set in the git index via
 `git update-index --chmod=+x`. Both of those are shipped bugs from sibling
 repos, not hypotheticals.
+
+## Running the gates
+
+There is no `make check` yet. Until there is, the gates are the scripts
+`.github/workflows/tests.yml` runs — read the job list rather than keeping a
+copy of it here, which is the drift this repo has an item open about.
 
 ## The backlog
 
