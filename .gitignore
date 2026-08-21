@@ -2,6 +2,7 @@
 /bin/
 /dist/
 *.exe
+/spill-guard
 
 # Python (the backlog tooling)
 __pycache__/

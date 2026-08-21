@@ -13,9 +13,10 @@ This directory holds the design and the reasoning behind it:
 | [`language-choice.md`](language-choice.md) | Why Go, with the measurements. Verbatim from the analysis that started the project. |
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
-**Status: proposed, not built.** Nothing under `cmd/` or `internal/` exists yet.
-The [open questions](#open-questions) are the parts that need a decision or a
-measurement before implementation starts.
+**Status: nothing scans anything yet.** The module, the entry point's skeleton
+and four of the [CI gates](#ci) exist; `internal/` does not. The
+[open questions](#open-questions) are the parts that need a decision or a
+measurement before implementation goes further.
 
 ## The problem
 

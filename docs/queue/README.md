@@ -58,16 +58,26 @@ Labels in use: `security` `tests` `docs` `infra` `bug` `hook` `rules`
 `release`. Add `open-question` to an item that ends in a decision rather than a
 next step, and drop it in the same edit that writes the answer in.
 
-A blocked item's body opens with what it waits on — `Blocked by [Q3](Q3.md)`
-where the blocker is an item, prose where it is not. A deferred item opens with
-its revive trigger: `**Demand:**`, `**Event:**` or `**Decision:**`.
+A blocked item's body opens with what it waits on — a link to the blocking item
+where the blocker is one, prose where it is not:
+
+```markdown
+Blocked by [Q7](Q7.md). The rules have to exist before a corpus gate means
+anything.
+```
+
+That example is fenced because the link checker skips fences. Inline, it would
+dangle the day Q7 is completed.
+
+A deferred item opens with its revive trigger: `**Demand:**`, `**Event:**` or
+`**Decision:**`.
 
 ## Where this backlog came from
 
-Every item traces to [`../design/`](../design/), which is the whole project so
-far — there is no code yet. `Q1` and `Q2` are measurements the design depends on
-and nobody has taken; take those before planning against anything downstream of
-them.
+Every item traces to [`../design/`](../design/), which is where the project was
+argued out before any of it was written. `Q1` and `Q2` are measurements the
+design depends on and nobody has taken; take those before planning against
+anything downstream of them.
 
 ## The rest of the process
 
