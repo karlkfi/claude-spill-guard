@@ -19,8 +19,9 @@ next step.
 file every completing session has to edit, which is the contention this layout
 exists to remove. `scripts/check-queue-index.py` holds that in CI: it fails a
 tracked file carrying `render` output, or naming half the store's items in any
-form. One in your working tree is the sanctioned workflow and does not fail —
-the check reads what is tracked.
+form — 12 of today's 23, against 6 for the most any real page names. One in
+your working tree is the sanctioned workflow and does not fail; the check reads
+what is tracked.
 
 ## Filing an item
 

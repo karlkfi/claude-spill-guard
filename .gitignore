@@ -16,5 +16,5 @@ __pycache__/
 tmp/
 .claude/settings.local.json
 
-# Mutation-control scratch (the CI controls write it; a local run leaves it)
+# Mutation-control scratch
 mutant.log

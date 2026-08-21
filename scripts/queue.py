@@ -562,11 +562,10 @@ def cmd_lint(args):
                 f"{where}: title is {len(i.title)} characters (max {TITLE_MAX}); "
                 f"move the detail into the body, which has no cap")
         prose = CODE_SPAN_RE.sub("", i.notes or "")
-        # What a blocked row opens with is what it waits on, so a dangling link
-        # there is a different defect from one anywhere else in the note: the
-        # blocker shipped and the frontmatter still says the row is waiting.
-        # The generic message sends a completing session to re-point the href,
-        # which preserves the dependency instead of clearing it.
+        # A dangling link in the opener is a different defect from one further
+        # down: the blocker shipped and the frontmatter still says the row
+        # waits. Re-pointing the href, which is what the generic message asks
+        # for, keeps the dependency instead of clearing it.
         opener = prose.lstrip().split("\n", 1)[0]
         waits_on = (set(ITEM_LINK_RE.findall(opener))
                     if i.status == "blocked" and BLOCKER_RE.match(prose)
@@ -587,13 +586,11 @@ def cmd_lint(args):
         # item — a release landing, an upstream fix, a SHA that does not exist
         # yet — so the script asks only that the note open by saying what it
         # waits on, and leaves whether the condition is real to a reader.
-        # Two branches, because the two ways into this state want opposite
-        # repairs and the checker cannot tell them apart — the evidence would
-        # have been the line that is missing. A row filed without its opener
-        # needs the line written. A row whose blocker shipped, and whose opener
-        # went out with the completion while the frontmatter stayed, needs the
-        # status flipped; writing the line back re-adds a dependency that no
-        # longer exists, and that is the commoner of the two here.
+        # Both branches, because the checker cannot tell them apart — the
+        # evidence would have been the line that is missing — and they want
+        # opposite repairs. A completion that took the opener and left the
+        # status is the commoner one here, and writing the line back re-adds a
+        # dependency that has shipped.
         if i.status == "blocked" and not BLOCKER_RE.match(prose):
             note("blocked-opener",
                  f"{where} is blocked but does not open with what it waits on. "

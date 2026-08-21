@@ -39,13 +39,13 @@ TEXT_ROW_RUN = 3
 ITEM_LINK = re.compile(r"\[[^\]]*\]\((?:\./)?(Q\d+)\.md(?:#[^)]*)?\)")
 ITEM_ID = re.compile(r"\bQ\d+\b")
 
-# Half the store, with a floor. Measured 2026-08-21 over the 46 tracked files
-# of a 22-item store: the most any legitimate file names is 6 distinct ids
-# (docs/queue/README.md and docs/queue/Q24.md), and an index names all 22. Half
-# is 11, so the floor governs only below 20 items -- where it trades a missed
-# hand-rolled index for keeping that margin off prose. Nothing is given up on
-# the shape that actually gets committed: the render signature above has no
-# threshold and fires whatever the store's size.
+# Half the store, with a floor. Measured 2026-08-21 over the 48 tracked files
+# of a 23-item store: the most any real page names is 6 distinct ids, in
+# docs/queue/README.md, and an index names all 23. Half is 12, so the floor
+# governs only below 20 items -- where it trades a missed hand-rolled index for
+# keeping that margin off prose. Nothing is given up on the shape that actually
+# gets committed: the render signature above has no threshold and fires
+# whatever the store's size.
 ID_FLOOR = 10
 
 

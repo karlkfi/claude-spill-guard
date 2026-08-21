@@ -64,9 +64,11 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       # `lint` reports what the files alone cannot settle as a note at exit 0,
-      # which is most of what a row-completing PR gets wrong -- both classes
-      # below were measured advisory on 2026-08-21. --strict promotes one named
-      # class, so the split here is the decision, not the wiring.
+      # which is most of what a row-completing PR gets wrong. Measured
+      # 2026-08-21 on a tree at b5c7207, by driving each case: a row linking a
+      # deleted row, and `status: blocked` with the blocker line removed, both
+      # exit 0. --strict promotes one named class, so the split below is the
+      # decision here -- wiring the linter in as-is would gate close to nothing.
       #
       # Bound on every event, because no state a sibling branch can reach
       # produces them:
@@ -131,10 +133,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Every assertion in the queue job has a spelling that passes on a store with
-  # nothing in it or a gate that skipped, and the two lint classes below were
-  # measured passing at exit 0 before this PR promoted them. So each gate gets a
-  # mutation that breaks its property and has to come back red -- and, where the
-  # message is the deliverable, red for the stated reason.
+  # nothing in it or a gate that skipped, and `blocked-opener` and
+  # `dangling-link` were both measured exiting 0 before the job promoted them.
+  # So each gate gets a mutation that breaks its property and has to come back
+  # red -- and, where the message is the deliverable, red for the stated reason.
   #
   # These steps edit the store and put it back with `git checkout -- docs/queue`,
   # which is safe on a runner's clean checkout and will discard uncommitted work
