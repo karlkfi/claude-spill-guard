@@ -86,11 +86,14 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
   times, and measure fixed cost separately — below ~8 KB it dominates.
 
 **The launcher denies when the binary is missing.** `hooks.json` never invokes
-`spill-guard` directly: an absent binary exits 127 with empty stdout, and Claude
-Code reads empty stdout as no objection. Anything `hooks.json` invokes ships
-executable, with the mode set in the git index via
-`git update-index --chmod=+x`. Both of those are shipped bugs from sibling
-repos, not hypotheticals.
+`spill-guard` directly: an absent binary exits 127, and only exit 2 blocks, so
+the call goes through with nothing in the transcript. Empty stdout is not what
+makes it pass — a hook exiting 2 with empty stdout still blocks — the exit code
+is. The launcher denies with a `deny` object on stdout, which blocks whatever it
+exits with. Anything `hooks.json` invokes ships executable, with the mode set in
+the git index via `git update-index --chmod=+x`. Both of those are shipped bugs
+from sibling repos, not hypotheticals. The measured table is in
+[`docs/design/README.md`](docs/design/README.md#the-exit-code-contract-measured).
 
 ## Running the gates
 

@@ -15,16 +15,27 @@ runs a command. A plugin install is a git clone and nothing else.
 
 `hooks.json` cannot invoke `spill-guard` directly.
 
-If the binary is absent, the command exits 127 with empty stdout, and Claude
-Code reads empty stdout as no objection. The hook is then installed, silent, and
-enforcing nothing — which is the predecessor's Node-18 failure with a different
-exit code on it. exit-status-guard shipped the same class of bug in 1.0.0: the
-launcher went out at mode 644, the shell refused it, exit 126, empty stdout, and
-the guard never fired once.
+If the binary is absent, the shell exits 127, and Claude Code lets the tool call
+through — measured, along with every other code, in
+[`README.md`](README.md#the-exit-code-contract-measured). The empty stdout is not
+the operative part: a hook that exits 2 with nothing on either stream still
+blocks. It is the non-2 exit code that decides. The hook is then installed,
+silent, and enforcing nothing — the predecessor's Node-18 failure with a
+different exit code on it. exit-status-guard shipped the same class of bug in
+1.0.0: the launcher went out at mode 644, the shell refused it, exit 126, and the
+guard never fired once. Both 126 and 127 were driven end to end here, and neither
+puts anything in the transcript.
 
 So `hooks.json` invokes a launcher, and the launcher's job when it cannot find a
-binary is to **write a deny to stdout** naming the install command for the
-platform it is on. Missing binary is a blocking condition, not a quiet one.
+binary is to **deny** — naming the install command for the platform it is on.
+Missing binary is a blocking condition, not a quiet one. Spell it as a `deny`
+decision object on **stdout**. That blocks whatever the launcher then exits with
+— measured on 0, 1, 9 and 127 — so a launcher that writes its deny and then dies
+still blocks, which no other spelling gives you. The alternative, exit 2 with the
+reason on **stderr**, works but reaches the model wrapped in
+`PreToolUse:<tool> hook error: [<path>]:`. Writing the reason to stdout and
+exiting 2 is the one combination that blocks and explains nothing: stdout is
+discarded on exit 2.
 
 Resolution order:
 
