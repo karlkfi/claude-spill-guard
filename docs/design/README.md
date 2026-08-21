@@ -164,15 +164,89 @@ it needs Node ≥22.6 for `--experimental-strip-types`, and on Node 18 it exits
 **9**. Claude Code does not treat 9 as blocking, so the plugin sat installed,
 checking nothing, reporting nothing. A single static binary removes that whole
 class. It does not remove the obligation to measure the harness's exit-code
-contract instead of reading it in the docs.
+contract instead of reading it in the docs, which
+[the section below](#the-exit-code-contract-measured) now does.
 
 Two mechanisms carry this:
 
 - **`spill-guard selftest`** feeds a canary secret through the full hook path
   and asserts a block. If the hook is not live, this is how you find out.
-- **CI measures the contract.** Which exit codes Claude Code treats as blocking
-  is currently a documentation claim, not a measurement
-  ([`language-choice.md` §7](language-choice.md)).
+- **The contract is measured, not read.** Only exit 2 blocks, a `deny` object on
+  stdout blocks whatever the exit code, and a hook that cannot run at all does
+  neither ([below](#the-exit-code-contract-measured)). That is a property of
+  the harness rather than of spill-guard, so it can move under a Claude Code
+  upgrade: re-run the probe against a new version instead of trusting the
+  table.
+
+## The exit-code contract, measured
+
+Measured 2026-08-21 against Claude Code 2.1.220 on darwin/arm64. A throwaway
+project ran a `PreToolUse` hook on `Bash` that appended to a log, wrote a chosen
+shape to stdout or stderr, and exited a chosen code. The tool call under test
+was `echo PROBE_RAN_MARKER_7X`, and the observable is whether that marker came
+back in a `tool_result` in the `--output-format stream-json` transcript. The
+hook's own log separates *the hook never ran* from *the hook ran and was
+ignored*.
+
+The call is blocked if **either** signal says so, and they are independent:
+
+| Signal | Blocks | What the model receives |
+|---|---|---|
+| A `deny` decision object on stdout | whatever the exit code | the `permissionDecisionReason`, verbatim |
+| Exit code 2 | whatever is on stdout | `PreToolUse:Bash hook error: [<path>]: <the hook's stderr>` |
+
+Anything else runs. The cells driven, all of them with an empty stderr unless
+noted:
+
+| Hook exit | Hook stdout | The tool call |
+|---|---|---|
+| 0 | empty | runs |
+| 1 | empty, plain text, or text on stderr | runs |
+| 9 | empty | runs |
+| 126 | empty | runs |
+| 127 | empty | runs |
+| 0 | text that is not a decision object | runs |
+| 2 | empty, plain text, or text on stderr | **blocked** |
+| 0, 1, 9, 127 | a `deny` decision object | **blocked** |
+
+**Only exit 2 blocks, and the documentation was right about it.** 1, 9, 126 and
+127 all let the call through. The predecessor's Node-18 exit 9 is a measurement
+now instead of an inference.
+
+**The exit code is not what makes a missing binary harmless.** A hook exiting 2
+with nothing on either stream still blocks, and the model is told `No stderr
+output`. Empty stdout is not the operative part of the failure the launcher
+exists to prevent; the non-2 exit code is.
+
+**A deny on stdout outranks the exit code.** The same `deny` object blocked the
+call on exits 0, 1, 9 and 127, and the reason reached the model byte-identical
+in all four. So a launcher that writes its deny and then dies still blocks — the
+one shape here that fails closed on its own. Prefer it.
+
+**On exit 2 the reason travels on stderr, and stdout is discarded.** A hook that
+writes `spill-guard: blocked ...` to stdout and exits 2 stops the call and tells
+the model nothing about why. The `deny` object has no such trap, and no
+`PreToolUse:Bash hook error: [<path>]:` prefix wrapped around its reason.
+
+### The two shapes that fail open
+
+Both were driven end to end, not reasoned about. Neither hook can write stdout
+at all, so neither has the `deny` escape above:
+
+| Configuration | What happens |
+|---|---|
+| `hooks.json` names a path that does not exist | the shell exits 127, the tool runs, `is_error` is false |
+| `hooks.json` names a file at mode 644 | the shell exits 126, the tool runs, `is_error` is false |
+
+Neither produces a warning anywhere in the transcript, and neither reaches the
+model. This is the case [`distribution.md`](distribution.md) argues the launcher
+exists to prevent, measured on both of the exit codes that get there.
+
+Two conditions that do **not** change any of the above, each measured on exits
+0, 2 and 127: running under `--permission-mode bypassPermissions`, and running
+in a workspace whose trust dialog has never been accepted. The untrusted
+workspace has its `permissions.allow` entries ignored with a warning on stderr,
+and its hooks run anyway.
 
 ## Output discipline
 
@@ -269,12 +343,7 @@ above become a fast path rather than the whole answer. If it cannot, the
 warning about content already sent is close to worthless. Measure it; do not
 read it.
 
-### 2. Which exit codes Claude Code treats as blocking
-
-Documented as 2. Never measured here. The predecessor's failure was exactly
-this gap.
-
-### 3. What counts as human-typed
+### 2. What counts as human-typed
 
 The audit's carried-over requirement is to distinguish human-typed text from
 runtime-written text when deciding what to scan. `UserPromptSubmit` is clearly

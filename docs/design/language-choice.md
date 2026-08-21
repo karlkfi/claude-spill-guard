@@ -1,7 +1,8 @@
 # Local secret/PII scanner: language and architecture analysis
 
 Measured 2026-08-19/20. Everything below is a direct measurement on the host
-described in [Environment](#environment) unless explicitly marked **UNVERIFIED**.
+described in [Environment](#6-environment) unless it names a different one.
+[§7](#7-claims-deliberately-left-unverified) lists what was left unmeasured.
 
 Origin: a security audit of the `coo-quack/sensitive-canary` Claude Code plugin
 (v0.8.1, Node/TypeScript) and a decision about rewriting it in a compiled language.
@@ -245,9 +246,12 @@ The plugin exits 2 (block) on internal error. But it requires Node ≥22.6 for
 **fails open silently**: installed, checking nothing, reporting nothing. A single
 static binary removes this entire class of failure.
 
-> **UNVERIFIED:** that Claude Code treats only exit 2 as blocking is from
-> documentation, not measurement. The exit-9 behaviour *was* measured. Confirm the
-> harness's treatment of other non-zero codes before relying on it.
+Measured 2026-08-21 on Claude Code 2.1.220, darwin/arm64. That is not the host in
+[Environment](#6-environment); the harness is what is under test here, not the
+scanner. Only exit 2 blocks — 1, 9, 126 and 127 all let the call through — so the
+exit-9 fail-open is a measurement now rather than an inference. The full table,
+including what a hook binary that cannot run at all does, is in
+[`README.md`](README.md#the-exit-code-contract-measured).
 
 ### Redaction must happen before anything is emitted
 
@@ -302,7 +306,5 @@ controlled.
 
 - **macOS `/usr/bin/python3` is an Xcode stub** — from recall, no macOS available.
   Materially affects any "Python is preinstalled" argument.
-- **Claude Code's treatment of non-zero, non-2 exit codes** — documentation only
-  (§5).
 - **`cargo-zigbuild` / macOS CI runners** as the Rust distribution fix — plausible
   and widely used, not tested here.
