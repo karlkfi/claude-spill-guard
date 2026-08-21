@@ -9,6 +9,7 @@ This directory holds the design and the reasoning behind it:
 | Doc | What it is |
 |---|---|
 | This file | The proposed design: threat model, hook surface, pipeline, rule schema, failure policy, CI. |
+| [`distribution.md`](distribution.md) | How the binary reaches a machine — the launcher, signed release assets, and the install channels evaluated against each other. |
 | [`language-choice.md`](language-choice.md) | Why Go, with the measurements. Verbatim from the analysis that started the project. |
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
@@ -207,9 +208,16 @@ internal/validate/        Luhn, mod-11, entropy, reserved ranges, context labels
 internal/bash/            Segment parsing, ported from workspace-guard.
 rules/spill-guard.json    The shipped ruleset. Data, not code.
 hooks/hooks.json          Hook wiring.
+hooks/run-spill-guard.cmd Launcher. Resolves the binary, denies when it cannot.
+scripts/install.sh        Install script, POSIX.
+scripts/install.ps1       Install script, Windows.
 testdata/corpus/          Precision fixtures — clean files that must not flag.
 docs/design/              This directory.
 ```
+
+The launcher is load-bearing, not glue: `hooks.json` invoking the binary
+directly would fail open when the binary is absent. See
+[`distribution.md`](distribution.md).
 
 ## CI
 
@@ -252,25 +260,7 @@ Four rules, each of which was learned by getting it wrong
 These need an answer before or during implementation. Each one changes the
 shape of the thing.
 
-### 1. How the binary reaches the user
-
-Claude Code plugins have no install-time hook. Every `plugin.json` across the
-five plugins installed on this machine carries the same eight keys — `name`,
-`version`, `description`, `author`, `homepage`, `repository`, `license`,
-`keywords` — and nothing that runs a command. So the binary has to arrive some
-other way, and the three candidates trade off differently:
-
-| Option | Install | Repo cost | Fails how |
-|---|---|---|---|
-| GitHub Release assets, launcher resolves from PATH or a cache | Two steps | None | Closed, with the install command in the reason |
-| Prebuilt binaries committed under `bin/` | One step | ~15 MB per release, forever, cloned by every user | Closed |
-| `go install` from source | Needs a Go toolchain | None | Closed |
-
-The sibling guards are Python precisely because a launcher can find an
-interpreter. Go has no equivalent, and this is the price of the property that
-made Go right on every other axis.
-
-### 2. Whether `PostToolUse` can withhold a result
+### 1. Whether `PostToolUse` can withhold a result
 
 If it can, `Bash` output becomes scannable and the command-operand heuristics
 above become a fast path rather than the whole answer. If it cannot, the
@@ -278,12 +268,12 @@ above become a fast path rather than the whole answer. If it cannot, the
 warning about content already sent is close to worthless. Measure it; do not
 read it.
 
-### 3. Which exit codes Claude Code treats as blocking
+### 2. Which exit codes Claude Code treats as blocking
 
 Documented as 2. Never measured here. The predecessor's failure was exactly
 this gap.
 
-### 4. What counts as human-typed
+### 3. What counts as human-typed
 
 The audit's carried-over requirement is to distinguish human-typed text from
 runtime-written text when deciding what to scan. `UserPromptSubmit` is clearly

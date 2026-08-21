@@ -28,6 +28,9 @@ get you nothing.
 - [`docs/design/language-choice.md`](docs/design/language-choice.md) — why Go,
   with the benchmark data, the false-positive analysis, and a list of confident
   claims that measurement killed.
+- [`docs/design/distribution.md`](docs/design/distribution.md) — how the binary
+  gets onto a machine: Homebrew tap, Scoop bucket, signed release assets, and a
+  launcher that denies rather than failing open when the binary is missing.
 - [`docs/design/brief.md`](docs/design/brief.md) — the origin brief.
 
 Follow [releases](https://github.com/karlkfi/claude-spill-guard/releases) for

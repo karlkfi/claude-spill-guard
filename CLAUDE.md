@@ -13,6 +13,7 @@ measured.
 | Path | What it is |
 |---|---|
 | `docs/design/README.md` | The proposed design. Threat model through CI. |
+| `docs/design/distribution.md` | The launcher, signed release assets, install channels. |
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
 
@@ -81,12 +82,20 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
   Use real heterogeneous files, verify match counts agree before comparing
   times, and measure fixed cost separately — below ~8 KB it dominates.
 
+**The launcher denies when the binary is missing.** `hooks.json` never invokes
+`spill-guard` directly: an absent binary exits 127 with empty stdout, and Claude
+Code reads empty stdout as no objection. Anything `hooks.json` invokes ships
+executable, with the mode set in the git index via
+`git update-index --chmod=+x`. Both of those are shipped bugs from sibling
+repos, not hypotheticals.
+
 ## Open questions
 
-Four, in `docs/design/README.md` under **Open questions**. Two of them
-(`PostToolUse` withholding, and which exit codes Claude Code treats as blocking)
-are measurements nobody has taken. Take them; do not read them out of the docs.
-The predecessor failed open on Node 18 for exactly that reason.
+Three, in `docs/design/README.md` under **Open questions**, plus two smaller
+ones at the end of `distribution.md`. Two of the three (`PostToolUse`
+withholding, and which exit codes Claude Code treats as blocking) are
+measurements nobody has taken. Take them; do not read them out of the docs. The
+predecessor failed open on Node 18 for exactly that reason.
 
 ## Prose
 
