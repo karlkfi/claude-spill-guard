@@ -119,15 +119,17 @@ code. Completing an item is `git rm docs/queue/QN.md`, since git history is the
 archive. [`docs/queue/README.md`](docs/queue/README.md) has the frontmatter and
 the conventions.
 
-Everything in there traces to `docs/design/`. `Q1` and `Q2` are measurements
-the design depends on — take them before planning against anything downstream.
+Everything in there traces to `docs/design/`.
 
 ## Open questions
 
-Three, in `docs/design/README.md` under **Open questions**, plus two smaller
-ones at the end of `distribution.md`. Two of the three (`PostToolUse`
-withholding, and which exit codes Claude Code treats as blocking) are
-measurements nobody has taken. Take them; do not read them out of the docs. The
+One left in `docs/design/README.md` under **Open questions** — what counts as
+human-typed — plus two smaller ones at the end of `distribution.md`.
+
+The two the design turned on are measured: only exit 2 blocks, and
+`PostToolUse` cannot withhold a result, so nothing is catchable after the fact.
+Both were taken by driving a real hook. Any re-measurement is taken the same
+way: reading Claude Code's own docs or source is second-best, and the
 predecessor failed open on Node 18 for exactly that reason.
 
 ## Prose
