@@ -13,8 +13,10 @@ This directory holds the design and the reasoning behind it:
 | [`language-choice.md`](language-choice.md) | Why Go, with the measurements. Verbatim from the analysis that started the project. |
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
-**Status: nothing scans anything yet.** The module, the entry point's skeleton
-and four of the [CI gates](#ci) exist; `internal/` does not. The
+**Status: nothing scans anything yet.** The module, the entry point's skeleton,
+four of the [CI gates](#ci) and `internal/validate` exist. The validators came
+first because they are pure functions over a candidate and needed nothing to
+call them; every other package under `internal/` is still proposed. The
 [open questions](#open-questions) are the parts that need a decision or a
 measurement before implementation goes further.
 
