@@ -1,0 +1,45 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The Go jobs the design calls for -- test, no-deps, no-network, cross-compile,
+# precision, mutation-control -- land with the implementation, not before. A job
+# that skips itself when `go.mod` is absent is a job that reports green for an
+# empty repo, which is the exact failure this project is about.
+# See docs/design/README.md, section "CI".
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Every relative link resolves
+        run: python3 scripts/check-doc-links.py
+
+  # The link check passes on a repo with no links at all, so on its own it
+  # cannot tell "all links resolve" from "the checker found nothing to check".
+  # Break one and require red.
+  docs-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Point a link at a file that does not exist
+        run: printf '\n[mutant](docs/design/no-such-file.md)\n' >> README.md
+      - name: The link check must fail
+        run: |
+          python3 scripts/check-doc-links.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the link check passed with a broken link in README.md" >&2
+            exit 1
+          fi

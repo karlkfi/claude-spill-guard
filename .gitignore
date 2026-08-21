@@ -1,0 +1,12 @@
+# Build output
+/bin/
+/dist/
+*.exe
+
+# Go
+*.test
+*.out
+
+.DS_Store
+tmp/
+.claude/settings.local.json
