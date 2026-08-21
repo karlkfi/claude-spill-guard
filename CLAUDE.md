@@ -89,6 +89,27 @@ executable, with the mode set in the git index via
 `git update-index --chmod=+x`. Both of those are shipped bugs from sibling
 repos, not hypotheticals.
 
+## The backlog
+
+`docs/queue/`, one file per item with priority in each item's `rank` key. There
+is no committed index — a directory listing sorts `Q1, Q10, Q11, Q2`, so render
+the real order:
+
+```bash
+python3 scripts/queue.py render
+```
+
+Pick the top ready item, after `gh pr list` — an open PR is the in-flight
+signal. File one with `./scripts/alloc-queue-id.sh 'title'` for the ID and
+`python3 scripts/queue.py rank` for the key; never hand-type a rank. Lint with
+`python3 scripts/queue.py lint`, and commit backlog edits in isolation from
+code. Completing an item is `git rm docs/queue/QN.md`, since git history is the
+archive. [`docs/queue/README.md`](docs/queue/README.md) has the frontmatter and
+the conventions.
+
+Everything in there traces to `docs/design/`. `Q1` and `Q2` are measurements
+the design depends on — take them before planning against anything downstream.
+
 ## Open questions
 
 Three, in `docs/design/README.md` under **Open questions**, plus two smaller
