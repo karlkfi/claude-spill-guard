@@ -51,7 +51,7 @@ text, and they do not have the same power.
 |---|---|---|
 | `UserPromptSubmit` | Text the human typed | Yes — the prompt never reaches the model |
 | `PreToolUse` | The tool call's arguments: a command string, a file path, a `Write` body | Yes — `deny` stops the call |
-| `PostToolUse` | The tool's result | **Unmeasured.** See [open questions](#open-questions) |
+| `PostToolUse` | The tool's result | **No.** The result is already sent — [measured below](#posttooluse-cannot-withhold-a-result) |
 
 `PreToolUse` on `Read` is stronger than it first looks. The hook gets the path
 before the tool runs, so it can open the file and scan it locally, then deny.
@@ -70,7 +70,43 @@ worth having and neither complete:
    layer is the thing to port rather than to rewrite.
 
 Neither catches a command that synthesizes a secret at runtime. That is a
-stated limitation, not a gap to close later.
+stated limitation, not a gap to close later, and `PostToolUse` does not close it
+either: the measurement below rules out catching `Bash` after the fact. These
+two are the whole answer for `Bash`, not a fast path in front of one.
+
+### `PostToolUse` cannot withhold a result
+
+Measured 2026-08-21 against Claude Code 2.1.220 on darwin/arm64. A `PostToolUse`
+hook on `Bash` denied a call whose output carried a marker string. The check is
+whether that marker reaches the session transcript under `~/.claude/projects/`,
+because the transcript is what went to the API — the hook's own return value
+proves nothing either way, which is the trap this measurement exists to avoid.
+
+Three ways of denying, one result:
+
+| How the hook denied | Marker in the `tool_result` | `is_error` |
+|---|---|---|
+| exit 2, reason on stderr | present | false |
+| exit 0, `{"decision":"block","reason":...}` | present | false |
+| exit 0, a `deny` decision object | present | false |
+
+A hook that exits 0 and does nothing produces a transcript identical in that
+respect. In all three deny runs the verdict arrives *after* the result, as a
+separate `attachment` entry, so the model reads the output and then reads the
+complaint about it. Its own recorded reasoning in the `decision: block` run:
+
+> I did run the echo command successfully - it output "SPILL_Q2_MARKER_9K"
+
+By the time a `PostToolUse` hook runs, the output has been sent. The hook can
+append a warning about content the model already has. It cannot unsend it.
+
+**So the `PostToolUse` surface is worth having only as an after-the-fact
+warning**, which is close to worthless for this tool's purpose and must not be
+counted as a control. Everything spill-guard actually prevents has to be
+prevented at `UserPromptSubmit` or `PreToolUse`. For `Bash` that means the
+command string and its resolved file operands are the entire surface, so the
+segmentation layer this design ports from workspace-guard is load-bearing rather
+than an optimisation.
 
 ## Pipeline
 
@@ -332,18 +368,13 @@ Four rules, each of which was learned by getting it wrong
 
 ## Open questions
 
-These need an answer before or during implementation. Each one changes the
-shape of the thing.
+One left, and it needs an answer before or during implementation because it
+changes the shape of the thing. The other two were measurements rather than
+decisions, and both are taken: see
+[the hook surface](#posttooluse-cannot-withhold-a-result) and
+[the exit-code contract](#the-exit-code-contract-measured).
 
-### 1. Whether `PostToolUse` can withhold a result
-
-If it can, `Bash` output becomes scannable and the command-operand heuristics
-above become a fast path rather than the whole answer. If it cannot, the
-`PostToolUse` surface is worth having only as an after-the-fact warning, and a
-warning about content already sent is close to worthless. Measure it; do not
-read it.
-
-### 2. What counts as human-typed
+### 1. What counts as human-typed
 
 The audit's carried-over requirement is to distinguish human-typed text from
 runtime-written text when deciding what to scan. `UserPromptSubmit` is clearly
