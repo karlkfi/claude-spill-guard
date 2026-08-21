@@ -116,9 +116,13 @@ Pick the top ready item, after `gh pr list` — an open PR is the in-flight
 signal. File one with `./scripts/alloc-queue-id.sh 'title'` for the ID and
 `python3 scripts/queue.py rank` for the key; never hand-type a rank. Lint with
 `python3 scripts/queue.py lint`, and commit backlog edits in isolation from
-code. Completing an item is `git rm docs/queue/QN.md`, since git history is the
-archive. [`docs/queue/README.md`](docs/queue/README.md) has the frontmatter and
-the conventions.
+code. A clean local lint is not the CI verdict — `lint` reports several classes
+as notes at exit 0 and the `queue` job promotes five of them with `--strict`.
+Completing an item is `git rm docs/queue/QN.md` **and flipping any row that
+waited on it to `status: ready`**, since git history is the archive and a row
+left blocked waits on nothing.
+[`docs/queue/README.md`](docs/queue/README.md) has the frontmatter, the
+conventions, and which classes bind on which event.
 
 Everything in there traces to `docs/design/`.
 

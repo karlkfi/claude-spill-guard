@@ -17,7 +17,10 @@ next step.
 
 **The rendered index is never committed.** A tracked index would be the one
 file every completing session has to edit, which is the contention this layout
-exists to remove.
+exists to remove. `scripts/check-queue-index.py` holds that in CI: it fails a
+tracked file carrying `render` output, or naming half the store's items in any
+form. One in your working tree is the sanctioned workflow and does not fail —
+the check reads what is tracked.
 
 ## Filing an item
 
@@ -37,6 +40,17 @@ python3 scripts/queue.py rank --head              # or --tail, --after, --before
 
 Then write `docs/queue/QN.md` with the frontmatter below and run
 `python3 scripts/queue.py lint`. Never hand-type a rank.
+
+`lint` reports at exit 0 what the files alone cannot settle, so a clean local
+run is not the whole gate. CI promotes five of those notes with `--strict`.
+`blocked-opener`, `deferred-trigger` and `empty-store` bind on every event:
+nothing another branch can do produces them. `dangling-link` and
+`stale-citation` are notes on a pull request and failures on `main`, because a
+row may point at an item a sibling PR is still filing — correct in the merged
+set, red on the branch that carries the pointer — and only the merged tree can
+tell that from a typo. CI also runs `queue.py claims --strict`, which fails an
+id holding no reservation on the remote at the commit that files the row,
+rather than at the rebase that collides with it.
 
 ```yaml
 ---
@@ -68,6 +82,11 @@ anything.
 
 That example is fenced because the link checker skips fences. Inline, it would
 dangle the day Q7 is completed.
+
+**When the blocker ships, the PR that completes it flips `status` to `ready`
+here and drops the line.** Doing the prose half and leaving `status: blocked`
+puts a row in the store waiting on nothing, and it was invisible to every gate
+until `blocked-opener` and `dangling-link` started binding.
 
 A deferred item opens with its revive trigger: `**Demand:**`, `**Event:**` or
 `**Decision:**`.
