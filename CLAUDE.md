@@ -17,9 +17,10 @@ measured.
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
+| `internal/validate/` | The five validators. Precision lives here, not in the regex. |
 | `scripts/` | The gate scripts CI runs, plus the backlog tooling. |
 
-Everything under `internal/`, `rules/`, and `hooks/` is proposed in the design
+The rest of `internal/`, plus `rules/` and `hooks/`, is proposed in the design
 doc and does not exist. `cmd/spill-guard/` is a skeleton: the subcommands the
 design names land with the pipeline that implements them.
 
