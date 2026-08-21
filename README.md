@@ -1,0 +1,128 @@
+# spill-guard
+
+**Keeps secrets and PII from reaching the API through a Claude Code session.**
+
+[![tests](https://img.shields.io/github/actions/workflow/status/karlkfi/claude-spill-guard/tests.yml?branch=main&label=tests)](https://github.com/karlkfi/claude-spill-guard/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/github/license/karlkfi/claude-spill-guard.svg)](LICENSE) [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-7e57c2)](#status)
+
+> `cat .env` is one keystroke, and the file is in the transcript before anyone
+> reads a line of it.
+
+Claude Code sends what it reads to the API. A `.env` file, a `grep -r password`
+across a repo, a stack trace carrying a bearer token — each lands in the
+conversation, and the conversation goes over the wire. There is no undo, and
+nothing marks the moment a credential leaves the machine.
+
+Git secret scanners do not cover this. `gitleaks` and its relatives watch the
+commit boundary, and a file read into a session is never committed. spill-guard
+watches the other boundary: the one between your filesystem and the model's
+context.
+
+## Status
+
+**Designed, not built.** This repo holds the design and the measurements behind
+it. There is no binary, no hook wiring, and no release yet — installing it would
+get you nothing.
+
+- [`docs/design/`](docs/design/) — the proposed design: threat model, hook
+  surface, scan pipeline, rule schema, failure policy, CI.
+- [`docs/design/language-choice.md`](docs/design/language-choice.md) — why Go,
+  with the benchmark data, the false-positive analysis, and a list of confident
+  claims that measurement killed.
+- [`docs/design/brief.md`](docs/design/brief.md) — the origin brief.
+
+Follow [releases](https://github.com/karlkfi/claude-spill-guard/releases) for
+the first one.
+
+## The shape of it
+
+A static Go binary, run as a Claude Code hook. Zero third-party dependencies —
+`regexp` and `encoding/json` are stdlib, so the supply chain is empty and you
+can verify that in an afternoon. No `net` and no `net/http` in the import graph,
+enforced in CI rather than asserted in a README. Detection is local heuristics
+and nothing else.
+
+It fails **closed**. Every sibling guard in this family fails silent, on the
+grounds that a hook running on every call must never be the reason ordinary work
+breaks. A secret scanner cannot afford that trade: one that fails quietly reports
+a safety it is not providing. So an internal error blocks, and
+`spill-guard selftest` exists to prove the hook is live rather than installed and
+inert.
+
+Findings carry a rule ID, a path, and a byte offset. Not the secret, and not a
+redacted window either — a hook's stderr reaches the API, so an 8-character
+fragment is 8 characters sent to the place the scanner exists to keep them away
+from.
+
+## Why precision is the whole problem
+
+This replaces `coo-quack/sensitive-canary`, a Node plugin that audits clean and
+is safe to install. Its ruleset, run over 257 real text files from an
+infrastructure repo, produced **5,679 matches across 9 rules, all of them PII
+noise and not one credential**. 71 of the 257 files flagged.
+
+```
+pii-phone-cn      2533     pii-postal-cn       8
+pii-ipv4-public   1522     pii-phone-de        4
+pii-phone-kr      1441     pii-steuer-id-de    3
+pii-postal-code    169     pii-brn-kr          3
+                           pii-phone-it        1
+```
+
+`0400-2341068` was flagged 268 times as a Chinese phone number. It is a slice
+out of the amdgpu DKMS version string `1:6.16.13.30300400-2341068`.
+`pii-postal-code` is `\b\d{5}(?:-\d{4})?\b`, which matches `65536` and Kubernetes
+NodePorts. `pii-ipv4-public` matches `10.0.0.1` and `0.0.0.0` despite `public` in
+the name — that one is a correctness bug, not merely noise.
+
+A 27.6% file-level false-positive rate with zero true positives is a design
+problem. Numeric-only PII patterns cannot be made precise by regex alone, so
+precision here comes from checksum validators, context gating, entropy floors,
+and reserved-range exclusion — with the numeric PII family shipping disabled.
+Ten precise rules beat seventy noisy ones.
+
+The full analysis, including the language benchmarks and the traps worth not
+rediscovering, is in
+[`docs/design/language-choice.md`](docs/design/language-choice.md).
+
+## Companion plugins
+
+spill-guard watches the **exfiltration** boundary — whether sensitive local
+content reaches the model's context. Sibling plugins guard different axes with
+the same secure-by-default design:
+
+- [**workspace-guard**](https://github.com/karlkfi/claude-workspace-guard) — the
+  **filesystem** boundary: prompts before guarded file commands read or write
+  paths outside the project root.
+- [**branch-guard**](https://github.com/karlkfi/claude-branch-guard) — the **git
+  history** boundary: auto-approves safe git on feature branches, pauses commits
+  and pushes to `main` and destructive git.
+- [**prod-guard**](https://github.com/karlkfi/claude-prod-guard) — the
+  **infrastructure blast-radius** boundary: denies mutations aimed at production
+  contexts.
+- [**exit-status-guard**](https://github.com/karlkfi/claude-exit-status-guard) —
+  the **evidence** boundary: denies commands whose exit status is the answer and
+  gets discarded.
+- [**foreground-guard**](https://github.com/karlkfi/claude-foreground-guard) —
+  the **liveness** boundary: keeps blocking commands from stalling a session.
+- [**pr-sentinel**](https://github.com/karlkfi/claude-pr-sentinel) — the
+  **review** boundary: watches a PR to green without merging it.
+
+They run side by side; each defers to normal permissions outside its own axis.
+
+## Privacy
+
+The scanner runs entirely on your machine and has no network capability at all —
+no telemetry, no update check, no remote rule source, and no `net` package in
+the binary. See [`PRIVACY.md`](PRIVACY.md).
+
+## Contributing
+
+Bugs, ideas, and questions go in
+[GitHub Issues](https://github.com/karlkfi/claude-spill-guard/issues).
+
+A rule that flags ordinary work is a bug worth reporting — include the exact
+text and the rule ID. For development conventions, see [`CLAUDE.md`](CLAUDE.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
