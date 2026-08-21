@@ -3,6 +3,10 @@
 /dist/
 *.exe
 
+# Python (the backlog tooling)
+__pycache__/
+*.py[cod]
+
 # Go
 *.test
 *.out
