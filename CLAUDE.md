@@ -19,7 +19,7 @@ measured.
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
 | `internal/validate/` | The six validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
-| `scripts/` | The gate scripts CI runs, plus the backlog tooling. Two files are vendored — [`scripts/README.md`](scripts/README.md) says which, from where, and why not to edit them here. |
+| `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, why not to edit it here, and what `make vendor` asserts about it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
 
@@ -124,6 +124,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `doctor` | scripts/check-tools.sh runs, and every required tool is present |
 | `gate-drift` | the gate list, the CI job list and the table in CLAUDE.md still agree |
 | `hooks-check` | every tracked git hook is executable, so none is silently inert |
+| `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
 | `docs` | every relative link in the repo markdown resolves |
 | `queue` | the backlog store format holds, every filed id holds a claim, no index is committed |
 | `test` | gofmt, go vet and go test |
@@ -149,12 +150,13 @@ is no committed index — a directory listing sorts `Q1, Q10, Q11, Q2`, so rende
 the real order:
 
 ```bash
-python3 scripts/queue.py render
+python3 scripts/vendor/claude-skills/queue.py render
 ```
 
 Pick the top ready item, after `gh pr list` — an open PR is the in-flight
-signal. File one with `./scripts/alloc-queue-id.sh 'title'` for the ID and
-`python3 scripts/queue.py rank` for the key; never hand-type a rank. Lint with
+signal. File one with `./scripts/vendor/claude-skills/alloc-queue-id.sh
+'title'` for the ID and `python3 scripts/vendor/claude-skills/queue.py rank`
+for the key; never hand-type a rank. Lint with
 `make queue`, and commit backlog edits in isolation from code. A clean bare
 `queue.py lint` is not the CI verdict — it reports several classes as notes at
 exit 0. `make queue` promotes the three no sibling branch can trip; the `queue`
