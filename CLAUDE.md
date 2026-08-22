@@ -98,6 +98,34 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
   Use real heterogeneous files, verify match counts agree before comparing
   times, and measure fixed cost separately — below ~8 KB it dominates.
 
+**Three of the runner's inputs are not on your machine, so a green local gate
+cannot see them.** Each of these cost a CI round-trip on 2026-08-22, and each
+was invisible to `make check` over the same tree:
+
+- **macOS ships bash 3.2.57 as `/bin/bash`.** `shopt -s inherit_errexit` is
+  4.4+, so an errexit prologue that demands it kills the script on a fresh Mac
+  — the prologue meant to harden `scripts/check-tools.sh` was what broke it.
+  Ask for the option and carry on without it.
+- **GNU make 4.x prints `make[1]: Entering directory` on stdout** when
+  `MAKELEVEL` says sub-make; 3.81 never prints it. Anything parsing `make`
+  output needs `--no-print-directory`, a stripped `MAKELEVEL`/`MAKEFLAGS` in
+  the child env, and a parse that refuses an unrecognised line by name rather
+  than absorbing it. Two banners read as two gates.
+- **A workflow `run:` block runs under `bash -e`.** An `&&` list whose left
+  side is false returns 1 and takes the whole step down, so `[ "$x" = y ] &&
+  continue` is a step that dies on the common case. Use `if`.
+
+The instrument for the third is the one to reach for generally: extract a
+step's script verbatim from the workflow YAML and run it under `bash -e`.
+Re-running the repo's gate over the final tree never enters a `run:` block's
+shell.
+
+**A mutation control needs a precondition asserting the mutation mutated.**
+`PATH=/usr/bin:/bin` was meant to hide Go from `make doctor` and hid nothing,
+because `setup-go` links Go into `/usr/bin` — so the control passed while
+testing nothing. Name the tool, not its location, and fail the step when the
+thing you removed is still reachable.
+
 **The launcher denies when the binary is missing.** `hooks.json` never invokes
 `spill-guard` directly: an absent binary exits 127, and only exit 2 blocks, so
 the call goes through with nothing in the transcript. Empty stdout is not what
