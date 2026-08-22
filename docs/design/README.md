@@ -14,7 +14,7 @@ This directory holds the design and the reasoning behind it:
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
 **Status: nothing scans anything yet.** The module, the entry point's skeleton,
-four of the [CI gates](#ci) and `internal/validate` exist. The validators came
+the [CI gates](#ci) that do not need a ruleset, and `internal/validate` exist. The validators came
 first because they are pure functions over a candidate and needed nothing to
 call them; every other package under `internal/` is still proposed. The
 [open questions](#open-questions) are the parts that need a decision or a
@@ -411,12 +411,18 @@ directly would fail open when the binary is absent. See
 Every property this project claims is enforced by a job, because a property
 stated in a README and checked by nobody is a property that decays.
 
-| Job | What it enforces |
+What runs today is not enumerated here, because a second copy of a list is a
+copy that drifts. `GATES` in the `Makefile` is the source of truth; `make
+list-gates` names every gate with what it covers, the workflow's job list is
+asserted against it by the `gate-drift` gate, and
+[`CLAUDE.md`](../../CLAUDE.md#running-the-gates) carries the table generated
+from it. `make check` runs the lot.
+
+Two jobs the design calls for and the repo does not have yet, because there is
+no ruleset and no corpus to run them over:
+
+| Job | What it will enforce |
 |---|---|
-| `test` | `go test ./...`, `go vet`, `gofmt -l` |
-| `no-deps` | `go.mod` has no `require` block, and `go list -deps ./...` resolves to stdlib only |
-| `no-network` | `go list -deps` contains no `net`, `net/http`, or `os/exec` |
-| `cross-compile` | All five targets build from one runner: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64 |
 | `precision` | The ruleset runs over `testdata/corpus/` and the false-positive count must not exceed a pinned number |
 | `mutation-control` | Disable one rule; the suite must go red |
 
@@ -425,8 +431,10 @@ somebody reports a missed secret. Precision regressions are invisible until the
 noise has trained everyone to ignore the tool, which is how the inherited
 ruleset arrived at 5,679 matches and zero true positives.
 
-The mutation-control job follows the sibling repos: a suite that has never
-failed is a suite with no evidence behind it.
+The rule mutation-control job follows the sibling repos, and so does every gate
+already shipping: a suite that has never failed is a suite with no evidence
+behind it. Each gate in the workflow is paired with a control that breaks its
+property and requires it to go red.
 
 ## Benchmarking, if you benchmark at all
 

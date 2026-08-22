@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# The store gates, before a commit rather than at review. Installed by
+# `make hooks`, which points core.hooksPath here; `git commit --no-verify`
+# skips it.
+#
+# `make queue` and nothing else. The Go gates need a toolchain and a build,
+# the cross-compile gate builds five targets, and a pre-commit hook that takes
+# a minute is one everybody turns off -- which is worse than not having it,
+# because it looks installed. `make check` before asking for review is where
+# the rest of them run.
+#
+# What runs here is the merged set's own gate at its default strictness: three
+# lint classes no sibling branch can trip, the id-claim check, and the
+# committed-index check. The two classes the workflow holds back until main --
+# a row linking an item a sibling PR is still filing, a citation into a file it
+# is still adding -- stay advisory here for the same reason and louder: a
+# commit that cannot be recorded is worse than a branch that is briefly red.
+# They still print as notes, so the human sees them.
+set -euo pipefail
+shopt -s inherit_errexit
+
+# `set -e` does not reach inside a command substitution: `out="$(f)"` runs f
+# past its own failure and takes the status of f's last command. inherit_errexit
+# is what makes that exit instead of continuing with a truncated value.
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+if ! command -v make >/dev/null 2>&1; then
+	printf 'pre-commit: no make on PATH, so the store gates did not run\n' >&2
+	exit 1
+fi
+
+printf 'pre-commit: make queue\n'
+make --no-print-directory queue

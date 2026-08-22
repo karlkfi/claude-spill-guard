@@ -18,6 +18,267 @@ env:
   PYTHON_VERSION: '3.13'
 
 jobs:
+  # First, because it is the gate over the list every other job is on. `GATES`
+  # in the Makefile is the source of truth; this asserts the job list here, the
+  # table in CLAUDE.md and `make list-gates` still agree with it.
+  gate-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Every copy of the gate list still agrees with the Makefile
+        run: make gate-drift
+
+  # Five mutations: four for the directions the lists can come apart, and one
+  # for the parse itself. A drift check that only catches a missing job says
+  # nothing about a stale table, and the stale table is the one that reads as
+  # authoritative while being wrong.
+  gate-drift-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: A gate the workflow does not run must fail the check
+        run: |
+          printf '\nGATES += mutant\nmutant.desc := a gate no job runs\nmutant:\n\t@true\n' >> Makefile
+          make gate-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- Makefile
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::gate-drift passed with a gate no CI job runs" >&2
+            exit 1
+          fi
+          if ! grep -q 'has no `mutant` job' mutant.log; then
+            echo "::error::gate-drift failed, but not on the missing job" >&2
+            exit 1
+          fi
+
+      - name: A job in no gate's name must fail the check
+        run: |
+          printf '\n  mutant-job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n' \
+            >> .github/workflows/tests.yml
+          make gate-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .github/workflows/tests.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::gate-drift passed with a job outside the gate list" >&2
+            exit 1
+          fi
+          if ! grep -q 'runs a `mutant-job` job' mutant.log; then
+            echo "::error::gate-drift failed, but not on the extra job" >&2
+            exit 1
+          fi
+
+      # The one that keeps `make check` and CI running the same command. A job
+      # calling the script directly passes every other assertion here.
+      - name: A gate job that does not invoke its make target must fail the check
+        run: |
+          sed -i 's|^        run: make docs$|        run: python3 scripts/check-doc-links.py|' \
+            .github/workflows/tests.yml
+          if git diff --quiet; then
+            echo "::error::the mutation changed nothing -- the docs job no longer matches" >&2
+            exit 1
+          fi
+          make gate-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .github/workflows/tests.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::gate-drift passed with a job bypassing its make target" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not invoke `make docs`' mutant.log; then
+            echo "::error::gate-drift failed, but not on the bypassed target" >&2
+            exit 1
+          fi
+
+      # The defect this gate shipped with, on 2026-08-22: GNU make 4.x announces
+      # `make[1]: Entering directory ...` on stdout when MAKELEVEL says it is a
+      # sub-make, which is exactly how this script is reached. The parse read
+      # two banners as two gates and reported nine findings, none of them real.
+      # make 3.81 never prints it, so no local run could have caught it. The
+      # banner is suppressed twice over now; this asserts the third answer,
+      # which is that an unparseable line is refused rather than absorbed.
+      - name: Noise on print-gates stdout must be refused, not read as a gate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("Makefile")
+          t = p.read_text()
+          old = "print-gates:\n\t@$(foreach g,$(GATES),"
+          new = ("print-gates:\n"
+                 "\t@printf \"make[1]: Entering directory '/home/runner/work/x/x'\\n\"\n"
+                 "\t@$(foreach g,$(GATES),")
+          assert t.count(old) == 1, "print-gates is not where the mutation expects it"
+          p.write_text(t.replace(old, new))
+          PY
+          make gate-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- Makefile
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::gate-drift passed with a directory banner on print-gates stdout" >&2
+            exit 1
+          fi
+          if ! grep -q 'wrote a line that is not a gate' mutant.log; then
+            echo "::error::gate-drift failed, but not on the unparseable line" >&2
+            exit 1
+          fi
+
+      - name: A stale generated table must fail the check
+        run: |
+          sed -i 's#gofmt, go vet and go test#gofmt and go vet#' CLAUDE.md
+          if git diff --quiet; then
+            echo "::error::the mutation changed nothing -- the table no longer matches" >&2
+            exit 1
+          fi
+          make gate-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- CLAUDE.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::gate-drift passed with a stale gate table in CLAUDE.md" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not match the list' mutant.log; then
+            echo "::error::gate-drift failed, but not on the table" >&2
+            exit 1
+          fi
+
+  # git skips a hook that is not executable, silently and at exit 0, so a hook
+  # that lost its mode bit looks exactly like a repo with no hook.
+  hooks-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Every tracked git hook would run
+        run: make hooks-check
+
+  # Four mutations: the mode bit git reads, a name git never calls, a missing
+  # shebang, and an empty directory -- which is how every assertion in the gate
+  # passes over nothing at all.
+  hooks-check-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: A hook that is not executable in the index must fail the gate
+        run: |
+          git update-index --chmod=-x .githooks/pre-commit
+          make hooks-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git update-index --chmod=+x .githooks/pre-commit
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::hooks-check passed with a hook git would skip" >&2
+            exit 1
+          fi
+          if ! grep -q 'is mode 100644 in the index' mutant.log; then
+            echo "::error::hooks-check failed, but not on the mode bit" >&2
+            exit 1
+          fi
+
+      - name: A file under a name git never calls must fail the gate
+        run: |
+          git mv .githooks/pre-commit .githooks/pre-comit
+          make hooks-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git mv .githooks/pre-comit .githooks/pre-commit
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::hooks-check passed with a misspelled hook name" >&2
+            exit 1
+          fi
+          if ! grep -q 'not a hook name git recognises' mutant.log; then
+            echo "::error::hooks-check failed, but not on the name" >&2
+            exit 1
+          fi
+
+      - name: A hook with no shebang must fail the gate
+        run: |
+          sed -i '1{/^#!/d}' .githooks/pre-commit
+          if git diff --quiet; then
+            echo "::error::the mutation changed nothing -- the hook has no shebang to strip" >&2
+            exit 1
+          fi
+          make hooks-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .githooks
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::hooks-check passed with a hook carrying no shebang" >&2
+            exit 1
+          fi
+          if ! grep -q 'opens with no shebang' mutant.log; then
+            echo "::error::hooks-check failed, but not on the shebang" >&2
+            exit 1
+          fi
+
+      - name: An empty hooks directory must fail the gate
+        run: |
+          git rm -q --cached .githooks/pre-commit
+          make hooks-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git reset -q HEAD -- .githooks
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::hooks-check passed over a directory with no hook in it" >&2
+            exit 1
+          fi
+          if ! grep -q 'holds no tracked file' mutant.log; then
+            echo "::error::hooks-check failed, but not on the empty directory" >&2
+            exit 1
+          fi
+
+  # `make check` is a loop over GATES, and a loop is how a run reports green
+  # while a gate it was supposed to cover failed -- take the status from the
+  # last iteration and every earlier failure vanishes. Same defect the
+  # cross-compile control exists for, one level up. So the mutation breaks a
+  # gate that is not last, and both halves are asserted: that check goes red,
+  # and that it carried on to the end anyway.
+  check-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Break a gate that is not the last one
+        run: printf '\n[mutant](docs/design/no-such-file.md)\n' >> README.md
+      - name: check must fail, and must still have run the gates after it
+        run: |
+          make check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::make check passed with the docs gate broken" >&2
+            exit 1
+          fi
+          if ! grep -q 'all 5 targets build' mutant.log; then
+            echo "::error::check stopped at the failing gate, so this run does not show it reaching the end" >&2
+            exit 1
+          fi
+
   docs:
     runs-on: ubuntu-latest
     steps:
@@ -26,7 +287,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Every relative link resolves, fragment included
-        run: python3 scripts/check-doc-links.py
+        run: make docs
 
   # The link check passes on a repo with no links at all, so on its own it
   # cannot tell "all links resolve" from "the checker found nothing to check".
@@ -45,7 +306,7 @@ jobs:
       - name: A link to a file that does not exist must fail the gate
         run: |
           printf '\n[mutant](docs/design/no-such-file.md)\n' >> README.md
-          python3 scripts/check-doc-links.py > mutant.log 2>&1 && rc=0 || rc=$?
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           git checkout -- README.md
@@ -64,7 +325,7 @@ jobs:
       - name: A link to a heading that does not exist must fail the gate
         run: |
           printf '\n[mutant](docs/design/README.md#no-such-heading)\n' >> README.md
-          python3 scripts/check-doc-links.py > mutant.log 2>&1 && rc=0 || rc=$?
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           git checkout -- README.md
@@ -88,7 +349,7 @@ jobs:
 
           Quoting `[dead](#no-such-heading)` and `[gone](no-such-file.md)`.
           MD
-          python3 scripts/check-doc-links.py > mutant.log 2>&1 && rc=0 || rc=$?
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           git checkout -- README.md
@@ -137,30 +398,24 @@ jobs:
       #                     tree holds both sides, so main is the first place
       #                     the answer is not a guess -- one merge later than a
       #                     PR gate and the earliest point it can be right.
-      - name: The store's format rules hold
-        env:
-          MERGED: ${{ github.event_name == 'push' }}
-        run: |
-          set -- --strict blocked-opener \
-                 --strict deferred-trigger \
-                 --strict empty-store
-          if [ "$MERGED" = "true" ]; then
-            set -- "$@" --strict dangling-link --strict stale-citation
-          fi
-          echo "queue.py lint $*"
-          python3 scripts/queue.py lint "$@"
-
-      # A hand-picked id collides at the rebase, by which point two rows share a
-      # filename and one of them has to be renamed. --strict because a runner
-      # has a network: without it an unreachable remote skips, and a skip here
-      # reads exactly like a pass. This binds on a pull request and is a no-op
-      # on a push, where the merge base with origin/main is HEAD and no branch
-      # adds anything -- by then the collision has already landed.
-      - name: Every id this branch adds holds a claim on the remote
-        run: python3 scripts/queue.py claims --strict
-
-      - name: No rendered index is committed
-        run: python3 scripts/check-queue-index.py
+      #
+      # MERGED is what selects between the two sets. The lists themselves live
+      # in the Makefile, beside the target that reads them, so the pre-commit
+      # hook and this job promote the same classes.
+      #
+      # The other two assertions `make queue` runs:
+      #
+      #   claims --strict   a hand-picked id collides at the rebase, by which
+      #                     point two rows share a filename and one has to be
+      #                     renamed. --strict because a runner has a network:
+      #                     without it an unreachable remote skips, and a skip
+      #                     reads exactly like a pass. This binds on a pull
+      #                     request and is a no-op on a push, where the merge
+      #                     base with origin/main is HEAD and no branch adds
+      #                     anything -- by then the collision has landed.
+      #   check-queue-index  no rendered index is committed.
+      - name: The store's rules hold, ids hold claims, no index is committed
+        run: make queue MERGED=${{ github.event_name == 'push' }}
 
       # Render on demand is the whole point, so render it here: the ordered
       # backlog is readable from the Actions tab without a checkout. The item
@@ -421,7 +676,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: gofmt, go vet, go test
-        run: python3 scripts/check-go.py
+        run: make test
 
   # Two measured fail-opens, one job. `gofmt -l` lists every unformatted file
   # and exits 0. `go test ./...` exits 0 for a package with no test files, so
@@ -441,7 +696,7 @@ jobs:
       - name: An unformatted file must fail the gate
         run: |
           printf 'package main\n\nfunc  unformatted()  {}\n' > cmd/spill-guard/mutant.go
-          python3 scripts/check-go.py > mutant.log 2>&1 && rc=0 || rc=$?
+          make test > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           rm -f cmd/spill-guard/mutant.go
@@ -460,7 +715,7 @@ jobs:
             echo "::error::the mutation changed nothing -- it no longer matches main.go" >&2
             exit 1
           fi
-          python3 scripts/check-go.py > mutant.log 2>&1 && rc=0 || rc=$?
+          make test > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           git checkout -- cmd/spill-guard/main.go
@@ -485,7 +740,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: The build graph is stdlib and this module only
-        run: python3 scripts/check-supply-chain.py no-deps
+        run: make no-deps
 
   # The dependency is local and wired in with a `replace`, so the control needs
   # no network and cannot be broken by an upstream module going away. It trips
@@ -511,7 +766,7 @@ jobs:
           go mod edit -require=example.com/mutant@v0.0.0 -replace=example.com/mutant=./mutant-dep
       - name: The no-deps check must fail, on both halves
         run: |
-          python3 scripts/check-supply-chain.py no-deps > mutant.log 2>&1 && rc=0 || rc=$?
+          make no-deps > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           if [ "$rc" -eq 0 ]; then
@@ -539,7 +794,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: The build graph reaches no net, net/http or os/exec
-        run: python3 scripts/check-supply-chain.py no-network
+        run: make no-network
 
   # One mutation per forbidden package, because a check that happens to catch
   # net/http says nothing about os/exec -- which is the one that gets added in
@@ -559,7 +814,7 @@ jobs:
         run: |
           for pkg in net net/http os/exec; do
             printf 'package main\n\nimport _ "%s"\n' "$pkg" > cmd/spill-guard/mutant.go
-            python3 scripts/check-supply-chain.py no-network > mutant.log 2>&1 && rc=0 || rc=$?
+            make no-network > mutant.log 2>&1 && rc=0 || rc=$?
             echo "--- import $pkg -- check exit: $rc"
             cat mutant.log
             rm -f cmd/spill-guard/mutant.go
@@ -585,7 +840,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: All five targets build
-        run: python3 scripts/cross-compile.py
+        run: make cross-compile
 
   # The mutation breaks darwin, which is first in the list, and leaves windows
   # -- the last -- building. A loop that takes its status from the last target
@@ -605,7 +860,7 @@ jobs:
         run: printf 'package main\n\nfunc mutant() { var x int = "not an int"; _ = x }\n' > cmd/spill-guard/mutant_darwin.go
       - name: The cross-compile check must fail
         run: |
-          python3 scripts/cross-compile.py > mutant.log 2>&1 && rc=0 || rc=$?
+          make cross-compile > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           if [ "$rc" -eq 0 ]; then

@@ -1,0 +1,122 @@
+# Every gate this project runs, and the one list they are all derived from.
+#
+# GATES is the source of truth. `make check` runs it, `make list-gates` prints
+# it, the job list in .github/workflows/tests.yml is asserted against it, and
+# the table in CLAUDE.md is generated from it. A derived list that can go stale
+# silently is worse than honest copies, because it reads as authoritative --
+# so `make gate-drift` fails until every one of those agrees, and it is itself
+# a gate.
+#
+# Adding a gate: one name in GATES, one `<name>.desc`, one target, one job in
+# the workflow (plus its mutation control), then `make gates`.
+
+PYTHON ?= python3
+
+GATES := gate-drift hooks-check docs queue test no-deps no-network cross-compile
+
+gate-drift.desc    := the gate list, the CI job list and the table in CLAUDE.md still agree
+hooks-check.desc   := every tracked git hook is executable, so none is silently inert
+docs.desc          := every relative link in the repo markdown resolves
+queue.desc         := the backlog store format holds, every filed id holds a claim, no index is committed
+test.desc          := gofmt, go vet and go test
+no-deps.desc       := go.mod requires nothing and the build graph is this module plus stdlib
+no-network.desc    := the build graph reaches no net, net/http or os/exec
+cross-compile.desc := all five shipped targets build from one runner
+
+# Single-quote a value for the shell, so a description carrying an apostrophe
+# does not close the quoting early.
+sq = '$(subst ','\'',$(1))'
+
+HOOKS_DIR := .githooks
+
+# Which of `queue.py lint`'s notes are promoted to failures. The split is the
+# `queue` job's decision, argued in its comments in the workflow: these three
+# are reachable by no sibling branch, so they bind wherever this runs.
+QUEUE_STRICT := --strict blocked-opener --strict deferred-trigger --strict empty-store
+
+# These two bind only where the merged tree can answer them. A row may
+# legitimately link an item a sibling PR is still filing, or cite a line in a
+# file that PR is still adding: both branches are correct and only the one
+# carrying the pointer is red. MERGED=true on a push to main.
+QUEUE_STRICT_MERGED := --strict dangling-link --strict stale-citation
+
+MERGED ?= false
+queue_strict = $(QUEUE_STRICT) $(if $(filter true,$(MERGED)),$(QUEUE_STRICT_MERGED))
+
+.DEFAULT_GOAL := help
+.PHONY: help check list-gates print-gates gates hooks $(GATES)
+
+help:
+	@printf 'spill-guard\n\n'
+	@printf '  make check        run every gate, reporting all failures\n'
+	@printf '  make list-gates   name every gate and what it covers\n'
+	@printf '  make <gate>       run one gate\n'
+	@printf '  make gates        refresh the generated gate table in CLAUDE.md\n'
+	@printf '  make hooks        install the pre-commit hook (git core.hooksPath)\n\n'
+	@$(MAKE) --no-print-directory list-gates
+
+# Every gate runs even when an earlier one fails, so one run reports the whole
+# tree. Stopping at the first failure is how a contributor fixes one thing,
+# re-runs, and finds the next -- which is the shape every check script in
+# scripts/ already refuses.
+check:
+	@rc=0; \
+	for g in $(GATES); do \
+		printf '\n=== %s ===\n' "$$g"; \
+		$(MAKE) --no-print-directory MERGED=$(MERGED) "$$g" || rc=1; \
+	done; \
+	printf '\n'; \
+	if [ "$$rc" -ne 0 ]; then \
+		printf 'check: at least one gate failed\n' >&2; \
+	else \
+		printf 'check: every gate passed\n'; \
+	fi; \
+	exit "$$rc"
+
+list-gates:
+	@printf '%-14s %s\n' 'GATE' 'WHAT IT COVERS'
+	@$(foreach g,$(GATES),printf '%-14s %s\n' $(call sq,$(g)) $(call sq,$($(g).desc));)
+
+# Tab-separated, for scripts/gates.py. Asking make rather than parsing the
+# Makefile keeps one parser: make's own.
+print-gates:
+	@$(foreach g,$(GATES),printf '%s\t%s\n' $(call sq,$(g)) $(call sq,$($(g).desc));)
+
+gates:
+	$(PYTHON) scripts/gates.py
+
+# Tracked hooks, so the store gates run before a commit rather than at review.
+# --no-verify skips them; a hook is a fast local echo of CI, not a second
+# authority.
+hooks:
+	git config core.hooksPath $(HOOKS_DIR)
+	@printf 'hooks: core.hooksPath = %s\n' "$$(git config core.hooksPath)"
+	@printf 'hooks: %s runs `make queue` before every commit\n' '$(HOOKS_DIR)/pre-commit'
+
+gate-drift:
+	$(PYTHON) scripts/gates.py --check
+
+hooks-check:
+	$(PYTHON) scripts/check-githooks.py
+
+docs:
+	$(PYTHON) scripts/check-doc-links.py
+
+queue:
+	@rc=0; \
+	$(PYTHON) scripts/queue.py lint $(queue_strict) || rc=1; \
+	$(PYTHON) scripts/queue.py claims --strict || rc=1; \
+	$(PYTHON) scripts/check-queue-index.py || rc=1; \
+	exit "$$rc"
+
+test:
+	$(PYTHON) scripts/check-go.py
+
+no-deps:
+	$(PYTHON) scripts/check-supply-chain.py no-deps
+
+no-network:
+	$(PYTHON) scripts/check-supply-chain.py no-network
+
+cross-compile:
+	$(PYTHON) scripts/cross-compile.py
