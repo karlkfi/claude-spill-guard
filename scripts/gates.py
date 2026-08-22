@@ -30,6 +30,7 @@ toolchain's own answer to what gets linked, and `make print-gates` is make's
 own answer to what the gate list holds; a second parser is a second opinion.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -58,12 +59,34 @@ RUNNER_JOBS = frozenset({"check-mutation-control"})
 JOB_RE = re.compile(r"^  ([A-Za-z0-9_-]+):[ \t]*$")
 COMMENT_RE = re.compile(r"^[ \t]*#")
 
+# What a gate name may look like. Anything else on print-gates' stdout is noise
+# and is refused rather than absorbed -- see gates().
+GATE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+# GNU make 4.x announces `make[1]: Entering directory ...` on stdout when it
+# believes it is a sub-make, and it believes that from MAKELEVEL in the
+# environment -- which is exactly where this runs, since `make gate-drift` is
+# what invokes this script. Measured 2026-08-22 on a runner: nine findings,
+# every one of them a directory banner read as a gate name. make 3.81 does not
+# print it, so no local run of any kind could have shown it.
+#
+# Three answers rather than one, because the parse has to survive whatever a
+# future make prints: ask for silence, take away the reason it thinks it is a
+# sub-make, and refuse a line that is not a gate.
+MAKE_ENV_STRIP = ("MAKELEVEL", "MAKEFLAGS", "MFLAGS")
+
+
+def make(*args):
+    """Run make with nothing in the environment telling it it is a sub-make."""
+    env = {k: v for k, v in os.environ.items() if k not in MAKE_ENV_STRIP}
+    return subprocess.run(("make", "--no-print-directory") + args, cwd=ROOT,
+                          check=False, capture_output=True, text=True, env=env)
+
 
 def gates():
     """[(name, description)] in run order, from the Makefile. Never empty:
     a list that loaded nothing passes every assertion below."""
-    result = subprocess.run(("make", "print-gates"), cwd=ROOT, check=False,
-                            capture_output=True, text=True)
+    result = make("print-gates")
     if result.returncode != 0:
         sys.exit(f"gates: `make print-gates` exited {result.returncode}:\n"
                  f"{result.stderr.strip()}")
@@ -71,8 +94,13 @@ def gates():
     for line in result.stdout.splitlines():
         if not line.strip():
             continue
-        name, _, desc = line.partition("\t")
-        rows.append((name.strip(), desc.strip()))
+        name, sep, desc = line.partition("\t")
+        if not sep or not GATE_NAME_RE.match(name):
+            sys.exit(f"gates: `make print-gates` wrote a line that is not a "
+                     f"gate: {line!r}. Something in that invocation is writing "
+                     f"to stdout -- a sub-make's directory banner is the usual "
+                     f"one. Absorbing it would invent gates out of noise.")
+        rows.append((name, desc.strip()))
     if not rows:
         sys.exit("gates: `make print-gates` named no gates, so nothing below "
                  "could have failed -- is GATES still set in the Makefile?")
@@ -81,8 +109,7 @@ def gates():
 
 def has_rule(name):
     """Whether `make <name>` resolves to a rule. -n runs nothing."""
-    return subprocess.run(("make", "-n", name), cwd=ROOT, check=False,
-                          capture_output=True, text=True).returncode == 0
+    return make("-n", name).returncode == 0
 
 
 def jobs():

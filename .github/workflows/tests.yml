@@ -31,9 +31,10 @@ jobs:
       - name: Every copy of the gate list still agrees with the Makefile
         run: make gate-drift
 
-  # Four mutations, one per direction the lists can come apart. A drift check
-  # that only catches a missing job says nothing about a stale table, and the
-  # stale table is the one that reads as authoritative while being wrong.
+  # Five mutations: four for the directions the lists can come apart, and one
+  # for the parse itself. A drift check that only catches a missing job says
+  # nothing about a stale table, and the stale table is the one that reads as
+  # authoritative while being wrong.
   gate-drift-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -95,6 +96,39 @@ jobs:
           fi
           if ! grep -q 'does not invoke `make docs`' mutant.log; then
             echo "::error::gate-drift failed, but not on the bypassed target" >&2
+            exit 1
+          fi
+
+      # The defect this gate shipped with, on 2026-08-22: GNU make 4.x announces
+      # `make[1]: Entering directory ...` on stdout when MAKELEVEL says it is a
+      # sub-make, which is exactly how this script is reached. The parse read
+      # two banners as two gates and reported nine findings, none of them real.
+      # make 3.81 never prints it, so no local run could have caught it. The
+      # banner is suppressed twice over now; this asserts the third answer,
+      # which is that an unparseable line is refused rather than absorbed.
+      - name: Noise on print-gates stdout must be refused, not read as a gate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("Makefile")
+          t = p.read_text()
+          old = "print-gates:\n\t@$(foreach g,$(GATES),"
+          new = ("print-gates:\n"
+                 "\t@printf \"make[1]: Entering directory '/home/runner/work/x/x'\\n\"\n"
+                 "\t@$(foreach g,$(GATES),")
+          assert t.count(old) == 1, "print-gates is not where the mutation expects it"
+          p.write_text(t.replace(old, new))
+          PY
+          make gate-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- Makefile
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::gate-drift passed with a directory banner on print-gates stdout" >&2
+            exit 1
+          fi
+          if ! grep -q 'wrote a line that is not a gate' mutant.log; then
+            echo "::error::gate-drift failed, but not on the unparseable line" >&2
             exit 1
           fi
 
