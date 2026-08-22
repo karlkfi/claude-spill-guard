@@ -165,16 +165,54 @@ extends it from `.claude/spill-guard.json`, matching the sibling guards.
 }
 ```
 
+A numeric PII rule is the other shape. It has no literal to prefilter on, so
+`keywords` is empty and `labels` carries the words the value has to sit near:
+
+```json
+{
+  "id": "us-ssn",
+  "family": "pii",
+  "description": "US Social Security number",
+  "regex": "\\b(\\d{3}-?\\d{2}-?\\d{4})\\b",
+  "group": 1,
+  "keywords": [],
+  "labels": ["ssn", "social security"],
+  "validators": ["context-label"],
+  "enabled": false
+}
+```
+
 | Field | What it does |
 |---|---|
 | `id` | Stable identifier. Appears in findings and in the friction report. |
 | `family` | `credential` or `pii`. The `pii` family defaults to disabled. |
+| `description` | What the rule matches, in a few words. It reaches a terminal, so it is escaped like a path. |
 | `regex` | RE2. Compiled at startup; a rule that does not compile is a startup failure, not a skipped rule. |
 | `group` | Which capture group holds the candidate. Lets a rule capture a wider window than it reports. |
 | `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. |
+| `labels` | Word-boundary literals the candidate has to sit near, for the context-proximity check. Read after the match, so unlike `keywords` it gates nothing. |
 | `entropy` | Minimum Shannon bits per character over the captured group. Omitted means no floor. |
 | `validators` | Named checks from the table above, all of which must pass. |
 | `enabled` | Ships `false` for every `pii` rule. |
+
+`labels` and `keywords` are both word-boundary literal lists and they are not
+interchangeable. `keywords` runs before the regex and gates the credential
+family; `labels` is read by the context-proximity check after a match, and
+gates nothing. Spending `keywords` on a numeric rule's labels would hand that
+rule the prefilter [the pipeline](#pipeline) says it does not have, and that
+absence is one of the reasons the family ships disabled.
+
+**The proximity window is not per-rule.** `NearLabel` takes one and the loader
+always passes `internal/validate`'s `DefaultLabelWindow`, measured at 64 bytes.
+A per-rule override is defensible in the abstract — a postal code sits closer to
+its label than a free-text address does — but there is nothing to set one from.
+The measurement behind 64 found no knee to sit in, and its own doc comment says
+the corpus was the wrong shape and the number has to be re-taken against
+`testdata/corpus`. A per-rule window would freeze that provisional number into
+every rule that overrode it, where the re-measurement cannot reach it. So a
+rule carrying `window` is rejected at startup rather than ignored. Adding the
+field later breaks no rule file written before it; taking it away once rules
+have set it does.
 
 `gitleaks` is a safe ruleset to borrow from. Its `go.mod` carries no PCRE or
 `regexp2` dependency and it uses stdlib `regexp`, so a non-RE2 rule would panic
