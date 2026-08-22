@@ -205,7 +205,9 @@ func TestLoadRejects(t *testing.T) {
 }
 
 func TestEveryValidatorNameLoads(t *testing.T) {
-	for _, v := range []Validator{Luhn, Mod11, Entropy, ReservedRange, ContextLabel} {
+	for _, v := range []Validator{
+		Luhn, CardPlaceholder, Mod11, Entropy, ReservedRange, ContextLabel,
+	} {
 		t.Run(string(v), func(t *testing.T) {
 			body := set(`"validators": ["entropy"]`, `"validators": [`+quote(string(v))+`]`)
 			if v != Entropy {

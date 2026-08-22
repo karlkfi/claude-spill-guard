@@ -39,19 +39,21 @@ const (
 type Validator string
 
 const (
-	Luhn          Validator = "luhn"
-	Mod11         Validator = "mod-11"
-	Entropy       Validator = "entropy"
-	ReservedRange Validator = "reserved-range"
-	ContextLabel  Validator = "context-label"
+	Luhn            Validator = "luhn"
+	CardPlaceholder Validator = "card-placeholder"
+	Mod11           Validator = "mod-11"
+	Entropy         Validator = "entropy"
+	ReservedRange   Validator = "reserved-range"
+	ContextLabel    Validator = "context-label"
 )
 
 var validators = map[Validator]bool{
-	Luhn:          true,
-	Mod11:         true,
-	Entropy:       true,
-	ReservedRange: true,
-	ContextLabel:  true,
+	Luhn:            true,
+	CardPlaceholder: true,
+	Mod11:           true,
+	Entropy:         true,
+	ReservedRange:   true,
+	ContextLabel:    true,
 }
 
 // A Rule is one compiled pattern and everything the pipeline needs to decide

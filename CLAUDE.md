@@ -17,7 +17,7 @@ measured.
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
-| `internal/validate/` | The five validators. Precision lives here, not in the regex. |
+| `internal/validate/` | The six validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
 | `scripts/` | The gate scripts CI runs, plus the backlog tooling. |
 
