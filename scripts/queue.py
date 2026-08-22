@@ -15,10 +15,11 @@ Subcommands:
   migrate   convert a legacy `docs/STATUS.md` Queue/Deferred table into items
   rank      compute an order key for an insertion
 
-Ranks are base-36 order keys compared as plain strings, using the same
-magnitude-head scheme as github-actions-gateway's queuestore, so a store
-written by either tool reads and extends under the other. That package is on
-an unmerged branch of the gateway as of 2026-08-16, not on its main.
+Ranks are base-36 order keys compared as plain strings, under a magnitude-head
+scheme a second implementation of the same algebra also targets, so a store
+written by either tool reads and extends under the other. `rank-vectors.tsv`
+holds that contract and its provenance; it sits beside this file in the
+session-backlog skill and is not vendored with it.
 """
 
 import argparse
@@ -129,10 +130,10 @@ SMALLEST_INTEGER = "A" + DIGITS[0] * 26
 # lengths 2..27 upward, 'Z'..'A' the same downward, and uppercase sorting below
 # lowercase is what puts the descending magnitudes underneath.
 #
-# Ported from the Go implementation in karlkfi/github-actions-gateway's
-# devtools/docs/queuestore so a store written by either reads and extends
-# under the other. That path is on an unmerged branch there as of 2026-08-16,
-# not on the gateway's main.
+# The algebra is implemented twice, so a change here is half a change. The
+# shared vectors in `rank-vectors.tsv` are what hold the two sides to one
+# scheme — change them first, and read that file's header for which second
+# implementation this is and where it stands.
 
 def integer_length(head):
     if "a" <= head <= "z":
@@ -589,7 +590,7 @@ def cmd_lint(args):
         # Both branches, because the checker cannot tell them apart — the
         # evidence would have been the line that is missing — and they want
         # opposite repairs. A completion that took the opener and left the
-        # status is the commoner one here, and writing the line back re-adds a
+        # status is the commoner one, and writing the line back re-adds a
         # dependency that has shipped.
         if i.status == "blocked" and not BLOCKER_RE.match(prose):
             note("blocked-opener",
@@ -1051,11 +1052,10 @@ def main(argv=None):
     k = sub.add_parser(
         "rank",
         help="compute an order key",
-        description="Generates a magnitude-head base-36 order key, the same "
-                    "scheme github-actions-gateway's queuestore uses, so a key "
-                    "minted here interleaves correctly with one minted there. "
-                    "That package is on an unmerged branch of the gateway, not "
-                    "on its main.")
+        description="Generates a magnitude-head base-36 order key — a string "
+                    "that sorts into the position you asked for. Give it the "
+                    "neighbours to land between, or --head or --tail for the "
+                    "ends of the store.")
     k.add_argument("--after", help="rank of the item this goes below")
     k.add_argument("--before", help="rank of the item this goes above")
     k.add_argument("--head", action="store_true", help="before every item")
