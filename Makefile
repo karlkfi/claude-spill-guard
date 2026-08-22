@@ -12,8 +12,9 @@
 
 PYTHON ?= python3
 
-GATES := gate-drift hooks-check docs queue test no-deps no-network cross-compile
+GATES := doctor gate-drift hooks-check docs queue test no-deps no-network cross-compile
 
+doctor.desc        := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc    := the gate list, the CI job list and the table in CLAUDE.md still agree
 hooks-check.desc   := every tracked git hook is executable, so none is silently inert
 docs.desc          := every relative link in the repo markdown resolves
@@ -52,7 +53,8 @@ help:
 	@printf '  make list-gates   name every gate and what it covers\n'
 	@printf '  make <gate>       run one gate\n'
 	@printf '  make gates        refresh the generated gate table in CLAUDE.md\n'
-	@printf '  make hooks        install the pre-commit hook (git core.hooksPath)\n\n'
+	@printf '  make hooks        install the pre-commit hook (git core.hooksPath)\n'
+	@printf '  make doctor       report which required tools are missing, and how to get them\n\n'
 	@$(MAKE) --no-print-directory list-gates
 
 # Every gate runs even when an earlier one fails, so one run reports the whole
@@ -92,6 +94,13 @@ hooks:
 	git config core.hooksPath $(HOOKS_DIR)
 	@printf 'hooks: core.hooksPath = %s\n' "$$(git config core.hooksPath)"
 	@printf 'hooks: %s runs `make queue` before every commit\n' '$(HOOKS_DIR)/pre-commit'
+
+# Runs `command -v` and nothing else, so it works on a fresh clone with none
+# of the tools present -- which is the point of it and the easy half to lose.
+# The pinned linters are not in its list: they live in tools/go.mod and run
+# through `cd tools && go run <path>`, so Go is what a contributor needs.
+doctor:
+	bash scripts/check-tools.sh
 
 gate-drift:
 	$(PYTHON) scripts/gates.py --check

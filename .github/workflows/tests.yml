@@ -18,6 +18,101 @@ env:
   PYTHON_VERSION: '3.13'
 
 jobs:
+  # setup-go on purpose: the required tier names Go, so a runner without it
+  # would redden this for a reason that says nothing about the tree.
+  doctor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: The tools report runs, and the required tier is satisfied
+        run: make doctor
+
+  # The row's stated property, and the one it says is easy to lose: this has to
+  # run on a fresh clone with none of the tools present. The natural
+  # implementation reaches for the very things it is checking -- `go version`
+  # to find Go, `go run` from tools/ to find a linter -- and both work on the
+  # machine of whoever wrote them.
+  #
+  # Two mutations, because "absent" has two shapes here: not on PATH, and
+  # present but with nothing fetched to run it with.
+  doctor-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # This machine minus Go, built rather than hardcoded. `PATH=/usr/bin:/bin`
+      # was the obvious spelling and it does not mutate anything: setup-go
+      # links go into /usr/bin, so the step ran against a PATH that still had
+      # it and reported `go /usr/bin/go`. Measured on this runner 2026-08-22.
+      # Naming directories to drop is guesswork about where a tool lives; this
+      # names the tool.
+      #
+      # Four assertions. The first is the one the /usr/bin spelling lacked --
+      # that the mutation mutated -- and the last two are what say the output
+      # is a report rather than a crash at the first absence.
+      - name: With Go off PATH it must still report, and must name Go
+        run: |
+          # `if` rather than `[ ... ] && continue`: this step runs under
+          # `bash -e`, where an && list whose left side is false returns 1 and
+          # takes the whole step down. It is the same shape as the && the
+          # exit-status rules warn about, arriving as a false rather than a
+          # failure.
+          shim="$(mktemp -d)"
+          IFS=: read -ra dirs <<< "$PATH" || true
+          for d in "${dirs[@]}"; do
+            if [ ! -d "$d" ]; then continue; fi
+            for f in "$d"/*; do
+              if [ ! -e "$f" ]; then continue; fi
+              b="$(basename "$f")"
+              if [ "$b" = go ]; then continue; fi
+              if [ ! -e "$shim/$b" ]; then ln -s "$f" "$shim/$b"; fi
+            done
+          done
+          if PATH="$shim" command -v go; then
+            echo "::error::the mutation changed nothing -- go is still reachable" >&2
+            exit 1
+          fi
+          env PATH="$shim" make doctor > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "doctor exit: $rc"
+          cat mutant.log
+          rm -rf "$shim"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::doctor passed with go missing from the required tier" >&2
+            exit 1
+          fi
+          if ! grep -qE '^  go +MISSING' mutant.log; then
+            echo "::error::doctor failed, but did not name go as missing" >&2
+            exit 1
+          fi
+          if ! grep -qE '^  git +/' mutant.log; then
+            echo "::error::doctor stopped at the first missing tool instead of reporting the rest" >&2
+            exit 1
+          fi
+
+      # The other half of a fresh clone: Go is here, and nothing has been
+      # fetched. Anything reaching tools/ -- `go run`, `go build`, `go list` --
+      # fails with the proxy off over an empty module cache, so this stays
+      # green only while the probe is `command -v` and nothing else.
+      - name: With no module cache and no proxy it must still exit clean
+        run: |
+          cache="$(mktemp -d)"
+          GOFLAGS=-mod=mod GOPROXY=off GOMODCACHE="$cache"             make doctor > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "doctor exit: $rc"
+          cat mutant.log
+          rm -rf "$cache"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::doctor reached for something it had to download -- it must not touch tools/" >&2
+            exit 1
+          fi
+
   # First, because it is the gate over the list every other job is on. `GATES`
   # in the Makefile is the source of truth; this asserts the job list here, the
   # table in CLAUDE.md and `make list-gates` still agree with it.
