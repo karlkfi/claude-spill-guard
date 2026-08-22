@@ -139,6 +139,7 @@ not need to do.
    | Validator | Applies to |
    |---|---|
    | Luhn | Payment cards |
+   | Placeholder denylist | Payment cards, beside Luhn — the published test numbers and repeated-digit runs the checksum accepts |
    | mod-11 | National ID numbers |
    | Shannon entropy floor | High-entropy credential candidates |
    | Reserved-range exclusion | IP rules — RFC1918, loopback, link-local, documentation ranges, `0.0.0.0` |
@@ -355,7 +356,7 @@ cmd/spill-guard/          Entry point. Subcommands: hook, scan, selftest, rules,
 internal/hook/            Claude Code payload decode, verdict encode, exit-code contract.
 internal/rules/           Schema, registry load and merge, compile.
 internal/scan/            Binary skip, prefilter, match loop, findings.
-internal/validate/        Luhn, mod-11, entropy, reserved ranges, context labels.
+internal/validate/        Luhn, card placeholders, mod-11, entropy, reserved ranges, context labels.
 internal/bash/            Segment parsing, ported from workspace-guard.
 rules/spill-guard.json    The shipped ruleset. Data, not code.
 hooks/hooks.json          Hook wiring.

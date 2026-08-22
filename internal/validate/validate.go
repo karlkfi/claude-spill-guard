@@ -24,8 +24,8 @@ package validate
 // number, so it is dropped.
 //
 // Luhn is a transcription check and nothing more. 0000000000000000 passes it,
-// as does every published test card number, so a card rule needs a placeholder
-// denylist beside this one.
+// as does every published test card number, so a card rule names
+// NotPlaceholderCard beside this one.
 func Luhn(candidate string) bool {
 	sum, digits := 0, 0
 	// Right to left, because the doubling alternates from the check digit.
