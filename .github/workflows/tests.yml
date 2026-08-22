@@ -48,14 +48,42 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Three assertions, not one. Red is the cheap half; that it named the
-      # missing tool and carried on past it is what says the report is a report
-      # rather than a crash at the first absence.
+      # This machine minus Go, built rather than hardcoded. `PATH=/usr/bin:/bin`
+      # was the obvious spelling and it does not mutate anything: setup-go
+      # links go into /usr/bin, so the step ran against a PATH that still had
+      # it and reported `go /usr/bin/go`. Measured on this runner 2026-08-22.
+      # Naming directories to drop is guesswork about where a tool lives; this
+      # names the tool.
+      #
+      # Four assertions. The first is the one the /usr/bin spelling lacked --
+      # that the mutation mutated -- and the last two are what say the output
+      # is a report rather than a crash at the first absence.
       - name: With Go off PATH it must still report, and must name Go
         run: |
-          env PATH=/usr/bin:/bin make doctor > mutant.log 2>&1 && rc=0 || rc=$?
+          # `if` rather than `[ ... ] && continue`: this step runs under
+          # `bash -e`, where an && list whose left side is false returns 1 and
+          # takes the whole step down. It is the same shape as the && the
+          # exit-status rules warn about, arriving as a false rather than a
+          # failure.
+          shim="$(mktemp -d)"
+          IFS=: read -ra dirs <<< "$PATH" || true
+          for d in "${dirs[@]}"; do
+            if [ ! -d "$d" ]; then continue; fi
+            for f in "$d"/*; do
+              if [ ! -e "$f" ]; then continue; fi
+              b="$(basename "$f")"
+              if [ "$b" = go ]; then continue; fi
+              if [ ! -e "$shim/$b" ]; then ln -s "$f" "$shim/$b"; fi
+            done
+          done
+          if PATH="$shim" command -v go; then
+            echo "::error::the mutation changed nothing -- go is still reachable" >&2
+            exit 1
+          fi
+          env PATH="$shim" make doctor > mutant.log 2>&1 && rc=0 || rc=$?
           echo "doctor exit: $rc"
           cat mutant.log
+          rm -rf "$shim"
           if [ "$rc" -eq 0 ]; then
             echo "::error::doctor passed with go missing from the required tier" >&2
             exit 1
