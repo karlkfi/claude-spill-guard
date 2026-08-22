@@ -81,8 +81,8 @@ Blocked by [Q7](Q7.md). The rules have to exist before a corpus gate means
 anything.
 ```
 
-That example is fenced because the link checker skips fences. Inline, it would
-dangle the day Q7 is completed.
+That example is fenced because the link checker skips fenced blocks and inline
+code spans alike. As a live link it would dangle the day Q7 is completed.
 
 **When the blocker ships, the PR that completes it flips `status` to `ready`
 here and drops the line.** Doing the prose half and leaving `status: blocked`

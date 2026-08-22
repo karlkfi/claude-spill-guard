@@ -25,12 +25,15 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Every relative link resolves
+      - name: Every relative link resolves, fragment included
         run: python3 scripts/check-doc-links.py
 
   # The link check passes on a repo with no links at all, so on its own it
   # cannot tell "all links resolve" from "the checker found nothing to check".
-  # Break one and require red.
+  # Break one and require red -- once per half of a link, because the path and
+  # the fragment are separate reads and a control over one says nothing about
+  # the other. The third mutation runs the other way: the checker has to stay
+  # green on a link that is only being quoted.
   docs-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -38,15 +41,59 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Point a link at a file that does not exist
-        run: printf '\n[mutant](docs/design/no-such-file.md)\n' >> README.md
-      - name: The link check must fail
+
+      - name: A link to a file that does not exist must fail the gate
         run: |
+          printf '\n[mutant](docs/design/no-such-file.md)\n' >> README.md
           python3 scripts/check-doc-links.py > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
+          git checkout -- README.md
           if [ "$rc" -eq 0 ]; then
             echo "::error::the link check passed with a broken link in README.md" >&2
+            exit 1
+          fi
+          if ! grep -q '^broken link: README.md' mutant.log; then
+            echo "::error::the link check failed, but not on the missing file" >&2
+            exit 1
+          fi
+
+      # The fragment half has a spelling that throws every fragment away and
+      # still prints "all relative links resolve" -- which is what this gate did
+      # until Q25. So the path mutation above cannot stand in for this one.
+      - name: A link to a heading that does not exist must fail the gate
+        run: |
+          printf '\n[mutant](docs/design/README.md#no-such-heading)\n' >> README.md
+          python3 scripts/check-doc-links.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the link check passed with a link to a heading that does not exist" >&2
+            exit 1
+          fi
+          if ! grep -q '^broken anchor: README.md' mutant.log; then
+            echo "::error::the link check failed, but not on the anchor" >&2
+            exit 1
+          fi
+
+      # Precision, and the direction a red-only control cannot reach. The store
+      # quotes broken links as exhibits, so a checker that reads inside an
+      # inline code span reports the exhibit as a defect -- Q25's own row was an
+      # instance, and it leaves the tree with the row. Nothing else in the tree
+      # carries the case, so this step is what keeps the stripping honest.
+      - name: A link quoted inside a code span must not fail the gate
+        run: |
+          cat >> README.md <<'MD'
+
+          Quoting `[dead](#no-such-heading)` and `[gone](no-such-file.md)`.
+          MD
+          python3 scripts/check-doc-links.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the link check read a link out of an inline code span" >&2
             exit 1
           fi
 
