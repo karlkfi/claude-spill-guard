@@ -61,8 +61,9 @@ line in it lands in someone else's repository as a byproduct. Upstream settled
 that in `effd161` (2026-08-21) by cutting the three places the file named
 another organization's repository as the source of its rank algebra — one of
 them the `rank --help` description, which printed that credit to whoever ran
-`python3 scripts/vendor/claude-skills/queue.py rank --help` here. A record kept outside the file
-does not travel, so it can name a source without imposing it downstream.
+`python3 scripts/vendor/claude-skills/queue.py rank --help` here. A record
+kept outside the file does not travel, so it can name a source without
+imposing it downstream.
 
 That cuts both ways: this page is invisible to anyone reading `queue.py`
 alone.

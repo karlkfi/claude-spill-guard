@@ -35,8 +35,8 @@ git log --oneline HEAD..origin/main    # any output: re-read the code on main
 ```
 
 ```bash
-./scripts/vendor/claude-skills/alloc-queue-id.sh 'The item title'      # claims the id on the remote
-python3 scripts/vendor/claude-skills/queue.py rank --head              # or --tail, --after, --before
+./scripts/vendor/claude-skills/alloc-queue-id.sh 'The item title'  # claims the id
+python3 scripts/vendor/claude-skills/queue.py rank --head          # or --tail/--after/--before
 ```
 
 Then write `docs/queue/QN.md` with the frontmatter below and run

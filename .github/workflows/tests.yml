@@ -741,8 +741,9 @@ jobs:
           cited = sorted(store.glob("Q*.md"))[0]
           cited.write_text(
               cited.read_text(encoding="utf-8")
-              + "\n\nMeasured at scripts/vendor/claude-skills/queue.py:999999.\n", encoding="utf-8")
-          print(f"pointed {cited.name} past the end of scripts/vendor/claude-skills/queue.py")
+              + "\n\nMeasured at scripts/vendor/claude-skills/queue.py:999999.\n",
+              encoding="utf-8")
+          print(f"pointed {cited.name} past the end of the vendored queue.py")
           PY
           python3 scripts/vendor/claude-skills/queue.py lint --strict deferred-trigger \
             > mutant.log 2>&1 && rc=0 || rc=$?

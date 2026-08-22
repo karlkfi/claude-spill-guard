@@ -19,7 +19,7 @@ measured.
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
 | `internal/validate/` | The six validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
-| `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, why not to edit it here, and what `make vendor` asserts about it. |
+| `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
 
@@ -154,10 +154,11 @@ python3 scripts/vendor/claude-skills/queue.py render
 ```
 
 Pick the top ready item, after `gh pr list` — an open PR is the in-flight
-signal. File one with `./scripts/vendor/claude-skills/alloc-queue-id.sh
-'title'` for the ID and `python3 scripts/vendor/claude-skills/queue.py rank`
-for the key; never hand-type a rank. Lint with
-`make queue`, and commit backlog edits in isolation from code. A clean bare
+signal. The tooling that files one is vendored, so it sits a directory deeper
+than the gate scripts: `./scripts/vendor/claude-skills/alloc-queue-id.sh
+'title'` for the ID, `python3 scripts/vendor/claude-skills/queue.py rank` for
+the key; never hand-type a rank. Lint with `make queue`, and commit backlog
+edits in isolation from code. A clean bare
 `queue.py lint` is not the CI verdict — it reports several classes as notes at
 exit 0. `make queue` promotes the three no sibling branch can trip; the `queue`
 job adds `dangling-link` and `stale-citation` on a push to `main`.
