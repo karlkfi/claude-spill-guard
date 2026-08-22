@@ -374,6 +374,101 @@ jobs:
             exit 1
           fi
 
+  # Two files here are copies of tooling that lives in a private repo, so
+  # nothing can ask whether upstream has moved. What is local is whether the
+  # copy still is one -- a fix typed into it helps this repo, reaches no other
+  # repo running the same tooling, and is gone at the next re-vendor.
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Every vendored copy still hashes to its declared digest
+        run: make vendor
+
+  # Three mutations. The first is the defect the gate exists for. The second is
+  # the property that made the layout worth changing: the files checked come
+  # from the tree, so a third copy nobody declared is a failure rather than a
+  # row a manifest was never given. The third breaks the record instead of the
+  # files -- a table this cannot find declares no digest at all, which is the
+  # spelling that passes over everything.
+  vendor-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # One byte, which is what a real fix looks like from the outside. The
+      # message is half the deliverable: a red gate that does not say which of
+      # the copies moved sends a reader to diff all of them.
+      - name: A vendored file edited in place must fail the gate, by name
+        run: |
+          printf '\n# mutant\n' >> scripts/vendor/claude-skills/queue.py
+          make vendor > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- scripts/vendor/claude-skills/queue.py
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::vendor passed with a vendored file edited in place" >&2
+            exit 1
+          fi
+          if ! grep -q 'vendor/claude-skills/queue.py hashes to' mutant.log; then
+            echo "::error::vendor failed, but did not name the file that drifted" >&2
+            exit 1
+          fi
+
+      # The one a manifest cannot do. A manifest checks the rows it holds, so a
+      # copy added without a row is invisible to it -- silence, which is the
+      # failure shape this repo keeps designing out.
+      - name: A vendored file nothing declares must fail the gate
+        run: |
+          printf '#!/usr/bin/env python3\n' > scripts/vendor/claude-skills/mutant.py
+          git add -N scripts/vendor/claude-skills/mutant.py
+          make vendor > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git rm -q --cached scripts/vendor/claude-skills/mutant.py
+          rm -f scripts/vendor/claude-skills/mutant.py
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::vendor passed with an undeclared file under scripts/vendor/" >&2
+            exit 1
+          fi
+          if ! grep -q 'mutant.py is vendored and nothing declares' mutant.log; then
+            echo "::error::vendor failed, but not on the undeclared file" >&2
+            exit 1
+          fi
+
+      # A reformat of the page is how the record goes missing in practice, and
+      # a parse that finds no table has nothing to disagree with. Renaming the
+      # header leaves a table sitting right there, which is what makes this the
+      # honest version of the mutation.
+      - name: A digest table the gate cannot find must fail it, not pass it
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("scripts/README.md")
+          t = p.read_text()
+          old = "| Here | Upstream path | Taken from | sha256 |\n"
+          assert t.count(old) == 1, "the digest table header has moved"
+          p.write_text(t.replace(old, "| File | Source | Commit | Digest |\n"))
+          PY
+          make vendor > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- scripts/README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::vendor passed over a README declaring no digest" >&2
+            exit 1
+          fi
+          if ! grep -q 'no digest is declared anywhere' mutant.log; then
+            echo "::error::vendor failed, but not on the missing table" >&2
+            exit 1
+          fi
+
   docs:
     runs-on: ubuntu-latest
     steps:
@@ -525,7 +620,7 @@ jobs:
           {
             echo "## Backlog"
             echo
-            python3 scripts/queue.py render --format table --all \
+            python3 scripts/vendor/claude-skills/queue.py render --format table --all \
               | sed "s|](\(Q[0-9]\{1,\}\)\.md)|]($BLOB/\1.md)|g"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -569,7 +664,7 @@ jobs:
               sys.exit(0)
           sys.exit("no blocked row carries an opener to strip")
           PY
-          python3 scripts/queue.py lint --strict blocked-opener \
+          python3 scripts/vendor/claude-skills/queue.py lint --strict blocked-opener \
             > mutant.log 2>&1 && rc=0 || rc=$?
           echo "lint exit: $rc"
           cat mutant.log
@@ -604,7 +699,7 @@ jobs:
               sys.exit(0)
           sys.exit("no blocked row links an item the store still holds")
           PY
-          python3 scripts/queue.py lint --strict dangling-link \
+          python3 scripts/vendor/claude-skills/queue.py lint --strict dangling-link \
             > mutant.log 2>&1 && rc=0 || rc=$?
           echo "lint exit: $rc"
           cat mutant.log
@@ -646,10 +741,11 @@ jobs:
           cited = sorted(store.glob("Q*.md"))[0]
           cited.write_text(
               cited.read_text(encoding="utf-8")
-              + "\n\nMeasured at scripts/queue.py:999999.\n", encoding="utf-8")
-          print(f"pointed {cited.name} past the end of scripts/queue.py")
+              + "\n\nMeasured at scripts/vendor/claude-skills/queue.py:999999.\n",
+              encoding="utf-8")
+          print(f"pointed {cited.name} past the end of the vendored queue.py")
           PY
-          python3 scripts/queue.py lint --strict deferred-trigger \
+          python3 scripts/vendor/claude-skills/queue.py lint --strict deferred-trigger \
             > mutant.log 2>&1 && rc=0 || rc=$?
           echo "--- deferred-trigger -- lint exit: $rc"
           cat mutant.log
@@ -657,7 +753,7 @@ jobs:
             echo "::error::lint passed with a parked row nothing can revive" >&2
             exit 1
           fi
-          python3 scripts/queue.py lint --strict stale-citation \
+          python3 scripts/vendor/claude-skills/queue.py lint --strict stale-citation \
             > mutant.log 2>&1 && rc=0 || rc=$?
           echo "--- stale-citation -- lint exit: $rc"
           cat mutant.log
@@ -677,7 +773,7 @@ jobs:
       - name: A store with no items in it must fail the gate
         run: |
           mkdir -p mutant-store
-          python3 scripts/queue.py --store mutant-store lint --strict empty-store \
+          python3 scripts/vendor/claude-skills/queue.py --store mutant-store lint --strict empty-store \
             > mutant.log 2>&1 && rc=0 || rc=$?
           echo "lint exit: $rc"
           cat mutant.log
@@ -693,7 +789,7 @@ jobs:
       # the same contention with none of the same text in it.
       - name: Each shape of committed index must fail the check
         run: |
-          python3 scripts/queue.py render --format table --all > docs/queue/INDEX.md
+          python3 scripts/vendor/claude-skills/queue.py render --format table --all > docs/queue/INDEX.md
           git add -N docs/queue/INDEX.md
           python3 scripts/check-queue-index.py > mutant.log 2>&1 && rc=0 || rc=$?
           echo "--- rendered index -- check exit: $rc"
@@ -731,7 +827,7 @@ jobs:
       # allocator ever minted is what proves the read happened.
       - name: An id holding no claim must fail the gate
         run: |
-          python3 scripts/queue.py rank --tail > mutant.rank
+          python3 scripts/vendor/claude-skills/queue.py rank --tail > mutant.rank
           {
             echo "---"
             echo "id: Q999999"
@@ -746,7 +842,7 @@ jobs:
             echo
             echo "The mutation control for queue.py claims."
           } > docs/queue/Q999999.md
-          python3 scripts/queue.py claims --strict > mutant.log 2>&1 && rc=0 || rc=$?
+          python3 scripts/vendor/claude-skills/queue.py claims --strict > mutant.log 2>&1 && rc=0 || rc=$?
           echo "claims exit: $rc"
           cat mutant.log
           rm -f docs/queue/Q999999.md mutant.rank

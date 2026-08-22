@@ -6,20 +6,21 @@ tree records that.
 
 ## Vendored from the skills repo
 
-[`queue.py`](queue.py) and [`alloc-queue-id.sh`](alloc-queue-id.sh) are copied
-out of `karlkfi/claude-skills` and run here as ordinary repo tooling. Each is
-byte-identical to its upstream file at the commit named below.
+Everything under `vendor/` is somebody else's file, grouped by where it came
+from. `vendor/claude-skills/` holds two, copied out of `karlkfi/claude-skills`
+and run here as ordinary repo tooling. Each is byte-identical to its upstream
+file at the commit named below.
 
 | Here | Upstream path | Taken from | sha256 |
 |---|---|---|---|
-| [`queue.py`](queue.py) | `session-backlog/scripts/queue.py` | `a055c5e`, 2026-08-21 | `c514771d81bba5ba` |
-| [`alloc-queue-id.sh`](alloc-queue-id.sh) | `session-backlog/scripts/alloc-queue-id.sh` | `e52e962`, 2026-08-16 | `c6bf6edd06d8fc0c` |
+| [`queue.py`](vendor/claude-skills/queue.py) | `session-backlog/scripts/queue.py` | `a055c5e`, 2026-08-21 | `c514771d81bba5ba` |
+| [`alloc-queue-id.sh`](vendor/claude-skills/alloc-queue-id.sh) | `session-backlog/scripts/alloc-queue-id.sh` | `e52e962`, 2026-08-16 | `c6bf6edd06d8fc0c` |
 
 The digests are the first 16 hex characters of `shasum -a 256`, which
 reproduces them in one command:
 
 ```bash
-shasum -a 256 scripts/queue.py scripts/alloc-queue-id.sh
+shasum -a 256 scripts/vendor/claude-skills/*
 ```
 
 **Do not edit either file in place.** A fix written here reaches no other repo
@@ -31,9 +32,27 @@ digest change in the same diff, where a reviewer sees it.
 Re-vendoring is a copy and a digest:
 
 ```bash
-cp <skills-checkout>/session-backlog/scripts/queue.py scripts/queue.py
-shasum -a 256 scripts/queue.py
+cp <skills-checkout>/session-backlog/scripts/queue.py scripts/vendor/claude-skills/queue.py
+shasum -a 256 scripts/vendor/claude-skills/queue.py
 ```
+
+### The table above is what `make vendor` reads
+
+[`check-vendor.py`](check-vendor.py) hashes every vendored file and compares it
+to the row here, so a copy edited in place goes red and the message names it.
+Declaring a fork is still possible and no longer silent: it moves a digest in
+the same diff a reviewer reads.
+
+**The files it checks come from the tree, not from this table.** Everything git
+tracks under `vendor/` is in scope by construction, and a file with no row is a
+failure rather than an omission nobody sees — which is the property a manifest
+cannot have, since a manifest only checks what it already lists. A row that
+outlives its file fails the same way, from the other side.
+
+The gate asserts nothing about forgery. Anyone who can edit a vendored file can
+edit the row above it, and 16 hex characters would not stop them if they could
+not. What it catches is the honest edit: a fix typed into the copy, where it
+helps this repo and no other, until the next `cp` takes it away.
 
 ### Why the record is here and not in the file itself
 
@@ -42,8 +61,9 @@ line in it lands in someone else's repository as a byproduct. Upstream settled
 that in `effd161` (2026-08-21) by cutting the three places the file named
 another organization's repository as the source of its rank algebra — one of
 them the `rank --help` description, which printed that credit to whoever ran
-`python3 scripts/queue.py rank --help` here. A record kept outside the file
-does not travel, so it can name a source without imposing it downstream.
+`python3 scripts/vendor/claude-skills/queue.py rank --help` here. A record
+kept outside the file does not travel, so it can name a source without
+imposing it downstream.
 
 That cuts both ways: this page is invisible to anyone reading `queue.py`
 alone.

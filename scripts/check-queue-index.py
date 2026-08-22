@@ -98,8 +98,9 @@ def main():
         print(f"committed index: {entry}", file=sys.stderr)
     if findings:
         print(f"\n{len(findings)} committed backlog index(es). The store has no "
-              f"index by design -- render one with `python3 scripts/queue.py "
-              f"render` and leave it untracked.", file=sys.stderr)
+              f"index by design -- render one with `python3 "
+              f"scripts/vendor/claude-skills/queue.py render` and leave it "
+              f"untracked.", file=sys.stderr)
         return 1
     print(f"no committed backlog index (limit: {limit} items named in one file)")
     return 0

@@ -12,11 +12,12 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift hooks-check docs queue test no-deps no-network cross-compile
+GATES := doctor gate-drift hooks-check vendor docs queue test no-deps no-network cross-compile
 
 doctor.desc        := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc    := the gate list, the CI job list and the table in CLAUDE.md still agree
 hooks-check.desc   := every tracked git hook is executable, so none is silently inert
+vendor.desc        := every vendored copy still hashes to the digest scripts/README.md declares
 docs.desc          := every relative link in the repo markdown resolves
 queue.desc         := the backlog store format holds, every filed id holds a claim, no index is committed
 test.desc          := gofmt, go vet and go test
@@ -108,13 +109,16 @@ gate-drift:
 hooks-check:
 	$(PYTHON) scripts/check-githooks.py
 
+vendor:
+	$(PYTHON) scripts/check-vendor.py
+
 docs:
 	$(PYTHON) scripts/check-doc-links.py
 
 queue:
 	@rc=0; \
-	$(PYTHON) scripts/queue.py lint $(queue_strict) || rc=1; \
-	$(PYTHON) scripts/queue.py claims --strict || rc=1; \
+	$(PYTHON) scripts/vendor/claude-skills/queue.py lint $(queue_strict) || rc=1; \
+	$(PYTHON) scripts/vendor/claude-skills/queue.py claims --strict || rc=1; \
 	$(PYTHON) scripts/check-queue-index.py || rc=1; \
 	exit "$$rc"
 

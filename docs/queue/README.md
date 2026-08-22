@@ -8,7 +8,7 @@ different items never touch the same path.
 is neither priority nor number. Render the real order:
 
 ```bash
-python3 scripts/queue.py render
+python3 scripts/vendor/claude-skills/queue.py render
 ```
 
 `--all` includes deferred items, `--format table` emits Markdown, and
@@ -35,12 +35,12 @@ git log --oneline HEAD..origin/main    # any output: re-read the code on main
 ```
 
 ```bash
-./scripts/alloc-queue-id.sh 'The item title'      # claims the id on the remote
-python3 scripts/queue.py rank --head              # or --tail, --after, --before
+./scripts/vendor/claude-skills/alloc-queue-id.sh 'The item title'  # claims the id
+python3 scripts/vendor/claude-skills/queue.py rank --head          # or --tail/--after/--before
 ```
 
 Then write `docs/queue/QN.md` with the frontmatter below and run
-`python3 scripts/queue.py lint`. Never hand-type a rank.
+`python3 scripts/vendor/claude-skills/queue.py lint`. Never hand-type a rank.
 
 `lint` reports at exit 0 what the files alone cannot settle, so a clean local
 run is not the whole gate. CI promotes five of those notes with `--strict`.
