@@ -1,7 +1,8 @@
 package validate
 
-// DefaultLabelWindow is how many bytes before a candidate NearLabel searches
-// when a rule does not set its own.
+// DefaultLabelWindow is how many bytes before a candidate NearLabel searches.
+// The rule schema carries no per-rule window, so this is the window every rule
+// gets; docs/design/README.md argues that under "Rule schema".
 //
 // Measured 2026-08-21 over 914 text files, 8.93 MiB, of real source, config and
 // documentation: the seven Claude Code guard plugins checked out under
@@ -57,9 +58,11 @@ const DefaultLabelWindow = 64
 // YAML putting the value on the line below its key, and refusing to cross would
 // cost that recall for nothing.
 //
-// A rule that reaches here with no labels, or a window of zero, reports
-// nothing at all. That is a rule the loader should have refused rather than
-// something to paper over here.
+// A rule that reaches here with no labels reports nothing at all, and that is
+// a rule the loader should have refused rather than something to paper over
+// here. A window of zero does the same and cannot come from a rule file, since
+// the schema has no per-rule window -- it would be a caller passing the wrong
+// thing.
 func NearLabel(buf []byte, at int, labels []string, window int) bool {
 	if window <= 0 || at <= 0 || at > len(buf) {
 		return false
