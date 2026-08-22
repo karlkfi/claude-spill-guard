@@ -1,6 +1,6 @@
 # `scripts/`
 
-The gate scripts `.github/workflows/tests.yml` runs, plus the backlog tooling.
+The gate scripts CI runs, plus the backlog tooling.
 Most of these are this repo's own. Two are copies, and this page is where the
 tree records that.
 
