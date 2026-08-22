@@ -1,14 +1,14 @@
 # `scripts/`
 
 The gate scripts `.github/workflows/tests.yml` runs, plus the backlog tooling.
-Most of these are this repo's own. Two are copies, and this page is the only
-thing in the tree that says so.
+Most of these are this repo's own. Two are copies, and this page is where the
+tree records that.
 
 ## Vendored from the skills repo
 
 [`queue.py`](queue.py) and [`alloc-queue-id.sh`](alloc-queue-id.sh) are copied
-out of `karlkfi/claude-skills` and run here as ordinary repo tooling. Both are
-byte-identical to the commit they name below.
+out of `karlkfi/claude-skills` and run here as ordinary repo tooling. Each is
+byte-identical to its upstream file at the commit named below.
 
 | Here | Upstream path | Taken from | sha256 |
 |---|---|---|---|
@@ -31,7 +31,7 @@ digest change in the same diff, where a reviewer sees it.
 Re-vendoring is a copy and a digest:
 
 ```bash
-cp ~/workspace/claude-skills/session-backlog/scripts/queue.py scripts/queue.py
+cp <skills-checkout>/session-backlog/scripts/queue.py scripts/queue.py
 shasum -a 256 scripts/queue.py
 ```
 
