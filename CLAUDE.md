@@ -19,7 +19,7 @@ measured.
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
 | `internal/validate/` | The six validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
-| `scripts/` | The gate scripts CI runs, plus the backlog tooling. |
+| `scripts/` | The gate scripts CI runs, plus the backlog tooling. Two files are vendored — [`scripts/README.md`](scripts/README.md) says which, from where, and why not to edit them here. |
 
 The rest of `internal/`, plus `rules/` and `hooks/`, is proposed in the design
 doc and does not exist — including `rules/spill-guard.json` itself, which the
