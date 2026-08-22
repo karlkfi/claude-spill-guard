@@ -136,14 +136,14 @@ not need to do.
 4. **Validate.** This is where precision comes from, and regex is not where it
    lives:
 
-   | Validator | Applies to |
-   |---|---|
-   | Luhn | Payment cards |
-   | Placeholder denylist | Payment cards, beside Luhn — the published test numbers and repeated-digit runs the checksum accepts |
-   | mod-11 | National ID numbers |
-   | Shannon entropy floor | High-entropy credential candidates |
-   | Reserved-range exclusion | IP rules — RFC1918, loopback, link-local, documentation ranges, `0.0.0.0` |
-   | Context label proximity | Bare numeric runs, which count only near a label like `phone:` or `ssn=` |
+   | Name in `validators` | Check | Applies to |
+   |---|---|---|
+   | `luhn` | Luhn checksum | Payment cards |
+   | `card-placeholder` | Denylist of the published test numbers and repeated-digit runs Luhn accepts | Payment cards, beside `luhn` |
+   | `mod-11` | ISO 7064 MOD 11-2 | National ID numbers |
+   | `entropy` | Shannon floor, read from the rule's `entropy` | High-entropy credential candidates |
+   | `reserved-range` | Reserved-range exclusion | IP rules — RFC1918, loopback, link-local, documentation ranges, `0.0.0.0` |
+   | `context-label` | Proximity to one of the rule's `labels` | Bare numeric runs, which count only near a label like `phone:` or `ssn=` |
 
 5. **Report.** Rule ID, path, byte offset. Nothing else.
 
@@ -161,7 +161,7 @@ extends it from `.claude/spill-guard.json`, matching the sibling guards.
   "group": 1,
   "keywords": ["AKIA", "ASIA", "ABIA", "ACCA", "A3T"],
   "entropy": 3.0,
-  "validators": [],
+  "validators": ["entropy"],
   "enabled": true
 }
 ```
@@ -193,7 +193,7 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. |
 | `labels` | Word-boundary literals the candidate has to sit near, for the context-proximity check. Read after the match, so unlike `keywords` it gates nothing. |
 | `entropy` | Minimum Shannon bits per character over the captured group. Omitted means no floor. |
-| `validators` | Named checks from the table above, all of which must pass. |
+| `validators` | Names from the validator table above, all of which must pass. |
 | `enabled` | Ships `false` for every `pii` rule. |
 
 `labels` and `keywords` are both word-boundary literal lists and they are not
@@ -214,6 +214,41 @@ every rule that overrode it, where the re-measurement cannot reach it. So a
 rule carrying `window` is rejected at startup rather than ignored. Adding the
 field later breaks no rule file written before it; taking it away once rules
 have set it does.
+
+A rule names every check that has to pass, including the two that read a field
+of its own — `entropy` reads the rule's floor and `context-label` reads its
+labels. Presence and configuration are separate on purpose. A numeric rule
+whose author wrote the labels and left the validator off is an ungated numeric
+regex, which is the shape that produced 5,679 matches and no credentials, so
+naming the check is what turns that omission into a startup error. The loader
+rejects a rule carrying configuration no check reads.
+
+## Loading the ruleset
+
+Both files are one JSON object with a `rules` array, so the config keys
+`.claude/spill-guard.json` grows later need no format change. `id`, `family`,
+`description`, `regex` and `enabled` are required of a rule; the rest default
+to absent, and `enabled` has no default because a rule that does not say is a
+rule somebody has not decided about.
+
+A project entry whose `id` is already shipped overrides the fields it mentions
+and leaves the others, which makes
+
+```json
+{"rules": [{"id": "aws-access-key-id", "enabled": false}]}
+```
+
+the way to turn a shipped rule off. An entry with a new `id` is appended and
+has to be a whole rule.
+
+**A field the schema has no room for is a load failure.** Go's `encoding/json`
+drops an unknown field in silence unless the decoder is told not to — measured,
+not read — and every field here only ever makes a rule stricter, so a
+misspelled one leaves a rule that loads, compiles, runs, and reports either
+nothing or everything. `window` is the field this catches by design.
+
+Every problem is reported in one run. A rule author who has to fix them one at
+a time is a rule author who stops running the loader.
 
 `gitleaks` is a safe ruleset to borrow from. Its `go.mod` carries no PCRE or
 `regexp2` dependency and it uses stdlib `regexp`, so a non-RE2 rule would panic
