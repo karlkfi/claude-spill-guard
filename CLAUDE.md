@@ -111,9 +111,15 @@ was invisible to `make check` over the same tree:
   output needs `--no-print-directory`, a stripped `MAKELEVEL`/`MAKEFLAGS` in
   the child env, and a parse that refuses an unrecognised line by name rather
   than absorbing it. Two banners read as two gates.
-- **A workflow `run:` block runs under `bash -e`.** An `&&` list whose left
-  side is false returns 1 and takes the whole step down, so `[ "$x" = y ] &&
-  continue` is a step that dies on the common case. Use `if`.
+- **A workflow `run:` block runs under `bash -e`, and errexit exempts the left
+  side of an `&&` list.** So `[ "$x" = y ] && continue` does not die where it
+  stands: a loop of them runs to completion at rc=0, which is the shape a
+  session testing this bullet will write. Three shapes do take the step down —
+  the list as the script's last command, whose status the script exits with
+  under `-e` or without it; the list as a called function's last command, where
+  the call is not exempt and errexit fires on it; and a failure in the command
+  after the final `&&`, which was never exempt. Measured 2026-08-22 on 3.2.57
+  and 5.3.15, identical on both. Write `if`.
 
 The instrument for the third is the one to reach for generally: extract a
 step's script verbatim from the workflow YAML and run it under `bash -e`.

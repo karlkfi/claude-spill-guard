@@ -60,11 +60,14 @@ jobs:
       # is a report rather than a crash at the first absence.
       - name: With Go off PATH it must still report, and must name Go
         run: |
-          # `if` rather than `[ ... ] && continue`: this step runs under
-          # `bash -e`, where an && list whose left side is false returns 1 and
-          # takes the whole step down. It is the same shape as the && the
-          # exit-status rules warn about, arriving as a false rather than a
-          # failure.
+          # `if` rather than `[ ... ] && continue` -- though not because the
+          # && would die here. This step runs under `bash -e`, which exempts
+          # the left side of an && list, so the loop below would run to
+          # completion at rc=0. What the && costs is that the quiet depends on
+          # position: the same list takes a step down as the script's last
+          # command, as a called function's last command, or when the command
+          # after the final && is the one that fails. `if` is quiet wherever it
+          # sits. Measured 2026-08-22 on bash 3.2.57 and 5.3.15.
           shim="$(mktemp -d)"
           IFS=: read -ra dirs <<< "$PATH" || true
           for d in "${dirs[@]}"; do
