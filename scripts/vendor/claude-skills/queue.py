@@ -536,6 +536,10 @@ def cmd_lint(args):
             print(f"queue: note: {msg}", file=sys.stderr)
 
     seen_id = {}
+    # Every citation the marker exempted. The exemption is a waiver, and one
+    # nothing counts is one a session can reach for to silence real drift,
+    # since the legitimate use and the abuse both report nothing.
+    exhibits = []
     ids = {i.id for i in items}
     for i in items:
         where = i.path.name
@@ -622,6 +626,9 @@ def cmd_lint(args):
             # Marked as an exhibit, so every check below would report a defect
             # the row is deliberately showing — and hand over the repair.
             if notes[:m.start()].endswith(EXHIBIT_PREFIX):
+                exhibits.append(
+                    f"{where} holds {EXHIBIT_PREFIX}{m.group(0)} "
+                    f"(marked exhibit, not checked)")
                 continue
             path, line, fragment = m.group(1), int(m.group(2)), m.group(3)
             target = next((base / path for base in (store.parent, store.parent.parent)
@@ -666,11 +673,25 @@ def cmd_lint(args):
         note("empty-store",
              f"no Q*.md under {store}; either the backlog is empty or --store "
              f"is pointed at the wrong directory")
+    # On request rather than by default: the count below raises the question
+    # and this answers it, at a length an ordinary run does not want. A `grep`
+    # for the prefix is not the same reading — it finds prose *about* the
+    # marker as readily as a citation carrying it.
+    if args.show_exhibits:
+        for e in exhibits:
+            print(f"queue: {e}", file=sys.stderr)
     for p in problems:
         print(f"queue: {p}", file=sys.stderr)
     if problems:
         return 1
-    print(f"queue: {len(items)} item(s) OK")
+    # Disclosed only where there is something to disclose. An unconditional
+    # count would change the line every store prints, in every repository
+    # holding a copy of this file, and a zero discloses nothing; what has to
+    # stop is a store carrying exemptions reading like one carrying none.
+    # Telling a silent zero from a copy too old to count is what
+    # --show-exhibits is for, since that copy rejects the flag.
+    held = f" ({len(exhibits)} marked exhibit(s) held back)" if exhibits else ""
+    print(f"queue: {len(items)} item(s) OK{held}")
     return 0
 
 
@@ -1021,6 +1042,11 @@ def main(argv=None):
                          "line itself. --strict promotes a note's severity and "
                          "never this window, so a gate wanting an exact check "
                          "asks for both.")
+    li.add_argument("--show-exhibits", action="store_true",
+                    help="list the citations held back by the "
+                         f"`{EXHIBIT_PREFIX}` prefix, with the row carrying "
+                         "each. The success line counts them; this names "
+                         "them.")
     li.set_defaults(fn=cmd_lint)
 
     c = sub.add_parser(
