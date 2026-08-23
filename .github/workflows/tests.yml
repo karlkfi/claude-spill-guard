@@ -483,8 +483,17 @@ jobs:
   # cannot tell "all links resolve" from "the checker found nothing to check".
   # Break one and require red -- once per half of a link, because the path and
   # the fragment are separate reads and a control over one says nothing about
-  # the other. The third mutation runs the other way: the checker has to stay
-  # green on a link that is only being quoted.
+  # the other.
+  #
+  # The rest run the other way, and Q32 is why there are four of them. Three
+  # shapes must not fail the gate: a link quoted in a code span, a link shown
+  # inside an indented code block, and a link to a setext heading. Two must
+  # still fail it, because the obvious way to reach those greens overshoots --
+  # reading setext without dropping frontmatter first turns `size: S` into an
+  # anchor in every row of the store, and stripping four-space indentation
+  # without list context drops every link nested at that column. Measured
+  # 2026-08-23: each of the four new steps is reddened by a different spelling
+  # of the fix, and only the shipped one passes all four.
   docs-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -533,18 +542,118 @@ jobs:
       # inline code span reports the exhibit as a defect -- Q25's own row was an
       # instance, and it leaves the tree with the row. Nothing else in the tree
       # carries the case, so this step is what keeps the stripping honest.
+      #
+      # The precondition arrived with Q32, which made the column the heredoc
+      # lands at load-bearing: four spaces of it and the line is an indented
+      # code block, which the checker now skips, and the step then demands a
+      # green it would get from a checker that had stopped reading entirely.
       - name: A link quoted inside a code span must not fail the gate
         run: |
           cat >> README.md <<'MD'
 
           Quoting `[dead](#no-such-heading)` and `[gone](no-such-file.md)`.
           MD
+          if ! grep -q '^Quoting `\[dead\]' README.md; then
+            echo "::error::the mutation changed nothing -- the quoted link is not at column 0" >&2
+            exit 1
+          fi
           make docs > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           git checkout -- README.md
           if [ "$rc" -ne 0 ]; then
             echo "::error::the link check read a link out of an inline code span" >&2
+            exit 1
+          fi
+
+      # Q32's first half, and a direction only a green-demanding control
+      # reaches: a setext heading has to contribute an anchor, and until this
+      # it contributed nothing, so a link to one failed.
+      - name: A link to a setext heading must pass the gate
+        run: |
+          printf '\n## Mutant setext\n\nMutant heading\n==============\n\n[mutant](#mutant-heading)\n' \
+            >> README.md
+          if ! grep -qx '==============' README.md; then
+            echo "::error::the mutation changed nothing -- no setext underline in README.md" >&2
+            exit 1
+          fi
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the link check does not read a setext heading as one" >&2
+            exit 1
+          fi
+
+      # The trap Q32 names, and why the walk drops frontmatter before it reads
+      # a heading at all: every row in docs/queue closes its frontmatter with a
+      # `---`, so a checker that reads setext without skipping it first turns
+      # `size: S` into an anchor in all of them. The fixture carries one key on
+      # purpose -- a naive reader taking only the line above the `---` and one
+      # taking the whole paragraph then agree on `size-s`, so this step catches
+      # both spellings. Measured 2026-08-23 against both.
+      - name: A frontmatter close must not offer an anchor
+        run: |
+          printf '%s\n' '---' 'size: S' '---' '' '# Real heading' > mutant-frontmatter.md
+          printf '\n## Mutant frontmatter\n\n[mutant](mutant-frontmatter.md#size-s)\n' >> README.md
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          rm -f mutant-frontmatter.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the link check read a frontmatter close as a setext heading" >&2
+            exit 1
+          fi
+          if ! grep -q '^broken anchor: README.md' mutant.log; then
+            echo "::error::the link check failed, but not on the frontmatter anchor" >&2
+            exit 1
+          fi
+
+      # Q32's second half. Four-space indentation is the third way to write
+      # code in markdown and the checker did not strip it, so a doc showing a
+      # link as an example failed on it. The precondition is the indentation
+      # itself rather than the append: this step is the one that passes
+      # vacuously if the four spaces do not survive into README.md.
+      - name: A link inside an indented code block must not fail the gate
+        run: |
+          printf '\n## Mutant indent\n\nExample:\n\n    [mutant](no-such-file.md)\n' >> README.md
+          if ! grep -qx '    \[mutant\](no-such-file.md)' README.md; then
+            echo "::error::the mutation changed nothing -- the link is not indented four spaces" >&2
+            exit 1
+          fi
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the link check read a link out of an indented code block" >&2
+            exit 1
+          fi
+
+      # The other side of that one, and the reason the strip needs list
+      # context: four spaces is a code block only outside a list, and this repo
+      # nests plenty of items at that column. A checker that reads the indent
+      # alone drops every link in them and reports nothing, which is the shape
+      # a red-only job cannot tell from a clean tree. The blank line is
+      # load-bearing -- without it the nested item is a lazy continuation of
+      # the outer one, which no implementation reads as code, so the step would
+      # pass either way.
+      - name: A link in a list item indented four spaces must fail the gate
+        run: |
+          printf '\n## Mutant list\n\n- outer item\n\n    - nested, with [a link](no-such-file.md)\n' \
+            >> README.md
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the link check read a nested list item as an indented code block" >&2
+            exit 1
+          fi
+          if ! grep -q '^broken link: README.md' mutant.log; then
+            echo "::error::the link check failed, but not on the nested item" >&2
             exit 1
           fi
 

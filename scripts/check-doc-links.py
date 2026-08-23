@@ -7,9 +7,9 @@ network is a different tool with different failure modes, and this one runs on
 every PR. A fragment is not: the headings are on disk, so resolving one is a
 second read of a file already open. Anchors into non-markdown targets are still
 out of scope, since nothing here knows what a heading is in those. Headings are
-ATX (`## Like this`) -- a setext heading is invisible here, and reading one is
-not free, because every row in `docs/queue` closes its frontmatter with the
-`---` that would make the line above it a heading.
+ATX (`## Like this`) and setext (underlined with `=` or `-`), which is why the
+walk drops frontmatter before it reads either: every row in `docs/queue` closes
+its own with the `---` that would otherwise underline `size: S` into a heading.
 
 Exits 1 and lists every broken link, so one run reports all of them.
 """
@@ -29,24 +29,95 @@ FENCE = re.compile(r"^\s*(```|~~~)")
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
 HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*#*\s*$")
 INLINE_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+DELIMITER = re.compile(r"^---[ \t]*$")
+SETEXT = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
+# A list marker and the run of whitespace to its content. Where that content
+# starts is what an indented code block is measured against: four spaces opens
+# one at the outermost level and is ordinary item content inside a list, so a
+# walk that reads the indent alone drops the links in every nested item.
+LIST_ITEM = re.compile(r"^ *(?:[-*+]|\d{1,9}[.)]) +")
 
 SKIP_PREFIXES = ("http://", "https://", "mailto:")
 
 
+def frontmatter_end(lines):
+    """The index of the first line below a YAML frontmatter block, or 0.
+
+    An opener with no close is not frontmatter, so the file is read whole.
+    """
+    if not lines or not DELIMITER.match(lines[0]):
+        return 0
+    for i in range(1, len(lines)):
+        if DELIMITER.match(lines[i]):
+            return i + 1
+    return 0
+
+
 def prose_lines(text):
-    """Yield (line_number, line) for every line outside a fenced code block."""
+    """Yield (line_number, line, underlines) for every line rendering as prose.
+
+    `underlines` is the heading text a setext underline sits under, and None on
+    every other line. Frontmatter, fenced code and indented code are all out.
+    """
+    lines = text.splitlines()
+    start = frontmatter_end(lines)
+
     in_fence = False
-    for n, line in enumerate(text.splitlines(), 1):
+    items = []            # where the content of each open list item starts
+    para, para_col = [], 0
+
+    for n, line in enumerate(lines[start:], start + 1):
         if FENCE.match(line):
             in_fence = not in_fence
+            para = []
             continue
-        if not in_fence:
-            yield n, line
+        if in_fence:
+            continue
+        if not line.strip():
+            para = []
+            yield n, line, None
+            continue
+
+        expanded = line.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip(" "))
+        item = LIST_ITEM.match(expanded)
+
+        # A line that has dedented out of the open items closes them, and so
+        # does a marker opening a sibling of one.
+        if item or not para:
+            while items and indent < items[-1]:
+                items.pop()
+        content = items[-1] if items else 0
+
+        if para:
+            # An underline belongs to its paragraph only from inside the same
+            # container, which is what keeps a `---` at column 0 under a list
+            # item a thematic break rather than a heading over the item.
+            if SETEXT.match(expanded) and para_col <= indent < para_col + 4:
+                yield n, line, " ".join(s.strip() for s in para)
+                para = []
+                continue
+            # Indented code cannot interrupt a paragraph, so an indented line
+            # under an open one is a continuation whatever its column.
+        elif indent >= content + 4:
+            continue
+
+        if item and indent < content + 4:
+            items.append(item.end())
+            para, para_col = [expanded[item.end():]], item.end()
+        elif HEADING.match(line) or SETEXT.match(expanded):
+            para = []
+        else:
+            if not para:
+                para_col = content
+            para.append(line)
+
+        yield n, line, None
 
 
 def links_in(text):
     """Yield (line_number, target) for every markdown link in prose."""
-    for n, line in prose_lines(text):
+    for n, line, _ in prose_lines(text):
         for match in LINK.finditer(CODE_SPAN.sub("", line)):
             yield n, match.group(1)
 
@@ -62,11 +133,12 @@ def slugs_in(text):
     """The anchors a file offers. GitHub disambiguates a repeated heading by
     appending -1, -2 in document order, so a duplicate is not ambiguous."""
     anchors, seen = set(), {}
-    for _, line in prose_lines(text):
+    for _, line, underlines in prose_lines(text):
         match = HEADING.match(line)
-        if not match:
+        heading = match.group(1) if match else underlines
+        if heading is None:
             continue
-        base = slug(match.group(1))
+        base = slug(heading)
         count = seen.get(base, 0)
         seen[base] = count + 1
         anchors.add(base if count == 0 else f"{base}-{count}")
