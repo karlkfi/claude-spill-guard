@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # For `vulns` and nothing else. An advisory lands against code that has not
+  # changed, so a gate that only runs on a diff reports a binary as clean for
+  # as long as nobody touches it. Every other job runs too, which costs a few
+  # runner-minutes a week and re-exercises the mutation controls -- the ones
+  # most likely to rot unobserved, since nothing else makes them fail.
+  schedule:
+    - cron: '17 4 * * 1'
 
 # Every gate here is paired with a mutation control that breaks the property and
 # requires the gate to go red. A gate that has never failed is a claim, not
@@ -123,6 +130,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -137,6 +148,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -1176,5 +1191,215 @@ jobs:
           fi
           if ! grep -q 'windows/amd64: ok' mutant.log; then
             echo "::error::windows/amd64 did not build, so this run does not show the last target passing" >&2
+            exit 1
+          fi
+
+  # The pin gate reads every workflow through the YAML parser in
+  # tools/cmd/workflow, so it needs Go as well as Python.
+  action-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Every `uses:` names an immutable revision
+        run: make action-pins
+
+  # Two mutations, and they pull in opposite directions on purpose. The first
+  # is the ordinary one: unpin a ref and require red. The second is the reason
+  # this gate parses YAML instead of matching lines, and it requires *green* --
+  # a `uses:` inside a comment or a `run:` block is not a mapping key, and a
+  # gate that flagged it would be unusable in this very repository, whose own
+  # workflow contains both.
+  action-pins-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: A ref pinned to a tag must fail the gate
+        run: |
+          sed -i 's|actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1|actions/checkout@v7|' \
+            .github/workflows/tests.yml
+          if git diff --quiet; then
+            echo "::error::the mutation changed nothing -- the checkout pin no longer matches" >&2
+            exit 1
+          fi
+          make action-pins > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .github/workflows/tests.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::action-pins passed with a tag-pinned action" >&2
+            exit 1
+          fi
+          if ! grep -q "is pinned to 'v7'" mutant.log; then
+            echo "::error::action-pins failed, but not on the tag" >&2
+            exit 1
+          fi
+
+      # The inverted one. `-eq 0` below is deliberate and is not a typo: this
+      # feeds the gate input that must NOT trip it, so green is the pass.
+      - name: A `uses:` that is not a mapping key must NOT fail the gate
+        run: |
+          make action-pins > base.log 2>&1
+          base=$(sed -n 's/^action-pins: \([0-9][0-9]*\) .*/\1/p' base.log)
+          if [ -z "$base" ]; then
+            echo "::error::could not read the baseline count from action-pins" >&2
+            exit 1
+          fi
+          cat > .github/workflows/mutant.yml <<'MUTANT'
+          # uses: actions/evil@v1
+          on: push
+          jobs:
+            a:
+              steps:
+                - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+                - run: |
+                    # uses: actions/evil@v1
+                    echo "uses: actions/evil@v1"
+          MUTANT
+          make action-pins > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          rm -f .github/workflows/mutant.yml
+          if [ "$rc" -ne 0 ]; then
+            echo '::error::action-pins flagged a uses: that is not a mapping key' >&2
+            exit 1
+          fi
+          if ! grep -q 'across 2 workflow(s)' mutant.log; then
+            echo "::error::action-pins did not read the second workflow at all" >&2
+            exit 1
+          fi
+          if ! grep -q "^action-pins: $((base + 1)) " mutant.log; then
+            echo "::error::action-pins did not count the one added reference" >&2
+            exit 1
+          fi
+
+      # The floor. Everything above assumes the extractor found something; this
+      # is what happens when it does not. `make vendor`-style digest checks and
+      # `gates.py` both refuse an empty input set for the same reason -- a sweep
+      # of nothing prints the same success line as a sweep of everything.
+      - name: An extractor that finds no `uses:` at all must fail the gate
+        run: |
+          sed -i 's|if k.Value == "uses" {|if false {|' tools/cmd/workflow/main.go
+          if git diff --quiet -- tools/cmd/workflow/main.go; then
+            echo "::error::the mutation changed nothing -- the walk no longer matches" >&2
+            exit 1
+          fi
+          make action-pins > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- tools/cmd/workflow/main.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::action-pins passed having checked no reference at all" >&2
+            exit 1
+          fi
+          if ! grep -q 'not one `uses:` among them' mutant.log; then
+            echo "::error::action-pins failed, but not on the empty sweep" >&2
+            exit 1
+          fi
+
+  # The one gate whose oracle is off the runner: govulncheck reads the advisory
+  # database at vuln.go.dev.
+  vulns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: No known vulnerability the build graph calls
+        run: make vulns
+
+  # Two mutations, for the two ways this gate can end badly, because the whole
+  # design of check-vulns.py is telling them apart. The second one takes a real
+  # dependency with a real advisory, which is the only way to reach the finding
+  # branch -- and it is the one control here a third party can break. That is
+  # acceptable for this gate and no other: its oracle is already the network.
+  vulns-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: A database it cannot read must fail as a tool failure, not a CVE
+        run: |
+          sed -i 's|"-C", str(ROOT), "./..."|"-db", "https://127.0.0.1:1/nope", "-C", str(ROOT), "./..."|' \
+            scripts/check-vulns.py
+          if git diff --quiet; then
+            echo "::error::the mutation changed nothing -- check-vulns.py no longer matches" >&2
+            exit 1
+          fi
+          make vulns > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- scripts/check-vulns.py
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::vulns passed with an unreadable advisory database" >&2
+            exit 1
+          fi
+          if ! grep -q 'this is the tool failing, not an answer about the code' mutant.log; then
+            echo "::error::vulns failed, but reported it as a finding about the code" >&2
+            exit 1
+          fi
+
+      - name: A dependency with a called advisory must fail the gate
+        run: |
+          go get golang.org/x/text@v0.3.0
+          mkdir -p internal/mutant
+          cat > internal/mutant/mutant.go <<'MUTANT'
+          package mutant
+
+          import "golang.org/x/text/language"
+
+          // Parse carries GO-2021-0113, which govulncheck reports only when the
+          // vulnerable symbol is actually reachable.
+          func Tag(s string) string {
+            t, err := language.Parse(s)
+            if err != nil {
+              return ""
+            }
+            return t.String()
+          }
+          MUTANT
+          go mod tidy
+          if git diff --quiet go.mod; then
+            echo "::error::the mutation changed nothing -- go.mod took no dependency" >&2
+            exit 1
+          fi
+          make vulns > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          rm -rf internal/mutant
+          git checkout -- go.mod
+          rm -f go.sum
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::vulns passed with a called advisory in the graph" >&2
+            exit 1
+          fi
+          if ! grep -q 'found a vulnerability this code calls' mutant.log; then
+            echo "::error::vulns failed, but not on the advisory" >&2
             exit 1
           fi

@@ -1,0 +1,35 @@
+# The maintenance half of the pin rule.
+#
+# `action-pins` fails a `uses:` that names anything but a 40-character commit
+# SHA, which stops a mutable ref reaching CI. On its own that trades a mutable
+# dependency for a frozen one: a SHA nobody bumps is a vulnerable version held
+# in place by a gate. This is what bumps them, and it rewrites the SHA and the
+# `# vX.Y.Z` comment beside it together.
+#
+# Two ecosystems, because two sets of third-party code run in a job holding the
+# repository token. Actions are the obvious half. tools/go.mod is the other:
+# it pins govulncheck, actionlint and golangci-lint, none of which the shipped
+# binary links -- `no-deps` reads the root module, and the root module still
+# requires nothing.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: build(actions)
+
+  # Direct only. Everything golangci-lint drags in is indirect and moves with
+  # it, so opening a pull request per transitive bump would bury the three
+  # updates anybody here would act on.
+  - package-ecosystem: gomod
+    directory: /tools
+    schedule:
+      interval: weekly
+      day: monday
+    allow:
+      - dependency-type: direct
+    commit-message:
+      prefix: build(tools)

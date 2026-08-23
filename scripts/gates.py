@@ -28,6 +28,13 @@ compose, so a job that has gone missing is a hand fix and the message says so.
 The Makefile is read by asking make, not by parsing it. `go list` is the
 toolchain's own answer to what gets linked, and `make print-gates` is make's
 own answer to what the gate list holds; a second parser is a second opinion.
+The workflow is read the same way, through the YAML parser in
+tools/cmd/workflow: a job name this used to read with `^  ([A-Za-z0-9_-]+):$`
+and a comment-stripping pass was simply not seen when it did not match, and
+this check would then report agreement over a job list with an entry missing --
+a gate can drop out of CI while the check that exists to prevent exactly that
+stays green. Every job name in the file happened to match, so it was never
+wrong; it was unable to be.
 """
 
 import os
@@ -35,6 +42,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+import workflow_model
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
@@ -53,11 +62,6 @@ CONTROL_SUFFIX = "-mutation-control"
 # job the list does not generate. Its control breaks a gate that is not last
 # and requires `check` to go red anyway -- the failure the loop can swallow.
 RUNNER_JOBS = frozenset({"check-mutation-control"})
-
-# A job name sits two spaces in under `jobs:`. Comments live at the same indent,
-# so they are skipped rather than read as job names.
-JOB_RE = re.compile(r"^  ([A-Za-z0-9_-]+):[ \t]*$")
-COMMENT_RE = re.compile(r"^[ \t]*#")
 
 # What a gate name may look like. Anything else on print-gates' stdout is noise
 # and is refused rather than absorbed -- see gates().
@@ -113,29 +117,12 @@ def has_rule(name):
 
 
 def jobs():
-    """{job name: its block, comments stripped}. Never empty, for the reason
-    the gate list is not."""
-    text = WORKFLOW.read_text(encoding="utf-8")
-    head, sep, body = text.partition("\njobs:\n")
-    if not sep:
-        sys.exit(f"gates: no `jobs:` block in {WORKFLOW.relative_to(ROOT)}")
-    found, name, lines = {}, None, []
-    for line in body.splitlines():
-        match = JOB_RE.match(line)
-        if match:
-            if name is not None:
-                found[name] = "\n".join(lines)
-            name, lines = match.group(1), []
-            continue
-        if name is not None and not COMMENT_RE.match(line):
-            lines.append(line)
-    if name is not None:
-        found[name] = "\n".join(lines)
-    if not found:
-        sys.exit(f"gates: read no jobs out of {WORKFLOW.relative_to(ROOT)}, so "
-                 f"nothing below could have failed -- has the file's shape "
-                 f"changed?")
-    return found
+    """{job name: its `run:` commands}. Never empty: the parser exits rather
+    than returning a document it could not read, which is the reason the gate
+    list is not allowed to be empty either."""
+    model = workflow_model.load([WORKFLOW])
+    return {j["name"]: j["runs"]
+            for j in model[str(WORKFLOW.relative_to(ROOT))]["jobs"]}
 
 
 def table(rows):
@@ -181,10 +168,13 @@ def check(rows):
                         f"cover it")
 
     for name in names:
-        body = found.get(name)
-        if body is None:
+        runs = found.get(name)
+        if runs is None:
             continue
-        if not re.search(rf"(?m)^\s*(?:run:\s+)?make\s+{re.escape(name)}\b", body):
+        # Against the commands the job runs, not against its block text: a
+        # `make docs` inside an echo or a comment satisfied the old reading.
+        if not any(re.search(rf"(?m)^\s*make\s+{re.escape(name)}\b", run)
+                   for run in runs):
             findings.append(f"the `{name}` job does not invoke `make {name}`, "
                             f"so CI and `make check` can run different commands "
                             f"under one name")

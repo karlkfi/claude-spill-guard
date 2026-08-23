@@ -44,6 +44,15 @@ tool-dependency pattern puts them in [`tools/`](tools/), which carries its own
 obviously reasonable, and the `require` block it adds is not obviously the
 thing this project promised not to have.
 
+**`go run` when you want output; build first when you want the exit code.** It
+does not propagate its child's status — any non-zero exit comes back as 1, with
+the real one written to stderr as `exit status 3`. Harmless for a tool whose
+only codes are 0 and 1, and it destroys the signal for govulncheck, whose whole
+contract is 0 clean and 3 found. `scripts/check-vulns.py` builds to a temporary
+path and runs that, because under `go run` a real advisory is indistinguishable
+from the tool failing — which is the one confusion that script exists to
+prevent, and it shipped inside it until the mutation control was driven.
+
 **No network capability whatsoever.** No `net`, no `net/http`, no `os/exec`.
 Enforced by a job over `go list -deps`, not by review. A telemetry field added
 in good faith is the failure mode here, and review does not reliably catch it.
@@ -161,9 +170,11 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
 | `docs` | every relative link in the repo markdown resolves |
 | `queue` | the backlog store format holds, every filed id holds a claim, no index is committed |
+| `action-pins` | every `uses:` in every workflow names an immutable revision, not a tag |
 | `test` | gofmt, go vet and go test |
 | `no-deps` | go.mod requires nothing and the build graph is this module plus stdlib |
 | `no-network` | the build graph reaches no net, net/http or os/exec |
+| `vulns` | govulncheck finds no known vulnerability the build graph calls |
 | `cross-compile` | all five shipped targets build from one runner |
 <!-- gates:end -->
 

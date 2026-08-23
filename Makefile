@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift hooks-check vendor docs queue test no-deps no-network cross-compile
+GATES := doctor gate-drift hooks-check vendor docs queue action-pins test no-deps no-network vulns cross-compile
 
 doctor.desc        := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc    := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -20,9 +20,11 @@ hooks-check.desc   := every tracked git hook is executable, so none is silently 
 vendor.desc        := every vendored copy still hashes to the digest scripts/README.md declares
 docs.desc          := every relative link in the repo markdown resolves
 queue.desc         := the backlog store format holds, every filed id holds a claim, no index is committed
+action-pins.desc   := every `uses:` in every workflow names an immutable revision, not a tag
 test.desc          := gofmt, go vet and go test
 no-deps.desc       := go.mod requires nothing and the build graph is this module plus stdlib
 no-network.desc    := the build graph reaches no net, net/http or os/exec
+vulns.desc         := govulncheck finds no known vulnerability the build graph calls
 cross-compile.desc := all five shipped targets build from one runner
 
 # Single-quote a value for the shell, so a description carrying an apostrophe
@@ -122,6 +124,12 @@ queue:
 	$(PYTHON) scripts/check-queue-index.py || rc=1; \
 	exit "$$rc"
 
+# Reads the workflows through the YAML parser in tools/, not a regex: a
+# `uses:` inside a comment or a `run:` block is not a mapping key, and this
+# repository's own workflow has both.
+action-pins:
+	$(PYTHON) scripts/check-action-pins.py
+
 test:
 	$(PYTHON) scripts/check-go.py
 
@@ -130,6 +138,12 @@ no-deps:
 
 no-network:
 	$(PYTHON) scripts/check-supply-chain.py no-network
+
+# The one gate whose oracle is off this machine: govulncheck reads the
+# advisory database at vuln.go.dev. check-vulns.py tells that failing apart
+# from a finding, so a third party being down never reads as a CVE.
+vulns:
+	$(PYTHON) scripts/check-vulns.py
 
 cross-compile:
 	$(PYTHON) scripts/cross-compile.py
