@@ -238,10 +238,17 @@ The entropy bound comes off the rule's own regex, at the **longest** string the
 group can capture rather than the shortest. A group matching 8 to 64 bytes
 reaches 3 bits at its shortest and 6 at its longest, so measuring the shortest
 would refuse a working rule at startup — the failure this check exists to
-prevent, pointed the other way. The walk over-estimates where it cannot be
-sure: `(?:ab){1,3}` draws on two byte values and is counted as six bytes, so a
-rule between the two ceilings loads. Missing a dead rule leaves this check
-half-done; refusing a live one takes the scanner down.
+prevent, pointed the other way.
+
+The walk over-estimates rather than under-estimates, because the two errors are
+not symmetric: missing a dead rule leaves this check half-done, while refusing a
+live one takes the scanner down. One of those over-estimates is systematic and
+worth knowing about. The ceiling counts distinct *byte values* at 256 rather
+than at what the group can actually produce, so `[a-f0-9]{32}` is capped at
+log2(32) = 5 bits where sixteen hex symbols cap it at 4 — a 32-character hex key
+rule with a floor of 4.5 is dead and still loads. Every restricted-charset rule
+carries that slack, exact length or not. Length has its own and it is smaller:
+`(?:ab){1,3}` is counted at six bytes though it draws on two.
 
 ## Loading the ruleset
 
