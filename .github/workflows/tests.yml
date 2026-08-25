@@ -356,6 +356,285 @@ jobs:
             exit 1
           fi
 
+  # The one job here that is not ubuntu-only, and the row that asked for it
+  # says why: a suite that invokes the binary directly never executes the
+  # launcher at all, and a launcher that stopped working produces exactly the
+  # empty stdout a clean call produces. The file is a polyglot -- cmd.exe runs
+  # the batch half, every other shell runs the POSIX half -- so neither half is
+  # exercised by driving the other, and Windows is a shipped target.
+  launcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: The launcher resolves, denies, and is executable in the index
+        if: runner.os != 'Windows'
+        run: make launcher
+
+      # `make` is not something this repository is willing to assume on the
+      # Windows image, and a job that failed for want of make would be red for
+      # a reason that says nothing about the launcher. So the Windows lane runs
+      # the gate's own script; the Makefile rule is a one-line wrapper around
+      # exactly this, and gate-drift's `make launcher` assertion is satisfied by
+      # the step above.
+      - name: The launcher resolves, denies, and is executable in the index
+        if: runner.os == 'Windows'
+        run: python scripts/check-launcher.py
+
+  # Every assertion this gate makes has a spelling that passes on a launcher
+  # that enforces nothing, and the mode bit is the one with a shipped bug
+  # behind it: exit-status-guard 1.0.0 went out at 644, the shell refused it
+  # with 126, and the guard never fired once.
+  #
+  # The deny mutation is the other half. A launcher that cannot find a binary
+  # and exits non-zero without writing a decision object lets the tool call
+  # through, and the gate has to be the thing that notices -- because nothing
+  # in a transcript ever will.
+  #
+  # The endings control is the one that has to run on Windows, because what it
+  # asserts is behaviour rather than bytes: flatten the file to LF and put a
+  # parenthesized block back, and cmd.exe loses its file position, the `goto`
+  # after the block cannot find its label, and the launcher exits without
+  # denying. Asserting that on ubuntu would only re-check the byte counter this
+  # gate already reads, which is not the property that matters.
+  launcher-mutation-control:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Measured 2026-08-25 in four arms on a throwaway branch: LF-only plus a
+      # parenthesized block gives `The system cannot find the batch label
+      # specified - deny_missing`, exit 1, empty stdout -- which is not a deny,
+      # so the tool call runs unscanned. Removing the block made the symptom go
+      # away and left the defect; the endings are what fix it. This step is the
+      # transplant of that arm, so the repo owns the reproduction rather than a
+      # branch nobody keeps.
+      #
+      # The mutation text is verbatim from that arm and its output was checked
+      # byte-for-byte against it. That is not fastidiousness. An earlier
+      # spelling inserted a block of its own shaping, which flattened the
+      # endings and left the deny reachable -- so the byte assertion reddened
+      # and the behaviour did not change, and the step passed its own
+      # preconditions while testing nothing. What the failure needs is not a
+      # block somewhere but a `goto` reached by FALLING THROUGH past one: a
+      # `goto` that jumps in resets cmd.exe's file position and survives. Do
+      # not re-shape this mutation without re-driving it on Windows.
+      - name: LF endings with a block present must fail the gate on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python - <<'MUTATE'
+          import pathlib
+          p = pathlib.Path("hooks/run-spill-guard.cmd")
+          text = p.read_text(encoding="utf-8")          # universal newlines -> LF
+          straight = """:try_path
+          where spill-guard >nul 2>nul
+          if errorlevel 1 goto :try_default
+          spill-guard %*
+          exit /b %ERRORLEVEL%
+
+          :try_default
+          if not exist "%LOCALAPPDATA%\\spill-guard\\bin\\spill-guard.exe" goto :deny_missing
+          """.replace("\n          ", "\n")
+          block = """:try_path
+          for /f "delims=" %%P in ('where spill-guard 2^>nul') do (
+              "%%P" %*
+              exit /b %ERRORLEVEL%
+          )
+
+          if exist "%LOCALAPPDATA%\\spill-guard\\bin\\spill-guard.exe" goto :run_default
+          echo run-spill-guard.cmd: no spill-guard.exe on PATH or under LOCALAPPDATA. >&2
+          goto :deny_missing
+
+          :run_default
+          """.replace("\n          ", "\n")
+          if straight not in text:
+              raise SystemExit("the straight-line PATH route is not in the launcher any more")
+          p.write_text(text.replace(straight, block, 1), encoding="utf-8", newline="\n")
+          MUTATE
+          if git diff --quiet -- hooks/run-spill-guard.cmd; then
+            echo "::error::the mutation changed nothing -- it no longer matches the launcher" >&2
+            exit 1
+          fi
+          if ! python -c "import pathlib,sys; d=pathlib.Path('hooks/run-spill-guard.cmd').read_bytes(); sys.exit(0 if d.count(b'\r\n')==0 and b'for /f' in d else 1)"; then
+            echo "::error::the file is not uniform LF with a block, so this step tested nothing" >&2
+            exit 1
+          fi
+          echo "mutation landed: uniform LF, block present"
+          python scripts/check-launcher.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a launcher whose deny path does not run" >&2
+            exit 1
+          fi
+          # Both, and the second is the point. The endings assertion reddens on
+          # any flattening, so requiring only that would test the assertion
+          # rather than the behaviour -- and an earlier spelling of this step
+          # mutated to a shape that tripped the assertion without reproducing
+          # the failure, which is exactly the hole these two greps close.
+          if ! grep -q 'would run unscanned' mutant.log; then
+            echo "::error::the gate failed, but not on the deny that never arrives" >&2
+            exit 1
+          fi
+          if ! grep -q 'cannot find the batch label' mutant.log; then
+            echo "::error::cmd.exe did not report a lost label, so this is not the failure that was measured" >&2
+            exit 1
+          fi
+
+      - name: A launcher that is not executable in the index must fail the gate
+        if: runner.os != 'Windows'
+        run: |
+          git update-index --chmod=-x hooks/run-spill-guard.cmd
+          if [ "$(git ls-files -s -- hooks/run-spill-guard.cmd | cut -d' ' -f1)" = "100755" ]; then
+            echo "::error::--chmod=-x changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git update-index --chmod=+x hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the launcher gate passed on a launcher the shell would refuse" >&2
+            exit 1
+          fi
+          if ! grep -q 'in the index' mutant.log; then
+            echo "::error::the gate failed, but not on the index mode" >&2
+            exit 1
+          fi
+
+      - name: A launcher that exits non-zero instead of denying must fail the gate
+        if: runner.os != 'Windows'
+        run: |
+          python3 - <<'MUTATE'
+          import pathlib
+          # Bytes, not text. read_text/write_text translate line endings, so a
+          # text round-trip flattens all 75 CRLF on top of the deny mutation --
+          # which passes for the right reason on POSIX and makes the log read
+          # as though the endings assertion caught the deny. Compound mutations
+          # are what step 1 of this job exists to warn about.
+          p = pathlib.Path("hooks/run-spill-guard.cmd")
+          data = p.read_bytes()
+          old = b"    printf '%s\\n' \"$1\"\n    exit 0\n"
+          if old not in data:
+              raise SystemExit("the deny body is not in the launcher any more")
+          p.write_bytes(data.replace(old, b"    exit 1\n", 1))
+          MUTATE
+          if [ "$(python3 -c "import pathlib; print(pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().count(b'\r\n'))")" != "75" ]; then
+            echo "::error::the mutation moved the line endings, so this step is testing two things at once" >&2
+            exit 1
+          fi
+          if git diff --quiet -- hooks/run-spill-guard.cmd; then
+            echo "::error::the mutation changed nothing -- it no longer matches the launcher" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the launcher gate passed on a launcher that fails open" >&2
+            exit 1
+          fi
+          # Anchored on the consequence rather than on the wording of the
+          # finding: the message is prose and prose gets edited, and a control
+          # that greps for a sentence goes green-then-wrong the day somebody
+          # rewrites it. This exact grep broke once already, on a reword.
+          if ! grep -q 'would run unscanned' mutant.log; then
+            echo "::error::the gate failed, but not on the missing deny" >&2
+            exit 1
+          fi
+
+      # One byte, and the quietest mutation this file has. The terminator's CR
+      # is also sh's heredoc delimiter -- line 1 opens with `: << 'CMDBLOCK'`
+      # and keeps its CR, so the delimiter is `CMDBLOCK\r`. Drop it and sh
+      # swallows the whole POSIX half, and the launcher exits 0 with empty
+      # stdout and empty stderr. Silent, where the cmd.exe defect at least
+      # exited 1.
+      #
+      # POSIX-only, and this comment said "every platform" until a review drove
+      # it: every batch path leaves at an `exit /b` well above the terminator,
+      # so cmd.exe never reads that line, and the four-arm probe agrees --
+      # Windows passed the arm whose terminator carried no CR. Which is why
+      # this step is ubuntu-only: not merely a sufficient platform, the only
+      # one where it manifests. Windows's cover for that byte is the assertion.
+      #
+      # It is a one-character edit any editor can make, so it gets a control
+      # rather than a sentence.
+      - name: Dropping the terminator's CR must fail the gate
+        if: runner.os != 'Windows'
+        run: |
+          python3 - <<'MUTATE'
+          import pathlib
+          p = pathlib.Path("hooks/run-spill-guard.cmd")
+          data = p.read_bytes()
+          if data.count(b"CMDBLOCK\r\n") != 1:
+              raise SystemExit("the CRLF-terminated CMDBLOCK line is not there to break")
+          p.write_bytes(data.replace(b"CMDBLOCK\r\n", b"CMDBLOCK\n", 1))
+          MUTATE
+          if git diff --quiet -- hooks/run-spill-guard.cmd; then
+            echo "::error::the mutation changed nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a launcher that is silently inert on every platform" >&2
+            exit 1
+          fi
+          # Both, because they are independent: the byte assertion sees the
+          # terminator, and the behavioural cases see a launcher that exits 0
+          # saying nothing. A spelling that lost one would still pass on the
+          # other, and the pair is what says so.
+          if ! grep -q 'line carries no CR' mutant.log; then
+            echo "::error::the endings assertion did not name the terminator" >&2
+            exit 1
+          fi
+          if ! grep -q 'would run unscanned' mutant.log; then
+            echo "::error::the deny cases did not notice a launcher that says nothing at all" >&2
+            exit 1
+          fi
+
+      # The direction a red-only control cannot reach: the gate must not report
+      # a finding on a machine that has spill-guard installed, which is every
+      # machine once this ships. The deny cases hide the tool by dropping the
+      # directory that holds it, and a spelling that names directories to keep
+      # instead would go green here and red on a contributor's laptop.
+      - name: The gate must still pass with a spill-guard on PATH
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p "$HOME/fake-bin"
+          printf '#!/bin/sh\nexit 0\n' > "$HOME/fake-bin/spill-guard"
+          chmod +x "$HOME/fake-bin/spill-guard"
+          export PATH="$HOME/fake-bin:$PATH"
+          command -v spill-guard || { echo "::error::the fixture is not on PATH, so this step tested nothing" >&2; exit 1; }
+          make launcher
+
   # `make check` is a loop over GATES, and a loop is how a run reports green
   # while a gate it was supposed to cover failed -- take the status from the
   # last iteration and every earlier failure vanishes. Same defect the

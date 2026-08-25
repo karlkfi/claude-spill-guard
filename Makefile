@@ -12,11 +12,12 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift hooks-check vendor docs queue action-pins test no-deps no-network vulns cross-compile
+GATES := doctor gate-drift hooks-check launcher vendor docs queue action-pins test no-deps no-network vulns cross-compile
 
 doctor.desc        := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc    := the gate list, the CI job list and the table in CLAUDE.md still agree
 hooks-check.desc   := every tracked git hook is executable, so none is silently inert
+launcher.desc      := the hook launcher is executable in the index, resolves a binary, and denies when it cannot
 vendor.desc        := every vendored copy still hashes to the digest scripts/README.md declares
 docs.desc          := every relative link in the repo markdown resolves
 queue.desc         := the backlog store format holds, every filed id holds a claim, no index is committed
@@ -110,6 +111,12 @@ gate-drift:
 
 hooks-check:
 	$(PYTHON) scripts/check-githooks.py
+
+# Not covered by hooks-check, which scopes to .githooks and asks what git will
+# run. This file is invoked by Claude Code, and a launcher at mode 644 passes
+# every other gate here while the guard never fires once.
+launcher:
+	$(PYTHON) scripts/check-launcher.py
 
 vendor:
 	$(PYTHON) scripts/check-vendor.py

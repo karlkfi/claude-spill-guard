@@ -23,11 +23,16 @@ measured.
 | `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
+| `hooks/` | Not those. The launcher Claude Code invokes, which resolves the binary and denies when it cannot find one. |
 
-The rest of `internal/`, plus `rules/` and `hooks/`, is proposed in the design
-doc and does not exist — including `rules/spill-guard.json` itself, which the
-loader reads and the v1 ruleset ships. `cmd/spill-guard/` is a skeleton: the
-subcommands the design names land with the pipeline that implements them.
+The rest of `internal/`, plus `rules/`, is proposed in the design doc and does
+not exist — including `rules/spill-guard.json` itself, which the loader reads
+and the v1 ruleset ships. `hooks/` holds the launcher and nothing else: the
+`hooks.json` that invokes it and the plugin manifests beside it land together
+in a later item, because a repo that is installable as a security tool
+scanning nothing is the failure this project indicts the predecessor for.
+`cmd/spill-guard/` is a skeleton: the subcommands the design names land with
+the pipeline that implements them.
 
 ## Rules that are not negotiable
 
@@ -142,6 +147,16 @@ because `setup-go` links Go into `/usr/bin` — so the control passed while
 testing nothing. Name the tool, not its location, and fail the step when the
 thing you removed is still reachable.
 
+**The launcher's line endings are load-bearing, and split.** CRLF down to the
+`CMDBLOCK` terminator, LF after it, `-text` in `.gitattributes` so git cannot
+normalise the split away. Measured 2026-08-25 in four arms on GitHub runners:
+LF throughout makes cmd.exe lose its file position across a parenthesized
+block, so the `goto` after it dies with `The system cannot find the batch label
+specified`, the launcher exits 1 with empty stdout, and the call runs
+unscanned; CRLF throughout kills the POSIX half on `set: Illegal option -`.
+`make launcher` asserts both halves and a `windows-latest` control reproduces
+the failure.
+
 **The launcher denies when the binary is missing.** `hooks.json` never invokes
 `spill-guard` directly: an absent binary exits 127, and only exit 2 blocks, so
 the call goes through with nothing in the transcript. Empty stdout is not what
@@ -168,6 +183,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `doctor` | scripts/check-tools.sh runs, and every required tool is present |
 | `gate-drift` | the gate list, the CI job list and the table in CLAUDE.md still agree |
 | `hooks-check` | every tracked git hook is executable, so none is silently inert |
+| `launcher` | the hook launcher is executable in the index, resolves a binary, and denies when it cannot |
 | `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
 | `docs` | every relative link in the repo markdown resolves |
 | `queue` | the backlog store format holds, every filed id holds a claim, no index is committed |
@@ -219,10 +235,14 @@ Everything in there traces to `docs/design/`.
 ## Open questions
 
 One left in `docs/design/README.md` under **Open questions** — what counts as
-human-typed — plus two smaller ones at the end of `distribution.md`.
+human-typed — plus one at the end of `distribution.md`, whether `install.sh`
+should refuse to proceed without `cosign`.
 
-The two the design turned on are measured: only exit 2 blocks, and
-`PostToolUse` cannot withhold a result, so nothing is catchable after the fact.
+The three the design turned on are measured: only exit 2 blocks, `PostToolUse`
+cannot withhold a result so nothing is catchable after the fact, and version
+skew is settled by embedding the shipped ruleset rather than by probing for it
+— the ruleset half was the only one with a silent direction, and a compiled-in
+set cannot disagree with the binary carrying it.
 Both were taken by driving a real hook. Any re-measurement is taken the same
 way: reading Claude Code's own docs or source is second-best, and the
 predecessor failed open on Node 18 for exactly that reason.

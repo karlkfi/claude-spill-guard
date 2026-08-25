@@ -2,3 +2,20 @@
 # platform, including Windows, where the suite runs under Git Bash. A CRLF
 # checkout breaks bash outright, so the working tree stays LF-only everywhere.
 * text=auto eol=lf
+
+# The launcher is the one exception, and it is not a preference. It is a
+# polyglot: cmd.exe reads the batch half and /bin/sh reads the POSIX tail, and
+# the two want different line endings. Measured 2026-08-25 on GitHub runners,
+# four arms driven end to end -- LF-only makes cmd.exe lose its file position
+# across a parenthesized block, so the goto after it dies with `The system
+# cannot find the batch label specified` and the launcher exits 1 with empty
+# stdout, which is not a deny and lets the tool call through unscanned; CRLF
+# throughout kills the POSIX half instead, on `set: Illegal option -`.
+#
+# So the file carries CRLF down to the CMDBLOCK terminator and LF after it.
+# cmd.exe never reads past the terminator and sh discards everything above it
+# as heredoc content, so each half gets what it needs. `-text` is what stops
+# git normalising that away in either direction; `make launcher` asserts both
+# the endings and this attribute, because a rule this easy to undo cannot live
+# in a comment.
+hooks/run-spill-guard.cmd -text
