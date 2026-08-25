@@ -174,15 +174,20 @@ func passes(rule rules.Rule, buf []byte, lo, hi int) (bool, error) {
 }
 
 // digest is the dedup key a Finding carries in place of the value: the first
-// eight bytes of sha256(rule id + value), hex. Sixty-four bits is past where a
-// session's findings collide, and it is never emitted -- the reporting rule
-// allows the rule id, the path and the offset, and nothing else.
+// eight bytes of sha256(rule id, NUL, value), hex. Sixty-four bits is past
+// where a session's findings collide, and it is never emitted -- the reporting
+// rule allows the rule id, the path and the offset, and nothing else.
 //
 // The rule id goes in the hash so two rules matching the same bytes stay two
-// findings.
+// findings. The NUL between them is what keeps that true: concatenated
+// directly, ("aws-", "key") and ("aws", "-key") hash the same, and the
+// consequence is two findings silently merging into one. A rule id cannot
+// contain a NUL, because it comes out of a JSON string this package never
+// re-encodes, so the separator is unambiguous.
 func digest(ruleID string, value []byte) string {
 	h := sha256.New()
 	h.Write([]byte(ruleID))
+	h.Write([]byte{0})
 	h.Write(value)
 	return hex.EncodeToString(h.Sum(nil)[:8])
 }

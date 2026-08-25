@@ -285,6 +285,13 @@ func TestDigest(t *testing.T) {
 	if len(same) != 16 {
 		t.Errorf("digest %q is %d hex characters, want 16", same, len(same))
 	}
+	// Without a separator the two fields run together, so a rule id ending in
+	// the byte a neighbouring value starts with produces one digest for two
+	// findings -- and merging two findings into one is the silent direction.
+	if a, b := digest("aws-", []byte("key")), digest("aws", []byte("-key")); a == b {
+		t.Errorf("digest(%q, %q) and digest(%q, %q) are both %q", "aws-", "key",
+			"aws", "-key", a)
+	}
 }
 
 // Fail closed: an internal error blocks rather than returning what it managed

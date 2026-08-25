@@ -56,6 +56,27 @@ func TestHasKeyword(t *testing.T) {
 			"key=-sk-abcdef", []string{"-sk-"}, true},
 		{"a keyword whose value continues into word bytes",
 			"AKIAIOSFODNN7EXAMPLE", []string{"AKIA"}, true},
+
+		// The search finds candidate positions by first byte and there are two
+		// cases of it, so these are the shapes that structure can get wrong.
+		{"a mixed-case match, which neither single-case pass finds whole",
+			"AkIaIOSFODNN7EXAMPLE", aws, true},
+		{"a lowercase keyword against uppercase text",
+			"THE PREFIX IS AKIA", []string{"akia"}, true},
+		{"the keyword exactly filling the tail of the buffer",
+			"prefix AKIA", []string{"AKIA"}, true},
+		{"a keyword one byte longer than the tail left for it",
+			"prefix AKI", []string{"AKIA"}, false},
+		{"first bytes that match repeatedly and never complete",
+			"aaaaaaaaaaaaaaaaaaaa", []string{"AKIA"}, false},
+		{"a run of near misses before the real one",
+			"AK AKI AKIX AKIA", []string{"AKIA"}, true},
+		{"a keyword whose first byte has no case, matched late",
+			"nothing here yet -sk-x", []string{"-sk-"}, true},
+		{"a buffer that is exactly the keyword and nothing else",
+			"AKIA", []string{"AKIA"}, true},
+		{"an overlapping candidate in front of the real match",
+			"--sk-", []string{"-sk-"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := hasKeyword([]byte(tc.buf), tc.keywords); got != tc.want {
