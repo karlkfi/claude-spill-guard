@@ -267,6 +267,104 @@ jobs:
 
   # git skips a hook that is not executable, silently and at exit 0, so a hook
   # that lost its mode bit looks exactly like a repo with no hook.
+  status-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The README's status table still says what the tree can do
+        run: make status-drift
+
+  # The status table is generated, so the interesting mutation is not editing
+  # the block -- it is changing what the tree can do and leaving the block
+  # alone. That is the decay this gate exists for, and the only one a reader
+  # cannot see happening.
+  status-drift-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: A hand-edited status table must fail the check
+        run: |
+          sed -i 's/| Ship a ruleset | no |/| Ship a ruleset | yes |/' README.md
+          if git diff --quiet -- README.md; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make status-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::status-drift passed on a table that claims a ruleset the tree does not have" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not match the tree' mutant.log; then
+            echo "::error::status-drift failed, but not on the table disagreeing with the tree" >&2
+            exit 1
+          fi
+
+      - name: Wiring the scanner in must fail the check and flip the table
+        run: |
+          sed -i 's|^import (|import (\n\t_ "github.com/karlkfi/claude-spill-guard/internal/scan"|' cmd/spill-guard/main.go
+          gofmt -w cmd/spill-guard/main.go
+          if ! go list -deps ./cmd/spill-guard | grep -q 'internal/scan'; then
+            echo "::error::the binary still does not reach internal/scan, so this step tested nothing" >&2
+            exit 1
+          fi
+          make status-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::status-drift passed while the README said the binary cannot scan and it can" >&2
+            git checkout -- cmd/spill-guard/main.go
+            exit 1
+          fi
+          # The rewrite must track the code, not merely notice a difference:
+          # a generator that always emits the committed text would pass the
+          # assertion above and be worth nothing.
+          make status > /dev/null 2>&1 || true
+          grep -q '| Scan a file or a buffer | yes |' README.md && flipped=0 || flipped=1
+          git checkout -- cmd/spill-guard/main.go README.md
+          if [ "$flipped" -ne 0 ]; then
+            echo "::error::the generated table did not flip to yes once the binary reached internal/scan" >&2
+            exit 1
+          fi
+
+      - name: A command the usage text does not name must fail the check
+        run: |
+          sed -i 's|^\tcase "version":|\tcase "scan":\n\t\treturn 0\n\tcase "version":|' cmd/spill-guard/main.go
+          gofmt -w cmd/spill-guard/main.go
+          if ! grep -q 'case "scan":' cmd/spill-guard/main.go; then
+            echo "::error::the mutation did not add a case arm, so this step tested nothing" >&2
+            exit 1
+          fi
+          make status-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- cmd/spill-guard/main.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::status-drift passed on a command the usage text does not name" >&2
+            exit 1
+          fi
+          if ! grep -q 'usage text does not name it' mutant.log; then
+            echo "::error::status-drift failed, but not on the undocumented command" >&2
+            exit 1
+          fi
+
   hooks-check:
     runs-on: ubuntu-latest
     steps:

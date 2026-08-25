@@ -12,10 +12,11 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift hooks-check launcher vendor docs queue action-pins test no-deps no-network vulns cross-compile
+GATES := doctor gate-drift status-drift hooks-check launcher vendor docs queue action-pins test no-deps no-network vulns cross-compile
 
 doctor.desc        := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc    := the gate list, the CI job list and the table in CLAUDE.md still agree
+status-drift.desc  := the README's status table still says what the tree can actually do
 hooks-check.desc   := every tracked git hook is executable, so none is silently inert
 launcher.desc      := the hook launcher is executable in the index, resolves a binary, and denies when it cannot
 vendor.desc        := every vendored copy still hashes to the digest scripts/README.md declares
@@ -49,7 +50,7 @@ MERGED ?= false
 queue_strict = $(QUEUE_STRICT) $(if $(filter true,$(MERGED)),$(QUEUE_STRICT_MERGED))
 
 .DEFAULT_GOAL := help
-.PHONY: help check list-gates print-gates gates hooks $(GATES)
+.PHONY: help check list-gates print-gates gates status hooks $(GATES)
 
 help:
 	@printf 'spill-guard\n\n'
@@ -57,6 +58,7 @@ help:
 	@printf '  make list-gates   name every gate and what it covers\n'
 	@printf '  make <gate>       run one gate\n'
 	@printf '  make gates        refresh the generated gate table in CLAUDE.md\n'
+	@printf '  make status       refresh the generated status table in README.md\n'
 	@printf '  make hooks        install the pre-commit hook (git core.hooksPath)\n'
 	@printf '  make doctor       report which required tools are missing, and how to get them\n\n'
 	@$(MAKE) --no-print-directory list-gates
@@ -91,6 +93,12 @@ print-gates:
 gates:
 	$(PYTHON) scripts/gates.py
 
+# The README's status section is a set of machine-decidable facts written as
+# prose, so it decays the way every hand-kept copy does and nothing re-reads
+# it. Same split as `gates`: this rewrites, `status-drift` asserts.
+status:
+	$(PYTHON) scripts/check-status.py
+
 # Tracked hooks, so the store gates run before a commit rather than at review.
 # --no-verify skips them; a hook is a fast local echo of CI, not a second
 # authority.
@@ -108,6 +116,9 @@ doctor:
 
 gate-drift:
 	$(PYTHON) scripts/gates.py --check
+
+status-drift:
+	$(PYTHON) scripts/check-status.py --check
 
 hooks-check:
 	$(PYTHON) scripts/check-githooks.py
