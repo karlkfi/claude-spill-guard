@@ -141,11 +141,20 @@ step's script verbatim from the workflow YAML and run it under `bash -e`.
 Re-running the repo's gate over the final tree never enters a `run:` block's
 shell.
 
-**A mutation control needs a precondition asserting the mutation mutated.**
-`PATH=/usr/bin:/bin` was meant to hide Go from `make doctor` and hid nothing,
-because `setup-go` links Go into `/usr/bin` — so the control passed while
-testing nothing. Name the tool, not its location, and fail the step when the
-thing you removed is still reachable.
+**A mutation control needs a precondition asserting the mutation had its
+effect, not that it happened.** The two come apart. `PATH=/usr/bin:/bin` was
+meant to hide Go from `make doctor` and hid nothing, because `setup-go` links
+Go into `/usr/bin` — the control passed while testing nothing. That is the
+instance; the rule recurs. On 2026-08-25 a Windows control asserted "uniform
+LF, block present", both true, while the launcher went on denying: the mutation
+landed and did not bite. Five such controls in one batch, three carrying an
+explicit precondition that passed.
+
+The checkable form is comparison against a case already measured — that control
+now transplants the failing arm byte for byte, 7,214 bytes verified identical,
+from the CI run that measured it failing. Where no such case exists, build one,
+and give any probe whose answer matters when it is *empty* a positive control
+proving it can come back non-empty.
 
 **The launcher's line endings are load-bearing, and split.** CRLF down to the
 `CMDBLOCK` terminator, LF after it, `-text` in `.gitattributes` so git cannot
