@@ -1,0 +1,311 @@
+package scan
+
+import (
+	"reflect"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/karlkfi/claude-spill-guard/internal/rules"
+)
+
+// load builds the ruleset the way the binary does, so a fixture that the
+// loader would refuse fails here rather than testing a rule that cannot exist.
+func load(t *testing.T, ruleset string) []rules.Rule {
+	t.Helper()
+	loaded, err := rules.Load([]byte(ruleset), nil)
+	if err != nil {
+		t.Fatalf("the fixture ruleset does not load: %v", err)
+	}
+	return loaded
+}
+
+func scan(t *testing.T, path string, buf string, ruleset []rules.Rule) []Finding {
+	t.Helper()
+	findings, err := Buffer(path, []byte(buf), ruleset)
+	if err != nil {
+		t.Fatalf("Buffer: %v", err)
+	}
+	return findings
+}
+
+func ids(findings []Finding) []string {
+	out := make([]string, 0, len(findings))
+	for _, f := range findings {
+		out = append(out, f.RuleID)
+	}
+	return out
+}
+
+const awsRule = `{"rules": [{
+	"id": "aws-access-key-id",
+	"family": "credential",
+	"description": "AWS access key ID",
+	"regex": "\\b((?:AKIA|ASIA)[A-Z0-9]{16})\\b",
+	"group": 1,
+	"keywords": ["AKIA", "ASIA"],
+	"enabled": true
+}]}`
+
+const key = "AKIAIOSFODNN7EXAMPLE"
+
+func TestBufferReportsRuleIDPathAndOffset(t *testing.T) {
+	ruleset := load(t, awsRule)
+	buf := "aws_access_key_id = " + key + "\n"
+
+	findings := scan(t, "config/aws.ini", buf, ruleset)
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1: %+v", len(findings), findings)
+	}
+	got := findings[0]
+	if got.RuleID != "aws-access-key-id" {
+		t.Errorf("RuleID = %q, want %q", got.RuleID, "aws-access-key-id")
+	}
+	if got.Path != "config/aws.ini" {
+		t.Errorf("Path = %q, want %q", got.Path, "config/aws.ini")
+	}
+	if want := strings.Index(buf, key); got.Offset != want {
+		t.Errorf("Offset = %d, want %d", got.Offset, want)
+	}
+}
+
+// The prefilter decides what the regex never sees, so the way to test it is a
+// rule whose regex matches text its keywords do not cover. Both buffers match
+// the pattern; only one carries a keyword.
+func TestBufferPrefiltersTheCredentialFamily(t *testing.T) {
+	ruleset := load(t, `{"rules": [{
+		"id": "twenty-uppercase",
+		"family": "credential",
+		"description": "twenty uppercase characters",
+		"regex": "\\b([A-Z0-9]{20})\\b",
+		"group": 1,
+		"keywords": ["AKIA"],
+		"enabled": true
+	}]}`)
+
+	if findings := scan(t, "a", key, ruleset); len(findings) != 1 {
+		t.Fatalf("the keyword is present and the regex matches, so this is the "+
+			"control: got %d findings, want 1", len(findings))
+	}
+	other := strings.Repeat("Z", 20)
+	if !regexp.MustCompile(`\b([A-Z0-9]{20})\b`).MatchString(other) {
+		t.Fatalf("%q does not match the fixture's own pattern, so the case "+
+			"below would pass whether or not the prefilter ran", other)
+	}
+	if findings := scan(t, "a", other, ruleset); len(findings) != 0 {
+		t.Errorf("the regex matches and no keyword does, so the prefilter "+
+			"should have skipped the rule: got %+v", findings)
+	}
+}
+
+// The pii family has no literal to anchor on, so its rules are not gated on
+// keywords even when the ruleset gives them some.
+func TestBufferDoesNotPrefilterThePIIFamily(t *testing.T) {
+	ruleset := load(t, `{"rules": [{
+		"id": "public-ipv4",
+		"family": "pii",
+		"description": "public IPv4 address",
+		"regex": "\\b(\\d{1,3}(?:\\.\\d{1,3}){3})\\b",
+		"group": 1,
+		"keywords": ["nothing-in-the-buffer"],
+		"validators": ["reserved-range"],
+		"enabled": true
+	}]}`)
+
+	findings := scan(t, "a", "peer 8.8.8.8 and 192.168.1.1\n", ruleset)
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1 (the reserved address is dropped by "+
+			"its validator, not by a prefilter): %+v", len(findings), findings)
+	}
+}
+
+func TestBufferSkipsDisabledRules(t *testing.T) {
+	ruleset := load(t, strings.Replace(awsRule, `"enabled": true`, `"enabled": false`, 1))
+	if findings := scan(t, "a", key, ruleset); len(findings) != 0 {
+		t.Errorf("a disabled rule produced %+v", findings)
+	}
+}
+
+func TestBufferSkipsBinaries(t *testing.T) {
+	ruleset := load(t, awsRule)
+	if findings := scan(t, "a.png", "\x00"+key, ruleset); len(findings) != 0 {
+		t.Errorf("a buffer with a NUL in it produced %+v", findings)
+	}
+}
+
+// Every check a rule names has to pass, and each one is reached from here --
+// a validator wired to the wrong function is invisible until a rule uses it.
+func TestBufferRunsEveryValidator(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		rule    string
+		buf     string
+		wantIDs []string
+	}{
+		{"luhn drops a transcription error",
+			`"regex": "\\b(\\d{16})\\b", "group": 1, "validators": ["luhn"]`,
+			"4111111111111111 and 4111111111111112", []string{"r"}},
+		{"card-placeholder drops a published test number",
+			`"regex": "\\b(\\d{16})\\b", "group": 1, "validators": ["luhn", "card-placeholder"]`,
+			"4111111111111111", nil},
+		{"mod-11 drops a bad check character",
+			`"regex": "\\b([0-9X]{9})\\b", "group": 1, "validators": ["mod-11"]`,
+			"00000001X 000000010", []string{"r"}},
+		{"entropy drops a low-entropy capture",
+			`"regex": "\\b([A-Za-z0-9]{20})\\b", "group": 1, "entropy": 3.5, "validators": ["entropy"]`,
+			"aaaaaaaaaaaaaaaaaaaa Xk92QmZ4Lp01WvBn7YtR", []string{"r"}},
+		{"reserved-range drops a private address",
+			`"regex": "\\b(\\d{1,3}(?:\\.\\d{1,3}){3})\\b", "group": 1, "validators": ["reserved-range"]`,
+			"10.0.0.1 and 8.8.8.8", []string{"r"}},
+		{"context-label drops a numeric run with no label near it",
+			`"regex": "\\b(\\d{9})\\b", "group": 1, "labels": ["ssn"], "validators": ["context-label"]`,
+			"const bufSize = 655360000", nil},
+		{"context-label keeps one that has a label near it",
+			`"regex": "\\b(\\d{9})\\b", "group": 1, "labels": ["ssn"], "validators": ["context-label"]`,
+			"ssn: 078051120", []string{"r"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ruleset := load(t, `{"rules": [{
+				"id": "r", "family": "pii", "description": "d",
+				"enabled": true, `+tc.rule+`}]}`)
+			got := ids(scan(t, "a", tc.buf, ruleset))
+			if strings.Join(got, ",") != strings.Join(tc.wantIDs, ",") {
+				t.Errorf("got %d findings %v, want %v", len(got), got, tc.wantIDs)
+			}
+		})
+	}
+}
+
+// Rules run separately and every match in a buffer is reported. A single
+// alternation over the patterns is the shape this forecloses -- it runs at
+// 0.5x, and it also loses which rule matched.
+func TestBufferRunsEveryRuleOverEveryMatch(t *testing.T) {
+	ruleset := load(t, `{"rules": [
+		{"id": "aws", "family": "credential", "description": "d", "group": 1,
+		 "regex": "\\b(AKIA[A-Z0-9]{16})\\b", "keywords": ["AKIA"], "enabled": true},
+		{"id": "twenty", "family": "credential", "description": "d", "group": 1,
+		 "regex": "\\b([A-Z0-9]{20})\\b", "keywords": ["AKIA"], "enabled": true}
+	]}`)
+
+	findings := scan(t, "a", key+" then "+key, ruleset)
+	if want := []string{"aws", "aws", "twenty", "twenty"}; !reflect.DeepEqual(ids(findings), want) {
+		t.Fatalf("got %v, want %v", ids(findings), want)
+	}
+	if findings[0].Offset == findings[1].Offset {
+		t.Errorf("both matches of the same rule report offset %d", findings[0].Offset)
+	}
+}
+
+// The group is what lets a rule capture a wider window than it reports, which
+// is how RE2's missing lookaround is worked around.
+func TestBufferReportsTheCapturedGroupRatherThanTheMatch(t *testing.T) {
+	ruleset := load(t, `{"rules": [{
+		"id": "r", "family": "pii", "description": "d", "enabled": true,
+		"regex": "token=([A-Za-z0-9]{8})", "group": 1
+	}]}`)
+
+	buf := "  token=abcd1234;"
+	findings := scan(t, "a", buf, ruleset)
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	if want := strings.Index(buf, "abcd1234"); findings[0].Offset != want {
+		t.Errorf("Offset = %d, want %d -- the group starts after `token=`",
+			findings[0].Offset, want)
+	}
+}
+
+// The predecessor's Finding carried the secret beside a redacted copy. It was
+// used only as a dedup key and never printed, and the field's existence was
+// the hazard. This reads the struct rather than the fields it happens to have
+// today, so a field added later fails here.
+func TestFindingCarriesNoPartOfTheValue(t *testing.T) {
+	ruleset := load(t, awsRule)
+	findings := scan(t, "config/aws.ini", "key = "+key, ruleset)
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+
+	v := reflect.ValueOf(findings[0])
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Type().Field(i)
+		if v.Field(i).Kind() != reflect.String {
+			continue
+		}
+		got := v.Field(i).String()
+		// Four characters, because a redacted window is the shape the design
+		// refuses and any run that long is the secret leaking a piece at a time.
+		for i := 0; i+4 <= len(key); i++ {
+			if strings.Contains(got, key[i:i+4]) {
+				t.Errorf("Finding.%s = %q, which carries %q from the value",
+					field.Name, got, key[i:i+4])
+			}
+		}
+	}
+}
+
+func TestDigest(t *testing.T) {
+	same := digest("rule-a", []byte(key))
+	if got := digest("rule-a", []byte(key)); got != same {
+		t.Errorf("digest is not stable: %q then %q", same, got)
+	}
+	if got := digest("rule-b", []byte(key)); got == same {
+		t.Errorf("two rules over the same value share the digest %q, so one "+
+			"would dedup the other away", got)
+	}
+	if got := digest("rule-a", []byte(key+"x")); got == same {
+		t.Errorf("two values under one rule share the digest %q", got)
+	}
+	if len(same) != 16 {
+		t.Errorf("digest %q is %d hex characters, want 16", same, len(same))
+	}
+}
+
+// Fail closed: an internal error blocks rather than returning what it managed
+// to scan. Each of these is settled by the loader before a Rule exists, and
+// the alternative to an error here is a panic, which exits on a code the hook
+// contract does not block on.
+func TestBufferFailsClosedOnAnUnusableRule(t *testing.T) {
+	compiled := regexp.MustCompile(`(a)(b)`)
+	for _, tc := range []struct {
+		name string
+		rule rules.Rule
+		want string
+	}{
+		{"no compiled regex",
+			rules.Rule{ID: "r", Family: rules.PII, Enabled: true},
+			"no compiled regex"},
+		{"a group the regex does not have",
+			rules.Rule{ID: "r", Family: rules.PII, Enabled: true, Regex: compiled, Group: 3},
+			"but the regex has 2 capture group(s)"},
+		{"a negative group",
+			rules.Rule{ID: "r", Family: rules.PII, Enabled: true, Regex: compiled, Group: -1},
+			"but the regex has 2 capture group(s)"},
+		{"a check the pipeline does not run",
+			rules.Rule{ID: "r", Family: rules.PII, Enabled: true, Regex: compiled,
+				Validators: []rules.Validator{"handwave"}},
+			`names check "handwave"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			findings, err := Buffer("a", []byte("ab"), []rules.Rule{tc.rule})
+			if err == nil {
+				t.Fatalf("no error, and %d findings", len(findings))
+			}
+			if findings != nil {
+				t.Errorf("an error came back with %d findings beside it", len(findings))
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not name %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A disabled rule is skipped before any of that is read, so a ruleset carrying
+// a broken rule nobody turned on still scans.
+func TestBufferIgnoresAnUnusableRuleThatIsDisabled(t *testing.T) {
+	broken := rules.Rule{ID: "r", Family: rules.PII}
+	if _, err := Buffer("a", []byte("ab"), []rules.Rule{broken}); err != nil {
+		t.Errorf("a disabled rule with no regex errored: %v", err)
+	}
+}
