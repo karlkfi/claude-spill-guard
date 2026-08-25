@@ -147,6 +147,16 @@ because `setup-go` links Go into `/usr/bin` — so the control passed while
 testing nothing. Name the tool, not its location, and fail the step when the
 thing you removed is still reachable.
 
+**The launcher's line endings are load-bearing, and split.** CRLF down to the
+`CMDBLOCK` terminator, LF after it, `-text` in `.gitattributes` so git cannot
+normalise the split away. Measured 2026-08-25 in four arms on GitHub runners:
+LF throughout makes cmd.exe lose its file position across a parenthesized
+block, so the `goto` after it dies with `The system cannot find the batch label
+specified`, the launcher exits 1 with empty stdout, and the call runs
+unscanned; CRLF throughout kills the POSIX half on `set: Illegal option -`.
+`make launcher` asserts both halves and a `windows-latest` control reproduces
+the failure.
+
 **The launcher denies when the binary is missing.** `hooks.json` never invokes
 `spill-guard` directly: an absent binary exits 127, and only exit 2 blocks, so
 the call goes through with nothing in the transcript. Empty stdout is not what

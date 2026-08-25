@@ -401,8 +401,19 @@ jobs:
   # and exits non-zero without writing a decision object lets the tool call
   # through, and the gate has to be the thing that notices -- because nothing
   # in a transcript ever will.
+  #
+  # The endings control is the one that has to run on Windows, because what it
+  # asserts is behaviour rather than bytes: flatten the file to LF and put a
+  # parenthesized block back, and cmd.exe loses its file position, the `goto`
+  # after the block cannot find its label, and the launcher exits without
+  # denying. Asserting that on ubuntu would only re-check the byte counter this
+  # gate already reads, which is not the property that matters.
   launcher-mutation-control:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -413,7 +424,64 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # Measured 2026-08-25 in four arms on a throwaway branch: LF-only plus a
+      # parenthesized block gives `The system cannot find the batch label
+      # specified - deny_missing`, exit 1, empty stdout -- which is not a deny,
+      # so the tool call runs unscanned. Removing the block made the symptom go
+      # away and left the defect; the endings are what fix it. This step is the
+      # transplant of that arm, so the repo owns the reproduction rather than a
+      # branch nobody keeps.
+      - name: LF endings with a block present must fail the gate on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python - <<'MUTATE'
+          import pathlib
+          p = pathlib.Path("hooks/run-spill-guard.cmd")
+          data = p.read_bytes()
+          straight = b'''where spill-guard >nul 2>nul\r
+          if errorlevel 1 goto :try_default\r
+          spill-guard %*\r
+          exit /b %ERRORLEVEL%\r
+          '''
+          block = b'''for /f "delims=" %%P in ('where spill-guard 2^>nul') do (\r
+              "%%P" %*\r
+              exit /b %ERRORLEVEL%\r
+          )\r
+          '''
+          if straight not in data:
+              raise SystemExit("the straight-line PATH route is not in the launcher any more")
+          p.write_bytes((data.replace(straight, block, 1)).replace(b"\r\n", b"\n"))
+          MUTATE
+          if git diff --quiet -- hooks/run-spill-guard.cmd; then
+            echo "::error::the mutation changed nothing -- it no longer matches the launcher" >&2
+            exit 1
+          fi
+          if python -c "import pathlib,sys; d=pathlib.Path('hooks/run-spill-guard.cmd').read_bytes(); sys.exit(0 if d.count(b'\r\n')==0 and b'for /f' in d else 1)"; then
+            echo "mutation landed: uniform LF, block present"
+          else
+            echo "::error::the file is not uniform LF with a block, so this step tested nothing" >&2
+            exit 1
+          fi
+          python scripts/check-launcher.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a launcher whose deny path does not run" >&2
+            exit 1
+          fi
+          if ! grep -q 'would run unscanned' mutant.log; then
+            echo "::error::the gate failed, but not on the deny that never arrives -- the byte check alone is not this step's point" >&2
+            exit 1
+          fi
+          if ! grep -q 'cannot find the batch label' mutant.log; then
+            echo "::error::cmd.exe did not report a lost label, so the reproduction is not the one that was measured" >&2
+            exit 1
+          fi
+
       - name: A launcher that is not executable in the index must fail the gate
+        if: runner.os != 'Windows'
         run: |
           git update-index --chmod=-x hooks/run-spill-guard.cmd
           if [ "$(git ls-files -s -- hooks/run-spill-guard.cmd | cut -d' ' -f1)" = "100755" ]; then
@@ -434,6 +502,7 @@ jobs:
           fi
 
       - name: A launcher that exits non-zero instead of denying must fail the gate
+        if: runner.os != 'Windows'
         run: |
           python3 - <<'MUTATE'
           import pathlib
@@ -471,6 +540,7 @@ jobs:
       # directory that holds it, and a spelling that names directories to keep
       # instead would go green here and red on a contributor's laptop.
       - name: The gate must still pass with a spill-guard on PATH
+        if: runner.os != 'Windows'
         run: |
           mkdir -p "$HOME/fake-bin"
           printf '#!/bin/sh\nexit 0\n' > "$HOME/fake-bin/spill-guard"

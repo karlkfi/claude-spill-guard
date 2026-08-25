@@ -186,6 +186,73 @@ def deny_reason(out):
     return reason if isinstance(reason, str) and reason else None
 
 
+# The line the batch half ends on. cmd.exe never reads past it and sh treats
+# everything above it as heredoc content, which is what lets one file carry two
+# sets of line endings without either half noticing the other's.
+TERMINATOR = b"CMDBLOCK"
+
+
+def line_endings(findings):
+    """The batch half must be CRLF and the POSIX tail must be LF.
+
+    Not a style rule. Measured 2026-08-25 on GitHub runners, driving the
+    launcher end to end in four arms:
+
+      * LF throughout -- cmd.exe loses its file position across a parenthesized
+        block, the `goto` after it dies with `The system cannot find the batch
+        label specified`, and the launcher exits 1 with empty stdout. That is
+        not a deny, so the tool call runs unscanned. The tree carried exactly
+        this and a whole platform's deny path was inert.
+      * CRLF throughout -- the POSIX half dies on `set: Illegal option -`
+        before it resolves anything.
+      * CRLF to the terminator and LF after -- passes every case on every
+        platform, with and without the block.
+
+    So both halves are checked, and so is the `-text` attribute that stops git
+    normalising the split away. A rule this easy to undo with one editor's
+    default cannot live in a comment.
+    """
+    # Split on LF and find the terminator by its text rather than by its
+    # ending. The whole-file regression flattens everything to LF, which takes
+    # the terminator's CRLF with it -- so a reader that located the halves by
+    # matching CRLF would lose its bearings on exactly the defect that shipped,
+    # and report that it cannot tell the halves apart instead of naming which
+    # one is wrong.
+    lines = LAUNCHER.read_bytes().split(b"\n")
+    cut = next((i for i, line in enumerate(lines)
+                if line.rstrip(b"\r") == TERMINATOR), None)
+    if cut is None:
+        findings.append(f"{TRACKED} has no {TERMINATOR.decode()} line, so the "
+                        f"batch half and the POSIX half cannot be told apart -- "
+                        f"and one of them is running with the other's endings")
+        return
+
+    head, tail = lines[:cut + 1], lines[cut + 1:]
+    # Each entry was terminated by the LF we split on, so it was CRLF exactly
+    # when it still ends with CR. The final entry is whatever followed the last
+    # newline, and an empty one falls out of both counts on its own.
+    stray_lf = sum(1 for line in head if not line.endswith(b"\r"))
+    stray_crlf = sum(1 for line in tail if line.endswith(b"\r"))
+    if stray_lf:
+        findings.append(f"{TRACKED} carries {stray_lf} bare LF in the batch "
+                        f"half, where cmd.exe needs CRLF -- a `goto` past a "
+                        f"parenthesized block then fails to find its label and "
+                        f"the launcher exits without denying")
+    if stray_crlf:
+        findings.append(f"{TRACKED} carries {stray_crlf} CRLF after the "
+                        f"terminator, where /bin/sh needs LF -- the POSIX half "
+                        f"dies on its own prologue before resolving anything")
+
+    attr = subprocess.run(("git", "check-attr", "text", "--", TRACKED),
+                          cwd=ROOT, check=True, capture_output=True,
+                          text=True).stdout.strip()
+    if not attr.endswith("unset"):
+        findings.append(f"git reports `{attr}` for {TRACKED}, so git is free to "
+                        f"normalise its line endings -- and a checkout that "
+                        f"normalises them is a checkout where one half of this "
+                        f"file does not run")
+
+
 def index_mode(findings):
     out = subprocess.run(("git", "ls-files", "-s", "--", TRACKED), cwd=ROOT,
                          check=True, capture_output=True, text=True).stdout
@@ -272,6 +339,7 @@ def main():
 
     findings = []
     index_mode(findings)
+    line_endings(findings)
 
     with tempfile.TemporaryDirectory() as work:
         work = Path(work)
@@ -293,9 +361,10 @@ def main():
               file=sys.stderr)
         return 1
     half = "batch" if WINDOWS else "POSIX"
-    print(f"launcher: executable in the index, denies with nothing installed "
-          f"and on an unusable SPILL_GUARD_BIN, and resolves by all three "
-          f"routes -- driven through the {half} half on {sys.platform}")
+    print(f"launcher: executable in the index, split line endings intact, "
+          f"denies with nothing installed and on an unusable SPILL_GUARD_BIN, "
+          f"and resolves by all three routes -- driven through the {half} half "
+          f"on {sys.platform}")
     return 0
 
 
