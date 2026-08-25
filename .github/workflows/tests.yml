@@ -431,6 +431,16 @@ jobs:
       # away and left the defect; the endings are what fix it. This step is the
       # transplant of that arm, so the repo owns the reproduction rather than a
       # branch nobody keeps.
+      #
+      # The mutation text is verbatim from that arm and its output was checked
+      # byte-for-byte against it. That is not fastidiousness. An earlier
+      # spelling inserted a block of its own shaping, which flattened the
+      # endings and left the deny reachable -- so the byte assertion reddened
+      # and the behaviour did not change, and the step passed its own
+      # preconditions while testing nothing. What the failure needs is not a
+      # block somewhere but a `goto` reached by FALLING THROUGH past one: a
+      # `goto` that jumps in resets cmd.exe's file position and survives. Do
+      # not re-shape this mutation without re-driving it on Windows.
       - name: LF endings with a block present must fail the gate on Windows
         if: runner.os == 'Windows'
         shell: bash
@@ -438,31 +448,41 @@ jobs:
           python - <<'MUTATE'
           import pathlib
           p = pathlib.Path("hooks/run-spill-guard.cmd")
-          data = p.read_bytes()
-          straight = b'''where spill-guard >nul 2>nul\r
-          if errorlevel 1 goto :try_default\r
-          spill-guard %*\r
-          exit /b %ERRORLEVEL%\r
-          '''
-          block = b'''for /f "delims=" %%P in ('where spill-guard 2^>nul') do (\r
-              "%%P" %*\r
-              exit /b %ERRORLEVEL%\r
-          )\r
-          '''
-          if straight not in data:
+          text = p.read_text(encoding="utf-8")          # universal newlines -> LF
+          straight = """:try_path
+          where spill-guard >nul 2>nul
+          if errorlevel 1 goto :try_default
+          spill-guard %*
+          exit /b %ERRORLEVEL%
+
+          :try_default
+          if not exist "%LOCALAPPDATA%\\spill-guard\\bin\\spill-guard.exe" goto :deny_missing
+          """.replace("\n          ", "\n")
+          block = """:try_path
+          for /f "delims=" %%P in ('where spill-guard 2^>nul') do (
+              "%%P" %*
+              exit /b %ERRORLEVEL%
+          )
+
+          if exist "%LOCALAPPDATA%\\spill-guard\\bin\\spill-guard.exe" goto :run_default
+          echo run-spill-guard.cmd: no spill-guard.exe on PATH or under LOCALAPPDATA. >&2
+          goto :deny_missing
+
+          :run_default
+          """.replace("\n          ", "\n")
+          if straight not in text:
               raise SystemExit("the straight-line PATH route is not in the launcher any more")
-          p.write_bytes((data.replace(straight, block, 1)).replace(b"\r\n", b"\n"))
+          p.write_text(text.replace(straight, block, 1), encoding="utf-8", newline="\n")
           MUTATE
           if git diff --quiet -- hooks/run-spill-guard.cmd; then
             echo "::error::the mutation changed nothing -- it no longer matches the launcher" >&2
             exit 1
           fi
-          if python -c "import pathlib,sys; d=pathlib.Path('hooks/run-spill-guard.cmd').read_bytes(); sys.exit(0 if d.count(b'\r\n')==0 and b'for /f' in d else 1)"; then
-            echo "mutation landed: uniform LF, block present"
-          else
+          if ! python -c "import pathlib,sys; d=pathlib.Path('hooks/run-spill-guard.cmd').read_bytes(); sys.exit(0 if d.count(b'\r\n')==0 and b'for /f' in d else 1)"; then
             echo "::error::the file is not uniform LF with a block, so this step tested nothing" >&2
             exit 1
           fi
+          echo "mutation landed: uniform LF, block present"
           python scripts/check-launcher.py > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
@@ -471,12 +491,17 @@ jobs:
             echo "::error::the gate passed on a launcher whose deny path does not run" >&2
             exit 1
           fi
+          # Both, and the second is the point. The endings assertion reddens on
+          # any flattening, so requiring only that would test the assertion
+          # rather than the behaviour -- and an earlier spelling of this step
+          # mutated to a shape that tripped the assertion without reproducing
+          # the failure, which is exactly the hole these two greps close.
           if ! grep -q 'would run unscanned' mutant.log; then
-            echo "::error::the gate failed, but not on the deny that never arrives -- the byte check alone is not this step's point" >&2
+            echo "::error::the gate failed, but not on the deny that never arrives" >&2
             exit 1
           fi
           if ! grep -q 'cannot find the batch label' mutant.log; then
-            echo "::error::cmd.exe did not report a lost label, so the reproduction is not the one that was measured" >&2
+            echo "::error::cmd.exe did not report a lost label, so this is not the failure that was measured" >&2
             exit 1
           fi
 

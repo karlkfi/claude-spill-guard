@@ -203,8 +203,9 @@ built around.
 stays a JSON file in the repo, authored and reviewed as JSON; `go:embed` puts it
 in the artifact, and the pair can no longer disagree because there is no longer
 a pair. It costs nothing at run time and nothing in the supply chain: `embed` is
-stdlib, and both gates were run against a probe importing it — `no-deps` and
-`no-network` each reported 106 packages, all clean.
+stdlib, and both gates were run against a probe importing it. The build graph
+goes from 104 packages to 105 — `embed` and nothing behind it — and `no-deps`
+and `no-network` both stay clean.
 
 It costs no capability either. A project entry whose `id` is already shipped
 overrides the fields it names, and that includes the pattern: driven on the same

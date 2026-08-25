@@ -149,18 +149,43 @@ def base_env(tmp):
 
 
 def resolvable(env):
-    """Whether the child environment can find a spill-guard at all.
+    """(whether the child environment can find a spill-guard, what it found).
 
     This is the precondition on every deny case below. `PATH=/usr/bin:/bin` was
     once used elsewhere in this repo to hide a tool and hid nothing, because
     the CI setup had linked it into /usr/bin -- so ask about the tool rather
     than about a directory.
+
+    It returns what it found as well as whether, because a precondition that
+    fires and cannot say which entry produced the hit costs the same CI round
+    trip evidence() exists to prevent -- on the same platform, for the same
+    reason.
     """
     probe = "where spill-guard" if WINDOWS else "command -v spill-guard"
     argv = ("cmd", "/c", probe) if WINDOWS else ("/bin/sh", "-c", probe)
     p = subprocess.run(argv, capture_output=True, text=True, check=False,
                        env=env)
-    return p.returncode == 0 and p.stdout.strip() != ""
+    found = p.stdout.strip()
+    return (p.returncode == 0 and found != ""), found
+
+
+def exits_zero(findings, what, rc, out, err):
+    """A deny has to arrive on exit 0, and the code is half the spelling.
+
+    A deny object on stdout blocks whatever the process exits with, so a
+    launcher denying on exit 2 still stops the call -- and the model is told
+    the hook errored and never sees the reason, because exit 2 discards stdout.
+    The other codes are worse in a different way: 1, 9 and 127 are what a
+    launcher that FAILED produces, which is the state this deny exists to be
+    distinguishable from. So 0 is the only code that carries no second meaning,
+    and pinning the object without pinning the code pins half the spelling.
+    """
+    if rc != 0:
+        findings.append(f"{what} arrived on exit {rc} rather than 0. The object "
+                        f"blocks either way; on 2 stdout is discarded and the "
+                        f"reason never reaches the model, and 1, 9 and 127 are "
+                        f"the codes a launcher that failed produces -- "
+                        f"{evidence(rc, out, err)}")
 
 
 def deny_reason(out):
@@ -270,10 +295,11 @@ def index_mode(findings):
 
 def denies_with_nothing_installed(findings, tmp):
     env = base_env(tmp)
-    if resolvable(env):
-        findings.append("the environment for the deny cases can still resolve "
-                        "a spill-guard, so a deny below would prove nothing "
-                        "and a run would prove nothing either")
+    ok, found = resolvable(env)
+    if ok:
+        findings.append(f"the environment for the deny cases can still resolve "
+                        f"a spill-guard at {found!r}, so a deny below would "
+                        f"prove nothing and a run would prove nothing either")
         return
     rc, out, err = run(env, ("hook",))
     reason = deny_reason(out)
@@ -282,6 +308,7 @@ def denies_with_nothing_installed(findings, tmp):
                         f"anything Claude Code reads as a deny, so the tool "
                         f"call would run unscanned -- {evidence(rc, out, err)}")
         return
+    exits_zero(findings, "the deny for a missing binary", rc, out, err)
     if "install" not in reason.lower():
         findings.append(f"the deny for a missing binary names no way to "
                         f"install one: {reason!r}")
@@ -296,10 +323,13 @@ def denies_on_an_unusable_explicit_path(findings, tmp, stub):
     env = base_env(tmp)
     env["SPILL_GUARD_BIN"] = str(tmp / "not-a-file")
     env["PATH"] = os.pathsep.join([str(stub.parent), env["PATH"]])
-    if not resolvable(env):
-        findings.append("the fallback control cannot resolve a spill-guard on "
-                        "PATH, so this case cannot tell a deny from a launcher "
-                        "that fell back and found nothing")
+    ok, _ = resolvable(env)
+    if not ok:
+        findings.append(f"the fallback control cannot resolve a spill-guard on "
+                        f"PATH -- `{'where' if WINDOWS else 'command -v'} "
+                        f"spill-guard` came back empty with {stub} on it -- so "
+                        f"this case cannot tell a deny from a launcher that "
+                        f"fell back and found nothing")
         return
     rc, out, err = run(env, ("hook",))
     if deny_reason(out) is None:
@@ -307,6 +337,8 @@ def denies_on_an_unusable_explicit_path(findings, tmp, stub):
                         f"did not deny -- an explicit path that does not work "
                         f"is a configuration error, not a reason to run some "
                         f"other binary -- {evidence(rc, out, err)}")
+        return
+    exits_zero(findings, "the deny for an unusable SPILL_GUARD_BIN", rc, out, err)
 
 
 def resolves(findings, tmp, stub, route):
