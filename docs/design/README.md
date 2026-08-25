@@ -192,7 +192,7 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `group` | Which capture group holds the candidate. Lets a rule capture a wider window than it reports. |
 | `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. |
 | `labels` | Word-boundary literals the candidate has to sit near, for the context-proximity check. Read after the match, so unlike `keywords` it gates nothing. |
-| `entropy` | Minimum Shannon bits per character over the captured group. Omitted means no floor. |
+| `entropy` | Minimum Shannon bits per character over the captured group. Omitted means no floor. A floor above what the group can reach is a startup failure, not a quiet rule. |
 | `validators` | Names from the validator table above, all of which must pass. |
 | `enabled` | Ships `false` for every `pii` rule. |
 
@@ -222,6 +222,26 @@ whose author wrote the labels and left the validator off is an ungated numeric
 regex, which is the shape that produced 5,679 matches and no credentials, so
 naming the check is what turns that omission into a startup error. The loader
 rejects a rule carrying configuration no check reads.
+
+**It rejects the mirror image too: a check named with configuration that can
+never let it pass.** `context-label` with no labels — absent, empty, or nothing
+but empty strings — searches for nothing and so reports nothing. An entropy
+floor above what the captured group can reach does the same: Shannon's ceiling
+is log2 of the distinct byte count, so an eight-byte capture cannot exceed 3
+bits however random it is, and a floor of 3.5 on one disables the rule outright.
+Either way the rule loads, compiles, runs on every file and reports nothing,
+which is exactly what a clean scan looks like from outside. That is the argument
+that already fails a rule whose regex does not compile, so it gets the same
+answer.
+
+The entropy bound comes off the rule's own regex, at the **longest** string the
+group can capture rather than the shortest. A group matching 8 to 64 bytes
+reaches 3 bits at its shortest and 6 at its longest, so measuring the shortest
+would refuse a working rule at startup — the failure this check exists to
+prevent, pointed the other way. The walk over-estimates where it cannot be
+sure: `(?:ab){1,3}` draws on two byte values and is counted as six bytes, so a
+rule between the two ceilings loads. Missing a dead rule leaves this check
+half-done; refusing a live one takes the scanner down.
 
 ## Loading the ruleset
 
