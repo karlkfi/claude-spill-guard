@@ -247,8 +247,12 @@ worth knowing about. The ceiling counts distinct *byte values* at 256 rather
 than at what the group can actually produce, so `[a-f0-9]{32}` is capped at
 log2(32) = 5 bits where sixteen hex symbols cap it at 4 — a 32-character hex key
 rule with a floor of 4.5 is dead and still loads. Every restricted-charset rule
-carries that slack, exact length or not. Length has its own and it is smaller:
-`(?:ab){1,3}` is counted at six bytes though it draws on two.
+carries that slack, exact length or not.
+
+`(?:ab){1,3}` looks like a second, length-shaped kind of looseness and is not.
+Its six-byte bound is exact — `ababab` is six bytes and the group matches it —
+and every one of its 1.585 bits of slack is the two symbols it draws on. There
+is one mechanism here, not two.
 
 ## Loading the ruleset
 
