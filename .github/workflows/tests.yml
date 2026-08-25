@@ -456,7 +456,11 @@ jobs:
             echo "::error::the launcher gate passed on a launcher that fails open" >&2
             exit 1
           fi
-          if ! grep -q 'does not read as a deny' mutant.log; then
+          # Anchored on the consequence rather than on the wording of the
+          # finding: the message is prose and prose gets edited, and a control
+          # that greps for a sentence goes green-then-wrong the day somebody
+          # rewrites it. This exact grep broke once already, on a reword.
+          if ! grep -q 'would run unscanned' mutant.log; then
             echo "::error::the gate failed, but not on the missing deny" >&2
             exit 1
           fi

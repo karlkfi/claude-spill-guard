@@ -3,9 +3,10 @@
 REM Cross-platform polyglot launcher for the spill-guard binary.
 REM
 REM On Windows cmd.exe runs the batch portion below. On Unix the shell reads
-REM `: << 'CMDBLOCK' ... CMDBLOCK` as a no-op heredoc and falls through to the
-REM POSIX tail at the bottom of this file. The structure is branch-guard's
-REM run-python-hook.cmd, kept recognisably the same so a fix there transfers.
+REM the first line as a no-op heredoc opener, discards everything down to the
+REM CMDBLOCK terminator, and falls through to the POSIX tail at the bottom of
+REM this file. The structure is branch-guard's run-python-hook.cmd, kept
+REM recognisably the same so a fix there transfers.
 REM
 REM Why this file exists at all: hooks.json cannot invoke spill-guard directly.
 REM An absent binary makes the shell exit 127 and a non-executable one makes it
@@ -24,6 +25,10 @@ REM
 REM Resolution order, from docs/design/distribution.md: SPILL_GUARD_BIN, then
 REM PATH, then the default install location, then deny.
 REM
+REM The batch half stays straight-line: no parenthesized blocks and no nested
+REM cmd. `where` answers whether PATH holds one and Windows resolves it, rather
+REM than this file capturing a path so cmd.exe can resolve it a second time.
+REM
 REM Every argument is passed through untouched, and so is stdin -- the hook
 REM payload arrives there. This file decides which binary runs and nothing
 REM else; hooks.json chooses the subcommand.
@@ -32,8 +37,9 @@ setlocal
 
 if not defined SPILL_GUARD_BIN goto :try_path
 if exist "%SPILL_GUARD_BIN%" goto :run_explicit
-REM The value is deliberately not echoed here. A Windows path may carry & or |
-REM or >, and batch would run what follows them.
+REM The value is deliberately not echoed here. A Windows path may carry a
+REM command separator or a redirect, and cmd.exe parses those before REM ever
+REM sees the line -- which is why no comment in this file contains one either.
 echo run-spill-guard.cmd: SPILL_GUARD_BIN names a path that does not exist. >&2
 goto :deny_explicit
 
@@ -42,16 +48,13 @@ goto :deny_explicit
 exit /b %ERRORLEVEL%
 
 :try_path
-for /f "delims=" %%P in ('where spill-guard 2^>nul') do (
-    "%%P" %*
-    exit /b %ERRORLEVEL%
-)
+where spill-guard >nul 2>nul
+if errorlevel 1 goto :try_default
+spill-guard %*
+exit /b %ERRORLEVEL%
 
-if exist "%LOCALAPPDATA%\spill-guard\bin\spill-guard.exe" goto :run_default
-echo run-spill-guard.cmd: no spill-guard.exe on PATH or under LOCALAPPDATA. >&2
-goto :deny_missing
-
-:run_default
+:try_default
+if not exist "%LOCALAPPDATA%\spill-guard\bin\spill-guard.exe" goto :deny_missing
 "%LOCALAPPDATA%\spill-guard\bin\spill-guard.exe" %*
 exit /b %ERRORLEVEL%
 

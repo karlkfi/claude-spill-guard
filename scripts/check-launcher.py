@@ -79,6 +79,18 @@ def build_stub(into):
     return out
 
 
+def evidence(rc, out, err):
+    """What a reader of a CI log needs to act on a finding.
+
+    The launcher writes its reasoning to stderr and its verdict to stdout, so a
+    finding that quotes only stdout throws away the half that says why. Every
+    finding below carries this; the cost of not carrying it is a CI round trip
+    per hypothesis, on the one platform this gate exists to reach and nobody
+    can drive locally.
+    """
+    return f"exit {rc}, stdout {out!r}, stderr {err.strip()!r}"
+
+
 def run(env, args=(), stdin=""):
     """Invoke the launcher the way Claude Code does -- through a shell, by
     path -- and return (rc, stdout, stderr).
@@ -196,12 +208,12 @@ def denies_with_nothing_installed(findings, tmp):
                         "a spill-guard, so a deny below would prove nothing "
                         "and a run would prove nothing either")
         return
-    rc, out, _ = run(env, ("hook",))
+    rc, out, err = run(env, ("hook",))
     reason = deny_reason(out)
     if reason is None:
-        findings.append(f"with no binary anywhere the launcher wrote "
-                        f"{out!r} (exit {rc}), which Claude Code does not read "
-                        f"as a deny -- the tool call would run unscanned")
+        findings.append(f"with no binary anywhere the launcher did not write "
+                        f"anything Claude Code reads as a deny, so the tool "
+                        f"call would run unscanned -- {evidence(rc, out, err)}")
         return
     if "install" not in reason.lower():
         findings.append(f"the deny for a missing binary names no way to "
@@ -222,12 +234,12 @@ def denies_on_an_unusable_explicit_path(findings, tmp, stub):
                         "PATH, so this case cannot tell a deny from a launcher "
                         "that fell back and found nothing")
         return
-    rc, out, _ = run(env, ("hook",))
+    rc, out, err = run(env, ("hook",))
     if deny_reason(out) is None:
         findings.append(f"SPILL_GUARD_BIN naming a path that is not executable "
-                        f"did not deny (exit {rc}, stdout {out!r}) -- an "
-                        f"explicit path that does not work is a configuration "
-                        f"error, not a reason to run some other binary")
+                        f"did not deny -- an explicit path that does not work "
+                        f"is a configuration error, not a reason to run some "
+                        f"other binary -- {evidence(rc, out, err)}")
 
 
 def resolves(findings, tmp, stub, route):
@@ -242,15 +254,15 @@ def resolves(findings, tmp, stub, route):
         shutil.copy2(stub, target / STUB_NAME)
     rc, out, err = run(env, ("hook", "--flag"), stdin="payload-on-stdin")
     if rc != 0:
-        findings.append(f"{route}: the launcher exited {rc} instead of running "
-                        f"the binary (stdout {out!r}, stderr {err.strip()!r})")
+        findings.append(f"{route}: the launcher exited non-zero instead of "
+                        f"running the binary -- {evidence(rc, out, err)}")
         return
     if 'argv:["hook" "--flag"]' not in out:
         findings.append(f"{route}: the binary did not receive the arguments "
-                        f"verbatim -- got {out!r}")
+                        f"verbatim -- {evidence(rc, out, err)}")
     if 'stdin:"payload-on-stdin"' not in out:
         findings.append(f"{route}: the binary did not receive stdin, which is "
-                        f"where the hook payload arrives -- got {out!r}")
+                        f"where the hook payload arrives -- {evidence(rc, out, err)}")
 
 
 def main():
