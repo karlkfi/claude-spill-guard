@@ -237,14 +237,23 @@ def line_endings(findings):
     normalising the split away. A rule this easy to undo with one editor's
     default cannot live in a comment.
 
-    None of which is only cmd.exe's problem, and the terminator is where that
-    stops being true. Its CR is doing double duty: line 1 opens the heredoc as
-    `: << 'CMDBLOCK'` and keeps its own CR, so sh's delimiter is `CMDBLOCK\r`
-    and the terminator has to carry a CR to match it. Drop that one byte and
-    the delimiter never matches, sh swallows the entire POSIX half as heredoc
-    content, and the launcher exits **0** with nothing on either stream --
-    silent, on every platform, and worse than the Windows defect this split
-    exists to fix, which at least exited 1. Measured 2026-08-25 on darwin.
+    The terminator is checked separately, because its CR answers to sh rather
+    than to cmd.exe and the consequence of losing it is a different defect.
+    Line 1 opens the heredoc as `: << \'CMDBLOCK\'` and keeps its own CR, so
+    sh\'s delimiter is `CMDBLOCK\r` and the terminator has to carry a CR to
+    match it. Drop that one byte and the delimiter never matches, sh swallows
+    the whole POSIX half as heredoc content, and the launcher exits **0** with
+    nothing on either stream -- silent, which is worse than the cmd.exe defect
+    above, where it at least exited 1.
+
+    cmd.exe is unaffected by that byte, and the correction is worth stating
+    because the first version of this comment claimed otherwise. Every batch
+    path leaves at an `exit /b` well above the terminator, so cmd never reads
+    that line; the four-arm probe agrees from the other side, since Windows
+    passed the arm whose terminator carried no CR. So this one silences macOS
+    and Linux and leaves Windows working -- two of three shipped targets, not
+    three. Measured 2026-08-25 on darwin and read off the control flow for the
+    rest, which is the split this repo asks of every other claim.
     """
     # Split on LF and find the terminator by its text rather than by its
     # ending. The whole-file regression flattens everything to LF, which takes
@@ -261,17 +270,28 @@ def line_endings(findings):
                         f"and one of them is running with the other's endings")
         return
 
-    head, tail = lines[:cut + 1], lines[cut + 1:]
+    batch, terminator, tail = lines[:cut], lines[cut], lines[cut + 1:]
     # Each entry was terminated by the LF we split on, so it was CRLF exactly
     # when it still ends with CR. The final entry is whatever followed the last
     # newline, and an empty one falls out of both counts on its own.
-    stray_lf = sum(1 for line in head if not line.endswith(b"\r"))
+    #
+    # Three findings rather than two, because the terminator's CR answers to a
+    # different reader than the lines above it and losing it is a different
+    # defect. Folding it into the batch count would name cmd.exe for something
+    # only sh sees.
+    stray_lf = sum(1 for line in batch if not line.endswith(b"\r"))
     stray_crlf = sum(1 for line in tail if line.endswith(b"\r"))
     if stray_lf:
         findings.append(f"{TRACKED} carries {stray_lf} bare LF in the batch "
                         f"half, where cmd.exe needs CRLF -- a `goto` past a "
                         f"parenthesized block then fails to find its label and "
                         f"the launcher exits without denying")
+    if not terminator.endswith(b"\r"):
+        findings.append(f"{TRACKED}'s {TERMINATOR.decode()} line carries no CR, "
+                        f"so it no longer matches the heredoc delimiter on line "
+                        f"1 -- sh swallows the whole POSIX half and the launcher "
+                        f"exits 0 saying nothing on macOS and Linux. cmd.exe "
+                        f"never reads this line, so Windows is unaffected")
     if stray_crlf:
         findings.append(f"{TRACKED} carries {stray_crlf} CRLF after the "
                         f"terminator, where /bin/sh needs LF -- the POSIX half "

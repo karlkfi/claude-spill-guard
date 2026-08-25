@@ -531,13 +531,22 @@ jobs:
         run: |
           python3 - <<'MUTATE'
           import pathlib
+          # Bytes, not text. read_text/write_text translate line endings, so a
+          # text round-trip flattens all 75 CRLF on top of the deny mutation --
+          # which passes for the right reason on POSIX and makes the log read
+          # as though the endings assertion caught the deny. Compound mutations
+          # are what step 1 of this job exists to warn about.
           p = pathlib.Path("hooks/run-spill-guard.cmd")
-          t = p.read_text()
-          old = "    printf '%s\\n' \"$1\"\n    exit 0\n"
-          if old not in t:
+          data = p.read_bytes()
+          old = b"    printf '%s\\n' \"$1\"\n    exit 0\n"
+          if old not in data:
               raise SystemExit("the deny body is not in the launcher any more")
-          p.write_text(t.replace(old, "    exit 1\n", 1))
+          p.write_bytes(data.replace(old, b"    exit 1\n", 1))
           MUTATE
+          if [ "$(python3 -c "import pathlib; print(pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().count(b'\r\n'))")" != "75" ]; then
+            echo "::error::the mutation moved the line endings, so this step is testing two things at once" >&2
+            exit 1
+          fi
           if git diff --quiet -- hooks/run-spill-guard.cmd; then
             echo "::error::the mutation changed nothing -- it no longer matches the launcher" >&2
             exit 1
@@ -559,13 +568,22 @@ jobs:
             exit 1
           fi
 
-      # One byte, and the worst mutation this file has. The terminator's CR is
-      # also sh's heredoc delimiter -- line 1 opens with `: << 'CMDBLOCK'` and
-      # keeps its CR, so the delimiter is `CMDBLOCK\r`. Drop it and sh swallows
-      # the whole POSIX half, and the launcher exits 0 with empty stdout and
-      # empty stderr: silent on every platform, where the Windows defect at
-      # least exited 1. It is a one-character edit any editor can make, so it
-      # gets a control rather than a sentence.
+      # One byte, and the quietest mutation this file has. The terminator's CR
+      # is also sh's heredoc delimiter -- line 1 opens with `: << 'CMDBLOCK'`
+      # and keeps its CR, so the delimiter is `CMDBLOCK\r`. Drop it and sh
+      # swallows the whole POSIX half, and the launcher exits 0 with empty
+      # stdout and empty stderr. Silent, where the cmd.exe defect at least
+      # exited 1.
+      #
+      # POSIX-only, and this comment said "every platform" until a review drove
+      # it: every batch path leaves at an `exit /b` well above the terminator,
+      # so cmd.exe never reads that line, and the four-arm probe agrees --
+      # Windows passed the arm whose terminator carried no CR. Which is why
+      # this step is ubuntu-only: not merely a sufficient platform, the only
+      # one where it manifests. Windows's cover for that byte is the assertion.
+      #
+      # It is a one-character edit any editor can make, so it gets a control
+      # rather than a sentence.
       - name: Dropping the terminator's CR must fail the gate
         if: runner.os != 'Windows'
         run: |
@@ -593,7 +611,7 @@ jobs:
           # terminator, and the behavioural cases see a launcher that exits 0
           # saying nothing. A spelling that lost one would still pass on the
           # other, and the pair is what says so.
-          if ! grep -q '1 bare LF in the batch half' mutant.log; then
+          if ! grep -q 'line carries no CR' mutant.log; then
             echo "::error::the endings assertion did not name the terminator" >&2
             exit 1
           fi
