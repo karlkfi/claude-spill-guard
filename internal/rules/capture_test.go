@@ -64,11 +64,15 @@ func TestMaxCaptureBytes(t *testing.T) {
 
 		// A class is inclusive rune pairs and the widest encoding is at the top
 		// of a range, so reading the bottom under-estimates -- the one direction
-		// that refuses a live rule at startup. Every other class case here is
-		// one byte at both ends, or astral at both, so the two readings agree
-		// and none of them can catch that. A negation is where they part: `[^a]`
-		// parses to [\x00-\x60] and [\x62-\x{10FFFF}], one byte at the bottom
-		// and four at the top.
+		// that refuses a live rule at startup. The two ends differ only where a
+		// single range spans encoding widths: `[^a]` parses to [\x00-\x60] and
+		// [\x62-\x{10FFFF}], and that second range crosses one byte to four.
+		// Measured over every other class here, none of them does -- [A-Za-z0-9]
+		// and \d are one byte end to end, while \p{L}, \p{Greek} and (?i)[k]
+		// each have a range whose bottom is already as wide as the widest top --
+		// so all five agree at both ends and cannot tell the two readings apart.
+		// Negation is the ordinary way to write a spanning range rather than the
+		// thing that matters, so a case added here wants the span.
 		{"a negated class, whose widest rune is at the top of a later range",
 			`([^a]{2})`, 1, 8},
 		{"a negated class as a scanning rule would write it", `([^\s]{32})`, 1, 128},
