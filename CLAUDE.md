@@ -19,6 +19,7 @@ measured.
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
 | `internal/validate/` | The six validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
+| `internal/scan/` | The pipeline over one buffer. Binary skip, the literal prefilter, the match loop, findings. |
 | `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
