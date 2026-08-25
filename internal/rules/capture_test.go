@@ -62,6 +62,17 @@ func TestMaxCaptureBytes(t *testing.T) {
 		{"a dot, which is a rune and so up to four bytes", `(.)`, 1, 4},
 		{"a unicode class", `(\p{L}{4})`, 1, 16},
 
+		// A class is inclusive rune pairs and the widest encoding is at the top
+		// of a range, so reading the bottom under-estimates -- the one direction
+		// that refuses a live rule at startup. Every other class case here is
+		// one byte at both ends, or astral at both, so the two readings agree
+		// and none of them can catch that. A negation is where they part: `[^a]`
+		// parses to [\x00-\x60] and [\x62-\x{10FFFF}], one byte at the bottom
+		// and four at the top.
+		{"a negated class, whose widest rune is at the top of a later range",
+			`([^a]{2})`, 1, 8},
+		{"a negated class as a scanning rule would write it", `([^\s]{32})`, 1, 128},
+
 		// Bytes, not runes. A folded literal matches every case of itself and
 		// they are not all the same width: (?i)k matches the Kelvin sign, which
 		// is three bytes. A class needs no such walk -- syntax.Parse folds it
@@ -130,6 +141,9 @@ func TestMaxCaptureBytesNeverUnderEstimatesARealCapture(t *testing.T) {
 		{`(?i)(k)`, "\u212a"},
 		{`((?:ab){1,3})`, "ababab"},
 		{`(\p{L}{4})`, "\u00e9\u00e9\u00e9\u00e9"},
+		// Two astral runes are eight bytes, which is what a class arm reading
+		// the bottom of its ranges would report as two.
+		{`([^a]{2})`, "\U0001D400\U0001D401"},
 	} {
 		t.Run(tc.pattern, func(t *testing.T) {
 			re := regexp.MustCompile(tc.pattern)
