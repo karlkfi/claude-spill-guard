@@ -356,6 +356,125 @@ jobs:
             exit 1
           fi
 
+  # The one job here that is not ubuntu-only, and the row that asked for it
+  # says why: a suite that invokes the binary directly never executes the
+  # launcher at all, and a launcher that stopped working produces exactly the
+  # empty stdout a clean call produces. The file is a polyglot -- cmd.exe runs
+  # the batch half, every other shell runs the POSIX half -- so neither half is
+  # exercised by driving the other, and Windows is a shipped target.
+  launcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: The launcher resolves, denies, and is executable in the index
+        if: runner.os != 'Windows'
+        run: make launcher
+
+      # `make` is not something this repository is willing to assume on the
+      # Windows image, and a job that failed for want of make would be red for
+      # a reason that says nothing about the launcher. So the Windows lane runs
+      # the gate's own script; the Makefile rule is a one-line wrapper around
+      # exactly this, and gate-drift's `make launcher` assertion is satisfied by
+      # the step above.
+      - name: The launcher resolves, denies, and is executable in the index
+        if: runner.os == 'Windows'
+        run: python scripts/check-launcher.py
+
+  # Every assertion this gate makes has a spelling that passes on a launcher
+  # that enforces nothing, and the mode bit is the one with a shipped bug
+  # behind it: exit-status-guard 1.0.0 went out at 644, the shell refused it
+  # with 126, and the guard never fired once.
+  #
+  # The deny mutation is the other half. A launcher that cannot find a binary
+  # and exits non-zero without writing a decision object lets the tool call
+  # through, and the gate has to be the thing that notices -- because nothing
+  # in a transcript ever will.
+  launcher-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: A launcher that is not executable in the index must fail the gate
+        run: |
+          git update-index --chmod=-x hooks/run-spill-guard.cmd
+          if [ "$(git ls-files -s -- hooks/run-spill-guard.cmd | cut -d' ' -f1)" = "100755" ]; then
+            echo "::error::--chmod=-x changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git update-index --chmod=+x hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the launcher gate passed on a launcher the shell would refuse" >&2
+            exit 1
+          fi
+          if ! grep -q 'in the index' mutant.log; then
+            echo "::error::the gate failed, but not on the index mode" >&2
+            exit 1
+          fi
+
+      - name: A launcher that exits non-zero instead of denying must fail the gate
+        run: |
+          python3 - <<'MUTATE'
+          import pathlib
+          p = pathlib.Path("hooks/run-spill-guard.cmd")
+          t = p.read_text()
+          old = "    printf '%s\\n' \"$1\"\n    exit 0\n"
+          if old not in t:
+              raise SystemExit("the deny body is not in the launcher any more")
+          p.write_text(t.replace(old, "    exit 1\n", 1))
+          MUTATE
+          if git diff --quiet -- hooks/run-spill-guard.cmd; then
+            echo "::error::the mutation changed nothing -- it no longer matches the launcher" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the launcher gate passed on a launcher that fails open" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not read as a deny' mutant.log; then
+            echo "::error::the gate failed, but not on the missing deny" >&2
+            exit 1
+          fi
+
+      # The direction a red-only control cannot reach: the gate must not report
+      # a finding on a machine that has spill-guard installed, which is every
+      # machine once this ships. The deny cases hide the tool by dropping the
+      # directory that holds it, and a spelling that names directories to keep
+      # instead would go green here and red on a contributor's laptop.
+      - name: The gate must still pass with a spill-guard on PATH
+        run: |
+          mkdir -p "$HOME/fake-bin"
+          printf '#!/bin/sh\nexit 0\n' > "$HOME/fake-bin/spill-guard"
+          chmod +x "$HOME/fake-bin/spill-guard"
+          export PATH="$HOME/fake-bin:$PATH"
+          command -v spill-guard || { echo "::error::the fixture is not on PATH, so this step tested nothing" >&2; exit 1; }
+          make launcher
+
   # `make check` is a loop over GATES, and a loop is how a run reports green
   # while a gate it was supposed to cover failed -- take the status from the
   # last iteration and every earlier failure vanishes. Same defect the

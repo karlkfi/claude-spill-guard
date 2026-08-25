@@ -178,13 +178,62 @@ stated property is that it has none. Even scoped to the launcher rather than the
 scanner, it turns "no network capability, verifiable in an afternoon" into a
 claim with an asterisk. Not worth it.
 
+## Version skew: settled by removing it, not by detecting it
+
+A tap that upgrades `spill-guard` while the plugin stays pinned leaves two
+pairs able to disagree — launcher against binary, and binary against ruleset.
+The question was posed as a choice between checking on every invocation and
+checking only in `selftest`. Neither is the answer, because only one of the two
+pairs fails silently and it can be made unable to disagree at all.
+
+**Only the ruleset half has a silent direction.** Driven against
+`internal/rules` on 2026-08-24, not read off the schema:
+
+| Skew | What happens |
+|---|---|
+| Older binary, newer ruleset | `0 rule(s), err=the shipped ruleset: json: unknown field "window"` — refused at startup, naming the field |
+| Newer binary, older ruleset | `1 rule(s), err=<nil>` — loads clean, and quietly lacks whatever the newer release added |
+
+The first is the fail-closed rule doing its job: the binary stops with a reason.
+The second is a scanner that runs, reports nothing, and is indistinguishable
+from one that checked everything, which is the failure this whole project is
+built around.
+
+**So the shipped ruleset is compiled into the binary.** `rules/spill-guard.json`
+stays a JSON file in the repo, authored and reviewed as JSON; `go:embed` puts it
+in the artifact, and the pair can no longer disagree because there is no longer
+a pair. It costs nothing at run time and nothing in the supply chain: `embed` is
+stdlib, and both gates were run against a probe importing it — `no-deps` and
+`no-network` each reported 106 packages, all clean.
+
+It costs no capability either. A project entry whose `id` is already shipped
+overrides the fields it names, and that includes the pattern: driven on the same
+day, an override of `{"id": "aws", "regex": "(ASIA[A-Z0-9]{16})"}` against a
+shipped `aws` rule returned one rule whose compiled pattern was the override's.
+Turning a shipped rule off, retuning one, and adding new ones all survive.
+
+**The launcher-against-binary half stays, and it fails loud.** The launcher
+resolves a path and passes its arguments through; it chooses no subcommand, so
+the interface is whatever `hooks.json` names. A binary that does not recognise
+it exits 2 with a reason on stderr, and
+[`README.md`](README.md#the-exit-code-contract-measured) measures exit 2 as
+blocking. Fail-closed and visible, which is where an incompatibility should
+land.
+
+**Nothing probes a version on the hook path.** The launcher would have to read a
+version out of a manifest in cmd.exe batch as well as POSIX sh — hand-rolled
+parsing in the language least able to do it — or spawn the binary a second time
+to ask. That second spawn was measured on 2026-08-24, darwin/arm64, over 200
+runs of a `-trimpath -ldflags="-s -w"` build of `cmd/spill-guard`: p50 2.20 ms,
+p95 2.53 ms, p99 2.62 ms. Small in isolation and roughly a doubling of the
+binary-side fixed cost, on a path nobody chose to be on, to detect a
+disagreement that no longer exists.
+
+`selftest` asserts the launcher and the binary agree anyway, because there it is
+free and a human is asking the question directly.
+
 ## Open
 
-- **Version skew between the launcher and the binary.** A tap that upgrades
-  `spill-guard` while the plugin stays pinned gives you a binary and a ruleset
-  from different releases. Checking on every invocation costs latency on a path
-  nobody chose to be on; checking in `selftest` catches it only when someone
-  runs `selftest`. Undecided.
 - **Whether `install.sh` should refuse to proceed without `cosign`.** Failing
   closed is this project's rule everywhere else, and most machines do not have
   cosign installed.
