@@ -236,6 +236,15 @@ def line_endings(findings):
     So both halves are checked, and so is the `-text` attribute that stops git
     normalising the split away. A rule this easy to undo with one editor's
     default cannot live in a comment.
+
+    None of which is only cmd.exe's problem, and the terminator is where that
+    stops being true. Its CR is doing double duty: line 1 opens the heredoc as
+    `: << 'CMDBLOCK'` and keeps its own CR, so sh's delimiter is `CMDBLOCK\r`
+    and the terminator has to carry a CR to match it. Drop that one byte and
+    the delimiter never matches, sh swallows the entire POSIX half as heredoc
+    content, and the launcher exits **0** with nothing on either stream --
+    silent, on every platform, and worse than the Windows defect this split
+    exists to fix, which at least exited 1. Measured 2026-08-25 on darwin.
     """
     # Split on LF and find the terminator by its text rather than by its
     # ending. The whole-file regression flattens everything to LF, which takes

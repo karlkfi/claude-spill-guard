@@ -559,6 +559,49 @@ jobs:
             exit 1
           fi
 
+      # One byte, and the worst mutation this file has. The terminator's CR is
+      # also sh's heredoc delimiter -- line 1 opens with `: << 'CMDBLOCK'` and
+      # keeps its CR, so the delimiter is `CMDBLOCK\r`. Drop it and sh swallows
+      # the whole POSIX half, and the launcher exits 0 with empty stdout and
+      # empty stderr: silent on every platform, where the Windows defect at
+      # least exited 1. It is a one-character edit any editor can make, so it
+      # gets a control rather than a sentence.
+      - name: Dropping the terminator's CR must fail the gate
+        if: runner.os != 'Windows'
+        run: |
+          python3 - <<'MUTATE'
+          import pathlib
+          p = pathlib.Path("hooks/run-spill-guard.cmd")
+          data = p.read_bytes()
+          if data.count(b"CMDBLOCK\r\n") != 1:
+              raise SystemExit("the CRLF-terminated CMDBLOCK line is not there to break")
+          p.write_bytes(data.replace(b"CMDBLOCK\r\n", b"CMDBLOCK\n", 1))
+          MUTATE
+          if git diff --quiet -- hooks/run-spill-guard.cmd; then
+            echo "::error::the mutation changed nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a launcher that is silently inert on every platform" >&2
+            exit 1
+          fi
+          # Both, because they are independent: the byte assertion sees the
+          # terminator, and the behavioural cases see a launcher that exits 0
+          # saying nothing. A spelling that lost one would still pass on the
+          # other, and the pair is what says so.
+          if ! grep -q '1 bare LF in the batch half' mutant.log; then
+            echo "::error::the endings assertion did not name the terminator" >&2
+            exit 1
+          fi
+          if ! grep -q 'would run unscanned' mutant.log; then
+            echo "::error::the deny cases did not notice a launcher that says nothing at all" >&2
+            exit 1
+          fi
+
       # The direction a red-only control cannot reach: the gate must not report
       # a finding on a machine that has spill-guard installed, which is every
       # machine once this ships. The deny cases hide the tool by dropping the
