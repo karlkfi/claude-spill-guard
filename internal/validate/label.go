@@ -59,9 +59,10 @@ const DefaultLabelWindow = 64
 // cost that recall for nothing.
 //
 // A rule that reaches here with no labels reports nothing at all, and that is
-// a rule the loader should have refused rather than something to paper over
-// here. A window of zero does the same and cannot come from a rule file, since
-// the schema has no per-rule window -- it would be a caller passing the wrong
+// a rule the loader refuses rather than something to paper over here -- an
+// absent list, an empty one, and one holding nothing but empty strings alike.
+// A window of zero does the same and cannot come from a rule file, since the
+// schema has no per-rule window -- it would be a caller passing the wrong
 // thing.
 func NearLabel(buf []byte, at int, labels []string, window int) bool {
 	if window <= 0 || at <= 0 || at > len(buf) {

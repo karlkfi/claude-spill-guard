@@ -269,15 +269,49 @@ func compile(e entry) (Rule, error) {
 	// Configuration with no check to read it is a setting that does nothing,
 	// and both of these settings only ever make a rule stricter -- so the rule
 	// loads, runs, and reports more than its author meant it to. That is the
-	// direction the naming split exists to catch. The other direction, a check
-	// named with configuration that can never let it fire, is a separate item.
+	// direction the naming split exists to catch.
 	if len(rule.Labels) > 0 && !rule.Uses(ContextLabel) {
 		return fail("carries labels but does not name %q, so nothing reads them", ContextLabel)
 	}
 	if rule.Entropy > 0 && !rule.Uses(Entropy) {
 		return fail("carries an entropy floor but does not name %q, so nothing reads it", Entropy)
 	}
+
+	// The other direction, and the worse one: a check named with configuration
+	// that can never let it pass. The rule loads, compiles, runs on every file
+	// and reports nothing, which is the reading a clean scan already has -- so
+	// nothing downstream can tell it from a rule that checked and found
+	// nothing. Neither of them is a regex that fails to compile, so the Compile
+	// call above cannot catch either.
+	if rule.Uses(ContextLabel) && !hasLabel(rule.Labels) {
+		return fail("names %q with no label to look for, so it reports nothing", ContextLabel)
+	}
+	if rule.Uses(Entropy) {
+		reach, err := maxCaptureBytes(*e.Regex, group)
+		if err != nil {
+			return fail("%s", err)
+		}
+		if ceiling := entropyCeiling(reach); rule.Entropy > ceiling {
+			return fail("entropy floor %v over a group of at most %d byte(s), which "+
+				"cannot carry more than %.4g bits, so it reports nothing",
+				rule.Entropy, reach, ceiling)
+		}
+	}
 	return rule, nil
+}
+
+// hasLabel reports whether labels holds one NearLabel would search for. An
+// empty string is not one: it matches nothing there, so a rule carrying only
+// empty labels is as quiet as a rule carrying none, and
+// validate.TestNearLabelWithNoUsableLabelsReportsNothing pins all three
+// spellings of that.
+func hasLabel(labels []string) bool {
+	for _, l := range labels {
+		if l != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func deref(p *[]string) []string {

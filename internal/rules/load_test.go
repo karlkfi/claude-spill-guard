@@ -54,11 +54,21 @@ func without(kv string) string {
 
 // The guard is on the input rather than on the result, because a case whose
 // replacement equals what it replaces is a legitimate no-op.
-func set(from, to string) string {
-	if !strings.Contains(awsRule, from) {
-		panic("set() matched nothing: " + from)
+func set(from, to string) string { return replace(awsRule, from, to) }
+
+// replace is set() against a body that has already been edited once.
+func replace(in, from, to string) string {
+	if !strings.Contains(in, from) {
+		panic("replace() matched nothing: " + from)
 	}
-	return strings.Replace(awsRule, from, to, 1)
+	return strings.Replace(in, from, to, 1)
+}
+
+// labelled swaps the AWS rule onto the context-proximity check, taking the
+// entropy floor off with it -- a floor left behind is a setting nothing reads,
+// which the loader rejects first and for a different reason.
+func labelled(validators string) string {
+	return replace(without(`"entropy": 3.0,`), `"validators": ["entropy"]`, validators)
 }
 
 func TestLoadReadsEveryField(t *testing.T) {
@@ -153,9 +163,15 @@ func TestRE2Constraints(t *testing.T) {
 		{"a word boundary, which RE2 does have", `\bAKIA\b`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := set(`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
+			// The entropy floor comes off, because every case here is about
+			// what regexp.Compile accepts. \bAKIA\b captures four bytes and
+			// four bytes cannot carry the AWS rule's 3 bits, so leaving the
+			// floor on would fail that case for a reason the case is not about.
+			body := replace(without(`"entropy": 3.0,`),
+				`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
 				`"regex": `+quote(tc.regex))
-			body = strings.Replace(body, `"group": 1`, `"group": 0`, 1)
+			body = replace(body, `"validators": ["entropy"]`, `"validators": []`)
+			body = replace(body, `"group": 1`, `"group": 0`)
 			_, err := load(t, one(body))
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("Load() = %v, want an error: %v", err, tc.wantErr)
@@ -191,6 +207,24 @@ func TestLoadRejects(t *testing.T) {
 			`"validators": ["entropy"], "labels": ["ssn"]`), "nothing reads them"},
 		{"an entropy floor nothing reads",
 			set(`"validators": ["entropy"]`, `"validators": []`), "nothing reads it"},
+
+		// A check named with configuration that can never let it pass. Each of
+		// these loads, compiles, runs on every file and reports nothing, which
+		// is what a clean scan looks like from the outside.
+		{"context-label with no labels to look for",
+			labelled(`"validators": ["context-label"]`), "no label to look for"},
+		{"context-label with an empty list of labels",
+			labelled(`"labels": [], "validators": ["context-label"]`), "no label to look for"},
+		{"context-label with nothing but an empty label, which matches nothing",
+			labelled(`"labels": [""], "validators": ["context-label"]`), "no label to look for"},
+		{"an entropy floor above what an eight-byte group can carry",
+			replace(set(`"entropy": 3.0`, `"entropy": 3.5`),
+				`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
+				`"regex": "([A-Za-z0-9]{8})"`), "cannot carry more than 3 bits"},
+		{"an entropy floor above what any byte string can carry",
+			replace(set(`"entropy": 3.0`, `"entropy": 9`),
+				`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
+				`"regex": "([A-Za-z0-9]+)"`), "cannot carry more than 8 bits"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := load(t, one(tc.body))
@@ -201,6 +235,58 @@ func TestLoadRejects(t *testing.T) {
 				t.Errorf("Load() = %v, want an error naming %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// The bound is the longest string the group can capture, not the shortest, and
+// the two disagree on every rule whose group is a range. A group matching 8 to
+// 64 bytes carries 3 bits at its shortest and 6 at its longest, so a floor of 4
+// is a rule that fires on a 16-byte capture -- and a loader that measured the
+// shortest would refuse it at startup, which is a working rule taken out by the
+// check meant to catch dead ones.
+func TestAnEntropyFloorIsBoundedByTheLongestCapture(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		regex   string
+		entropy string
+		wantErr bool
+	}{
+		{"a range whose top clears the floor and whose bottom does not",
+			`([A-Za-z0-9]{8,64})`, "4.0", false},
+		{"a range whose top does not clear it either", `([A-Za-z0-9]{8,64})`, "6.5", true},
+		{"an unbounded group, which reaches the 8-bit ceiling", `([A-Za-z0-9]+)`, "7.9", false},
+
+		// The comparison is >, so a floor sitting exactly on the ceiling is a
+		// rule that fires: eight distinct bytes carry exactly 3 bits.
+		{"a floor exactly on the ceiling", `([A-Za-z0-9]{8})`, "3.0", false},
+		{"a floor one notch above it", `([A-Za-z0-9]{8})`, "3.01", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := replace(set(`"entropy": 3.0`, `"entropy": `+tc.entropy),
+				`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
+				`"regex": `+quote(tc.regex))
+			_, err := load(t, one(body))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Load() = %v, want an error: %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// The floor is read against the group the rule reports, not against the whole
+// match. A rule capturing a wide window and reporting a short slice of it is
+// the shape `group` exists for, and reading the window would let a floor
+// through that the reported candidate can never reach.
+func TestTheEntropyBoundReadsTheReportedGroup(t *testing.T) {
+	body := replace(set(`"entropy": 3.0`, `"entropy": 3.5`),
+		`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
+		`"regex": "AKIA[A-Z0-9]{16}=([A-Z0-9]{8})"`)
+	_, err := load(t, one(body))
+	if err == nil {
+		t.Fatal("Load() = nil error; the reported group is eight bytes, which cannot carry 3.5 bits")
+	}
+	if !strings.Contains(err.Error(), "8 byte(s)") {
+		t.Errorf("Load() = %v, want an error measuring the group rather than the match", err)
 	}
 }
 
