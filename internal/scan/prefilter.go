@@ -54,12 +54,16 @@ func hasKeyword(buf []byte, keywords []string) bool {
 // cheaper than the regex pass it skips, and the walk was not: measured
 // 2026-08-24 over 67 of this repo's own text files, 0.32 MiB, min-of-7 in one
 // process, the walk cost 0.398x an equivalent regex pass against this at
-// 0.139x -- a 2.9x speedup, on a machine under heavy load. An independent
-// measurement the same day on a different corpus agreed on the direction and
-// not the magnitude, putting the walk at 0.78-1.10x and this at 0.0085-0.0162x.
-// Neither is a number to quote: what both agree on is that the walk cost about
-// what it was there to avoid. Q53 is the row that settles the magnitude and
-// retires the design's figure.
+// 0.139x.
+//
+// How much that wins depends on the keywords as much as on the corpus, which
+// is the part to carry away. The walk is O(buffer) and content-independent;
+// this is O(occurrences of the anchor byte). So a keyword opening on a rare
+// letter flatters it -- across thirteen keywords of one length on one corpus,
+// 46.6x for a Z-led keyword against 3.1x for an E-led one, with the walk flat
+// at 1.49-1.56 ms throughout. Realistic credential prefixes land at 6-12x. Q53
+// takes the benchmark properly, over the shipped keyword list, because a
+// synthetic one picks its own answer.
 //
 // The two arms were held to identical results before either was timed, over
 // every file in that corpus and over a 360,000-case differential on random
