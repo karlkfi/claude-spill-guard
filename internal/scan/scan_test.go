@@ -119,6 +119,32 @@ func TestBufferDoesNotPrefilterThePIIFamily(t *testing.T) {
 	}
 }
 
+// A keyword list naming no literal cannot gate, and the direction it fails in
+// is the whole argument. Treating it as a gate skips the rule on every file,
+// and a rule that scanned nothing reports what a rule that scanned everything
+// reports. Measured on `internal/rules` at this commit: the loader refuses a
+// credential rule with an empty list and accepts one holding [""], so the
+// second of these is reachable from a rule file today.
+func TestBufferDoesNotLetAnUngatableKeywordListSilenceARule(t *testing.T) {
+	for _, keywords := range []string{`[""]`, `["", ""]`} {
+		t.Run(keywords, func(t *testing.T) {
+			ruleset := load(t, `{"rules": [{
+				"id": "aws-access-key-id",
+				"family": "credential",
+				"description": "AWS access key ID",
+				"regex": "\\b((?:AKIA|ASIA)[A-Z0-9]{16})\\b",
+				"group": 1,
+				"keywords": `+keywords+`,
+				"enabled": true
+			}]}`)
+			if findings := scan(t, "a", key, ruleset); len(findings) != 1 {
+				t.Errorf("got %d findings, want 1 -- a list naming no literal "+
+					"has to leave the rule ungated, not silenced", len(findings))
+			}
+		})
+	}
+}
+
 func TestBufferSkipsDisabledRules(t *testing.T) {
 	ruleset := load(t, strings.Replace(awsRule, `"enabled": true`, `"enabled": false`, 1))
 	if findings := scan(t, "a", key, ruleset); len(findings) != 0 {

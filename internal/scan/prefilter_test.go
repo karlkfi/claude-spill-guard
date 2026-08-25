@@ -41,8 +41,12 @@ func TestHasKeyword(t *testing.T) {
 		{"nothing resembling the keyword", "package main", aws, false},
 		{"an empty buffer", "", aws, false},
 		{"no keywords at all", "AKIAIOSFODNN7EXAMPLE", nil, false},
-		{"an empty keyword, which gates nothing rather than everything",
-			"package main", []string{""}, false},
+		// An empty keyword names no literal, so it cannot be found. What the
+		// caller does with that is the question, and it is answered in
+		// scan.go's gates() rather than here.
+		{"an empty keyword", "package main", []string{""}, false},
+		{"an empty keyword against a buffer holding anything at all",
+			"AKIAIOSFODNN7EXAMPLE", []string{""}, false},
 		{"a keyword longer than the buffer", "AK", aws, false},
 
 		// A keyword opening on punctuation carries its own boundary, so there

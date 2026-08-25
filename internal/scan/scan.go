@@ -73,10 +73,8 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) ([]Finding, error) {
 
 		// The prefilter gates the credential family and nothing else. A pii
 		// rule is pure-numeric with no literal to anchor on, which is one of
-		// the reasons that family ships disabled. The empty-list guard is for
-		// a Rule built by hand: gating on no keywords at all would drop every
-		// match, and the loader refuses a credential rule that has none.
-		if rule.Family == rules.Credential && len(rule.Keywords) > 0 &&
+		// the reasons that family ships disabled.
+		if rule.Family == rules.Credential && gates(rule.Keywords) &&
 			!hasKeyword(buf, rule.Keywords) {
 			continue
 		}
@@ -110,6 +108,28 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) ([]Finding, error) {
 		}
 	}
 	return findings, nil
+}
+
+// gates reports whether a keyword list can gate anything, which is not the
+// same question as whether it is empty.
+//
+// A list naming no literal -- empty, or holding nothing but empty strings --
+// makes hasKeyword false for every buffer, so treating it as a gate would skip
+// the rule on every file. That is the failure this project is built around: a
+// rule that scanned nothing reports the same clean result as a rule that
+// scanned everything, and no output distinguishes them. So an uninterpretable
+// keyword list runs the regex instead, which costs a full pass and cannot
+// silence anything.
+//
+// Refusing such a list belongs in the loader, where a startup error names the
+// rule. This is the safe reading for a Rule that reaches here anyway.
+func gates(keywords []string) bool {
+	for _, keyword := range keywords {
+		if keyword != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // passes runs every check the rule names against the candidate at buf[lo:hi].
