@@ -33,3 +33,4 @@ tmp/
 
 # Mutation-control scratch
 mutant.log
+restored.log

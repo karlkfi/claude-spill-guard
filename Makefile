@@ -36,12 +36,20 @@ sq = '$(subst ','\'',$(1))'
 HOOKS_DIR := .githooks
 
 # Which of `queue.py lint`'s notes are promoted to failures. The split is the
-# `queue` job's decision, argued in its comments in the workflow: these four
-# are decidable from the files in front of you, so they bind wherever this
-# runs. stale-citation is here because a citation is settled by reading the
-# file it names -- a merge cannot make a correct one wrong, so failing a
-# branch on it costs nothing correct. What counts as drifted is a separate
-# question: `--citation-window` decides that and promotion cannot reach it.
+# `queue` job's decision, argued in its comments in the workflow. The first
+# three are decidable from the files in front of you and bind wherever this
+# runs.
+#
+# stale-citation is here with a cost that is accepted rather than absent, and
+# the workflow states it in full. Two of its four arms are branch-decidable --
+# a fragment has drifted from the line it names or it has not, and no merge
+# changes that. The other two fire on a path that does not resolve and a line
+# past a file's end, both of which a sibling PR can turn green by adding the
+# file. `--strict` has no sub-class granularity, so promoting the drift arms
+# means promoting those too. Q67 is the split.
+#
+# What counts as drifted is a separate question again: `--citation-window`
+# decides that and promotion cannot reach it. Q30 settles the value at 10.
 QUEUE_STRICT := --strict blocked-opener --strict deferred-trigger \
                 --strict empty-store --strict stale-citation
 

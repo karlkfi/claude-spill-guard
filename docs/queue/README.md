@@ -45,18 +45,30 @@ Then write `docs/queue/QN.md` with the frontmatter below and run
 `lint` reports at exit 0 what the files alone cannot settle, so a clean local
 run is not the whole gate. CI promotes five of those notes with `--strict`.
 `blocked-opener`, `deferred-trigger`, `empty-store` and `stale-citation` bind
-on every event: each is settled by the files in front of the checker, and a
-citation in particular either finds its fragment near the line it names or it
-does not, so no merge can turn a correct one stale. How near is a separate
-setting — `--citation-window`, ten lines by default — which promotion does not
-reach, so a clean run means no citation has drifted more than the window rather
-than that citations are exact. `dangling-link` is a note on a pull request and
-a failure on `main`, because a row may link an item a sibling PR is still
-filing — correct in the merged set, red on the branch that carries the link —
-and only the merged tree can tell that from a typo. `make queue MERGED=true`
-runs the trunk's set locally. CI also runs `queue.py claims --strict`, which
-fails an id holding no reservation on the remote at the commit that files the
-row, rather than at the rebase that collides with it.
+on every event. `dangling-link` is a note on a pull request and a failure on
+`main`, because a row may link an item a sibling PR is still filing — correct
+in the merged set, red on the branch that carries the link — and only the
+merged tree can tell that from a typo. `make queue MERGED=true` runs the
+trunk's set locally.
+
+`stale-citation` binds on a branch with one cost worth knowing before you write
+a citation. Two of its four checks are settled by reading the file in front of
+you: the fragment has drifted from the line it names, or the file no longer
+carries it. Two are not — an unresolvable path and a line past the end of a
+file both go green the moment a sibling PR adds that file. So a row citing a
+file another branch is still adding is red here until that branch lands, and
+`make queue` is the pre-commit hook, so it blocks the commit rather than only a
+CI run. Mark such a pointer `exhibit:`, or write it after the sibling merges.
+`--strict` names a class rather than a check, which is why the two travel
+together; [Q67](Q67.md) is the split.
+
+How near a fragment must be is a separate setting again — `--citation-window`,
+ten lines by default — which promotion does not reach, so a clean run means no
+citation has drifted more than the window rather than that citations are exact.
+
+CI also runs `queue.py claims --strict`, which fails an id holding no
+reservation on the remote at the commit that files the row, rather than at the
+rebase that collides with it.
 
 ```yaml
 ---
