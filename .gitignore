@@ -14,7 +14,19 @@ __pycache__/
 
 .DS_Store
 tmp/
-.claude/settings.local.json
+# Claude Code: ignore the .claude/ runtime tree — worktrees/, settings.local.json,
+# session scratch — and allowlist the shareable config back in. `.claude/*` not
+# `.claude/`: git does not descend into a fully ignored directory, so under the
+# latter every negation below would be dead.
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/agents/
+!.claude/skills/
+!.claude/hooks/
+# Credentials stay untracked even nested inside an allowlisted directory, since
+# the last matching pattern wins.
+.claude/**/.credentials.json
 
 # Mutation-control scratch
 mutant.log
