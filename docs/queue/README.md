@@ -61,10 +61,13 @@ and `main` reddens on the merge. No event split reaches that, which is what
 One case costs you something, and it is wider than a missing file. Any pointer
 that describes the merged tree rather than the branch in front of you reddens
 here — a file another branch is adding, a fragment it adds, or a line number
-that is only right once it lands — with no repair available until it does. Mark
-such a pointer `exhibit:`, or write it afterwards. `make queue` is also the pre-commit hook, so it blocks the commit
-rather than only a CI run. `--strict` names a class rather than one of its four
-checks, which is why that case cannot be left behind; [Q67](Q67.md) is the fix.
+that is only right once it lands — with no repair available until it does.
+Mark such a pointer `exhibit:`, or write it afterwards. `make queue` is also
+the pre-commit hook, so it blocks the commit rather than only a CI run.
+
+All four of the class's checks behave that way, because `lint` sees one tree,
+so promoting some and not others would not help. [Q67](Q67.md) is the open
+question about a marker that expires once the sibling lands.
 
 How near a fragment must be is a separate setting again — `--citation-window`,
 ten lines by default — which promotion does not reach, so a clean run means no

@@ -1112,19 +1112,26 @@ jobs:
       # self-inflicted drift on this tree, twenty lines inserted above a
       # citation exact at scripts/gates.py:40: exit 0 before, exit 2 after.
       #
-      # The cost is one arm, and it is taken rather than waived. A row citing a
-      # file a sibling PR *adds* cannot resolve here, so a correct pointer
-      # reddens the branch carrying it with no repair but `exhibit:` or waiting
-      # for the sibling. That is the dangling-link case, and the pre-Q45
-      # comment here said so: "or cite a line in a file that PR is still
-      # adding". `--strict` names a class rather than an arm, so that one
-      # cannot be left behind.
+      # The cost is taken rather than waived, and it is not one arm. Any pointer
+      # describing the merged tree rather than this branch reddens here -- a
+      # file a sibling adds, a fragment it adds, a line number only right once
+      # it lands. All four checks behave alike, as the table above measures,
+      # because lint sees one tree: which check fires depends on how the trees
+      # differ, and which side reddens depends only on which tree the author
+      # wrote against, which the checker cannot know. That is the dangling-link
+      # case, and the pre-Q45 comment here said so: "or cite a line in a file
+      # that PR is still adding".
+      #
+      # So no arm split separates the cost from the benefit, and Q67 is an open
+      # question about an expiring marker rather than a split. `exhibit:` is
+      # the nearest tool and the wrong one: it never expires, so the pointer
+      # stays unchecked after the sibling lands, which is when checking it
+      # would start working.
       #
       # Taken because the failure is loud, names the file, and repairs in a
       # line -- and it fails closed, which is this repository's posture
       # everywhere else. `make queue` is also the pre-commit hook, so it blocks
-      # a commit and not only a CI run. Q67 makes --strict arm-granular
-      # upstream, which is the real fix.
+      # a commit and not only a CI run.
       #
       # Advisory on a pull request and bound on main:
       #   dangling-link     a row may legitimately link an item a sibling PR is

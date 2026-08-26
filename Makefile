@@ -48,10 +48,13 @@ HOOKS_DIR := .githooks
 # front of it, and main reddens on the merge. So this narrows that hole rather
 # than closing it, and MERGED=true on the trunk is still what catches the rest.
 #
-# The cost is one arm. A row citing a file a sibling PR *adds* cannot resolve
-# here, so a correct pointer reddens the branch carrying it with no repair but
-# `exhibit:` or waiting. `--strict` names a class rather than an arm, so that
-# arm cannot be left behind. Q67 is the split.
+# The cost is any pointer describing the merged tree rather than this branch --
+# a file a sibling adds, a fragment it adds, a line number only right once it
+# lands. All four of the class's checks behave alike here, because lint sees
+# one tree: which check fires depends on how the trees differ, and which side
+# reddens depends only on which tree the author wrote against. So no arm split
+# separates the cost from the benefit. Repair is `exhibit:` or waiting. Q67 is
+# the open question about a marker that expires, not a split.
 #
 # What counts as drifted is a separate question again: `--citation-window`
 # decides that and promotion cannot reach it. Q30 settles the value at 10.
