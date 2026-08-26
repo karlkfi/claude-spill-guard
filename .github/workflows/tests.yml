@@ -285,6 +285,10 @@ jobs:
   # the block -- it is changing what the tree can do and leaving the block
   # alone. That is the decay this gate exists for, and the only one a reader
   # cannot see happening.
+  #
+  # The markers are the case neither of those reaches. They are not the table's
+  # content and not the tree, but whether there is a block to compare at all,
+  # and every other step here assumes the pair is present to be read.
   status-drift-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -362,6 +366,63 @@ jobs:
           fi
           if ! grep -q 'usage text does not name it' mutant.log; then
             echo "::error::status-drift failed, but not on the undocumented command" >&2
+            exit 1
+          fi
+
+      # Q55. `block()` returns None when either marker is missing; `--check`
+      # reports it and the rewrite refuses. Nothing drove either path, so the
+      # one branch with no case behind it was the branch deciding whether the
+      # gate inspects anything at all.
+      #
+      # Red is not the assertion, and neither is a non-zero rewrite. The
+      # regression to expect is `block()` handing back a tuple instead of None:
+      # the empty text then fails the table comparison, so the exit code does
+      # not move and only the message does. And a rewrite that dies on
+      # `parts[1]` exits non-zero and writes nothing, exactly as the refusal
+      # does. So both halves grep for the message they are actually about.
+      - name: A README with no marker pair must fail the check and refuse the rewrite
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("README.md")
+          keep = [l for l in p.read_text(encoding="utf-8").splitlines(keepends=True)
+                  if "status:begin" not in l and "status:end" not in l]
+          p.write_text("".join(keep), encoding="utf-8")
+          PY
+          if grep -q 'status:begin' README.md || grep -q 'status:end' README.md; then
+            echo "::error::the mutation changed nothing -- a marker survives, so block() still finds the pair" >&2
+            exit 1
+          fi
+          make status-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::status-drift passed on a README with no status markers" >&2
+            git checkout -- README.md
+            exit 1
+          fi
+          if ! grep -q 'README.md has no `status:begin`' mutant.log; then
+            echo "::error::status-drift failed, but not on the missing markers" >&2
+            git checkout -- README.md
+            exit 1
+          fi
+
+          before=$(git hash-object README.md)
+          make status > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "rewrite exit: $rc"
+          cat mutant.log
+          after=$(git hash-object README.md)
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::make status exited 0 with no block to rewrite" >&2
+            exit 1
+          fi
+          if [ "$before" != "$after" ]; then
+            echo "::error::make status wrote to README.md with no block to put one in" >&2
+            exit 1
+          fi
+          if ! grep -q 'there is nothing to rewrite' mutant.log; then
+            echo "::error::make status refused, but not on the missing markers -- a traceback refuses the same way" >&2
             exit 1
           fi
 
