@@ -301,9 +301,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # The row this flips has to be one whose committed value the tree really
+      # produces, so the direction follows the tree rather than being fixed:
+      # it read `no` until the shipped ruleset existed and reads `yes` now.
+      # The precondition below is what makes that maintainable -- a sed that
+      # stops matching fails the step instead of passing it.
       - name: A hand-edited status table must fail the check
         run: |
-          sed -i 's/| Ship a ruleset | no |/| Ship a ruleset | yes |/' README.md
+          sed -i 's/| Ship a ruleset | yes |/| Ship a ruleset | no |/' README.md
           if git diff --quiet -- README.md; then
             echo "::error::the mutation changed nothing, so this step tested nothing" >&2
             exit 1
@@ -313,7 +318,7 @@ jobs:
           cat mutant.log
           git checkout -- README.md
           if [ "$rc" -eq 0 ]; then
-            echo "::error::status-drift passed on a table that claims a ruleset the tree does not have" >&2
+            echo "::error::status-drift passed on a table that denies a ruleset the tree has" >&2
             exit 1
           fi
           if ! grep -q 'does not match the tree' mutant.log; then
