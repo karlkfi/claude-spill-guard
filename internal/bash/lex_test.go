@@ -49,6 +49,11 @@ func TestLex(t *testing.T) {
 			[]string{"echo", `a"b`}},
 		{"a backslash inside single quotes is literal", `echo 'a\b'`,
 			[]string{"echo", `a\b`}},
+		// A trailing backslash inside single quotes is literal too, so the
+		// quote closes. Treating it as an escape swallows the closing `'`
+		// and the parse errors instead.
+		{"a backslash before the closing single quote", `cat 'a\'`,
+			[]string{"cat", `a\`}},
 		{"an empty quoted word is a token", "echo '' x", []string{"echo", "", "x"}},
 
 		// glueDollarParen: without it `$(` tokenizes as a lone `$`, which
@@ -71,6 +76,9 @@ func TestLexUnbalanced(t *testing.T) {
 		`echo "unclosed`,
 		"echo 'unclosed",
 		`echo trailing\`,
+		// The other direction of the same rule: the `\` is literal, so the
+		// `'` after it closes and the final `'` opens a quote nothing shuts.
+		`echo 'x\'y'`,
 	} {
 		if _, err := lex(in); err == nil {
 			t.Errorf("lex(%q) succeeded, want an error", in)

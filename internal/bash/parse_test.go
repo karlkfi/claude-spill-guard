@@ -53,6 +53,11 @@ func TestStripHeredocBodies(t *testing.T) {
 			"echo $((1<<3))", "echo $((1<<3))"},
 		{"an arithmetic shift outside a substitution either",
 			"((a<<b)); echo hi", "((a<<b)); echo hi"},
+		// The delimiter may be separated from the operator. Without the
+		// space skip the delimiter reads as empty, nothing is armed, and
+		// the body survives into the lexer as phantom operands.
+		{"whitespace between the operator and the delimiter",
+			"cat << EOF\nbody\nEOF\n", "cat << EOF\n"},
 		{"a here-string is a different operator",
 			`grep x <<< "$v"`, `grep x <<< "$v"`},
 		{"a quoted operator is text",
@@ -75,6 +80,13 @@ func TestStripHeredocBodiesCollects(t *testing.T) {
 			"cat <<EOF\nbody\nEOF\n", []string{"body\nEOF\n"}, nil},
 		{"a quoted delimiter's does not",
 			"cat <<'EOF'\nbody\nEOF\n", nil, nil},
+		// The other two spellings of a quoted delimiter. Any quoting is
+		// bash's expansion switch, so each arm has to set it: a body that
+		// comes back expanded is one a substitution scan will read.
+		{"a backslash-quoted delimiter does not either",
+			"cat <<\\EOF\n$(id)\nEOF\n", nil, nil},
+		{"nor a double-quoted one",
+			"cat <<\"EOF\"\n$(id)\nEOF\n", nil, nil},
 		// Bash hands an unterminated body over as data, so it is stripped. A
 		// caller that would rather keep judging the text reads it back out.
 		{"an unterminated body is swallowed and reportable",
