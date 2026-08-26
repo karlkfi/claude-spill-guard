@@ -13,6 +13,9 @@ __pycache__/
 *.out
 
 .DS_Store
+# Unanchored, so a tmp/ a cd-drifted command writes one level down is covered
+# too. No tracked .gitkeep: agent scratch goes in the session scratchpad, so
+# the repo never carries a tmp/ directory of its own.
 tmp/
 # Claude Code: ignore the .claude/ runtime tree — worktrees/, settings.local.json,
 # session scratch — and allowlist the shareable config back in. `.claude/*` not
