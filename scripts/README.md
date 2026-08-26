@@ -23,10 +23,9 @@ nothing executes invites a reading that does not hold.
 path: the twelve entry points run as `$(PYTHON) scripts/x.py` from the Makefile
 and `python3 scripts/x.py` from the workflow, and the library is imported by an
 interpreter already running a different file. So a mode that drifts breaks
-nothing. That is
-the whole difference from [`.githooks/`](../.githooks), where `hooks-check`
-fails until every tracked hook is executable because git skips one that is not
-without saying so, and from
+nothing. That is the whole difference from [`.githooks/`](../.githooks), where
+`hooks-check` fails until every tracked hook is executable because git skips
+one that is not without saying so, and from
 [`run-spill-guard.cmd`](../hooks/run-spill-guard.cmd), whose index mode the
 `launcher` gate asserts because Claude Code invokes it directly and a launcher
 at `644` never fires once.
