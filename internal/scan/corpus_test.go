@@ -25,7 +25,7 @@ const cleanFindings = 0
 
 // Floors, because an empty walk reports the same zero as a clean one.
 const (
-	minCleanFiles   = 10
+	minCleanFiles   = 11
 	minCleanBytes   = 8 << 10
 	minPlantedFiles = 10
 )

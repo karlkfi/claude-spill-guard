@@ -66,8 +66,16 @@ hypothetical: the paragraph you are reading, and the row that filed the
 problem, were both findings until the clause landed. Scanned over every tracked
 file, the rule went from 3 hits to 1, the one being its own planted fixture.
 
-The cost is a header truncated at a buffer boundary, which is a real recall gap
-and a deliberate one: a key without its body is not a key.
+[`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
+is what holds that down. It quotes four PEM headers in prose, so removing the
+clause takes the clean corpus from 0 findings to 4 and reddens the gate. Before
+that file existed the clause could be reverted with every test still passing,
+which is the shape this whole item is about.
+
+The cost is a header truncated at a buffer boundary, and an RFC 1421 encrypted
+key, whose `Proc-Type:` line sits where the body would be — Q69 has the
+measurement. A PKCS#8 encrypted key has base64 straight after the header and
+does match.
 
 **Two rules still have no answer for their own documentation**, and Q60 carries
 both. `jwt`'s 3.5 bits are real and the jwt.io sample token clears them at

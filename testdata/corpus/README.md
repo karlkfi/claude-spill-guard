@@ -44,6 +44,13 @@ was reported 268 times as a Chinese phone number.
 placeholder credentials and published test card numbers, which are what a real
 repository is full of and what a scanner has to be silent about.
 
+`tls-runbook.md` is there for one rule. `private-key-block` requires a base64
+body line after the PEM header, and nothing else in the corpus reaches that
+rule at all — so the clause could be deleted with every test still green. The
+runbook quotes four headers in prose, which turns a deletion into 4 findings
+and a red gate. A rule with no clean file touching it has a guard that cannot
+fire.
+
 ## Adding to it
 
 **A clean file** goes in as it was written, not tidied. Anything it forces you
