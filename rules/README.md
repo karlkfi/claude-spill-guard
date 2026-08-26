@@ -57,12 +57,15 @@ host, so capturing the whole thing would put a floor over text that is the same
 in every match. Capturing the secret tail lets the floor drop
 `.../B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` without dropping a real one.
 
-**Two rules name no validator, and that is a cost rather than an oversight.**
-`slack-webhook-url` is carried by its literals. `private-key-block` matches a
-PEM header, which is a fixed string — an entropy floor over it would be a floor
-over a constant. So a document that quotes `-----BEGIN RSA PRIVATE KEY-----` as
-an example is a false positive this ruleset has no answer for, and the corpus
-does not currently contain one.
+**Nine of the ten carry an entropy floor. The tenth is a cost rather than an
+oversight.** `private-key-block` matches a PEM header, which is a fixed string,
+and a floor over a constant is not a check. So a document quoting
+`-----BEGIN RSA PRIVATE KEY-----` as an example is a false positive this
+ruleset has no answer for, and the corpus does not contain one.
+
+`jwt` is the same problem wearing a floor. Its 3.5 bits are real and a
+published sample token clears them, because a sample JWT and a live one differ
+only in a signing key the scanner cannot see. Q60 carries both.
 
 ## The numeric PII family ships disabled
 
