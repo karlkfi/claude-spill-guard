@@ -36,15 +36,20 @@ sq = '$(subst ','\'',$(1))'
 HOOKS_DIR := .githooks
 
 # Which of `queue.py lint`'s notes are promoted to failures. The split is the
-# `queue` job's decision, argued in its comments in the workflow: these three
-# are reachable by no sibling branch, so they bind wherever this runs.
-QUEUE_STRICT := --strict blocked-opener --strict deferred-trigger --strict empty-store
+# `queue` job's decision, argued in its comments in the workflow: these four
+# are decidable from the files in front of you, so they bind wherever this
+# runs. stale-citation is here because a citation is settled by reading the
+# file it names -- a merge cannot make a correct one wrong, so failing a
+# branch on it costs nothing correct. What counts as drifted is a separate
+# question: `--citation-window` decides that and promotion cannot reach it.
+QUEUE_STRICT := --strict blocked-opener --strict deferred-trigger \
+                --strict empty-store --strict stale-citation
 
-# These two bind only where the merged tree can answer them. A row may
-# legitimately link an item a sibling PR is still filing, or cite a line in a
-# file that PR is still adding: both branches are correct and only the one
-# carrying the pointer is red. MERGED=true on a push to main.
-QUEUE_STRICT_MERGED := --strict dangling-link --strict stale-citation
+# The one class the merged tree has to answer. A row may legitimately link an
+# item a sibling PR is still filing: both branches are correct and only the one
+# carrying the link is red. MERGED=true on a push to main, and `make queue
+# MERGED=true` is how a local run sees what the trunk sees.
+QUEUE_STRICT_MERGED := --strict dangling-link
 
 MERGED ?= false
 queue_strict = $(QUEUE_STRICT) $(if $(filter true,$(MERGED)),$(QUEUE_STRICT_MERGED))

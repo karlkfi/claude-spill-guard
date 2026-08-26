@@ -44,14 +44,19 @@ Then write `docs/queue/QN.md` with the frontmatter below and run
 
 `lint` reports at exit 0 what the files alone cannot settle, so a clean local
 run is not the whole gate. CI promotes five of those notes with `--strict`.
-`blocked-opener`, `deferred-trigger` and `empty-store` bind on every event:
-nothing another branch can do produces them. `dangling-link` and
-`stale-citation` are notes on a pull request and failures on `main`, because a
-row may point at an item a sibling PR is still filing — correct in the merged
-set, red on the branch that carries the pointer — and only the merged tree can
-tell that from a typo. CI also runs `queue.py claims --strict`, which fails an
-id holding no reservation on the remote at the commit that files the row,
-rather than at the rebase that collides with it.
+`blocked-opener`, `deferred-trigger`, `empty-store` and `stale-citation` bind
+on every event: each is settled by the files in front of the checker, and a
+citation in particular either finds its fragment near the line it names or it
+does not, so no merge can turn a correct one stale. How near is a separate
+setting — `--citation-window`, ten lines by default — which promotion does not
+reach, so a clean run means no citation has drifted more than the window rather
+than that citations are exact. `dangling-link` is a note on a pull request and
+a failure on `main`, because a row may link an item a sibling PR is still
+filing — correct in the merged set, red on the branch that carries the link —
+and only the merged tree can tell that from a typo. `make queue MERGED=true`
+runs the trunk's set locally. CI also runs `queue.py claims --strict`, which
+fails an id holding no reservation on the remote at the commit that files the
+row, rather than at the rebase that collides with it.
 
 ```yaml
 ---

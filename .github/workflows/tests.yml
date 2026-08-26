@@ -1072,8 +1072,8 @@ jobs:
       # exit 0. --strict promotes one named class, so the split below is the
       # decision here -- wiring the linter in as-is would gate close to nothing.
       #
-      # Bound on every event, because no state a sibling branch can reach
-      # produces them:
+      # Bound on every event, because the files in front of the checker settle
+      # them:
       #   blocked-opener    a row saying `status: blocked` with nothing saying
       #                     what it waits on. This is the frontmatter flip left
       #                     half-applied -- the completion took the blocker line
@@ -1082,20 +1082,28 @@ jobs:
       #   empty-store       a store that loaded nothing. Every other assertion
       #                     here passes over zero items, so this is what stops
       #                     the job reading green on a store it never found.
+      #   stale-citation    a `file.ext:N` pointer whose fragment is not near
+      #                     the line it names. The fragment is either there or
+      #                     it is not, so no merge can turn a correct citation
+      #                     into a stale one and failing a branch on it costs
+      #                     nothing correct. Bound here since Q45: before that
+      #                     it sat in the set below, which made every pull
+      #                     request strictly weaker than the trunk on a class
+      #                     the branch could have settled itself.
       #
       # Advisory on a pull request and bound on main:
       #   dangling-link     a row may legitimately link an item a sibling PR is
-      #   stale-citation    still filing, or cite a line in a file that PR is
-      #                     still adding. Both PRs are correct and the merged
-      #                     set is correct; only the branch carrying the pointer
+      #                     still filing. Both PRs are correct and the merged
+      #                     set is correct; only the branch carrying the link
       #                     is red, and only until the sibling lands. The merged
       #                     tree holds both sides, so main is the first place
       #                     the answer is not a guess -- one merge later than a
       #                     PR gate and the earliest point it can be right.
       #
-      # MERGED is what selects between the two sets. The lists themselves live
-      # in the Makefile, beside the target that reads them, so the pre-commit
-      # hook and this job promote the same classes.
+      # MERGED is what selects between the two sets, and it now names one class
+      # rather than two. The lists themselves live in the Makefile, beside the
+      # target that reads them, so the pre-commit hook and this job promote the
+      # same classes.
       #
       # The other two assertions `make queue` runs:
       #
@@ -1217,12 +1225,11 @@ jobs:
             exit 1
           fi
 
-      # The other two classes the queue job promotes. Neither is load-bearing
-      # for a completion, and both are here for the same reason as the rest: a
-      # class promoted and never shown failing is a claim. stale-citation in
-      # particular fires on nothing in the store today -- there are no
-      # `file:line` pointers in it yet -- so this is the only evidence that
-      # promotion does anything at all.
+      # Two more classes the queue job promotes. Neither is load-bearing for a
+      # completion, and both are here for the same reason as the rest: a class
+      # promoted and never shown failing is a claim. This drives the linter
+      # directly, so it shows the class can fail and says nothing about which
+      # events promote it; the step after it is what reads the gate.
       - name: A parked row with no trigger, and a citation past a file's end
         run: |
           python3 - <<'PY'
@@ -1268,6 +1275,52 @@ jobs:
           fi
           if ! grep -q 'past the end of a' mutant.log; then
             echo "::error::lint failed, but not on the citation" >&2
+            exit 1
+          fi
+
+      # Q45. Every control above drives `queue.py lint --strict <class>` by
+      # hand, which shows a class can fail and cannot show which events promote
+      # it -- exactly the gap Q45 was filed against, where the trunk bound
+      # stale-citation and no pull request did. So this one reads the gate:
+      # `make queue` with MERGED unset is the pull-request invocation, and the
+      # claim is that it now fails.
+      #
+      # MERGED=true first, on the same mutated tree, as the precondition. That
+      # arm bound stale-citation before Q45 and binds it after, so it fails for
+      # a citation that is genuinely stale and passes for a mutation that did
+      # not land -- which is what stops the arm below reading green against a
+      # tree carrying no defect. Then the restore is asserted green, so the red
+      # in between is the citation rather than anything ambient.
+      - name: A stale citation must fail the gate on a pull request, not only on main
+        run: |
+          cited=$(ls docs/queue/Q*.md | head -1)
+          printf '\n\nMeasured at `scripts/check-queue-index.py:1:NO_SUCH_TOKEN`.\n' >> "$cited"
+          echo "planted a citation $cited names and check-queue-index.py does not carry"
+          make queue MERGED=true > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "--- MERGED=true -- make queue exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the mutation did not land: main's own set passed over it" >&2
+            git checkout -- docs/queue
+            exit 1
+          fi
+          make queue > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "--- MERGED unset -- make queue exit: $rc"
+          cat mutant.log
+          git checkout -- docs/queue
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the pull-request gate passed over a stale citation" >&2
+            exit 1
+          fi
+          if ! grep -q 'no longer carries' mutant.log; then
+            echo "::error::the gate failed, but not on the citation" >&2
+            exit 1
+          fi
+          make queue > restored.log 2>&1 && rc=0 || rc=$?
+          echo "--- restored -- make queue exit: $rc"
+          cat restored.log
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the gate is red on the restored tree, so the red above was not the citation" >&2
             exit 1
           fi
 
