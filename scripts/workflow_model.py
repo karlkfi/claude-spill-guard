@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Read the workflow files through the parser in tools/, as Python data.
 
 Two gates need to know what a workflow says: `action-pins` checks every `uses:`
