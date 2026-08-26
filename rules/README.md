@@ -33,7 +33,7 @@ carried by a planted fixture in
 | `stripe-live-secret-key` | `sk_live_` `rk_live_` | live keys only — see below |
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
-| `private-key-block` | `PRIVATE KEY` | the whole match is the PEM header |
+| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header |
 | `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, floor 3.5 |
 
 **The entropy floors are what make a placeholder quiet.** A repository holds
@@ -57,15 +57,24 @@ host, so capturing the whole thing would put a floor over text that is the same
 in every match. Capturing the secret tail lets the floor drop
 `.../B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` without dropping a real one.
 
-**Nine of the ten carry an entropy floor. The tenth is a cost rather than an
-oversight.** `private-key-block` matches a PEM header, which is a fixed string,
-and a floor over a constant is not a check. So a document quoting
-`-----BEGIN RSA PRIVATE KEY-----` as an example is a false positive this
-ruleset has no answer for, and the corpus does not contain one.
+**Nine of the ten carry an entropy floor. The tenth is structural instead.**
+`private-key-block` matches a PEM header, which is a fixed string, and a floor
+over a constant is not a check — so the rule requires one base64 body line
+after the header. Prose quoting `-----BEGIN RSA PRIVATE KEY-----` to explain
+what one looks like carries no such line and is not reported. That was not
+hypothetical: the paragraph you are reading, and the row that filed the
+problem, were both findings until the clause landed. Scanned over every tracked
+file, the rule went from 3 hits to 1, the one being its own planted fixture.
 
-`jwt` is the same problem wearing a floor. Its 3.5 bits are real and a
-published sample token clears them, because a sample JWT and a live one differ
-only in a signing key the scanner cannot see. Q60 carries both.
+The cost is a header truncated at a buffer boundary, which is a real recall gap
+and a deliberate one: a key without its body is not a key.
+
+**Two rules still have no answer for their own documentation**, and Q60 carries
+both. `jwt`'s 3.5 bits are real and the jwt.io sample token clears them at
+5.4441, because a sample JWT and a live one differ only in a signing key the
+scanner cannot see. `aws-access-key-id` is the same shape from the other
+direction: AWS's own published example reaches 3.6842 and passes the floor by
+design, which is what makes the floor work on placeholders and useless here.
 
 ## The numeric PII family ships disabled
 
