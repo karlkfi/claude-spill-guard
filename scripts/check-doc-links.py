@@ -23,7 +23,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # [text](target) -- not preceded by `!` so images are included the same way,
 # and not inside a fenced code block or an inline span, both stripped first.
 LINK = re.compile(r"(?<!\\)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
-FENCE = re.compile(r"^\s*(```|~~~)")
+# A fence marker: its indent, the run, and whatever follows. A block closes only
+# on a run of its own character, at least as long, with nothing after it, which
+# is how a doc shows one fence inside another.
+FENCE = re.compile(r"^( *)(`{3,}|~{3,})(.*)$")
 # A run of backticks, its content, and a run of the same length. A row quoting
 # a broken link as an exhibit is the case this exists for.
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
@@ -62,24 +65,28 @@ def prose_lines(text):
     lines = text.splitlines()
     start = frontmatter_end(lines)
 
-    in_fence = False
+    fence = None          # the open block's marker, its length, and its column
     items = []            # where the content of each open list item starts
     para, para_col = [], 0
 
     for n, line in enumerate(lines[start:], start + 1):
-        if FENCE.match(line):
-            in_fence = not in_fence
-            para = []
-            continue
-        if in_fence:
+        expanded = line.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip(" "))
+
+        if fence:
+            marker, width, column = fence
+            close = FENCE.match(expanded)
+            if (close and indent < column + 4
+                    and close.group(2)[0] == marker
+                    and len(close.group(2)) >= width
+                    and not close.group(3).strip()):
+                fence = None
             continue
         if not line.strip():
             para = []
             yield n, line, None
             continue
 
-        expanded = line.expandtabs(4)
-        indent = len(expanded) - len(expanded.lstrip(" "))
         item = LIST_ITEM.match(expanded)
 
         # A line that has dedented out of the open items closes them, and so
@@ -88,6 +95,15 @@ def prose_lines(text):
             while items and indent < items[-1]:
                 items.pop()
         content = items[-1] if items else 0
+
+        # A fence opens within three spaces of its container's content column.
+        # Four past it is the indented code block the marker is being shown
+        # inside, and reading it as an opener skips every link to the next one.
+        opener = FENCE.match(expanded)
+        if opener and indent < content + 4:
+            fence = (opener.group(2)[0], len(opener.group(2)), content)
+            para = []
+            continue
 
         if para:
             # An underline belongs to its paragraph only from inside the same
