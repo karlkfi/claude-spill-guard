@@ -10,9 +10,13 @@ Everything below is the part a person does.
 
 ## No file carries the version
 
-The binary reports whatever the tag said. `-ldflags -X main.version=<tag>` sets
-it at build time, and `cmd/spill-guard/main.go` carries `dev` as the default, so
-a build from a working tree says `dev` and a release says `v1.2.3`. There is no
+The binary reports whatever the tag said, with the leading `v` stripped.
+`cmd/spill-guard/main.go` carries `dev` as the default and `-ldflags -X
+main.version={{ .Version }}` overrides it at build time, so a working tree says
+`dev` and the tag `v1.2.3` produces a binary reporting `1.2.3`. GoReleaser's
+`.Version` is the tag without the `v`; `.Tag` is the raw tag. The archive name
+carries the same stripped form, so the binary and the file it ships in agree —
+measured on a real annotated tag, not read off the template docs. There is no
 version to bump in a manifest and no bump commit, which is why this document
 does not describe a direct-to-`main` exception for one — sibling repos need it
 and this one has nothing for it to apply to.

@@ -26,6 +26,13 @@ exactly what it would have to notice. Every way this can come back empty is an
 exit rather than a shorter list.
 
 Usage: check-release-artifacts.py [--dist DIR] [--signed]
+       check-release-artifacts.py --count-targets
+
+`--count-targets` prints how many targets ship and exits, so a caller that
+needs the number reads it from the same import rather than writing it down. The
+release workflow's provenance loop is that caller: a literal there would be a
+second copy of a list this file exists to keep single, and it would be wrong on
+the release that added a target rather than on a pull request.
 
 `--signed` additionally requires the cosign signature and certificate beside
 the checksums file. The pull-request run passes `--skip=sign` and omits this:
@@ -188,6 +195,10 @@ def check(dist, signed, shipped):
 
 
 def main(argv):
+    if argv[1:] == ["--count-targets"]:
+        print(len(targets()))
+        return 0
+
     dist, signed = ROOT / "dist", False
     rest = argv[1:]
     while rest:
@@ -197,7 +208,7 @@ def main(argv):
             dist, rest = Path(rest[1]), rest[2:]
         else:
             sys.exit(f"release-artifacts: unknown argument {rest[0]!r}; pass "
-                     f"--dist DIR, --signed, or nothing")
+                     f"--dist DIR, --signed, --count-targets, or nothing")
 
     shipped = targets()
     findings = check(dist, signed, shipped)

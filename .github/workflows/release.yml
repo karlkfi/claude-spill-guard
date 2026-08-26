@@ -15,6 +15,12 @@ name: release
 # two tools scripts/check-tools.sh reports in its `release` tier, and a gate
 # that needs a tool `make doctor` calls optional is a gate that fails on a
 # fresh clone. See docs/development/release-process.md.
+#
+# One consequence worth naming rather than discovering: `gate-drift` reads
+# tests.yml alone (scripts/gates.py pins it), so nothing checks this file's job
+# list against anything. A job deleted from here goes unnoticed by the check
+# that exists to catch exactly that, and Q59 covers the mutation-control half
+# rather than this one.
 on:
   push:
     tags:
@@ -244,6 +250,16 @@ jobs:
             --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             published/checksums.txt
+          # How many archives a release publishes, read from the same import
+          # check-release-artifacts.py uses rather than written down here. A
+          # literal is the defect this PR removed from
+          # action-pins-mutation-control, and it would be worse in this block:
+          # it is only reachable on a tag push, after the upload.
+          expected=$(python3 scripts/check-release-artifacts.py --count-targets)
+          if [ -z "$expected" ] || [ "$expected" -lt 1 ]; then
+            echo "::error::could not read the shipped-target count; refusing to verify against an unknown number" >&2
+            exit 1
+          fi
           cd published
           sha256sum -c checksums.txt
           # nullglob, so a pattern that matched nothing expands to nothing
@@ -258,8 +274,8 @@ jobs:
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
             verified=$((verified + 1))
           done
-          if [ "$verified" -ne 5 ]; then
-            echo "::error::verified provenance for $verified archives, and a release publishes 5" >&2
+          if [ "$verified" -ne "$expected" ]; then
+            echo "::error::verified provenance for $verified archives, and a release publishes $expected" >&2
             exit 1
           fi
 
