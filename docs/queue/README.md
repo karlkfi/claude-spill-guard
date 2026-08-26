@@ -58,10 +58,11 @@ green, because the pointer is still correct against the tree in front of you,
 and `main` reddens on the merge. No event split reaches that, which is what
 `MERGED=true` on the trunk is for.
 
-One case costs you something. A row citing a file another branch is still
-*adding* cannot resolve here, so a correct pointer reddens your branch with no
-repair available until that branch lands — mark it `exhibit:`, or write it
-afterwards. `make queue` is also the pre-commit hook, so it blocks the commit
+One case costs you something, and it is wider than a missing file. Any pointer
+that describes the merged tree rather than the branch in front of you reddens
+here — a file another branch is adding, a fragment it adds, or a line number
+that is only right once it lands — with no repair available until it does. Mark
+such a pointer `exhibit:`, or write it afterwards. `make queue` is also the pre-commit hook, so it blocks the commit
 rather than only a CI run. `--strict` names a class rather than one of its four
 checks, which is why that case cannot be left behind; [Q67](Q67.md) is the fix.
 
