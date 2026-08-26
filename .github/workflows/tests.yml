@@ -1913,8 +1913,15 @@ jobs:
         run: |
           make action-pins > base.log 2>&1
           base=$(sed -n 's/^action-pins: \([0-9][0-9]*\) .*/\1/p' base.log)
-          if [ -z "$base" ]; then
-            echo "::error::could not read the baseline count from action-pins" >&2
+          # The file count is read rather than written down, for the reason the
+          # reference count already was: this step adds one workflow to
+          # whatever the tree holds, and a literal is a second copy of a number
+          # the repository is free to change. It was `2`, and the release
+          # pipeline made it wrong -- the gate reported `across 3 workflow(s)`,
+          # correctly, and the control failed on its own arithmetic.
+          basefiles=$(sed -n 's/^action-pins: [0-9][0-9]* .*across \([0-9][0-9]*\) workflow(s).*/\1/p' base.log)
+          if [ -z "$base" ] || [ -z "$basefiles" ]; then
+            echo "::error::could not read the baseline counts from action-pins" >&2
             exit 1
           fi
           cat > .github/workflows/mutant.yml <<'MUTANT'
@@ -1936,7 +1943,7 @@ jobs:
             echo '::error::action-pins flagged a uses: that is not a mapping key' >&2
             exit 1
           fi
-          if ! grep -q 'across 2 workflow(s)' mutant.log; then
+          if ! grep -q "across $((basefiles + 1)) workflow(s)" mutant.log; then
             echo "::error::action-pins did not read the second workflow at all" >&2
             exit 1
           fi
