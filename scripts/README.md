@@ -19,9 +19,11 @@ The rule is that a file advertises exactly the way it can be run. A shebang on a
 file at `644` names an interpreter the mode refuses, and the bit on a file
 nothing executes invites a reading that does not hold.
 
-**No gate asserts any of this, on purpose.** All thirteen are invoked through
-an interpreter — `$(PYTHON) scripts/x.py` from the Makefile, `python3
-scripts/x.py` from the workflow — so a mode that drifts breaks nothing. That is
+**No gate asserts any of this, on purpose.** None of the thirteen is invoked by
+path: the twelve entry points run as `$(PYTHON) scripts/x.py` from the Makefile
+and `python3 scripts/x.py` from the workflow, and the library is imported by an
+interpreter already running a different file. So a mode that drifts breaks
+nothing. That is
 the whole difference from [`.githooks/`](../.githooks), where `hooks-check`
 fails until every tracked hook is executable because git skips one that is not
 without saying so, and from
