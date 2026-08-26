@@ -1128,12 +1128,19 @@ jobs:
       # this step passes while testing nothing. Measured 2026-08-25 at 5e47f92,
       # where the paired fixture reported the link and the lone one did not.
       #
-      # So the precondition counts fence-matching lines across the append. An
-      # earlier spelling grepped for this fixture's own `\`\`\`bash`, which pins the
-      # info string rather than the count: a second indented marker tagged
-      # anything else satisfies it and the step goes vacuous. Driven in all four
-      # cells -- shipped fixture red on the pre-fix checker and green on the
-      # fixed one, paired fixture green on both.
+      # So the precondition counts the fence-matching lines the append adds,
+      # which pins the parity rather than one marker's spelling. An earlier
+      # version grepped this fixture's own ```bash: a second indented marker
+      # tagged anything else satisfied it, balanced the flip, and the step went
+      # green with the bug present. Against the pre-fix checker the shipped
+      # fixture is red on the marker and the paired one red on the precondition;
+      # under that earlier spelling the paired fixture exited 0.
+      #
+      # Parity is not ordering, and ordering is left unpinned: the leak needs the
+      # link below the marker, so a fixture with it moved above adds one marker
+      # and exits 0 with the bug present. Pinning that means finding the marker
+      # to compare line numbers, which is the spelling pin again. Re-drive the
+      # inverted arm when this fixture changes.
       - name: A link after an indented fence marker must still fail the gate
         run: |
           before=$(grep -cE '^[[:space:]]*(```|~~~)' README.md)
