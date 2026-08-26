@@ -1,0 +1,112 @@
+# What a tag publishes: five archives, a checksums file, and a signature over it.
+#
+# GoReleaser is a release-time tool. It never enters the binary, so it does not
+# touch the zero-dependency property, which is about the shipped import graph
+# and an empty `require` block in the root go.mod. It is also not pinned in
+# tools/: scripts/check-tools.sh already carries `goreleaser` and `cosign` in
+# its `release` tier, probed with `command -v`, and that is the tier this repo
+# reserves for a tool a contributor fixing a bug has no reason to install.
+# tools/go.mod is for what runs on every gate.
+#
+# The version that runs is pinned in .github/workflows/release.yml, and the
+# same version installed locally is what `docs/development/release-process.md`
+# tells a maintainer to use. `goreleaser check` validates this file against the
+# schema of whichever binary reads it, so a config that drifted ahead of the
+# pinned version fails on a pull request rather than on a tag.
+version: 2
+
+project_name: spill-guard
+
+builds:
+  - id: spill-guard
+    main: ./cmd/spill-guard
+    binary: spill-guard
+
+    # The same three assertions scripts/cross-compile.py makes, for the same
+    # reasons. CGO_ENABLED=0 is the load-bearing one: cgo is how a "static
+    # binary, empty supply chain" becomes one linked against whatever the build
+    # host had installed.
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+    # Two builds of one commit differ only in the embedded build time unless
+    # something pins it. The commit's own timestamp is the one value every
+    # builder of that commit agrees on.
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+    # The five shipped targets, as the cross product minus windows/arm64.
+    # scripts/check-release-artifacts.py asserts this resolves to exactly the
+    # set in scripts/cross-compile.py -- a matrix and an explicit list are easy
+    # to drift apart, and the direction that fails silently is this one
+    # publishing fewer archives than the gate builds.
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: spill-guard
+    ids:
+      - spill-guard
+
+    # The install script (Q12), the Homebrew formula (Q13) and the Scoop
+    # manifest (Q14) each construct this name from an OS and an architecture,
+    # so it is an interface rather than a cosmetic choice. Changing it breaks
+    # every channel at once; check-release-artifacts.py pins the shape.
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+      - PRIVACY.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# Keyless, so there is no key to store, rotate, or lose. The identity is the
+# workflow's own OIDC token, which is why the verification step in
+# release.yml pins --certificate-identity to this repository's release.yml at
+# the tag being cut: a signature minted from any other ref must not verify.
+#
+# `.sig` and `.pem` are not arbitrary. OpenSSF Scorecard's Signed-Releases
+# check reads the release's asset names and scores a `*.sig` -- a correctly
+# signed release whose signature is named something else scores zero.
+signs:
+  - id: checksums
+    cmd: cosign
+    artifacts: checksum
+    certificate: '${artifact}.pem'
+    output: true
+    args:
+      - sign-blob
+      - '--output-certificate=${certificate}'
+      - '--output-signature=${signature}'
+      - '${artifact}'
+      - '--yes'
+
+# GoReleaser generates nothing here. The body comes from
+# docs/releases/<tag>.md, passed with --release-notes, and release.yml refuses
+# to run without that file -- the invariant docs/releases/README.md states and
+# nothing used to enforce.
+changelog:
+  disable: true
+
+release:
+  draft: true
+  prerelease: auto

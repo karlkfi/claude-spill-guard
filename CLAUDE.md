@@ -16,6 +16,7 @@ measured.
 | `docs/design/distribution.md` | The launcher, signed release assets, install channels. |
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
+| `docs/development/release-process.md` | Cutting a release: what a person does, and what the tag does. |
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
 | `internal/validate/` | The six validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
@@ -25,6 +26,7 @@ measured.
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
 | `hooks/` | Not those. The launcher Claude Code invokes, which resolves the binary and denies when it cannot find one. |
+| `.goreleaser.yaml` | What a tag publishes. Release-time only, and never in the shipped module. |
 
 `internal/hook/`, plus `rules/`, is proposed in the design doc and does
 not exist — including `rules/spill-guard.json` itself, which the loader reads
