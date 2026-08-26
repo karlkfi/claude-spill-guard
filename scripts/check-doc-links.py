@@ -65,7 +65,7 @@ def prose_lines(text):
     lines = text.splitlines()
     start = frontmatter_end(lines)
 
-    fence = None          # the open block's marker, its length, and its column
+    fence = None          # marker, run length, container's content column
     items = []            # where the content of each open list item starts
     para, para_col = [], 0
 
