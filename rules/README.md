@@ -73,9 +73,12 @@ that file existed the clause could be reverted with every test still passing,
 which is the shape this whole item is about.
 
 The cost is a header truncated at a buffer boundary, and an RFC 1421 encrypted
-key, whose `Proc-Type:` line sits where the body would be — Q69 has the
-measurement. A PKCS#8 encrypted key has base64 straight after the header and
-does match.
+key, whose `Proc-Type:` line sits where the body would be. A PKCS#8 encrypted
+key has base64 straight after the header and does match. Two arms of the
+alternation, `SSH2 ENCRYPTED ` and `PGP `, reach nothing their toolchains
+actually emit and have been dead since the rule was written. Q69 has all three
+with the measurements, and reading it before trusting this rule's coverage is
+the point of it.
 
 **Two rules still have no answer for their own documentation**, and Q60 carries
 both. `jwt`'s 3.5 bits are real and the jwt.io sample token clears them at
