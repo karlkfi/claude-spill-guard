@@ -1087,36 +1087,44 @@ jobs:
       #                     accepted rather than absent -- read the next block
       #                     before changing this.
       #
-      # stale-citation is four checks under one name, and they do not split the
-      # way this job's two sets do.
+      # stale-citation is four checks under one name, and the axis that decides
+      # where a defect surfaces is not which arm fired -- it is who moved the
+      # line. That cuts across all four.
       #
-      #   branch-decidable  the fragment has drifted from the line it names, or
-      #                     the file no longer carries it at all. Both are
-      #                     settled by reading the file on the branch, and no
-      #                     merge turns a correct one stale. These are what Q45
-      #                     was filed to promote: leaving them merged-only let
-      #                     a branch go green and redden main on the commit
-      #                     that landed it.
+      #   your own diff    the citation was correct when written and an edit in
+      #                    the same PR moved it. The branch goes red, you
+      #                    re-point it. This is what promotion buys, and it is
+      #                    the whole of what promotion buys.
       #
-      #   merge-decidable   the path does not resolve, or the line is past the
-      #                     end of the file. A sibling PR that adds the file,
-      #                     or extends it, turns either green -- so the branch
-      #                     carrying the pointer is red while the merged set is
-      #                     correct. That is the dangling-link case exactly,
-      #                     and the pre-Q45 comment here said so: "or cite a
-      #                     line in a file that PR is still adding".
+      #   a sibling's      the branch stays green, because the pointer is still
+      #                    correct against the tree in front of it, and main
+      #                    reddens on the merge. Every arm behaves this way and
+      #                    no event split reaches it. So Q45 narrows the
+      #                    branch-green/main-red hole rather than closing it,
+      #                    and MERGED=true on the trunk is what catches the
+      #                    rest -- one merge late, by construction.
       #
-      # `--strict` names a class, not an arm, so promoting the first pair
-      # promotes the second. Measured 2026-08-26 on this branch, citing a file
-      # only a sibling adds: `make queue` exits 2 here, exited 0 with a note
-      # before Q45, and exits 0 again once the sibling's file is present.
+      # Measured 2026-08-26 against live PR #28, which edits
+      # scripts/check-doc-links.py. Citing a fragment only #28's version
+      # carries: exit 2 here, exit 0 with its file present. Citing the fragment
+      # at #28's line number: exit 2 here with "now at line 96", exit 0 with
+      # its file present. Citing it at this branch's number: the reverse. And
+      # self-inflicted drift on this tree, twenty lines inserted above a
+      # citation exact at scripts/gates.py:40: exit 0 before, exit 2 after.
       #
-      # The cost is taken rather than waived. It is loud, it names the file,
-      # and it is one line to repair or to mark `exhibit:` -- and it fails
-      # closed, which is this repository's posture everywhere else. The
-      # alternative is the defect Q45 removed. `make queue` is also the
-      # pre-commit hook, so this blocks a commit and not only a CI run.
-      # Q67 splits the class upstream, which is the real fix.
+      # The cost is one arm, and it is taken rather than waived. A row citing a
+      # file a sibling PR *adds* cannot resolve here, so a correct pointer
+      # reddens the branch carrying it with no repair but `exhibit:` or waiting
+      # for the sibling. That is the dangling-link case, and the pre-Q45
+      # comment here said so: "or cite a line in a file that PR is still
+      # adding". `--strict` names a class rather than an arm, so that one
+      # cannot be left behind.
+      #
+      # Taken because the failure is loud, names the file, and repairs in a
+      # line -- and it fails closed, which is this repository's posture
+      # everywhere else. `make queue` is also the pre-commit hook, so it blocks
+      # a commit and not only a CI run. Q67 makes --strict arm-granular
+      # upstream, which is the real fix.
       #
       # Advisory on a pull request and bound on main:
       #   dangling-link     a row may legitimately link an item a sibling PR is

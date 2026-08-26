@@ -51,16 +51,19 @@ in the merged set, red on the branch that carries the link — and only the
 merged tree can tell that from a typo. `make queue MERGED=true` runs the
 trunk's set locally.
 
-`stale-citation` binds on a branch with one cost worth knowing before you write
-a citation. Two of its four checks are settled by reading the file in front of
-you: the fragment has drifted from the line it names, or the file no longer
-carries it. Two are not — an unresolvable path and a line past the end of a
-file both go green the moment a sibling PR adds that file. So a row citing a
-file another branch is still adding is red here until that branch lands, and
-`make queue` is the pre-commit hook, so it blocks the commit rather than only a
-CI run. Mark such a pointer `exhibit:`, or write it after the sibling merges.
-`--strict` names a class rather than a check, which is why the two travel
-together; [Q67](Q67.md) is the split.
+`stale-citation` binds on a branch, and what it catches there is a citation
+your own diff invalidated — correct when you wrote it, moved by an edit in the
+same PR. A citation a *sibling* moves is a different matter: your branch stays
+green, because the pointer is still correct against the tree in front of you,
+and `main` reddens on the merge. No event split reaches that, which is what
+`MERGED=true` on the trunk is for.
+
+One case costs you something. A row citing a file another branch is still
+*adding* cannot resolve here, so a correct pointer reddens your branch with no
+repair available until that branch lands — mark it `exhibit:`, or write it
+afterwards. `make queue` is also the pre-commit hook, so it blocks the commit
+rather than only a CI run. `--strict` names a class rather than one of its four
+checks, which is why that case cannot be left behind; [Q67](Q67.md) is the fix.
 
 How near a fragment must be is a separate setting again — `--citation-window`,
 ten lines by default — which promotion does not reach, so a clean run means no

@@ -41,12 +41,17 @@ HOOKS_DIR := .githooks
 # runs.
 #
 # stale-citation is here with a cost that is accepted rather than absent, and
-# the workflow states it in full. Two of its four arms are branch-decidable --
-# a fragment has drifted from the line it names or it has not, and no merge
-# changes that. The other two fire on a path that does not resolve and a line
-# past a file's end, both of which a sibling PR can turn green by adding the
-# file. `--strict` has no sub-class granularity, so promoting the drift arms
-# means promoting those too. Q67 is the split.
+# the workflow states it in full. What it catches on a branch is a citation
+# the branch's own diff invalidated -- correct when written, moved by an edit
+# in the same PR. What no event split reaches is a citation a *sibling* moved:
+# the branch stays green, because the pointer is correct against the tree in
+# front of it, and main reddens on the merge. So this narrows that hole rather
+# than closing it, and MERGED=true on the trunk is still what catches the rest.
+#
+# The cost is one arm. A row citing a file a sibling PR *adds* cannot resolve
+# here, so a correct pointer reddens the branch carrying it with no repair but
+# `exhibit:` or waiting. `--strict` names a class rather than an arm, so that
+# arm cannot be left behind. Q67 is the split.
 #
 # What counts as drifted is a separate question again: `--citation-window`
 # decides that and promotion cannot reach it. Q30 settles the value at 10.

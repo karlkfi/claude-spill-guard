@@ -239,8 +239,10 @@ edits in isolation from code. A clean bare
 `queue.py lint` is not the CI verdict — it reports several classes as notes at
 exit 0. `make queue` promotes four of them; the `queue` job adds
 `dangling-link` on a push to `main`, and `make queue MERGED=true` is the only
-local command that runs that stronger set. `stale-citation` is promoted whole,
-so a row citing a file a sibling PR is still adding is red on your branch until
+local command that runs that stronger set. `stale-citation` catches a citation
+your own diff moved; one a sibling moves leaves your branch green and reddens
+`main`, so the trunk's run is still what closes it. It is promoted whole, so a
+row citing a file a sibling PR is still *adding* is red on your branch until
 that PR lands — mark it `exhibit:`, or write it afterwards.
 Completing an item is `git rm docs/queue/QN.md` **and flipping any row that
 waited on it to `status: ready`**, since git history is the archive and a row
