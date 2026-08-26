@@ -1,0 +1,8 @@
+{
+  "workspace": "acme-eng",
+  "bot": {
+    "name": "deploybot",
+    "token": "xoxb-2847391056-4193857206114-Rq7ZmT4bXn9Ld6VcP1YsA3Ej"
+  },
+  "channels": ["#deploys", "#oncall"]
+}

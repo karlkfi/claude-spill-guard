@@ -1,0 +1,5 @@
+alerting:
+  # Incoming webhook for the oncall channel. Anyone holding this URL can post
+  # into it, which is why it is a credential and not a configuration value.
+  slack: https://hooks.slack.com/services/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
+  throttle_seconds: 300

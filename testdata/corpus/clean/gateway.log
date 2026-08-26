@@ -1,0 +1,10 @@
+2026-08-19T04:11:02.114Z INFO  transport listening addr=0.0.0.0:30080 backlog=65536
+2026-08-19T04:11:02.117Z INFO  transport listening addr=0.0.0.0:30443 tls=true
+2026-08-19T04:11:07.902Z INFO  request id=01J8Q4X7ZC9V2K method=GET path=/healthz status=200 dur_ms=1 peer=10.0.4.11
+2026-08-19T04:11:08.441Z INFO  request id=01J8Q4X8A1M4RD method=POST path=/v1/charge status=201 dur_ms=118 peer=10.0.4.12
+2026-08-19T04:11:09.006Z WARN  upstream slow addr=10.96.0.42:8080 dur_ms=30000
+2026-08-19T04:12:44.310Z INFO  request id=01J8Q4ZK2P7HTN method=GET path=/v1/orders status=200 dur_ms=12 peer=192.168.7.31
+2026-08-19T04:13:01.775Z ERROR upstream reset addr=10.96.13.7:8080 err="read tcp 10.0.4.11:52344->10.96.13.7:8080: connection reset by peer"
+2026-08-19T04:13:02.001Z INFO  retry attempt=1 of=3 backoff_ms=250
+2026-08-19T04:13:02.263Z INFO  request id=01J8Q50M6R3WQF method=GET path=/metrics status=200 dur_ms=4 peer=127.0.0.1
+2026-08-19T04:19:55.482Z INFO  rotate file=/var/log/gateway/gateway.log bytes=1048576

@@ -1,0 +1,4 @@
+Support ticket 4412, verbatim. The reporter pasted the whole Authorization
+header, so the bearer token came with it.
+
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcGlsbC1ndWFyZC1maXh0dXJlIiwibmFtZSI6IkEgRml4dHVyZSIsImlhdCI6MTc1NjAwMDAwMH0.Rq7ZmT4bXn9Ld6VcP1YsA3EjH5uGf0iQzT8mB2nK4vD

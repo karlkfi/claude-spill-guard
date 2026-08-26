@@ -1,0 +1,56 @@
+# The precision corpus
+
+Two halves, and the gate over them is
+[`scripts/check-precision.py`](../../scripts/check-precision.py) by way of
+`internal/scan/corpus_test.go`. Run it with `make precision`.
+
+| Half | What it asserts |
+|---|---|
+| `clean/` | The shipped ruleset reports **zero** findings. That number is pinned. |
+| `planted/` | Each file produces **exactly one** finding, of the rule its filename names. |
+
+## Nothing in `planted/` is a real credential
+
+Every value is fabricated to the shape its rule matches and works against
+nothing. `aws-access-key-id.env` carries `AKIAIOSFODNN7EXAMPLE`, which is the
+key AWS publishes in its own documentation. The rest were written for this
+directory.
+
+They are here as literals rather than assembled at scan time because the thing
+under test is a buffer, and a fixture that only exists inside a test is a
+fixture nobody can read.
+
+## `clean/` has to stay adversarial
+
+A corpus gate pinned at zero is worth exactly what its clean half is worth, and
+a bland clean half reports zero for a reason that has nothing to do with the
+ruleset. So the clean files are checked against two of the rules that produced
+the inherited 5,679 —
+[`docs/design/language-choice.md`](../../docs/design/language-choice.md) §3 has
+them — and both still have to fire:
+
+| Inherited rule | Matches on `clean/`, 2026-08-25 | Floor |
+|---|---|---|
+| `pii-postal-code` `\b\d{5}(?:-\d{4})?\b` | 30 | 20 |
+| `pii-phone-cn` | 8 | 6 |
+
+The three worked examples the design names are all in here deliberately:
+`65536` in `buffers.go` and `nginx.conf`, the NodePort `30443` in
+`k8s-service.yaml` and `main.tf`, and the amdgpu DKMS string
+`1:6.16.13.30300400-2341068` in `dkms-status.txt`, whose `0400-2341068` slice
+was reported 268 times as a Chinese phone number.
+
+`env.example` and `payments.md` are the other half of the same idea:
+placeholder credentials and published test card numbers, which are what a real
+repository is full of and what a scanner has to be silent about.
+
+## Adding to it
+
+**A clean file** goes in as it was written, not tidied. Anything it forces you
+to except is a rule to drop rather than a file to edit — that is the whole
+argument for pinning the count at zero.
+
+**A planted file** is named for its rule, carries one match, and is listed in
+the `planted` map in `internal/scan/corpus_test.go`. The map is what carries
+the count, which the filename cannot; a file in one and not the other fails the
+gate from either side.

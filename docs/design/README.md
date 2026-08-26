@@ -13,12 +13,13 @@ This directory holds the design and the reasoning behind it:
 | [`language-choice.md`](language-choice.md) | Why Go, with the measurements. Verbatim from the analysis that started the project. |
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
-**Status: nothing scans anything yet.** The module, the entry point's skeleton,
-the [CI gates](#ci) that do not need a ruleset, and `internal/validate` exist. The validators came
+**Status: nothing scans anything yet.** The module, the entry point's
+skeleton, the [CI gates](#ci), `internal/validate`, `internal/rules`,
+`internal/scan` and the shipped ruleset exist, and the binary reaches none of
+them — there is no `hook` subcommand to call them from. The validators came
 first because they are pure functions over a candidate and needed nothing to
-call them; every other package under `internal/` is still proposed. The
-[open questions](#open-questions) are the parts that need a decision or a
-measurement before implementation goes further.
+call them. The [open questions](#open-questions) are the parts that need a
+decision or a measurement before implementation goes further.
 
 ## The problem
 
@@ -449,23 +450,23 @@ asserted against it by the `gate-drift` gate, and
 [`CLAUDE.md`](../../CLAUDE.md#running-the-gates) carries the table generated
 from it. `make check` runs the lot.
 
-Two jobs the design calls for and the repo does not have yet, because there is
-no ruleset and no corpus to run them over:
+The `precision` job is the one that matters most. Recall regressions are
+visible — somebody reports a missed secret. Precision regressions are invisible
+until the noise has trained everyone to ignore the tool, which is how the
+inherited ruleset arrived at 5,679 matches and zero true positives. It runs the
+shipped ruleset over `testdata/corpus/`, pins the false-positive count on the
+clean half at zero, and requires each planted file to produce exactly one
+finding.
 
-| Job | What it will enforce |
-|---|---|
-| `precision` | The ruleset runs over `testdata/corpus/` and the false-positive count must not exceed a pinned number |
-| `mutation-control` | Disable one rule; the suite must go red |
-
-The precision job is the one that matters most. Recall regressions are visible —
-somebody reports a missed secret. Precision regressions are invisible until the
-noise has trained everyone to ignore the tool, which is how the inherited
-ruleset arrived at 5,679 matches and zero true positives.
-
-The rule mutation-control job follows the sibling repos, and so does every gate
-already shipping: a suite that has never failed is a suite with no evidence
-behind it. Each gate in the workflow is paired with a control that breaks its
-property and requires it to go red.
+**A second job disabling one rule is not separate from it.** The design asked
+for one, and every gate here is already paired with a mutation control that
+breaks its property and requires it to go red — so turning a rule off is a step
+of `precision-mutation-control` rather than a job of its own, which is also the
+only shape `gate-drift` accepts: a job in no gate's name is one `make check`
+does not cover. The other three steps break the corpus rather than the ruleset,
+because a zero over an empty corpus, a zero over a corpus nothing adversarial
+is left in, and a zero from a test that quietly stopped running are all the same
+zero from outside.
 
 ## Benchmarking, if you benchmark at all
 

@@ -1704,6 +1704,140 @@ jobs:
             exit 1
           fi
 
+  precision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The shipped ruleset over the precision corpus
+        run: make precision
+
+  # The design calls this the job that matters most, and a false-positive count
+  # pinned at zero is the easiest thing in this repository to pass while testing
+  # nothing: an empty corpus, a retired test, a rule that matches nothing, and a
+  # clean half nobody kept adversarial all report the same zero.
+  #
+  # Four mutations, one per way of reaching it. Each asserts its own effect
+  # before running the gate, because a mutation that silently did not land
+  # leaves a green run that reads exactly like a control that worked.
+  precision-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      # The mutation is a byte-for-byte transplant of a fixture this same gate
+      # proves is flagged, so the precondition is a comparison against a case
+      # already measured rather than an assertion that a command ran.
+      - name: A secret among the clean files must fail the gate
+        run: |
+          cp testdata/corpus/planted/aws-access-key-id.env testdata/corpus/clean/mutant.env
+          if ! cmp -s testdata/corpus/planted/aws-access-key-id.env testdata/corpus/clean/mutant.env; then
+            echo "::error::the transplant is not byte-identical to the fixture, so it is not the measured case" >&2
+            exit 1
+          fi
+          make precision > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          rm -f testdata/corpus/clean/mutant.env
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::precision passed with a planted AWS key among the clean files" >&2
+            exit 1
+          fi
+          if ! grep -q 'clean corpus produced 1 finding(s), pinned at 0' mutant.log; then
+            echo "::error::precision failed, but not on the false-positive count" >&2
+            exit 1
+          fi
+      - name: Turning a shipped rule off must fail the gate
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("rules/spill-guard.json")
+          t = p.read_text()
+          at = t.index('"id": "aws-access-key-id"')
+          at = t.index('"enabled": true', at)
+          p.write_text(t[:at] + '"enabled": false' + t[at + len('"enabled": true'):])
+          off = [r for r in json.loads(p.read_text())["rules"] if r["id"] == "aws-access-key-id"]
+          assert off and off[0]["enabled"] is False, "aws-access-key-id is still enabled"
+          PY
+          if git diff --quiet rules/spill-guard.json; then
+            echo "::error::the mutation changed nothing -- it no longer matches the ruleset" >&2
+            exit 1
+          fi
+          make precision > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- rules/spill-guard.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::precision passed with a shipped rule turned off" >&2
+            exit 1
+          fi
+          if ! grep -q 'want exactly one aws-access-key-id finding, got 0' mutant.log; then
+            echo "::error::precision failed, but not on the planted secret going unfound" >&2
+            exit 1
+          fi
+      # A clean half that has drifted bland reports zero for the wrong reason,
+      # and nothing about that zero looks different. Replacing every digit is
+      # the cheapest way to take the NodePorts, the buffer constants and the
+      # amdgpu string out at once.
+      - name: A clean corpus with nothing adversarial left in it must fail the gate
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          for f in pathlib.Path("testdata/corpus/clean").iterdir():
+              f.write_text(re.sub(r"\d", "x", f.read_text()))
+          PY
+          if git diff --quiet testdata/corpus/clean; then
+            echo "::error::the mutation changed nothing -- the clean corpus carried no digits" >&2
+            exit 1
+          fi
+          make precision > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- testdata/corpus/clean
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::precision passed over a clean corpus the inherited rules no longer fire on" >&2
+            exit 1
+          fi
+          if ! grep -q 'the material the corpus exists to hold has drifted out of it' mutant.log; then
+            echo "::error::precision failed, but not on the corpus losing its material" >&2
+            exit 1
+          fi
+      # `go test -run` exits 0 when its pattern matches nothing, so a corpus test
+      # that is renamed or moved retires itself and the gate keeps reporting the
+      # remaining ones as a pass. This is the control on the gate script rather
+      # than on the ruleset.
+      - name: A retired corpus test must fail the gate
+        run: |
+          sed -i 's/func TestEveryEnabledRuleHasAPlantedFile(/func TestEveryEnabledRuleStillHasAPlantedFile(/' internal/scan/corpus_test.go
+          if git diff --quiet internal/scan/corpus_test.go; then
+            echo "::error::the mutation changed nothing -- the test name no longer matches" >&2
+            exit 1
+          fi
+          make precision > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- internal/scan/corpus_test.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::precision passed with one of its corpus tests renamed away" >&2
+            exit 1
+          fi
+          if ! grep -q 'TestEveryEnabledRuleHasAPlantedFile reported no result' mutant.log; then
+            echo "::error::precision failed, but not on the retired test" >&2
+            exit 1
+          fi
+
   no-deps:
     runs-on: ubuntu-latest
     steps:

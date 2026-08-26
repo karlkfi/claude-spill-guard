@@ -1,0 +1,13 @@
+# dkms status on a build host, after the ROCm 6.16 point release. The version
+# strings are what the inherited ruleset drowned in: 0400-2341068 is a slice
+# out of the amdgpu string below and was reported 268 times as a Chinese
+# phone number.
+amdgpu/1:6.16.13.30300400-2341068, 6.8.0-45-generic, x86_64: installed
+amdgpu/1:6.16.13.30300400-2341068, 6.8.0-47-generic, x86_64: installed
+nvidia/570.86.16, 6.8.0-45-generic, x86_64: installed
+nvidia/570.86.16, 6.8.0-47-generic, x86_64: installed
+v4l2loopback/0.13.2, 6.8.0-47-generic, x86_64: installed
+
+Kernel 6.8.0-47-generic #47~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC
+Firmware 1:6.16.13.30300400-2341068 built 20240917
+Microcode revision 0xf4034a09
