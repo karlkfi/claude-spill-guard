@@ -77,10 +77,11 @@ the rule. The shipped count stays at its planted fixtures, 2 of them now. The
 reading that holds is the gated one below.
 
 [`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
-is what holds that down. It quotes five private-key headers in prose, so
-removing the clause takes the clean corpus from 0 findings to 5 and reddens the
-gate — six armour lines, of which the `CERTIFICATE` one is public and outside
-the rule's alternation. Before
+is what holds that down. It quotes four private-key headers inline and displays
+a fifth in an indented block — that fifth is what holds the clause's *shape*
+down — so removing the clause takes the clean corpus from 0 findings to 5 and
+reddens the gate. Six armour lines sit in the file; the `CERTIFICATE` one is
+public and outside the rule's alternation. Before
 that file existed the clause could be reverted with every test still passing,
 which is the shape this whole item is about.
 
@@ -96,12 +97,15 @@ those two toolchains emit and readmits no prose, because a prose line is not
 
 Widening to any `Name: value` line was measured too and is quiet over the whole
 corpus, which is why this originally shipped as a judgement call. It is not one.
-`TestPrivateKeyBlockAcrossThePEMLayouts` separates them: a header, an undefined
-field, then a body is reported under `[A-Za-z][A-Za-z0-9-]*:` and not under the
-named pair, and so are `Comment: exported by ssh-keygen` and a prose line ending
-in a colon. The named pair is measurably tighter as well as easier to check
-against RFC 1421. A toolchain that writes a third RFC 1421 field would go
-unreported and would be the thing that reverses this.
+Three shapes separate them — a header followed by an undefined field, by
+`Comment: exported by ssh-keygen`, or by a prose line ending in a colon, each
+with a body under it. `TestTheGenericStepReportsWhatTheNamedPairDoesNot` holds
+both halves: the alternative reports all three and the shipped rule reports
+none. It compiles a regex that ships nowhere, which
+[`corpus_test.go`](../internal/scan/corpus_test.go)'s inherited controls
+already do for the same reason — a claim with nothing that can fail is the
+shape this repository refuses. A toolchain that writes a third RFC 1421 field
+would go unreported and would be the thing that reverses this.
 
 **Two arms of the alternation are dead.** `SSH2 ENCRYPTED ` cannot reach RFC
 4716 armor, which is four dashes with inner spaces — `ssh-keygen -e -m

@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -25,6 +26,50 @@ func privateKeyBlock(t *testing.T) []rules.Rule {
 	}
 	t.Fatal("the shipped ruleset carries no private-key-block rule")
 	return nil
+}
+
+// genericOnly is the three shapes that separate the shipped step over
+// Proc-Type and DEK-Info from the one considered beside it, which admits any
+// `Name: value` line. Both tests below read them: one that the shipped rule is
+// quiet on all three, and one that the alternative is not.
+var genericOnly = []struct{ name, buf string }{
+	{"a header, then a field RFC 1421 does not define, then a body",
+		"-----BEGIN RSA PRIVATE KEY-----\nNote: the body is redacted\n" + pemBody + "\n"},
+	{"a header, then an RFC 4716 Comment field, then a body",
+		"-----BEGIN RSA PRIVATE KEY-----\nComment: exported by ssh-keygen\n" + pemBody + "\n"},
+	{"a header, then a prose line ending in a colon, then a body",
+		"-----BEGIN RSA PRIVATE KEY-----\nbase64:\n" + pemBody + "\n"},
+}
+
+// genericStep is the alternative shape, verbatim as it was measured. It ships
+// nowhere, and it is compiled here for the reason corpus_test.go's `inherited`
+// is compiled there: rules/README.md makes a claim about what it would report,
+// and a claim with nothing that can fail is the shape this repository refuses.
+var genericStep = regexp.MustCompile(
+	`(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)` +
+		`[\r\n]+(?:[A-Za-z][A-Za-z0-9-]*:[^\r\n]*[\r\n]+)*[A-Za-z0-9+/=]{32,}`)
+
+// The named pair is tighter than the alternative, which is what makes the
+// choice between them a measurement rather than a preference. The other half
+// of it -- that the shipped rule stays quiet on these -- is three rows of the
+// table below.
+func TestTheGenericStepReportsWhatTheNamedPairDoesNot(t *testing.T) {
+	set := privateKeyBlock(t)
+	for _, tc := range genericOnly {
+		t.Run(tc.name, func(t *testing.T) {
+			if !genericStep.MatchString(tc.buf) {
+				t.Errorf("the generic step does not report this, so it does not " +
+					"separate the two shapes and rules/README.md is wrong to say it does")
+			}
+			found, err := Buffer("t", []byte(tc.buf), set)
+			if err != nil {
+				t.Fatalf("scanning: %v", err)
+			}
+			if len(found) != 0 {
+				t.Errorf("the shipped rule reports this, so the two shapes agree here")
+			}
+		})
+	}
 }
 
 func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
@@ -55,8 +100,9 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 		{"a header displayed on its own line, with prose under it",
 			"-----BEGIN RSA PRIVATE KEY-----\n\nthen the encryption headers, then a\n" +
 				"blank line, then lines of\n\n" + pemBody + "\n", false},
-		{"a header, then a field RFC 1421 does not define, then a body",
-			"-----BEGIN RSA PRIVATE KEY-----\nNote: the body is redacted\n" + pemBody + "\n", false},
+		{genericOnly[0].name, genericOnly[0].buf, false},
+		{genericOnly[1].name, genericOnly[1].buf, false},
+		{genericOnly[2].name, genericOnly[2].buf, false},
 		{"a footer with no header",
 			pemBody + "\n-----END RSA PRIVATE KEY-----\n", false},
 	} {
