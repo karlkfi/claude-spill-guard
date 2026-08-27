@@ -507,10 +507,16 @@ Prefer it *for the event it was measured on*, and read the next paragraph before
 writing it anywhere else.
 
 **The encoding is per event, and generalising this row fails open on the one a
-human types into.** On `UserPromptSubmit` the `deny` object is accepted and
-ignored. The encoder and the full table belong with the `hook` subcommand that
-writes them; what matters here is that the sentence above stops at
-`PreToolUse`.
+human types into.** On `UserPromptSubmit` a `permissionDecision` of `deny` is
+accepted and ignored, and **naming the event correctly does not rescue it** — an
+object stamped `"hookEventName": "UserPromptSubmit"` is ignored exactly as one
+stamped `PreToolUse` is, 22,071 bytes against 22,086 with the marker twice in
+both. `permissionDecision` has no meaning on that event whatever it is labelled,
+so the shape that blocks there is `decision: block`. That clause is here because
+the obvious repair for the sentence before it is to fix the event name, and that
+repair does nothing. The encoder and the full table belong with the `hook`
+subcommand that writes them; what matters here is that the sentence above stops
+at `PreToolUse`.
 
 The reading this section needs is the one about `@path`, because
 [the operand](#path-is-an-operand-not-a-hop) rides in on that event. Driven
