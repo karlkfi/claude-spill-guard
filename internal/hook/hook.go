@@ -92,7 +92,13 @@ func scanCall(call payload, event Event) ([]scan.Finding, error) {
 		if err != nil {
 			return nil, err
 		}
-		findings = append(findings, got...)
+		// got.Skipped names a buffer the pipeline did not read -- a binary, or
+		// UTF-32 it declined to decode. Nothing here acts on it yet, so such a
+		// buffer contributes no findings and the call is allowed, which is a
+		// clean answer for content nothing opened. Q74 is that gap: the reason
+		// exists now, and deciding per reason whether it blocks is its work
+		// rather than this row's.
+		findings = append(findings, got.Findings...)
 	}
 	return findings, nil
 }
