@@ -178,10 +178,10 @@ func TestCleanCorpusWouldFlagUnderTheInheritedRules(t *testing.T) {
 // cannot carry.
 var planted = map[string]string{
 	"aws-access-key-id.env": "aws-access-key-id",
-	// The same rule twice, because the second file differs only in encoding:
-	// UTF-16LE with a byte-order mark, which is what Windows PowerShell 5.1
-	// writes through `>`. It is here rather than in a unit fixture so the
-	// shipped ruleset and the gate's own walk are what read it.
+	// The same rule twice. The second file is UTF-16LE with a byte-order mark,
+	// which is what Windows PowerShell 5.1 writes through `>`, and it is here
+	// rather than in a unit fixture so the shipped ruleset and the gate's own
+	// walk are what read it. Its key is its own; see utf16FixtureKey.
 	"aws-access-key-id-utf16le.env": "aws-access-key-id",
 	"github-token.sh":               "github-token",
 	"github-fine-grained-pat.txt":   "github-fine-grained-pat",

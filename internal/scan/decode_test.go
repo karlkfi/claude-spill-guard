@@ -187,6 +187,13 @@ func TestUTF16SourceAgreesWithTheDecodeAtEveryByte(t *testing.T) {
 	}
 }
 
+// utf16FixtureKey is the planted UTF-16 file's own value, and it is deliberately
+// not the one in aws-access-key-id.env beside it. Two fixtures sharing a literal
+// makes every edit to one a silent break in the other, and testdata/corpus's own
+// convention is a fabricated value per file. Shannon 4.1219 against the rule's
+// floor of 3.0, and it does not end in AWS's EXAMPLE.
+const utf16FixtureKey = "AKIA3QZ7NDXWK6PVMR2T"
+
 // The corpus half of the same assertion, over a file on disk rather than a
 // fixture assembled in memory. The gate walks this file too; what it cannot see
 // is where in it the finding points.
@@ -207,7 +214,7 @@ func TestThePlantedUTF16FixtureReportsAnOffsetIntoItself(t *testing.T) {
 		t.Fatalf("got %d findings, want 1: %+v", len(got.Findings), got.Findings)
 	}
 	at := got.Findings[0].Offset
-	want := encodeUTF16(key, false)[2:]
+	want := encodeUTF16(utf16FixtureKey, false)[2:]
 	if at+len(want) > len(buf) || string(buf[at:at+len(want)]) != string(want) {
 		t.Errorf("offset %d does not sit on the key: %s holds %q there",
 			at, name, clip(buf, at, len(want)))

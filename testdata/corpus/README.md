@@ -63,10 +63,14 @@ the count, which the filename cannot; a file in one and not the other fails the
 gate from either side.
 
 `aws-access-key-id-utf16le.env` is the one file here that is not testing a
-rule. Its text is `aws-access-key-id.env`'s, and the encoding is the variable:
-UTF-16LE with a byte-order mark, which is what Windows PowerShell 5.1 writes
-through `>`. It sits in the corpus rather than in a unit fixture so that the
-shipped ruleset and the gate's own walk are what read it — a decode asserted
-only against a buffer assembled in a test proves nothing about a file on disk,
-and this repository normalises line endings on everything it does not exempt.
-`.gitattributes` marks it `-text` for that reason.
+rule. It tests an encoding: UTF-16LE with a byte-order mark, which is what
+Windows PowerShell 5.1 writes through `>`. It sits in the corpus rather than in
+a unit fixture so that the shipped ruleset and the gate's own walk are what read
+it — a decode asserted only against a buffer assembled in a test proves nothing
+about a file on disk, and this repository normalises line endings on everything
+it does not exempt. `.gitattributes` marks it `-text` for that reason.
+
+Its key is its own, and that is the rule rather than an accident: two fixtures
+sharing one literal makes every edit to one a silent break in the other. The
+in-memory pair in `internal/scan/decode_test.go` is where identical text is
+scanned in both encodings, which is the comparison that needs identity.
