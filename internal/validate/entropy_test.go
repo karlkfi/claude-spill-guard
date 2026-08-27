@@ -3,6 +3,8 @@ package validate
 import (
 	"math"
 	"testing"
+
+	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 )
 
 func TestShannon(t *testing.T) {
@@ -36,6 +38,8 @@ func TestShannonReturnsPositiveZeroForAConstantRun(t *testing.T) {
 }
 
 func TestEntropyAtLeast(t *testing.T) {
+	vec := testvec.Load(t)
+
 	for _, tc := range []struct {
 		name string
 		s    string
@@ -43,9 +47,9 @@ func TestEntropyAtLeast(t *testing.T) {
 		want bool
 	}{
 		{"AWS's documented access key ID against the shipped floor",
-			"AKIAIOSFODNN7EXAMPLE", 3.0, true},
+			vec.Get(t, "aws-iam-example"), 3.0, true},
 		{"AWS's documented secret access key against the shipped floor",
-			"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", 3.0, true},
+			vec.Get(t, "aws-secret-access-key"), 3.0, true},
 		{"a floor of zero admits anything that is not empty", "aaaa", 0, true},
 
 		{"a padded placeholder token", "ghp_0000000000000000000000000000000000", 3.0, false},
