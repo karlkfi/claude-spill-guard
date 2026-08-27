@@ -193,15 +193,18 @@ func TestUTF16SourceAgreesWithTheDecodeAtEveryByte(t *testing.T) {
 // makes every edit to one a silent break in the other, and testdata/corpus's own
 // convention is a fabricated value per file.
 //
-// The value carries this project's name because a reader of a public security
-// repo needs something they can check, and "works against nothing" is a
-// sentence they have to take on trust -- least of all readable here, where the
-// fixture has to be decoded before it can be read at all. AWS's own
-// AKIAIOSFODNN7EXAMPLE is the counter-example: its one mark of being fabricated
-// is the EXAMPLE suffix, which is the string aws-placeholder exists to drop.
+// A planted fixture has to be found, so it cannot be marked by the string the
+// ruleset rejects: AKIAIOSFODNN7EXAMPLE -- which `key` above still uses, and
+// which is right there, because a unit test needs a regex match rather than
+// every validator -- is dropped by aws-placeholder. This value carries the
+// project's name instead, which a reader of a public security repo can grep
+// and no issued credential would hold. It matters more here than elsewhere:
+// the fixture has to be decoded before it can be read at all.
+//
 // The 0, 1, 8 and 9 are a second and weaker signal, resting on a base32
 // property of real key IDs that nobody here has verified.
-// testdata/corpus/README.md carries what was and was not measured.
+// testdata/corpus/README.md carries what was and was not measured, and why the
+// rule stops at planted/.
 //
 // Shannon 3.7842 against the rule's floor of 3.0, and no EXAMPLE suffix, so
 // aws-placeholder passes it once that check lands.

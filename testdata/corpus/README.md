@@ -75,26 +75,33 @@ sharing one literal makes every edit to one a silent break in the other. The
 in-memory pair in `internal/scan/decode_test.go` is where identical text is
 scanned in both encodings, which is the comparison that needs identity.
 
-**Put something in the value that a reader can check.** This directory is
-public and it ships inside a security tool, so someone who finds a
-credential-shaped string here has only the sentence above to tell them it is
-inert — and in `aws-access-key-id-utf16le.env` they cannot read it at all
-without decoding the file first. `AKIA0SPILLGUARD98107` carries this project's
-name, which anyone can grep for and no issued credential would contain. That
-costs nothing and needs no argument about AWS.
+**A planted value cannot rely on a marker the ruleset rejects, and this is the
+one rule here that is `planted/`-only.** Everything else in this file is about
+what a rule may match; this is about what a fixture is allowed to be, and it
+binds nowhere else in the repository — a unit test elsewhere needs its value to
+match a regex, not to survive every validator.
 
-The file beside it shows what happens without one. `aws-access-key-id.env`
-carries `AKIAIOSFODNN7EXAMPLE`, and the only thing marking that as fabricated is
-the `EXAMPLE` suffix — which is exactly what the `aws-placeholder` check exists
-to drop, because AWS publishes it. A fixture whose sole mark of being fake is
-the mark the scanner is taught to remove has, once that rule ships, no mark at
-all. Nothing else in the string distinguishes it: its body draws only from A-Z
-and 2-7, the alphabet a real key ID is *believed* to use.
+`aws-access-key-id.env` is the worked example. It carries
+`AKIAIOSFODNN7EXAMPLE`, which is fabricated in the most authoritative way
+available: AWS publishes it, so a reader who greps it lands in AWS's own
+documentation. That makes it an excellent value for a unit test and a
+disqualified one here, because `aws-placeholder` drops exactly that suffix.
+A planted fixture has to be **found**, so it cannot be marked by the string the
+scanner is being taught to reject.
 
-Believed, and not established here. A widely used technique recovers an AWS
-account ID by base32-decoding a key ID's body, which would rule `0`, `1`, `8`
-and `9` out of a real one — and nobody in this repository has verified that
-against an authoritative source. AWS's [IAM identifiers reference][iam-ids]
+Which leaves a fixture needing some other mark, and this is where a reader
+matters as well as the rule. This directory is public and it ships inside a
+security tool, so someone finding a credential-shaped string here has only the
+sentence above to tell them it is inert — and in `aws-access-key-id-utf16le.env`
+they cannot read it at all without decoding the file first.
+`AKIA0SPILLGUARD98107` carries this project's name, which anyone can grep for
+and no issued credential would contain. That costs nothing and needs no
+argument about AWS.
+
+The digits in it are a second and weaker signal. A widely used technique
+recovers an AWS account ID by base32-decoding a key ID's body, which would rule
+`0`, `1`, `8` and `9` out of a real one — and nobody in this repository has
+verified that against an authoritative source. AWS's [IAM identifiers reference][iam-ids]
 documents the unique-ID prefixes and says nothing about the alphabet. So the
 digits in `AKIA0SPILLGUARD98107` are a hedge rather than a proof, and the
 greppable name is what carries the claim. `internal/rules/capture_test.go`
