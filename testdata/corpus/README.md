@@ -32,6 +32,15 @@ They are here as literals rather than assembled at scan time because the thing
 under test is a buffer, and a fixture that only exists inside a test is a
 fixture nobody can read.
 
+Two files carry `private-key-block`, because the rule has two layouts to reach.
+`private-key-block.pem` is a body on the line after the header;
+`private-key-block-rfc1421.pem` is the encrypted PKCS#1 form, with `Proc-Type:`
+and `DEK-Info:` in between, which is what `openssl rsa -aes128 -p` and
+`ssh-keygen -m PEM -N` write. Two further layouts cannot be files at all — a
+CRLF fixture depends on what git does to it on checkout — so
+`TestPrivateKeyBlockAcrossThePEMLayouts` in `internal/scan` carries those as
+literals.
+
 ## `clean/` has to stay adversarial
 
 A corpus gate pinned at zero is worth exactly what its clean half is worth, and
@@ -62,6 +71,14 @@ rule at all — so the clause could be deleted with every test still green. The
 runbook quotes four headers in prose, which turns a deletion into 4 findings
 and a red gate. A rule with no clean file touching it has a guard that cannot
 fire.
+
+It holds the *shape* of that clause down as well as its presence. The clause
+steps over `Proc-Type:` and `DEK-Info:` so an RFC 1421 encrypted key is
+reported, and the obvious way to write that step is a bounded window of any
+printable bytes. The runbook's "What the parts look like" section is a header,
+then prose, then a body line inside 200 bytes: at a 200-byte window it is a
+finding, and with the two field names it is not. That section is the whole
+reason the narrower form shipped.
 
 `iam-policy-notes.md` and `jwt-debugging.md` are two more of the same, for the
 two rules whose vendor publishes an example realistic enough to clear an
