@@ -81,21 +81,23 @@ credential-shaped string here has only the sentence above to tell them it is
 inert — and in `aws-access-key-id-utf16le.env` they cannot read it at all
 without decoding the file first. `AKIA0SPILLGUARD98107` carries this project's
 name, which anyone can grep for and no issued credential would contain. That
-costs nothing and needs no argument.
+costs nothing and needs no argument about AWS.
 
-The digits in it are a second, weaker signal, and the difference is worth
-stating rather than blurring. A widely used technique recovers an AWS account
-ID by base32-decoding a key ID's 16-character body, which would mean a real one
-draws from A-Z and 2-7 and can never contain `0`, `1`, `8` or `9`. **Nobody
-here has verified that against an authoritative source.** AWS's [IAM
-identifiers reference][iam-ids] documents the prefixes and says nothing about
-the alphabet, and its own examples are hand-written non-keys that prove nothing
-either way — `AROA1234567890EXAMPLE` on that page contains every digit, and
-AWS's two published access key IDs disagree with each other, `AKIAI44QH8DHBEXAMPLE`
-carrying an `8` where `AKIAIOSFODNN7EXAMPLE` draws only from A-Z and 2-7.
+The file beside it shows what happens without one. `aws-access-key-id.env`
+carries `AKIAIOSFODNN7EXAMPLE`, and the only thing marking that as fabricated is
+the `EXAMPLE` suffix — which is exactly what the `aws-placeholder` check exists
+to drop, because AWS publishes it. A fixture whose sole mark of being fake is
+the mark the scanner is taught to remove has, once that rule ships, no mark at
+all. Nothing else in the string distinguishes it: its body draws only from A-Z
+and 2-7, the alphabet a real key ID is *believed* to use.
 
-So treat the digits as a hedge, not a proof, and let the greppable name carry
-the claim. `internal/rules/capture_test.go` reached the same shape first, with
-`AKIA0123456789ABCDEF`.
+Believed, and not established here. A widely used technique recovers an AWS
+account ID by base32-decoding a key ID's body, which would rule `0`, `1`, `8`
+and `9` out of a real one — and nobody in this repository has verified that
+against an authoritative source. AWS's [IAM identifiers reference][iam-ids]
+documents the unique-ID prefixes and says nothing about the alphabet. So the
+digits in `AKIA0SPILLGUARD98107` are a hedge rather than a proof, and the
+greppable name is what carries the claim. `internal/rules/capture_test.go`
+reached the same shape first, with `AKIA0123456789ABCDEF`.
 
 [iam-ids]: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html
