@@ -285,6 +285,10 @@ jobs:
   # the block -- it is changing what the tree can do and leaving the block
   # alone. That is the decay this gate exists for, and the only one a reader
   # cannot see happening.
+  #
+  # The markers are the case neither of those reaches. They are not the table's
+  # content and not the tree, but whether there is a block to compare at all,
+  # and every other step here assumes the pair is present to be read.
   status-drift-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -362,6 +366,63 @@ jobs:
           fi
           if ! grep -q 'usage text does not name it' mutant.log; then
             echo "::error::status-drift failed, but not on the undocumented command" >&2
+            exit 1
+          fi
+
+      # Q55. `block()` returns None when either marker is missing; `--check`
+      # reports it and the rewrite refuses. Nothing drove either path, so the
+      # one branch with no case behind it was the branch deciding whether the
+      # gate inspects anything at all.
+      #
+      # Red is not the assertion, and neither is a non-zero rewrite. The
+      # regression to expect is `block()` handing back a tuple instead of None:
+      # the empty text then fails the table comparison, so the exit code does
+      # not move and only the message does. And a rewrite that dies on
+      # `parts[1]` exits non-zero and writes nothing, exactly as the refusal
+      # does. So both halves grep for the message they are actually about.
+      - name: A README with no marker pair must fail the check and refuse the rewrite
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("README.md")
+          keep = [l for l in p.read_text(encoding="utf-8").splitlines(keepends=True)
+                  if "status:begin" not in l and "status:end" not in l]
+          p.write_text("".join(keep), encoding="utf-8")
+          PY
+          if grep -q 'status:begin' README.md || grep -q 'status:end' README.md; then
+            echo "::error::the mutation changed nothing -- a marker survives, so block() still finds the pair" >&2
+            exit 1
+          fi
+          make status-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::status-drift passed on a README with no status markers" >&2
+            git checkout -- README.md
+            exit 1
+          fi
+          if ! grep -q 'README.md has no `status:begin`' mutant.log; then
+            echo "::error::status-drift failed, but not on the missing markers" >&2
+            git checkout -- README.md
+            exit 1
+          fi
+
+          before=$(git hash-object README.md)
+          make status > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "rewrite exit: $rc"
+          cat mutant.log
+          after=$(git hash-object README.md)
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::make status exited 0 with no block to rewrite" >&2
+            exit 1
+          fi
+          if [ "$before" != "$after" ]; then
+            echo "::error::make status wrote to README.md with no block to put one in" >&2
+            exit 1
+          fi
+          if ! grep -q 'there is nothing to rewrite' mutant.log; then
+            echo "::error::make status refused, but not on the missing markers -- a traceback refuses the same way" >&2
             exit 1
           fi
 
@@ -880,15 +941,16 @@ jobs:
   # the fragment are separate reads and a control over one says nothing about
   # the other.
   #
-  # The rest run the other way, and Q32 is why there are four of them. Three
-  # shapes must not fail the gate: a link quoted in a code span, a link shown
-  # inside an indented code block, and a link to a setext heading. Two must
+  # The rest run the other way. Four shapes must not fail the gate: a link
+  # quoted in a code span, a link shown inside an indented code block, a link to
+  # a setext heading, and a link inside a fence nested in another. Three must
   # still fail it, because the obvious way to reach those greens overshoots --
   # reading setext without dropping frontmatter first turns `size: S` into an
-  # anchor in every row of the store, and stripping four-space indentation
-  # without list context drops every link nested at that column. Measured
-  # 2026-08-23: each of the four new steps is reddened by a different spelling
-  # of the fix, and only the shipped one passes all four.
+  # anchor in every row of the store, stripping four-space indentation without
+  # list context drops every link nested at that column, and reading a fence
+  # marker at any indent skips from an indented example to whatever fence comes
+  # next. Measured 2026-08-23: each of Q32's four steps is reddened by a
+  # different spelling of the fix, and only the shipped one passes all four.
   docs-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -1049,6 +1111,126 @@ jobs:
           fi
           if ! grep -q '^broken link: README.md' mutant.log; then
             echo "::error::the link check failed, but not on the nested item" >&2
+            exit 1
+          fi
+
+      # Q41's first half, and the shape this repo's own gate docs are made of: a
+      # doc showing a fenced block wraps it in a longer fence or in the other
+      # marker, and a checker flipping a boolean on every marker lets the inner
+      # fence close the outer one. The link inside is then read as prose. One
+      # rule closes all three spellings, so they share a step.
+      #
+      # A green here means the checker reported nothing about README.md, which is
+      # also what it reports when it read nothing at all -- so the step carries
+      # both halves of that. The same three links go in unfenced first and have
+      # to come back red, which is what says the checker is still reading this
+      # file; and the outer markers have to land at column 0, since four spaces
+      # of heredoc indentation makes the whole block indented code and the green
+      # below would then be about nothing.
+      - name: A link inside a nested fence must not fail the gate
+        run: |
+          cat >> README.md <<'MD'
+
+          ## Mutant nesting control
+
+          [nest-a](no-such-file.md)
+          [nest-b](no-such-file.md)
+          [nest-c](no-such-file.md)
+          MD
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "control exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ] || [ "$(grep -c '^broken link: README.md' mutant.log)" -ne 3 ]; then
+            echo "::error::the control reported no three unfenced links, so a green below would prove nothing" >&2
+            exit 1
+          fi
+
+          cat >> README.md <<'MD'
+
+          ## Mutant nesting
+
+          `````markdown
+          ```
+          [nest-a](no-such-file.md)
+          ```
+          `````
+
+          ~~~markdown
+          ```
+          [nest-b](no-such-file.md)
+          ```
+          ~~~
+
+          ```markdown
+          ~~~
+          [nest-c](no-such-file.md)
+          ~~~
+          ```
+          MD
+          if [ "$(grep -c '^[`~]\{3,\}markdown$' README.md)" -ne 3 ]; then
+            echo "::error::the mutation changed nothing -- the three outer fences are not at column 0" >&2
+            exit 1
+          fi
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the link check read a link out of a fence nested inside another" >&2
+            exit 1
+          fi
+
+      # Q41's other half, and the one that went the quiet way: the fence pattern
+      # matched at any indentation, so a marker shown inside an indented code
+      # block opened a block and the checker skipped to whatever fence came
+      # next, reading nothing in between. A lone marker is what does it -- two
+      # balance the flip and the link after is reported either way, which is how
+      # this step passes while testing nothing. Measured 2026-08-25 at 5e47f92,
+      # where the paired fixture reported the link and the lone one did not.
+      #
+      # So the precondition counts the fence-matching lines the append adds,
+      # which pins the parity rather than one marker's spelling. An earlier
+      # version grepped this fixture's own ```bash: a second indented marker
+      # tagged anything else satisfied it, balanced the flip, and the step went
+      # green with the bug present. Against the pre-fix checker the shipped
+      # fixture is red on the marker and the paired one red on the precondition;
+      # under that earlier spelling the paired fixture exited 0.
+      #
+      # Parity is not ordering, and ordering is left unpinned: the leak needs the
+      # link below the marker, so a fixture with it moved above adds one marker
+      # and exits 0 with the bug present. Pinning that means finding the marker
+      # to compare line numbers, which is the spelling pin again. Re-drive the
+      # inverted arm when this fixture changes.
+      - name: A link after an indented fence marker must still fail the gate
+        run: |
+          before=$(grep -cE '^[[:space:]]*(```|~~~)' README.md)
+          cat >> README.md <<'MD'
+
+          ## Mutant indented marker
+
+          To open a fence, write:
+
+              ```bash
+
+          and close it with the same marker.
+
+          [mutant](no-such-file.md)
+          MD
+          if [ "$(( $(grep -cE '^[[:space:]]*(```|~~~)' README.md) - before ))" -ne 1 ]; then
+            echo "::error::the mutation changed nothing -- the block must add exactly one fence marker, since an even count balances the flip" >&2
+            exit 1
+          fi
+          make docs > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the link check read an indented fence marker as opening a block" >&2
+            exit 1
+          fi
+          if ! grep -q '^broken link: README\.md:[0-9]*: no-such-file\.md$' mutant.log; then
+            echo "::error::the link check failed, but not on the link after the marker" >&2
             exit 1
           fi
 

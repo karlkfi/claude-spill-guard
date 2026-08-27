@@ -4,6 +4,36 @@ The gate scripts CI runs, plus the backlog tooling.
 Most of these are this repo's own. Two are copies, and this page is where the
 tree records that.
 
+## Modes, and what the executable bit means here
+
+Thirteen Python files here are this repo's own, and twelve of them are entry
+points: a `#!/usr/bin/env python3` line, a `main()`, an `if __name__ ==
+"__main__"` block, and mode `755`.
+[`workflow_model.py`](workflow_model.py) is the one that is not — nothing runs
+it, [`check-action-pins.py`](check-action-pins.py) and [`gates.py`](gates.py)
+import it — so it is tracked at `644` and carries no shebang.
+
+None of this reaches `vendor/`, which keeps whatever mode upstream shipped.
+
+The rule is that a file advertises exactly the way it can be run. A shebang on a
+file at `644` names an interpreter the mode refuses, and the bit on a file
+nothing executes invites a reading that does not hold.
+
+**No gate asserts any of this, on purpose.** None of the thirteen is invoked by
+path: the twelve entry points run as `$(PYTHON) scripts/x.py` from the Makefile
+and `python3 scripts/x.py` from the workflow, and the library is imported by an
+interpreter already running a different file. So a mode that drifts breaks
+nothing. That is the whole difference from [`.githooks/`](../.githooks), where
+`hooks-check` fails until every tracked hook is executable because git skips
+one that is not without saying so, and from
+[`run-spill-guard.cmd`](../hooks/run-spill-guard.cmd), whose index mode the
+`launcher` gate asserts because Claude Code invokes it directly and a launcher
+at `644` never fires once.
+
+Until Q56 the split tracked nothing but the order the files were added — eight
+at `755`, five at `644`, every one of them with a shebang. Its row is gone, so
+this names it rather than linking it.
+
 ## Vendored from the skills repo
 
 Everything under `vendor/` is somebody else's file, grouped by where it came
