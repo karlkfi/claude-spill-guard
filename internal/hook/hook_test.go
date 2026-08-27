@@ -9,14 +9,18 @@ import (
 	"testing"
 )
 
-// The value testdata/corpus/planted/aws-access-key-id.env carries, so a rule
-// retuned out from under this file fails the precision gate first rather than
-// leaving these tests quietly asserting nothing.
+// A key ID that cannot exist: a real one's body base32-decodes to an account
+// id, so it draws only on A-Z and 2-7, and 0, 1, 8 and 9 put this outside that
+// alphabet. It still matches the rule and clears the entropy floor, so it
+// costs nothing -- and a reader who finds it in a public repo can see it is
+// fabricated rather than take a comment's word for it.
 //
-// Not AWS's own AKIAIOSFODNN7EXAMPLE, which the fixture used to carry: a rule
-// that drops what a vendor publishes as an example is one this repo wants, and
-// it would leave every test below asserting nothing while still passing.
-const secret = "AKIA5J7QT2WVXMLB4RND"
+// internal/rules/capture_test.go already uses this value, which is where it
+// comes from. Not AWS's own AKIAIOSFODNN7EXAMPLE: that is base32-clean, so it
+// reads as live, and a rule dropping what a vendor publishes as an example is
+// one this repo wants -- it would leave every test below passing while
+// asserting nothing.
+const secret = "AKIA0123456789ABCDEF"
 
 // drive runs the hook over one payload and hands back everything a caller of
 // the process would see.

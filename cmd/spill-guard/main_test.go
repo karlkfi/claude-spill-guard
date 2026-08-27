@@ -70,7 +70,7 @@ func TestRunEscapesControlCharactersInTheCommandItRejects(t *testing.T) {
 // `hook` that ignored stdin would pass every other test in this file.
 func TestRunHookReadsThePayloadFromStdin(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	payload := `{"hook_event_name":"UserPromptSubmit","prompt":"AKIA5J7QT2WVXMLB4RND"}`
+	payload := `{"hook_event_name":"UserPromptSubmit","prompt":"AKIA0123456789ABCDEF"}`
 	if code := run([]string{"hook"}, strings.NewReader(payload), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr.String())
 	}
