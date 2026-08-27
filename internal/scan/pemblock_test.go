@@ -72,13 +72,16 @@ func TestTheGenericStepReportsWhatTheNamedPairDoesNot(t *testing.T) {
 	}
 }
 
+// pemCase is one layout and whether the shipped rule reports it.
+type pemCase struct {
+	name string
+	buf  string
+	want bool
+}
+
 func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 	set := privateKeyBlock(t)
-	for _, tc := range []struct {
-		name string
-		buf  string
-		want bool
-	}{
+	cases := []pemCase{
 		{"PKCS#8, body on the next line",
 			"-----BEGIN PRIVATE KEY-----\n" + pemBody + "\n", true},
 		{"the same with CRLF",
@@ -100,12 +103,18 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 		{"a header displayed on its own line, with prose under it",
 			"-----BEGIN RSA PRIVATE KEY-----\n\nthen the encryption headers, then a\n" +
 				"blank line, then lines of\n\n" + pemBody + "\n", false},
-		{genericOnly[0].name, genericOnly[0].buf, false},
-		{genericOnly[1].name, genericOnly[1].buf, false},
-		{genericOnly[2].name, genericOnly[2].buf, false},
 		{"a footer with no header",
 			pemBody + "\n-----END RSA PRIVATE KEY-----\n", false},
-	} {
+	}
+
+	// Appended rather than listed. Every shape that separates the two steps has
+	// to be quiet under the shipped one, and a fourth added to genericOnly for
+	// the comparison test would otherwise be gated there and absent here.
+	for _, g := range genericOnly {
+		cases = append(cases, pemCase{g.name, g.buf, false})
+	}
+
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := Buffer("t", []byte(tc.buf), set)
 			if err != nil {
