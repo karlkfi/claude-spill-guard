@@ -36,15 +36,36 @@ sq = '$(subst ','\'',$(1))'
 HOOKS_DIR := .githooks
 
 # Which of `queue.py lint`'s notes are promoted to failures. The split is the
-# `queue` job's decision, argued in its comments in the workflow: these three
-# are reachable by no sibling branch, so they bind wherever this runs.
-QUEUE_STRICT := --strict blocked-opener --strict deferred-trigger --strict empty-store
+# `queue` job's decision, argued in its comments in the workflow. The first
+# three are decidable from the files in front of you and bind wherever this
+# runs.
+#
+# stale-citation is here with a cost that is accepted rather than absent, and
+# the workflow states it in full. What it catches on a branch is a citation
+# the branch's own diff invalidated -- correct when written, moved by an edit
+# in the same PR. What no event split reaches is a citation a *sibling* moved:
+# the branch stays green, because the pointer is correct against the tree in
+# front of it, and main reddens on the merge. So this narrows that hole rather
+# than closing it, and MERGED=true on the trunk is still what catches the rest.
+#
+# The cost is any pointer describing the merged tree rather than this branch --
+# a file a sibling adds, a fragment it adds, a line number only right once it
+# lands. All four of the class's checks behave alike here, because lint sees
+# one tree: which check fires depends on how the trees differ, and which side
+# reddens depends only on which tree the author wrote against. So no arm split
+# separates the cost from the benefit. Repair is `exhibit:` or waiting. Q67 is
+# the open question about a marker that expires, not a split.
+#
+# What counts as drifted is a separate question again: `--citation-window`
+# decides that and promotion cannot reach it. Q30 settles the value at 10.
+QUEUE_STRICT := --strict blocked-opener --strict deferred-trigger \
+                --strict empty-store --strict stale-citation
 
-# These two bind only where the merged tree can answer them. A row may
-# legitimately link an item a sibling PR is still filing, or cite a line in a
-# file that PR is still adding: both branches are correct and only the one
-# carrying the pointer is red. MERGED=true on a push to main.
-QUEUE_STRICT_MERGED := --strict dangling-link --strict stale-citation
+# The one class the merged tree has to answer. A row may legitimately link an
+# item a sibling PR is still filing: both branches are correct and only the one
+# carrying the link is red. MERGED=true on a push to main, and `make queue
+# MERGED=true` is how a local run sees what the trunk sees.
+QUEUE_STRICT_MERGED := --strict dangling-link
 
 MERGED ?= false
 queue_strict = $(QUEUE_STRICT) $(if $(filter true,$(MERGED)),$(QUEUE_STRICT_MERGED))

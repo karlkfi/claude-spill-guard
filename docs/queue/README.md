@@ -44,14 +44,38 @@ Then write `docs/queue/QN.md` with the frontmatter below and run
 
 `lint` reports at exit 0 what the files alone cannot settle, so a clean local
 run is not the whole gate. CI promotes five of those notes with `--strict`.
-`blocked-opener`, `deferred-trigger` and `empty-store` bind on every event:
-nothing another branch can do produces them. `dangling-link` and
-`stale-citation` are notes on a pull request and failures on `main`, because a
-row may point at an item a sibling PR is still filing — correct in the merged
-set, red on the branch that carries the pointer — and only the merged tree can
-tell that from a typo. CI also runs `queue.py claims --strict`, which fails an
-id holding no reservation on the remote at the commit that files the row,
-rather than at the rebase that collides with it.
+`blocked-opener`, `deferred-trigger`, `empty-store` and `stale-citation` bind
+on every event. `dangling-link` is a note on a pull request and a failure on
+`main`, because a row may link an item a sibling PR is still filing — correct
+in the merged set, red on the branch that carries the link — and only the
+merged tree can tell that from a typo. `make queue MERGED=true` runs the
+trunk's set locally.
+
+`stale-citation` binds on a branch, and what it catches there is a citation
+your own diff invalidated — correct when you wrote it, moved by an edit in the
+same PR. A citation a *sibling* moves is a different matter: your branch stays
+green, because the pointer is still correct against the tree in front of you,
+and `main` reddens on the merge. No event split reaches that, which is what
+`MERGED=true` on the trunk is for.
+
+One case costs you something, and it is wider than a missing file. Any pointer
+that describes the merged tree rather than the branch in front of you reddens
+here — a file another branch is adding, a fragment it adds, or a line number
+that is only right once it lands — with no repair available until it does.
+Mark such a pointer `exhibit:`, or write it afterwards. `make queue` is also
+the pre-commit hook, so it blocks the commit rather than only a CI run.
+
+All four of the class's checks behave that way, because `lint` sees one tree,
+so promoting some and not others would not help. [Q67](Q67.md) is the open
+question about a marker that expires once the sibling lands.
+
+How near a fragment must be is a separate setting again — `--citation-window`,
+ten lines by default — which promotion does not reach, so a clean run means no
+citation has drifted more than the window rather than that citations are exact.
+
+CI also runs `queue.py claims --strict`, which fails an id holding no
+reservation on the remote at the commit that files the row, rather than at the
+rebase that collides with it.
 
 ```yaml
 ---
