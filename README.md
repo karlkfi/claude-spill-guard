@@ -33,9 +33,9 @@ authoritative and is not.
 | Run as a Claude Code hook | no |
 | Ship a ruleset | no |
 
-`spill-guard` builds and answers `version`. `internal/rules`, `internal/scan`,
-`internal/validate` are written and tested; the binary does not reach any of
-them yet.
+`spill-guard` builds and answers `version`. `internal/bash`, `internal/rules`,
+`internal/scan`, `internal/validate` are written and tested; the binary does
+not reach any of them yet.
 <!-- status:end -->
 
 - [`docs/design/`](docs/design/) — the proposed design: threat model, hook
