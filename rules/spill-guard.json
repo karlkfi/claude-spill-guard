@@ -8,7 +8,7 @@
       "group": 1,
       "keywords": ["AKIA", "ASIA", "ABIA", "ACCA", "A3T"],
       "entropy": 3.0,
-      "validators": ["entropy"],
+      "validators": ["entropy", "aws-placeholder"],
       "enabled": true
     },
     {
@@ -106,7 +106,7 @@
       "group": 1,
       "keywords": ["eyJ"],
       "entropy": 3.5,
-      "validators": ["entropy"],
+      "validators": ["entropy", "jwt-sample-key"],
       "enabled": true
     },
     {

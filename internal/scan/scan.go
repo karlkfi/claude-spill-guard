@@ -150,6 +150,10 @@ func passes(rule rules.Rule, buf []byte, lo, hi int) (bool, error) {
 			ok = validate.Luhn(candidate)
 		case rules.CardPlaceholder:
 			ok = validate.NotPlaceholderCard(candidate)
+		case rules.AWSPlaceholder:
+			ok = validate.NotPlaceholderAWSKeyID(candidate)
+		case rules.JWTSampleKey:
+			ok = validate.NotSampleJWT(candidate)
 		case rules.Mod11:
 			ok = validate.Mod11(candidate)
 		case rules.Entropy:
