@@ -291,6 +291,54 @@ func TestBufferReadsPastTheSniffWindowInAUTF16Buffer(t *testing.T) {
 	}
 }
 
+// A key past the sniff window, which every other offset assertion here is too
+// small to reach.
+//
+// The limit that stops the decode at the window is threaded through decode, and
+// the inversion that proves it exists -- restore noLimit -- cannot prove it is
+// in the right place, because with noLimit the whole package is consistent
+// again. Thread it into utf16Source as well and that walk covers a prefix
+// rather than the body, so every offset past the window collapses to the
+// prefix's length and nothing under 8 KiB notices. Written by
+// sharp-tu-3b9ae2-41 in review of this PR and reproduced here.
+func TestUTF16OffsetsHoldPastTheSniffWindow(t *testing.T) {
+	prose := strings.Repeat("# padding, ключ ниже\n", 900) + "AWS_ACCESS_KEY_ID="
+	buf := encodeUTF16(prose+key+"\n", false)
+
+	// Both preconditions carry weight. The first says the file reaches past the
+	// window; the second says the *decoded* key does, and it is the second that
+	// makes the map do work a prefix walk cannot fake.
+	if size := 2 * len(utf16.Encode([]rune(prose+key+"\n"))); size <= sniffLimit {
+		t.Fatalf("the fixture body is %d bytes, inside the %d-byte window -- "+
+			"this test would pass on a prefix walk", size, sniffLimit)
+	}
+	if at := len(prose); at <= sniffLimit {
+		t.Fatalf("the key decodes at %d, inside the %d-byte window", at, sniffLimit)
+	}
+
+	got, err := Buffer("creds.env", buf, load(t, awsRule))
+	if err != nil {
+		t.Fatalf("Buffer: %v", err)
+	}
+	if got.Skipped != Scanned {
+		t.Fatalf("the buffer was not read: %s", got.Skipped)
+	}
+	if len(got.Findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got.Findings))
+	}
+
+	at, want := got.Findings[0].Offset, encodeUTF16(key, false)[2:]
+	t.Logf("file %d bytes, key decodes at %d, reported file offset %d",
+		len(buf), len(prose), at)
+	if at+len(want) > len(buf) || string(buf[at:at+len(want)]) != string(want) {
+		t.Errorf("offset %d does not sit on the key: the file holds %q there",
+			at, clip(buf, at, len(want)))
+	}
+	if wantAt := 2 + 2*len(utf16.Encode([]rune(prose))); at != wantAt {
+		t.Errorf("offset is %d, want %d", at, wantAt)
+	}
+}
+
 // The sniff window is decoded before the rest of the buffer, and this is what
 // says so. Both halves are needed: the buffer is large, and the answer is in
 // its first few bytes, so a decode that reads it all allocates on the order of
