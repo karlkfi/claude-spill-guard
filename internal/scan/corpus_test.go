@@ -27,7 +27,7 @@ const cleanFindings = 0
 const (
 	minCleanFiles   = 13
 	minCleanBytes   = 12 << 10
-	minPlantedFiles = 10
+	minPlantedFiles = 12
 )
 
 // loadShipped is the ruleset as the binary will load it, no project overrides.
@@ -191,6 +191,11 @@ var planted = map[string]string{
 	"openai-api-key.py":             "openai-api-key",
 	"google-api-key.js":             "google-api-key",
 	"private-key-block.pem":         "private-key-block",
+	// And again, for the same reason one file down: this one is an RFC 1421
+	// encrypted key, which puts Proc-Type and DEK-Info between the header and
+	// the body -- the shape the body-line clause missed until it learned to
+	// step over them.
+	"private-key-block-rfc1421.pem": "private-key-block",
 	"jwt.txt":                       "jwt",
 }
 

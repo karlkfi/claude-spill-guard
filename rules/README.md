@@ -33,7 +33,7 @@ carried by a planted fixture in
 | `stripe-live-secret-key` | `sk_live_` `rk_live_` | live keys only — see below |
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
-| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header |
+| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them |
 | `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, floor 3.5, and no published sample signature |
 
 **The entropy floors are what make a *padded* placeholder quiet.** A repository
@@ -62,29 +62,75 @@ in every match. Capturing the secret tail lets the floor drop
 **Nine of the ten carry an entropy floor. The tenth is structural instead.**
 `private-key-block` matches a PEM header, which is a fixed string, and a floor
 over a constant is not a check — so the rule requires one base64 body line
-after the header. Prose quoting `-----BEGIN RSA PRIVATE KEY-----` to explain
-what one looks like carries no such line and is not reported. That was not
-hypothetical: the paragraph you are reading, and the row that filed the
+after the header, stepping over `Proc-Type:` and `DEK-Info:` if the key is an
+RFC 1421 encrypted one. Prose quoting `-----BEGIN RSA PRIVATE KEY-----` to
+explain what one looks like carries no such line and is not reported. That was
+not hypothetical: the paragraph you are reading, and the row that filed the
 problem, were both findings until the clause landed. Scanned over every tracked
 file, the rule went from 3 hits to 1, the one being its own planted fixture.
-Re-taken 2026-08-27 over 145 tracked files: still 1, and 8 with the clause
-removed. That second number grows as prose about the rule accumulates — four
-of the eight are the runbook below — so the reading that holds is the gated
-one in the next paragraph rather than this one.
+
+Do not quote that pair, and do not trust the number in this paragraph either.
+With the clause removed the same scan read 8 on 2026-08-27 and reads 21 at the
+commit you are looking at — twelve of those twenty-one are `pemblock_test.go`,
+which exists to exercise this rule. The clause-free count measures how much
+prose about PEM headers the repository holds, not how noisy the rule is, and it
+climbs every time somebody documents it: 19 while this branch was being
+reviewed, 21 after review asked for two more cases. The shipped count stays at
+its planted fixtures, 2 of them. The reading that holds is the gated one
+below.
 
 [`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
-is what holds that down. It quotes four PEM headers in prose, so removing the
-clause takes the clean corpus from 0 findings to 4 and reddens the gate. Before
+is what holds that down. It quotes four private-key headers inline and displays
+a fifth in an indented block — that fifth is what holds the clause's *shape*
+down — so removing the clause takes the clean corpus from 0 findings to 5 and
+reddens the gate. Six armour lines sit in the file; the `CERTIFICATE` one is
+public and outside the rule's alternation. Before
 that file existed the clause could be reverted with every test still passing,
 which is the shape this whole item is about.
 
-The cost is a header truncated at a buffer boundary, and an RFC 1421 encrypted
-key, whose `Proc-Type:` line sits where the body would be. A PKCS#8 encrypted
-key has base64 straight after the header and does match. Two arms of the
-alternation, `SSH2 ENCRYPTED ` and `PGP `, reach nothing their toolchains
-actually emit and have been dead since the rule was written. Q69 has all three
-with the measurements, and reading it before trusting this rule's coverage is
-the point of it.
+**The step over RFC 1421's headers is exactly two field names, and that is the
+precision decision.** An encrypted PKCS#1 key — what `openssl rsa -aes128 -p`
+and `ssh-keygen -m PEM -N` write — puts `Proc-Type:` and `DEK-Info:` where the
+body would be, so the clause missed it. The obvious widening is a bounded lazy
+window between header and body, and the corpus refuses it: at 200 bytes it
+fires on the runbook above, which lays out a header, explains the format in
+prose, and shows a body line. Naming the two fields admits every encrypted key
+those two toolchains emit and readmits no prose, because a prose line is not
+`Proc-Type:` or `DEK-Info:` and the body still has to begin a line.
+
+Widening to any `Name: value` line was measured too and is quiet over the whole
+corpus, which is why this originally shipped as a judgement call. It is not one.
+Three shapes separate them — a header followed by an undefined field, by
+`Comment: exported by ssh-keygen`, or by a prose line ending in a colon, each
+with a body under it. `TestTheGenericStepReportsWhatTheNamedPairDoesNot` holds
+both halves: the alternative reports all three and the shipped rule reports
+none. It compiles a regex that ships nowhere, which
+[`corpus_test.go`](../internal/scan/corpus_test.go)'s inherited controls
+already do for the same reason — a claim with nothing that can fail is the
+shape this repository refuses. A toolchain that writes a third RFC 1421 field
+would go unreported and would be the thing that reverses this.
+
+**Two arms of the alternation are dead.** `SSH2 ENCRYPTED ` cannot reach RFC
+4716 armor, which is four dashes with inner spaces — `ssh-keygen -e -m
+RFC4716` emits `---- BEGIN SSH2 PUBLIC KEY ----`, byte-checked — where the
+rule requires five and none. `PGP ` cannot reach
+`-----BEGIN PGP PRIVATE KEY BLOCK-----`, because real armor carries ` BLOCK`
+before the dashes; that one is derived from the spec rather than measured,
+`gpg` being absent on the machine it was taken on. They stay because deleting
+them is a judgement about what no toolchain
+writes rather than a proof, and with the body-line clause in force all an arm
+can add is a header followed by base64 — a key block, or a document displaying
+one, which is a class every other arm already carries.
+
+What the widening costs is a document that displays the encrypted layout
+verbatim — header, `Proc-Type:`, `DEK-Info:`, blank line, base64 — which is now
+reported. That is the same class as any document displaying a key block, which
+every arm already carries, and it is the one user-visible cost of the change.
+
+The clause's other cost is not live: a key whose header and body reach the
+scanner in different buffers reports nothing, and nothing chunks a file today —
+`scan.Buffer` takes the whole thing — so it is a constraint on whatever calls
+it rather than a gap.
 
 **Two rules carry a second check, because their vendor publishes a realistic
 example.** An entropy floor drops a padded placeholder and admits a plausible

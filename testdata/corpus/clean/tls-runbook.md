@@ -16,6 +16,21 @@ An encrypted PKCS#1 key still opens with `-----BEGIN RSA PRIVATE KEY-----`, and
 carries `Proc-Type: 4,ENCRYPTED` on the line after it. That header is how you
 tell it from the unencrypted form without decrypting anything.
 
+## What the parts look like
+
+The header names the format, and the body under it is base64 at sixty-four
+characters to the line. Laid out, with the body cut to a single line:
+
+    -----BEGIN RSA PRIVATE KEY-----
+
+then the encryption headers if the key has any, then a blank line, then lines
+of
+
+    QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
+
+until the footer. Nothing on this page is a key, and neither of those two
+lines came off one.
+
 ## Rotation
 
 1. Generate on the node. `openssl genrsa -out gateway.key 4096`, mode 0600,

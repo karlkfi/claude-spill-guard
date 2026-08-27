@@ -92,7 +92,7 @@
       "id": "private-key-block",
       "family": "credential",
       "description": "PEM private key header",
-      "regex": "(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)[\\r\\n]+[A-Za-z0-9+/=]{32,}",
+      "regex": "(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)[\\r\\n]+(?:(?:Proc-Type|DEK-Info):[^\\r\\n]*[\\r\\n]+)*[A-Za-z0-9+/=]{32,}",
       "group": 1,
       "keywords": ["PRIVATE KEY"],
       "validators": [],
