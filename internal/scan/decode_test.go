@@ -191,9 +191,17 @@ func TestUTF16SourceAgreesWithTheDecodeAtEveryByte(t *testing.T) {
 // utf16FixtureKey is the planted UTF-16 file's own value, and it is deliberately
 // not the one in aws-access-key-id.env beside it. Two fixtures sharing a literal
 // makes every edit to one a silent break in the other, and testdata/corpus's own
-// convention is a fabricated value per file. Shannon 4.1219 against the rule's
-// floor of 3.0, and it does not end in AWS's EXAMPLE.
-const utf16FixtureKey = "AKIA3QZ7NDXWK6PVMR2T"
+// convention is a fabricated value per file.
+//
+// The digits are the part that is not decoration. A real key ID's 16-character
+// body base32-decodes to the account that owns it, so it draws from A-Z and 2-7
+// alone; 0, 1, 8 and 9 cannot appear in one. A value carrying them is provably
+// not a credential by inspection, which is what a reader of a public security
+// repo needs and what a sentence promising "works against nothing" cannot give
+// them -- least of all here, where reading it at all means decoding the file
+// first. internal/rules/capture_test.go already had the shape. Shannon 3.7842
+// against the rule's floor of 3.0, and no EXAMPLE suffix for aws-placeholder.
+const utf16FixtureKey = "AKIA0SPILLGUARD98107"
 
 // The corpus half of the same assertion, over a file on disk rather than a
 // fixture assembled in memory. The gate walks this file too; what it cannot see

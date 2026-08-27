@@ -74,3 +74,14 @@ Its key is its own, and that is the rule rather than an accident: two fixtures
 sharing one literal makes every edit to one a silent break in the other. The
 in-memory pair in `internal/scan/decode_test.go` is where identical text is
 scanned in both encodings, which is the comparison that needs identity.
+
+**Where a fabricated value can be made provably impossible, make it.** This
+directory is public and it ships inside a security tool, so a reader who finds
+a credential-shaped string here has only the sentence above to tell them it is
+inert. Sometimes the value itself can tell them. An AWS access key ID's
+16-character body base32-decodes to the account that owns it, so a real one
+draws from A-Z and 2-7 alone and can never contain 0, 1, 8 or 9 —
+`aws-access-key-id-utf16le.env` carries `AKIA0SPILLGUARD98107` for that reason,
+and `internal/rules/capture_test.go` had the shape first. Where no such
+property exists the sentence is all there is, which is the argument for using
+one where it does.
