@@ -181,6 +181,11 @@ func TestNoRefusalCarriesScannedContent(t *testing.T) {
 		{"an indirectly named list",
 			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
 				`,"tool_input":{"command":"sort --files0-from=` + secret + `"}}`},
+		// argv[0] is the way the leak survives naming the command: the reader
+		// is found by basename, so the directories above it are free text.
+		{"a secret in the reader's own argv[0]",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"/tmp/` + secret + `/cat $UNSET"}}`},
 		{"a command string beside an unresolvable operand",
 			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
 				`,"tool_input":{"command":"echo ` + secret + ` && cat $UNSET"}}`},

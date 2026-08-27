@@ -112,8 +112,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 					"through %q, so which files this command would read is not "+
 					"settled here", strings.Join(flags, ", "))
 			}
-			// Safe to name: Files matched it, so this is one of the reader
-			// table's own keys rather than anything the caller chose.
+			// Safe to name, and the argument has to be exact because this is
+			// the one caller-derived string the reason carries. Files matched
+			// on path.Base(tokens[0]), so this basename is a key of the reader
+			// table or of its alias map -- two closed sets this repo authored.
+			// The directories above it never reach here: measured, a `cat`
+			// invoked as /tmp/<a key>/cat reports `cat`.
 			command := filepath.Base(tokens[0])
 			for _, operand := range operands {
 				path, err := resolve(operand, cwd, movedCwd)
