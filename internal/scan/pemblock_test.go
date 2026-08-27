@@ -61,11 +61,14 @@ func TestTheGenericStepReportsWhatTheNamedPairDoesNot(t *testing.T) {
 				t.Errorf("the generic step does not report this, so it does not " +
 					"separate the two shapes and rules/README.md is wrong to say it does")
 			}
-			found, err := Buffer("t", []byte(tc.buf), set)
+			got, err := Buffer("t", []byte(tc.buf), set)
 			if err != nil {
 				t.Fatalf("scanning: %v", err)
 			}
-			if len(found) != 0 {
+			if got.Skipped != Scanned {
+				t.Fatalf("not read: %s", got.Skipped)
+			}
+			if len(got.Findings) != 0 {
 				t.Errorf("the shipped rule reports this, so the two shapes agree here")
 			}
 		})
