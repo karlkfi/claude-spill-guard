@@ -136,8 +136,16 @@ on one of them names a crossing that happened at an earlier hop.
 **What a hook opens for itself has not crossed.** `PreToolUse` on `Read` carries
 the path and no content, so the hook reads the file, and those bytes are still
 on the local side until it allows the call. Same for the file operands the
-`Bash` reader spec resolves. That, plus the prompt, is the whole set of content
-spill-guard can actually withhold.
+`Bash` reader spec resolves, and for an `@path` in a prompt, which is the same
+shape arriving through `UserPromptSubmit` — [below](#path-is-an-operand-not-a-hop).
+
+Those three are the readers v1 covers, and they are instances rather than the
+class. The class is *any hook input naming a filesystem path whose result comes
+back as content*, and an installed MCP file or transcript reader is a member of
+it that no rule here mentions. Under the old axis those were runtime output and
+excluded with `PostToolUse`; under this one they are uncrossed hops where a deny
+works, so the axis opens that obligation rather than discharging it. Enumerating
+the readers is backlog work, not something this section settles.
 
 Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, by logging the
 raw stdin of a hook wired to all three events in a throwaway project and driving
@@ -189,8 +197,8 @@ follow, and each of them is a rule this project already made:
   `rules/spill-guard.json`. Sixty-four bits pins a guess uniquely, so for any
   low-entropy value the file is the plaintext with a short walk in front of
   it. The `pii` family is all such values: a US SSN is 10⁹ candidates, which
-  is 7.5 minutes of single-core Python, measured 2026-08-27 by digesting
-  500,000 of them and scaling. "Never put a raw secret in a struct that
+  is 7 minutes of single-core Python, measured 2026-08-27 as the best of three
+  runs of 1,000,000 digests, scaled. "Never put a raw secret in a struct that
   outlives the match" is not satisfied by writing a recoverable derivation of
   one to disk instead.
 - **A cache silences the scanner, which is the fail-open direction.** A stale,
@@ -201,6 +209,36 @@ follow, and each of them is a rule this project already made:
   session that made it. The brief rules out a daemon and a persistent process;
   a directory of digest sets nobody deletes is the same obligation arriving
   through a side door.
+
+### `@path` is an operand, not a hop
+
+Typing `@secret.txt` in a prompt puts the file's contents in front of the model,
+and **no hook of any kind runs for it**. Measured 2026-08-27 on 2.1.238, in a
+project wiring all three events to a stdin logger:
+
+| Prompt | Hook records | Marker reached the model |
+|---|---|---|
+| `Repeat back the second line of @secret.txt … Do not use any tool.` | 1 — `UserPromptSubmit` only | yes |
+| `Use the Read tool on secret.txt …` (control, same directory and config) | 4, including `PreToolUse` `Read` | yes |
+| `@secret.txt` again, with `UserPromptSubmit` exiting 2 | 1 — `UserPromptSubmit` | **no** |
+
+The control is what makes the first row an absence rather than a dead hook. The
+model's own account of where the content came from was that it had been
+surfaced by a system reminder, which is the harness splicing the file in on its
+own rather than issuing a tool call.
+
+**That is not a limitation to declare, because the operand is visible.**
+`UserPromptSubmit.prompt` carries `@secret.txt` as literal text, unexpanded, and
+denying there suppressed the splice outright — the marker the un-denied run
+returned did not appear. So the prompt is two things at once: content to scan,
+and a carrier of file operands, in the same way a `Bash` command string is. The
+resolution rule is the `Bash` reader spec's problem restated with a simpler
+grammar, and it belongs in the scan set rather than in
+[what this is not](#what-it-is-not).
+
+Getting it wrong is the failure this project indicts its predecessor for. A user
+who types `@.env` is doing the most obvious dangerous thing available, and a
+scanner that reports clean on it is reporting a safety it is not providing.
 
 ## Pipeline
 
