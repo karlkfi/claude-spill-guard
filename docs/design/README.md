@@ -510,8 +510,10 @@ writing it anywhere else.
 human types into.** On `UserPromptSubmit` a `permissionDecision` of `deny` is
 accepted and ignored, and **naming the event correctly does not rescue it** — an
 object stamped `"hookEventName": "UserPromptSubmit"` is ignored exactly as one
-stamped `PreToolUse` is, 22,071 bytes against 22,086 with the marker twice in
-both. `permissionDecision` has no meaning on that event whatever it is labelled,
+stamped `PreToolUse` is, both around 22 KB with the marker twice in each. Read
+the marker count rather than the byte total: transcript size varies by kilobytes
+across runs of the same arm, so a pair of exact sizes reads as a signature and is
+not one. `permissionDecision` has no meaning on that event whatever it is labelled,
 so the shape that blocks there is `decision: block`. That clause is here because
 the obvious repair for the sentence before it is to fix the event name, and that
 repair does nothing. The encoder and the full table belong with the `hook`
