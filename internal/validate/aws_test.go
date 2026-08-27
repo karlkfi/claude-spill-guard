@@ -14,9 +14,9 @@ func TestNotPlaceholderAWSKeyID(t *testing.T) {
 	}{
 		{"the key ID on AWS's IAM pages", "AKIAIOSFODNN7EXAMPLE", false},
 		{"the session key ID on the STS pages", "ASIAIOSFODNN7EXAMPLE", false},
-		{"a second documented body with the same suffix", "AKIAI44QH8DHBEXAMPLE", false},
+		{"a different body with the same suffix", "AKIAI44QH8DHBEXAMPLE", false},
 
-		{"the planted fixture's key", "AKIA5J7QT2WVXMLB4RND", true},
+		{"the planted fixture's key", "AKIAZMT4BXN9LD6VCP1Y", true},
 		{"a temporary session key of the same shape", "ASIA3ZQ7WX2VLM6TBYNJ", true},
 		// The two directions a suffix check gets wrong. Neither of these is a
 		// value AWS publishes, and dropping either would be a real key lost.

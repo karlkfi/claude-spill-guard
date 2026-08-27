@@ -7,10 +7,10 @@ are. AWS uses the same pair on every page.
 ## The pair
 
 The access key ID is `AKIAIOSFODNN7EXAMPLE` and the secret is
-`wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`. Both end in `EXAMPLE`, which is
-how AWS marks a value that authenticates against nothing. A key you generate
-yourself will not, so the suffix is the fastest way to tell a docs paste from
-a real credential.
+`wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`. Both carry `EXAMPLE`, which is how
+AWS marks a value that authenticates against nothing — the key ID ends there,
+the secret has `KEY` after it. A credential you generate yourself carries no
+such mark, so it is the fastest way to tell a docs paste from a real one.
 
 You will also meet `ASIAIOSFODNN7EXAMPLE` on the STS pages. `ASIA` is the
 prefix for a temporary session key; the body is the same example string.

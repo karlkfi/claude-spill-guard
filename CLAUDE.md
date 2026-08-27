@@ -18,7 +18,7 @@ measured.
 | `docs/design/brief.md` | The origin brief, as written. |
 | `docs/development/release-process.md` | Cutting a release: what a person does, and what the tag does. |
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
-| `internal/validate/` | The six validators. Precision lives here, not in the regex. |
+| `internal/validate/` | The eight validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
 | `internal/scan/` | The pipeline over one buffer. Binary skip, the literal prefilter, the match loop, findings. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |

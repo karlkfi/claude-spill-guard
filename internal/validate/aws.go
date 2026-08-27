@@ -2,9 +2,11 @@ package validate
 
 import "strings"
 
-// awsExampleSuffix is how AWS marks a credential in its own documentation:
-// AKIAIOSFODNN7EXAMPLE on the IAM pages, ASIAIOSFODNN7EXAMPLE on the STS ones,
-// wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY for the secret beside them.
+// awsExampleSuffix is how AWS marks a key ID in its own documentation:
+// AKIAIOSFODNN7EXAMPLE on the IAM pages, ASIAIOSFODNN7EXAMPLE on the STS ones.
+// The secret printed beside them, wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY,
+// carries the same mark and is not suffixed by it -- no rule here matches an
+// AWS secret, so nothing tests that string against this constant.
 const awsExampleSuffix = "EXAMPLE"
 
 // NotPlaceholderAWSKeyID reports whether an AWS access key ID candidate is
