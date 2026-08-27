@@ -75,13 +75,27 @@ sharing one literal makes every edit to one a silent break in the other. The
 in-memory pair in `internal/scan/decode_test.go` is where identical text is
 scanned in both encodings, which is the comparison that needs identity.
 
-**Where a fabricated value can be made provably impossible, make it.** This
-directory is public and it ships inside a security tool, so a reader who finds
-a credential-shaped string here has only the sentence above to tell them it is
-inert. Sometimes the value itself can tell them. An AWS access key ID's
-16-character body base32-decodes to the account that owns it, so a real one
-draws from A-Z and 2-7 alone and can never contain 0, 1, 8 or 9 —
-`aws-access-key-id-utf16le.env` carries `AKIA0SPILLGUARD98107` for that reason,
-and `internal/rules/capture_test.go` had the shape first. Where no such
-property exists the sentence is all there is, which is the argument for using
-one where it does.
+**Put something in the value that a reader can check.** This directory is
+public and it ships inside a security tool, so someone who finds a
+credential-shaped string here has only the sentence above to tell them it is
+inert — and in `aws-access-key-id-utf16le.env` they cannot read it at all
+without decoding the file first. `AKIA0SPILLGUARD98107` carries this project's
+name, which anyone can grep for and no issued credential would contain. That
+costs nothing and needs no argument.
+
+The digits in it are a second, weaker signal, and the difference is worth
+stating rather than blurring. A widely used technique recovers an AWS account
+ID by base32-decoding a key ID's 16-character body, which would mean a real one
+draws from A-Z and 2-7 and can never contain `0`, `1`, `8` or `9`. **Nobody
+here has verified that against an authoritative source.** AWS's [IAM
+identifiers reference][iam-ids] documents the prefixes and says nothing about
+the alphabet, and its own examples are hand-written non-keys that prove nothing
+either way — `AROA1234567890EXAMPLE` on that page contains every digit, and
+AWS's two published access key IDs disagree with each other, `AKIAI44QH8DHBEXAMPLE`
+carrying an `8` where `AKIAIOSFODNN7EXAMPLE` draws only from A-Z and 2-7.
+
+So treat the digits as a hedge, not a proof, and let the greppable name carry
+the claim. `internal/rules/capture_test.go` reached the same shape first, with
+`AKIA0123456789ABCDEF`.
+
+[iam-ids]: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html

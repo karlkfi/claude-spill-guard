@@ -193,14 +193,17 @@ func TestUTF16SourceAgreesWithTheDecodeAtEveryByte(t *testing.T) {
 // makes every edit to one a silent break in the other, and testdata/corpus's own
 // convention is a fabricated value per file.
 //
-// The digits are the part that is not decoration. A real key ID's 16-character
-// body base32-decodes to the account that owns it, so it draws from A-Z and 2-7
-// alone; 0, 1, 8 and 9 cannot appear in one. A value carrying them is provably
-// not a credential by inspection, which is what a reader of a public security
-// repo needs and what a sentence promising "works against nothing" cannot give
-// them -- least of all here, where reading it at all means decoding the file
-// first. internal/rules/capture_test.go already had the shape. Shannon 3.7842
-// against the rule's floor of 3.0, and no EXAMPLE suffix for aws-placeholder.
+// The value carries this project's name because a reader of a public security
+// repo needs something they can check, and "works against nothing" is a
+// sentence they have to take on trust -- least of all readable here, where the
+// fixture has to be decoded before it can be read at all. The 0, 1, 8 and 9 are
+// a second signal and a weaker one: a well-known technique base32-decodes a key
+// ID's body to recover the account, which would rule those digits out of a real
+// one, and nobody here has verified that against an authoritative source.
+// testdata/corpus/README.md carries what was and was not measured.
+//
+// Shannon 3.7842 against the rule's floor of 3.0, and no EXAMPLE suffix, so
+// aws-placeholder passes it once that check lands.
 const utf16FixtureKey = "AKIA0SPILLGUARD98107"
 
 // The corpus half of the same assertion, over a file on disk rather than a
