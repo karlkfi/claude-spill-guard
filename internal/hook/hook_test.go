@@ -105,6 +105,16 @@ func TestEachEventGetsTheBlockEncodingMeasuredToWorkForIt(t *testing.T) {
 	})
 }
 
+// It is also the positive control for TestNoRefusalCarriesScannedContent, and
+// that is a second job rather than a side effect. Every refusal in this package
+// now returns nothing of the payload, so that test is a suite of negatives with
+// nothing showing the inspection can see a value at all -- and a zero from a
+// clean binary reads exactly like a zero from a reason-reader that stopped
+// working. The assertion below is the half that says it can: a reason DOES
+// carry a caller-supplied string when the design allows one, which for a path
+// this binary resolved and opened it does.
+//
+// So do not narrow it to the rule id without moving that assertion somewhere.
 func TestReadIsScannedByOpeningTheFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "deploy.env")
 	if err := os.WriteFile(path, []byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
@@ -152,6 +162,11 @@ func TestNoVerdictCarriesTheValue(t *testing.T) {
 // allows and both of which are decisions rather than accidents. What it must
 // not carry is scanned content: a prompt body, a command string, or a file's
 // contents.
+// Its positive control is TestReadIsScannedByOpeningTheFile, which asserts a
+// reason carries the path it names. Without that pairing every case here could
+// pass against a reason-reader that had stopped seeing values, which is the
+// shape this file spent a day finding in other people's tests and then in its
+// own.
 func TestNoRefusalCarriesScannedContent(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct {
