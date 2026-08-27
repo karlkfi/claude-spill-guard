@@ -18,8 +18,9 @@ skeleton, the [CI gates](#ci), `internal/validate`, `internal/rules`,
 `internal/scan` and the shipped ruleset exist, and the binary reaches none of
 them — there is no `hook` subcommand to call them from. The validators came
 first because they are pure functions over a candidate and needed nothing to
-call them. The [open questions](#open-questions) are the parts that need a
-decision or a measurement before implementation goes further.
+call them. Nothing under [open questions](#open-questions) blocks that any
+more; the last of them is settled under
+[what gets scanned](#what-gets-scanned-is-the-crossing-not-the-hop).
 
 ## The problem
 
@@ -110,6 +111,142 @@ prevented at `UserPromptSubmit` or `PreToolUse`. For `Bash` that means the
 command string and its resolved file operands are the entire surface, so the
 segmentation layer this design ports from workspace-guard is load-bearing rather
 than an optimisation.
+
+### What gets scanned is the crossing, not the hop
+
+Scanning every field of every hook payload is the safe-looking default and it is
+how a scanner becomes noise: one secret reported at the `Read`, again at the
+`Write` that copies it, again at the heredoc that echoes it. Scanning only what
+a human typed is the opposite error — it catches the pasted credential and
+nothing the model moves.
+
+Authorship is the wrong axis for both. The boundary this tool defends is the
+local filesystem to the model's context, and the question a hook input answers
+is whether its bytes have crossed it yet. A `Write` body composed out of a file
+the model read is neither human-typed nor runtime-written, and deciding which it
+is has no answer because the question does not apply to it.
+
+**Whatever the model composed has already crossed.** The model emits the
+`tool_use` block, so every byte of it is API output before the `PreToolUse` hook
+is called. Denying that call stops a file being written; it unsends nothing. So
+`Write.content`, `Edit.old_string` and `new_string`, a heredoc body inside a
+`Bash` command, and the `description` beside it are re-emissions, and a finding
+on one of them names a crossing that happened at an earlier hop.
+
+**What a hook opens for itself has not crossed.** `PreToolUse` on `Read` carries
+the path and no content, so the hook reads the file, and those bytes are still
+on the local side until it allows the call. Same for the file operands the
+`Bash` reader spec resolves, and for an `@path` in a prompt, which is the same
+shape arriving through `UserPromptSubmit` — [below](#path-is-an-operand-not-a-hop).
+
+Those three are the readers v1 covers, and they are instances rather than the
+class. The class is *any hook input naming a filesystem path whose result comes
+back as content*, and an installed MCP file or transcript reader is a member of
+it that no rule here mentions. Under the old axis those were runtime output and
+excluded with `PostToolUse`; under this one they are uncrossed hops where a deny
+works, so the axis opens that obligation rather than discharging it. Enumerating
+the readers is backlog work, not something this section settles.
+
+Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, by logging the
+raw stdin of a hook wired to all three events in a throwaway project and driving
+a session that read a file, wrote its contents to a second file, and ran `cat`
+on the first:
+
+| Payload field | Where the bytes come from | Crossed already | Scan |
+|---|---|---|---|
+| `UserPromptSubmit.prompt` | the keyboard or the clipboard | No | **Yes** |
+| `PreToolUse` `Read.file_path` → the file the hook opens | the filesystem | No | **Yes** |
+| `PreToolUse` `Bash.command` → resolved read operands, opened by the hook | the filesystem | No | **Yes** |
+| `PreToolUse` `Bash.command`, the string itself | the model — see below | Yes | **Yes** |
+| `PreToolUse` `Bash.description` | the model | Yes | No |
+| `PreToolUse` `Write.content` | the model | Yes | No |
+| `PreToolUse` `Edit.old_string`, `Edit.new_string` | the model | Yes | No |
+| `PostToolUse.tool_response` | the tool, and [already sent](#posttooluse-cannot-withhold-a-result) | Yes | No |
+
+`Read`'s `tool_input` was `{"file_path": …}` and nothing else, which is what
+makes the hook's own open the only way to see the content. `Write`'s carried the
+full 55-byte body the model had assembled from the `Read` that preceded it,
+and the `Bash` heredoc arrived intact inside `command`. Every payload also
+carried `session_id`, `prompt_id`, `cwd`, `transcript_path` and, for a tool, a
+`tool_use_id` beginning `toolu_`.
+
+**The `Bash` command string is scanned, and the reason is authorship rather than
+crossing.** By the rule above a model-composed command has already crossed and a
+finding on it would be a warning, which
+[the `PostToolUse` verdict](#posttooluse-cannot-withhold-a-result) says not to
+count as a control. It is scanned anyway because it is the one payload field
+whose authorship the measurement above did not settle: every `PreToolUse` seen
+there carried a `toolu_` id, so every one was model-issued, and no probe has yet
+established what a command the human runs directly looks like from inside a
+hook. Failing closed on an unmeasured case is this project's rule, and the cost
+is one short string per `Bash` call with no file to open. The backlog holds the
+measurement that would retire the exception.
+
+**Dedup on the content hash is not the mechanism, and would cost more than the
+repetition it removes.** The repetition it targets is real — the same secret at
+four hops — but the rule above deletes three of those hops structurally, without
+keeping anything. Making the scanner quiet by remembering what it has already
+reported would instead need the `Finding` digest to survive between hook
+invocations, and each of those is a fresh process — five invocations in one
+session came back with five distinct PIDs under one parent, measured the same
+day — so the set becomes a file on disk keyed by `session_id`. Three things
+follow, and each of them is a rule this project already made:
+
+- **The file inverts.** `Digest` is the first eight bytes of
+  `sha256(rule id, NUL, value)`, and the rule id is public in
+  `rules/spill-guard.json`. Sixty-four bits pins a guess uniquely, so for any
+  low-entropy value the file is the plaintext with a short walk in front of
+  it. The `pii` family is all such values: a US SSN is 10⁹ candidates, which
+  is 7 minutes of single-core Python, measured 2026-08-27 as the best of three
+  runs of 1,000,000 digests, scaled. "Never put a raw secret in a struct that
+  outlives the match" is not satisfied by writing a recoverable derivation of
+  one to disk instead.
+- **A cache silences the scanner, which is the fail-open direction.** A stale,
+  corrupt, or planted entry means a real secret goes unreported and the run
+  looks clean, and there is no in-band signal that anything was suppressed. This
+  project blocks on every internal error for that reason.
+- **It is state, and state has to be reaped.** A per-session file outlives the
+  session that made it. The brief rules out a daemon and a persistent process;
+  a directory of digest sets nobody deletes is the same obligation arriving
+  through a side door.
+
+### `@path` is an operand, not a hop
+
+Typing `@secret.txt` in a prompt puts the file's contents in front of the model,
+and **no hook of any kind runs for it**. Measured 2026-08-27 on 2.1.238, in a
+project wiring all three events to a stdin logger. The marker column is read
+from the session transcript named by the hook payload's own `transcript_path`,
+not from what the run printed — a hook's stdout proves nothing here for the same
+reason it proves nothing [for `PostToolUse`](#posttooluse-cannot-withhold-a-result),
+and a blocked turn prints nothing whatever the splice did:
+
+| Prompt | Hook records | `tool_use_id` in transcript | Marker in transcript |
+|---|---|---|---|
+| `… @secret.txt … Do not use any tool.` | 1 — `UserPromptSubmit` | 0 | 2, in 21,722 bytes |
+| `Use the Read tool on secret.txt …` — control, same directory and config | 4, including `PreToolUse` `Read` | present | present |
+| `… @secret … Do not use any tool.` — near-miss token, file untouched | 1 — `UserPromptSubmit` | 0 | 0, in 21,384 bytes |
+| `… @secret.txt …` again, `UserPromptSubmit` exiting 2 | 1 — `UserPromptSubmit` | 0 | 0, in 1,404 bytes |
+
+Three things that table has to do at once. The `Read` control makes row one an
+absence rather than a dead hook. The **zero `tool_use_id`** makes it a splice
+rather than a hop the design already covers — content arriving is not evidence
+of a splice, because a model free to call `Read` produces the same content by a
+route `PreToolUse` does see. And the near-miss row shows the splice is keyed to
+an exact token: `@secret` next to a file named `secret.txt` moves nothing.
+
+**That is not a limitation to declare, because the operand is visible.**
+`UserPromptSubmit.prompt` carries `@secret.txt` as literal text, unexpanded, and
+denying there suppressed the crossing rather than merely the echo: the deny
+arm's whole transcript is 1,404 bytes against 21,722, with the marker absent
+from it. So the prompt is two things at once: content to scan,
+and a carrier of file operands, in the same way a `Bash` command string is. The
+resolution rule is the `Bash` reader spec's problem restated with a simpler
+grammar, and it belongs in the scan set rather than in
+[what this is not](#what-it-is-not).
+
+Getting it wrong is the failure this project indicts its predecessor for. A user
+who types `@.env` is doing the most obvious dangerous thing available, and a
+scanner that reports clean on it is reporting a safety it is not providing.
 
 ## Pipeline
 
@@ -364,10 +501,35 @@ with nothing on either stream still blocks, and the model is told `No stderr
 output`. Empty stdout is not the operative part of the failure the launcher
 exists to prevent; the non-2 exit code is.
 
-**A deny on stdout outranks the exit code.** The same `deny` object blocked the
-call on exits 0, 1, 9 and 127, and the reason reached the model byte-identical
-in all four. So a launcher that writes its deny and then dies still blocks — the
-one shape here that fails closed on its own. Prefer it.
+**A deny on stdout outranks the exit code — on `PreToolUse`.** The same `deny`
+object blocked the call on exits 0, 1, 9 and 127, and the reason reached the
+model byte-identical in all four. So a launcher that writes its deny and then
+dies still blocks, which is the one shape here that fails closed on its own.
+Prefer it *for the event it was measured on*, and read the next paragraph before
+writing it anywhere else.
+
+**The encoding is per event, and generalising this row fails open on the one a
+human types into.** On `UserPromptSubmit` a `permissionDecision` of `deny` is
+accepted and ignored, and **naming the event correctly does not rescue it** — an
+object stamped `"hookEventName": "UserPromptSubmit"` is ignored exactly as one
+stamped `PreToolUse` is, both around 22 KB with the marker twice in each. Read
+the marker count rather than the byte total: transcript size varies by kilobytes
+across runs of the same arm, so a pair of exact sizes reads as a signature and is
+not one. `permissionDecision` has no meaning on that event whatever it is labelled,
+so the shape that blocks there is `decision: block`. That clause is here because
+the obvious repair for the sentence before it is to fix the event name, and that
+repair does nothing. The encoder and the full table belong with the `hook`
+subcommand that writes them; what matters here is that the sentence above stops
+at `PreToolUse`.
+
+The reading this section needs is the one about `@path`, because
+[the operand](#path-is-an-operand-not-a-hop) rides in on that event. Driven
+2026-08-27 on 2.1.238 with a prompt naming `@secret.txt`, reading the session
+transcript rather than stdout: with a `deny` object the transcript is 22,086
+bytes and the file's marker appears twice; with `{"decision":"block"}` it is
+1,214 bytes with the marker absent; with exit 2, 1,404 bytes, absent. So both
+working encodings suppress the splice and not merely the prompt, and the
+recommended one suppresses neither.
 
 **On exit 2 the reason travels on stderr, and stdout is discarded.** A hook that
 writes `spill-guard: blocked ...` to stdout and exits 2 stops the call and tells
@@ -486,16 +648,17 @@ Four rules, each of which was learned by getting it wrong
 
 ## Open questions
 
-One left, and it needs an answer before or during implementation because it
-changes the shape of the thing. The other two were measurements rather than
-decisions, and both are taken: see
-[the hook surface](#posttooluse-cannot-withhold-a-result) and
-[the exit-code contract](#the-exit-code-contract-measured).
+None left in this file. The three it opened with are all settled, two by
+measurement and one by argument off them:
 
-### 1. What counts as human-typed
+- **`PostToolUse` cannot withhold a result**, so nothing is catchable after the
+  fact — [measured](#posttooluse-cannot-withhold-a-result).
+- **Only exit 2 blocks, and a `deny` object on stdout outranks the exit code** —
+  [measured](#the-exit-code-contract-measured).
+- **What counts as human-typed** was the wrong axis, and the requirement it came
+  from is met by asking whether a payload field's bytes have crossed the
+  filesystem-to-context boundary yet —
+  [above](#what-gets-scanned-is-the-crossing-not-the-hop).
 
-The audit's carried-over requirement is to distinguish human-typed text from
-runtime-written text when deciding what to scan. `UserPromptSubmit` is clearly
-the first and a tool result is clearly the second, but a `Write` body composed
-by the model from a file it read is neither. The rule that decides this has not
-been written.
+One remains outside it, at the end of [`distribution.md`](distribution.md):
+whether `install.sh` should refuse to proceed without `cosign`.
