@@ -253,12 +253,52 @@ scanner that reports clean on it is reporting a safety it is not providing.
 Per buffer, in order. Each stage exists to keep the next one off work it does
 not need to do.
 
-1. **Skip binaries.** A NUL byte in the first 8 KiB means skip. In the
-   benchmark corpus one PNG was 55% of all bytes, and the three language
-   prototypes disagreed on it because Go keeps raw bytes where Rust and Python
-   substitute U+FFFD.
+1. **Decode what declares itself.** A UTF-16 byte-order mark — `FF FE` or
+   `FE FF` — is decoded to UTF-8 and the rest of the pipeline reads that. A
+   mark is a declaration the file makes about itself, not an inference drawn
+   from its bytes, so this settles nothing the NUL check below stays out of.
+   Windows PowerShell 5.1 is the file class it is for: `>`, `>>` and
+   `Out-File` write UTF-16LE, and every Unicode encoding but UTF-7 writes a
+   mark, so the encoding a Windows script leaves behind always says what it
+   is — [`about_Character_Encoding`][psenc], read 2026-08-27, and the citation
+   is here rather than in a commit message because it is the only evidence
+   this repository has for the claim: there is no `pwsh` on the runners or on
+   a maintainer's Mac, so nothing can drive it. PowerShell 6 and later default
+   to `utf8NoBOM`, which has no NUL and always scanned. `Start-Transcript` is
+   the near miss worth naming: it writes UTF-8 with a mark, not UTF-16, so a
+   transcript is only in this class when a program's output was redirected
+   into it. `FF FE 00 00` is UTF-32LE and opens with the whole UTF-16LE mark,
+   so the longer mark is tested first and named rather than decoded.
 
-2. **Literal prefilter.** Word-boundary search for each credential rule's
+[psenc]: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_character_encoding
+
+   A finding reports a byte offset, so a decoded match is mapped back to the
+   offset in the file. The decode and the map are one walk over the code
+   units, which is what stops them disagreeing.
+
+2. **Skip binaries.** A NUL byte in the first 8 KiB of what step 1 produced
+   means skip. In the benchmark corpus one PNG was 55% of all bytes, and the
+   three language prototypes disagreed on it because Go keeps raw bytes where
+   Rust and Python substitute U+FFFD.
+
+   This stage is cheap and it has to stay ahead of the expensive ones, which
+   is a constraint on step 1 rather than on this one: a decode that runs to
+   the end of the buffer before anything decides to skip it inverts the whole
+   reason for the order. So the decode produces the sniff window first, this
+   check reads it, and the rest of the buffer is decoded only if it passes.
+   The window is a decision identical to the whole buffer's, not an
+   approximation of it, because this check never reads past 8 KiB. Measured
+   2026-08-27 on a 64 MiB UTF-16 buffer whose fourth character is a NUL:
+   189 ms and 32 MiB allocated and discarded, against a bound of 1 MiB the
+   test now holds it to.
+
+   UTF-16 written with no mark still lands here and is still skipped. Nothing
+   in such a buffer declares its encoding, and the alternative — reading
+   alternating NULs across the sniff window as UTF-16 rather than as binary —
+   is exactly the heuristic the NUL check was chosen instead of. It is a
+   stated gap rather than a silent one, which is what step 6 is for.
+
+3. **Literal prefilter.** Word-boundary search for each credential rule's
    keywords, 255–307 MiB/s against 1.0 MiB/s for the regex pass — roughly 280x.
    Use word boundaries, not `strings.Contains`: naive matching finds `sk-`
    inside `disk-containerd-…`, and one broad keyword (`AC`) took the file hit
@@ -266,12 +306,12 @@ not need to do.
    family only. Numeric PII rules have no literal to anchor on, which is one
    reason they ship disabled.
 
-3. **Match, one rule at a time.** Never fold the patterns into a single
+4. **Match, one rule at a time.** Never fold the patterns into a single
    alternation. Measured at 0.5x in Go and 0.7x in Rust: the DFA state space
    explodes and the lazy-DFA cache thrashes on heterogeneous input. Two engines,
    same result.
 
-4. **Validate.** This is where precision comes from, and regex is not where it
+5. **Validate.** This is where precision comes from, and regex is not where it
    lives:
 
    | Name in `validators` | Check | Applies to |
@@ -285,7 +325,11 @@ not need to do.
    | `reserved-range` | Reserved-range exclusion | IP rules — RFC1918, loopback, link-local, documentation ranges, `0.0.0.0` |
    | `context-label` | Proximity to one of the rule's `labels` | Bare numeric runs, which count only near a label like `phone:` or `ssn=` |
 
-5. **Report.** Rule ID, path, byte offset. Nothing else.
+6. **Report.** Rule ID, path, byte offset. Nothing else — and, beside the
+   findings, whether the buffer was read at all. A scanner that reports an
+   unread file the way it reports a file it read and found nothing in reports
+   a safety it is not providing, so every path that declines to read names its
+   reason and the caller carries that as far as the user.
 
 ## Rule schema
 

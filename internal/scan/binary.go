@@ -16,8 +16,13 @@ const sniffLimit = 8 << 10
 // A NUL byte and nothing else. Reading further, or deciding on a UTF-8
 // validity check instead, would take a position the three language prototypes
 // already disagreed on: Go keeps raw bytes where Rust and Python substitute
-// U+FFFD, so the same file is text in one and not in another. Text encoded in
-// UTF-16 is skipped by this, which is a recall gap rather than an oversight.
+// U+FFFD, so the same file is text in one and not in another.
+//
+// decode runs ahead of this and hands it whatever came out, so a NUL reaching
+// here is a NUL in the text rather than the other half of a UTF-16 character.
+// UTF-16 written without a byte-order mark still lands here, and that is the
+// remaining gap: nothing in such a buffer declares its encoding, and inferring
+// one is the heuristic this check was chosen instead of.
 func IsBinary(buf []byte) bool {
 	if len(buf) > sniffLimit {
 		buf = buf[:sniffLimit]

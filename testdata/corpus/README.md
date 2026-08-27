@@ -81,3 +81,50 @@ argument for pinning the count at zero.
 the `planted` map in `internal/scan/corpus_test.go`. The map is what carries
 the count, which the filename cannot; a file in one and not the other fails the
 gate from either side.
+
+`aws-access-key-id-utf16le.env` is the one file here that is not testing a
+rule. It tests an encoding: UTF-16LE with a byte-order mark, which is what
+Windows PowerShell 5.1 writes through `>`. It sits in the corpus rather than in
+a unit fixture so that the shipped ruleset and the gate's own walk are what read
+it — a decode asserted only against a buffer assembled in a test proves nothing
+about a file on disk, and this repository normalises line endings on everything
+it does not exempt. `.gitattributes` marks it `-text` for that reason.
+
+Its key is its own, and that is the rule rather than an accident: two fixtures
+sharing one literal makes every edit to one a silent break in the other. The
+in-memory pair in `internal/scan/decode_test.go` is where identical text is
+scanned in both encodings, which is the comparison that needs identity.
+
+**A planted value cannot rely on a marker the ruleset rejects, and this is the
+one rule here that is `planted/`-only.** Everything else in this file is about
+what a rule may match; this is about what a fixture is allowed to be, and it
+binds nowhere else in the repository — a unit test elsewhere needs its value to
+match a regex, not to survive every validator.
+
+`aws-access-key-id.env` is the worked example. It carries
+`AKIAIOSFODNN7EXAMPLE`, which is fabricated in the most authoritative way
+available: AWS publishes it, so a reader who greps it lands in AWS's own
+documentation. That makes it an excellent value for a unit test and a
+disqualified one here, because `aws-placeholder` drops exactly that suffix.
+A planted fixture has to be **found**, so it cannot be marked by the string the
+scanner is being taught to reject.
+
+Which leaves a fixture needing some other mark, and this is where a reader
+matters as well as the rule. This directory is public and it ships inside a
+security tool, so someone finding a credential-shaped string here has only the
+sentence above to tell them it is inert — and in `aws-access-key-id-utf16le.env`
+they cannot read it at all without decoding the file first.
+`AKIA0SPILLGUARD98107` carries this project's name, which anyone can grep for
+and no issued credential would contain. That costs nothing and needs no
+argument about AWS.
+
+The digits in it are a second and weaker signal. A widely used technique
+recovers an AWS account ID by base32-decoding a key ID's body, which would rule
+`0`, `1`, `8` and `9` out of a real one — and nobody in this repository has
+verified that against an authoritative source. AWS's [IAM identifiers reference][iam-ids]
+documents the unique-ID prefixes and says nothing about the alphabet. So the
+digits in `AKIA0SPILLGUARD98107` are a hedge rather than a proof, and the
+greppable name is what carries the claim. `internal/rules/capture_test.go`
+reached the same shape first, with `AKIA0123456789ABCDEF`.
+
+[iam-ids]: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html

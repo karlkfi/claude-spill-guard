@@ -7,6 +7,11 @@
 // measurement -- see IsBinary, hasKeyword, and the comment on the match loop
 // in Buffer. docs/design/README.md, "Pipeline", is the specification.
 //
+// Declining to read a buffer is a thing this package says rather than a thing
+// it does quietly. A Result carries the reason beside the findings, because a
+// scanner reporting an unread file the way it reports a file it read and found
+// nothing in reports a safety it is not providing.
+//
 // Nothing here retains a candidate. A Finding carries a truncated digest, so
 // the value is gone by the time a caller sees anything.
 package scan
@@ -32,13 +37,49 @@ import (
 type Finding struct {
 	RuleID string
 	Path   string
-	// Offset is where the captured group starts in the buffer, in bytes.
+	// Offset is where the captured group starts in the file, in bytes. Where
+	// the buffer was decoded the match is found at an offset in the decoded
+	// bytes and mapped back here, so this always names the same place a hex
+	// dump of the file would.
 	Offset int
 	// Digest is the dedup key, and it is why no field here holds the value.
 	// The predecessor's Finding carried the secret beside a redacted copy; it
 	// was used only as a dedup key and never printed, and the field's
 	// existence was the hazard.
 	Digest string
+}
+
+// A Skip is why a buffer was not read, and the empty value means it was.
+//
+// Every value is a phrase meant to reach whoever is being told the file was not
+// covered, because that is the only form of this fact that is worth anything: a
+// file nothing opened produces no findings, exactly like a file that was read
+// and held none.
+type Skip string
+
+const (
+	// Scanned is a buffer the pipeline read.
+	Scanned Skip = ""
+	// SkippedBinary is a NUL byte in the sniff window, read after any decoding.
+	// UTF-16 written with no byte-order mark lands here, which is the gap the
+	// decode stage leaves standing: nothing in the buffer declares the encoding,
+	// and guessing at one is the heuristic the NUL check was chosen instead of.
+	SkippedBinary Skip = "binary: a NUL byte in the first 8 KiB"
+	// SkippedUTF32 is a UTF-32 byte-order mark. Decoding it is the same shape as
+	// UTF-16 and no measurement says the file class is worth carrying, so this
+	// build names the encoding rather than guessing at the bytes.
+	SkippedUTF32 Skip = "UTF-32: declared by a byte-order mark, and not decoded"
+)
+
+// A Result is what the pipeline made of one buffer.
+//
+// Skipped sits beside Findings rather than folded into an error because both
+// are ordinary outcomes and only one of them means the file was covered. A
+// caller reading Findings alone cannot tell the two apart, which is the failure
+// this whole tool is built around.
+type Result struct {
+	Findings []Finding
+	Skipped  Skip
 }
 
 // Buffer runs the pipeline over buf and returns what survived, in the order
@@ -48,9 +89,10 @@ type Finding struct {
 // internal error, and a scanner that shrugs at one reports a safety it is not
 // providing. Disabled rules are skipped here rather than by the caller, so one
 // place decides it.
-func Buffer(path string, buf []byte, ruleset []rules.Rule) ([]Finding, error) {
-	if IsBinary(buf) {
-		return nil, nil
+func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
+	text, source, skip := decode(buf)
+	if skip != Scanned {
+		return Result{Skipped: skip}, nil
 	}
 
 	var findings []Finding
@@ -64,9 +106,9 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) ([]Finding, error) {
 		// block on -- the fail-open shape this whole tool is about.
 		switch {
 		case rule.Regex == nil:
-			return nil, fmt.Errorf("rule %q: no compiled regex", rule.ID)
+			return Result{}, fmt.Errorf("rule %q: no compiled regex", rule.ID)
 		case rule.Group < 0 || rule.Group > rule.Regex.NumSubexp():
-			return nil, fmt.Errorf(
+			return Result{}, fmt.Errorf(
 				"rule %q: group %d, but the regex has %d capture group(s)",
 				rule.ID, rule.Group, rule.Regex.NumSubexp())
 		}
@@ -75,7 +117,7 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) ([]Finding, error) {
 		// rule is pure-numeric with no literal to anchor on, which is one of
 		// the reasons that family ships disabled.
 		if rule.Family == rules.Credential && gates(rule.Keywords) &&
-			!hasKeyword(buf, rule.Keywords) {
+			!hasKeyword(text, rule.Keywords) {
 			continue
 		}
 
@@ -85,16 +127,16 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) ([]Finding, error) {
 		// thrashes on heterogeneous input. Two engines, same result, so it is
 		// a property of the approach rather than of either implementation.
 		// docs/design/language-choice.md section 2.
-		for _, m := range rule.Regex.FindAllSubmatchIndex(buf, -1) {
+		for _, m := range rule.Regex.FindAllSubmatchIndex(text, -1) {
 			lo, hi := m[2*rule.Group], m[2*rule.Group+1]
 			if lo < 0 {
 				// The group is in the pattern but took part in no match, which
 				// an alternation makes ordinary.
 				continue
 			}
-			ok, err := passes(rule, buf, lo, hi)
+			ok, err := passes(rule, text, lo, hi)
 			if err != nil {
-				return nil, err
+				return Result{}, err
 			}
 			if !ok {
 				continue
@@ -102,12 +144,16 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) ([]Finding, error) {
 			findings = append(findings, Finding{
 				RuleID: rule.ID,
 				Path:   path,
-				Offset: lo,
-				Digest: digest(rule.ID, buf[lo:hi]),
+				// The digest is over the decoded bytes, so one secret written
+				// in two encodings dedups to one key -- which is what a dedup
+				// key is for. The offset is the field that has to name a place
+				// in the file, and source is what maps it back.
+				Offset: source(lo),
+				Digest: digest(rule.ID, text[lo:hi]),
 			})
 		}
 	}
-	return findings, nil
+	return Result{Findings: findings}, nil
 }
 
 // gates reports whether a keyword list can gate anything, which is not the

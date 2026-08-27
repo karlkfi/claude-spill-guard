@@ -20,7 +20,7 @@ measured.
 | `cmd/spill-guard/` | The entry point. `version` and nothing else so far. |
 | `internal/validate/` | The eight validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
-| `internal/scan/` | The pipeline over one buffer. Binary skip, the literal prefilter, the match loop, findings. |
+| `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it read nothing. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. Data, not code. |
 | `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. |

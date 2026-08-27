@@ -75,9 +75,15 @@ func walk(t *testing.T, half string, ruleset []rules.Rule) reading {
 		if err != nil {
 			return err
 		}
+		if found.Skipped != Scanned {
+			// Not a soft outcome here. A corpus file nothing reads takes its
+			// findings out of every count below, and a zero is what this half
+			// is pinned at -- so an unread clean file reads as precision.
+			t.Errorf("%s was not read: %s", path, found.Skipped)
+		}
 		got.files++
 		got.bytes += len(buf)
-		got.findings = append(got.findings, found...)
+		got.findings = append(got.findings, found.Findings...)
 		return nil
 	})
 	if err != nil {
@@ -171,16 +177,21 @@ func TestCleanCorpusWouldFlagUnderTheInheritedRules(t *testing.T) {
 // derived from the filename, because the count is the part a naming convention
 // cannot carry.
 var planted = map[string]string{
-	"aws-access-key-id.env":       "aws-access-key-id",
-	"github-token.sh":             "github-token",
-	"github-fine-grained-pat.txt": "github-fine-grained-pat",
-	"slack-token.json":            "slack-token",
-	"slack-webhook-url.yaml":      "slack-webhook-url",
-	"stripe-live-secret-key.env":  "stripe-live-secret-key",
-	"openai-api-key.py":           "openai-api-key",
-	"google-api-key.js":           "google-api-key",
-	"private-key-block.pem":       "private-key-block",
-	"jwt.txt":                     "jwt",
+	"aws-access-key-id.env": "aws-access-key-id",
+	// The same rule twice. The second file is UTF-16LE with a byte-order mark,
+	// which is what Windows PowerShell 5.1 writes through `>`, and it is here
+	// rather than in a unit fixture so the shipped ruleset and the gate's own
+	// walk are what read it. Its key is its own; see utf16FixtureKey.
+	"aws-access-key-id-utf16le.env": "aws-access-key-id",
+	"github-token.sh":               "github-token",
+	"github-fine-grained-pat.txt":   "github-fine-grained-pat",
+	"slack-token.json":              "slack-token",
+	"slack-webhook-url.yaml":        "slack-webhook-url",
+	"stripe-live-secret-key.env":    "stripe-live-secret-key",
+	"openai-api-key.py":             "openai-api-key",
+	"google-api-key.js":             "google-api-key",
+	"private-key-block.pem":         "private-key-block",
+	"jwt.txt":                       "jwt",
 }
 
 func TestEveryPlantedSecretIsFoundExactlyOnce(t *testing.T) {
@@ -209,9 +220,13 @@ func TestEveryPlantedSecretIsFoundExactlyOnce(t *testing.T) {
 		if err != nil {
 			t.Fatalf("scanning %s: %v", name, err)
 		}
-		if len(found) != 1 || found[0].RuleID != want {
+		if found.Skipped != Scanned {
+			t.Errorf("%s was not read: %s", name, found.Skipped)
+			continue
+		}
+		if len(found.Findings) != 1 || found.Findings[0].RuleID != want {
 			t.Errorf("%s: want exactly one %s finding, got %d:\n%s",
-				name, want, len(found), report(found))
+				name, want, len(found.Findings), report(found.Findings))
 		}
 	}
 	for name := range planted {
