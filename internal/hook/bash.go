@@ -112,10 +112,13 @@ func bashTargets(command, cwd string) ([]target, error) {
 					"through %q, so which files this command would read is not "+
 					"settled here", strings.Join(flags, ", "))
 			}
+			// Safe to name: Files matched it, so this is one of the reader
+			// table's own keys rather than anything the caller chose.
+			command := filepath.Base(tokens[0])
 			for _, operand := range operands {
 				path, err := resolve(operand, cwd, movedCwd)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("in the %q here, %w", command, err)
 				}
 				if path == "" || seen[path] {
 					continue
@@ -168,28 +171,50 @@ func bashTargets(command, cwd string) ([]target, error) {
 // Every refusal here is a file a reader is pointed at and this cannot identify.
 // Skipping one would report a clean scan for content nothing looked at, which
 // is the failure the whole project is built around, so each is an error.
+//
+// # None of these reasons names the operand, and that is the whole point
+//
+// A reason reaches the API. An unresolvable operand is a fragment of a command
+// string the model wrote, and on this path nothing has been scanned yet -- the
+// walk fails before the command string itself is looked at -- so quoting the
+// operand sends content the scan never examined. `cat $HOME/<a key>` put the
+// key in the refusal verbatim.
+//
+// Clipping it the way decode clips an event name does not work here, and the
+// difference is worth stating because the first fix anyone reaches for is the
+// one that already exists two files away. An event name is a short identifier
+// whose interesting part is its head; a secret can sit anywhere in an operand
+// and usually sits at the start (`cat $AKIA…` is 24 bytes). A bound loose
+// enough to leave a real path legible keeps a whole key, and one tight enough
+// to cut a key mangles every path. There is no bound that does both.
+//
+// So the reason names the category and the command, and never the token. The
+// command is safe to name because Files has already matched it: it is one of
+// the table's own keys, a closed set this repo authored, rather than anything
+// the caller chose. What that costs is which operand on a command with several,
+// and the reason reaching the API is what the cost buys.
 func resolve(operand, cwd string, movedCwd bool) (string, error) {
 	switch {
 	case operand == "" || operand == "-":
 		// `-` is stdin to every reader in the table, not a file.
 		return "", nil
 	case strings.ContainsAny(operand, "$`"):
-		return "", fmt.Errorf("a file operand expands at run time (%q), so what "+
-			"this command would read cannot be known before it runs", operand)
+		return "", errors.New("a file operand expands at run time, so what this " +
+			"command would read cannot be known before it runs")
 	case strings.ContainsAny(operand, "*?["):
-		return "", fmt.Errorf("a file operand is a glob (%q), so which files "+
-			"this command would read is not settled here", operand)
+		return "", errors.New("a file operand is a glob, so which files this " +
+			"command would read is not settled here")
 	case strings.HasPrefix(operand, "~"):
 		// A bare `~` or `~/…` is the home directory, which is resolvable; a
 		// `~user` prefix is not, and neither is a `~` with no HOME.
 		if operand != "~" && !strings.HasPrefix(operand, "~/") {
-			return "", fmt.Errorf("a file operand names another user's home "+
-				"(%q), which this cannot resolve", operand)
+			return "", errors.New("a file operand names another user's home, " +
+				"which this cannot resolve")
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", fmt.Errorf("a file operand is home-relative (%q) and "+
-				"there is no home directory to resolve it against", operand)
+			return "", errors.New("a file operand is home-relative and there is " +
+				"no home directory to resolve it against")
 		}
 		return filepath.Join(home, strings.TrimPrefix(operand, "~")), nil
 	}
@@ -198,13 +223,12 @@ func resolve(operand, cwd string, movedCwd bool) (string, error) {
 		return operand, nil
 	}
 	if movedCwd {
-		return "", fmt.Errorf("a file operand is relative (%q) and the command "+
-			"changes directory first, so which file it names is not settled here",
-			operand)
+		return "", errors.New("a file operand is relative and the command " +
+			"changes directory first, so which file it names is not settled here")
 	}
 	if cwd == "" {
-		return "", fmt.Errorf("a file operand is relative (%q) and the payload "+
-			"names no working directory to resolve it against", operand)
+		return "", errors.New("a file operand is relative and the payload names " +
+			"no working directory to resolve it against")
 	}
 	return filepath.Join(cwd, operand), nil
 }

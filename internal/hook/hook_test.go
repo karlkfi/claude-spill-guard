@@ -158,6 +158,29 @@ func TestNoRefusalCarriesScannedContent(t *testing.T) {
 		name    string
 		payload string
 	}{
+		// The secret goes INSIDE the operand the refusal is about. The first
+		// version of this case put it in a neighbouring segment -- `echo
+		// <secret> && cat $UNSET` -- which passes whatever the refusal quotes,
+		// so it could not fail for the shape that matters. Four resolve paths
+		// were echoing the operand verbatim and this test said they were not.
+		{"a variable in the operand",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"cat $HOME/` + secret + `"}}`},
+		{"a glob in the operand",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"cat /secrets/` + secret + `*"}}`},
+		{"another user's home in the operand",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"cat ~alice/` + secret + `"}}`},
+		{"a relative operand after a directory change",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"cd /tmp && cat rel/` + secret + `"}}`},
+		{"a relative operand with no cwd to resolve against",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash",` +
+				`"tool_input":{"command":"cat rel/` + secret + `"}}`},
+		{"an indirectly named list",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"sort --files0-from=` + secret + `"}}`},
 		{"a command string beside an unresolvable operand",
 			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
 				`,"tool_input":{"command":"echo ` + secret + ` && cat $UNSET"}}`},
