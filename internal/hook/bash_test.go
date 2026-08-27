@@ -121,6 +121,12 @@ func TestAnOperandThatCannotBeResolvedBlocks(t *testing.T) {
 		{"a glob", "cat *.env", "is a glob"},
 		{"another user's home", "cat ~someone/.aws/credentials", "another user's home"},
 		{"relative after a cd", "cd /tmp && cat deploy.env", "changes directory first"},
+		// `cd` is not the only name for it. Driven before the fix, a `pushd`
+		// resolved the operand against the payload's cwd, scanned a file the
+		// command never reads, and allowed the call -- with `cd` blocking the
+		// same shape in the same run.
+		{"relative after a pushd", "pushd /tmp && cat deploy.env", "changes directory first"},
+		{"relative after a popd", "popd && cat deploy.env", "changes directory first"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, _ := drive(t, bashCall(t, tc.command, dir))

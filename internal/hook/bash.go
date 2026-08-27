@@ -12,6 +12,12 @@ import (
 	"github.com/karlkfi/claude-spill-guard/internal/readers"
 )
 
+// movesCwd are the builtins that change the working directory, so a relative
+// operand after one of them names a file this cannot identify. Conservative in
+// the direction that blocks: any of them means unresolvable, whether or not
+// this particular invocation would have moved anywhere.
+var movesCwd = map[string]bool{"cd": true, "pushd": true, "popd": true}
+
 // maxSubstDepth bounds the command-substitution recursion. internal/bash
 // returns only the outermost bodies and says the cap belongs to whoever drives
 // the loop, which is here. Upstream's MAX_SUBST_DEPTH is 25 and this matches
@@ -73,17 +79,23 @@ func bashTargets(command, cwd string) ([]target, error) {
 				"it would send is unknown: %w", err)
 		}
 
-		// A `cd` moves what a later relative operand means, and this port does
-		// not carry the working-directory tracker the guards upstream key on.
-		// So a relative operand after one is a path this cannot settle rather
-		// than one it can guess at.
+		// Anything that moves the working directory changes what a later
+		// relative operand means, and this port does not carry the tracker the
+		// guards upstream key on. So a relative operand after one is a path
+		// this cannot settle rather than one it can guess at.
+		//
+		// `cd` is not the only name for it. `pushd` and `popd` move too, and
+		// bare `pushd` swaps the top two entries and moves as well -- driven,
+		// a `pushd elsewhere && cat rel.env` resolved the operand against the
+		// payload's cwd, scanned a file the command never reads, and allowed
+		// the call with `cd` blocking the same shape in the same run.
 		movedCwd := false
 		for _, segment := range segments {
 			tokens := bash.StripEnvPrefix(bash.StripShKeywords(segment.Tokens))
 			if len(tokens) == 0 {
 				continue
 			}
-			if filepath.Base(tokens[0]) == "cd" {
+			if movesCwd[filepath.Base(tokens[0])] {
 				movedCwd = true
 				continue
 			}

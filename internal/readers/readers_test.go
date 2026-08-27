@@ -41,8 +41,17 @@ func TestFiles(t *testing.T) {
 			[]string{"/usr/bin/cat", "f"}, []string{"f"}, false},
 		{"an unknown flag is assumed to take no argument",
 			[]string{"cat", "--no-such-flag", "f"}, []string{"f"}, false},
+		// The package comment's own example, pinned. `sed -i f` -- without a
+		// script -- returns nothing, because `-i` is unknown to sed's row and
+		// `f` becomes the script `prog: 1` eats. The claim about `-i` is true
+		// and that spelling cannot show it, which is how the comment first
+		// carried a refutation of itself.
 		{"sed -i keeps its operand, because we scan reads",
 			[]string{"sed", "-i", "s/a/b/", "f"}, []string{"f"}, false},
+		{"sed --in-place likewise",
+			[]string{"sed", "--in-place", "s/a/b/", "f"}, []string{"f"}, false},
+		{"sed -i with no script has no operand to keep",
+			[]string{"sed", "-i", "f"}, nil, false},
 
 		// The divergence.
 		{"uniq's second positional is written, not read",

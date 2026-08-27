@@ -42,9 +42,9 @@
 //     -- a false positive downgrades a silent allow to a prompt and never the
 //     reverse. Here the polarity inverts: honouring a write-mode flag would
 //     EXEMPT an operand from being scanned, so a loose match would wave a real
-//     spill through. `sed -i f` therefore keeps f as a read. That over-scans a
-//     command whose output goes to a file rather than to the model, which is
-//     the safe direction and the only one this project accepts.
+//     spill through. `sed -i 's/x/y/' f` therefore keeps f as a read. That
+//     over-scans a command whose output goes to a file rather than to the
+//     model, which is the safe direction and the only one this project accepts.
 //
 // A program or pattern file -- `grep -f patterns`, `sed -f script`, `awk -f
 // prog` -- is kept as a read for the same reason. Its contents reach the tool
