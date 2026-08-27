@@ -78,7 +78,22 @@ zero-dependency property is about the shipped binary's import graph and an empty
 `require` block in `go.mod`; a build tool that never enters the binary does not
 touch it. The alternative is a hand-rolled `go build` matrix with
 `gh release upload`, which has fewer moving parts and then leaves the tap and
-bucket updates to be hand-rolled too. GoReleaser, pinned by commit SHA.
+bucket updates to be hand-rolled too. GoReleaser, pinned — and that is two pins
+rather than one. `goreleaser/goreleaser-action` is pinned by commit SHA, which
+the `action-pins` gate requires of every `uses:` in the tree, and the CLI it
+downloads is pinned separately to an exact release. The action's SHA says
+nothing about which binary it fetches: the default is `~> v2`, resolved on the
+day, so pinning the wrapper alone would leave the tool that builds the
+artifacts floating.
+
+**This is built.** [`.goreleaser.yaml`](../../.goreleaser.yaml) and
+[`release.yml`](../../.github/workflows/release.yml), with the runbook in
+[`release-process.md`](../development/release-process.md). Two things the design
+above left open and the implementation had to settle: the release is created as
+a **draft**, so publishing is a person rather than a tag push; and the workflow
+refuses to run without `docs/releases/<tag>.md`, which is the invariant
+[`docs/releases/README.md`](../releases/README.md) states and nothing used to
+enforce.
 
 ## Channels
 

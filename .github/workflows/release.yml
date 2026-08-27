@@ -1,0 +1,287 @@
+name: release
+
+# A tag publishes; a pull request rehearses.
+#
+# The release job runs on `v*` and on nothing else, so no pull request
+# exercises it and its first execution would be a permanent version number --
+# the one thing in this repository that cannot be fixed forward by pushing
+# again. `dry-run` is the answer: it builds the same archives from the same
+# config on every pull request, so the half that can be exercised without a tag
+# is exercised on every change. What it cannot reach is stated where it stops,
+# not implied by a green tick.
+#
+# This file is not in GATES. `make check` runs the gates, and a release
+# pipeline is not one: a contributor cannot build a release locally without the
+# two tools scripts/check-tools.sh reports in its `release` tier, and a gate
+# that needs a tool `make doctor` calls optional is a gate that fails on a
+# fresh clone. See docs/development/release-process.md.
+#
+# One consequence worth naming rather than discovering: `gate-drift` reads
+# tests.yml alone (scripts/gates.py pins it), so nothing checks this file's job
+# list against anything. A job deleted from here goes unnoticed by the check
+# that exists to catch exactly that, and Q59 covers the mutation-control half
+# rather than this one.
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.13'
+  # The CLI, not the action. Pinning `goreleaser/goreleaser-action` by SHA --
+  # which the `action-pins` gate requires -- pins the wrapper and leaves the
+  # binary it downloads to `~> v2`, whatever that resolves to on the day.
+  GORELEASER_VERSION: v2.18.0
+
+jobs:
+  # Everything a release does except signing, publishing, and the tag.
+  # Unfiltered by path on purpose: the assertion is against the target list in
+  # scripts/cross-compile.py, so a change there has to re-run this, and a
+  # path-gated job that was skipped reports no check at all -- which reads
+  # exactly like one that passed.
+  dry-run:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: GoReleaser warns on a shallow clone, and mod_timestamp
+      # reads the commit's own timestamp.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          install-only: true
+
+      # Against the schema of the pinned binary, so a config that drifted ahead
+      # of the version that reads it fails here rather than on a tag.
+      - name: The config validates against the pinned GoReleaser
+        run: goreleaser check
+
+      # --snapshot implies --skip=announce,publish,validate. Signing is skipped
+      # separately: cosign sign-blob writes a public Rekor entry, and minting
+      # one per pull request logs builds nobody published.
+      - name: A snapshot builds every archive
+        run: goreleaser release --snapshot --clean --skip=sign
+
+      - name: One archive per shipped target, named as the channels expect
+        run: python3 scripts/check-release-artifacts.py
+
+  # Two mutations, for the two halves of the check that fail in opposite
+  # directions. Both assert the mutation landed before asking for red: a break
+  # that silently did not happen leaves the checker reading clean input, and a
+  # control that passes for that reason is indistinguishable from one that
+  # worked.
+  dry-run-mutation-control:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: GoReleaser warns on a shallow clone, and mod_timestamp
+      # reads the commit's own timestamp.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          install-only: true
+
+      # The failure this check exists for: the release config ships fewer
+      # platforms than the cross-compile gate builds. Nothing else notices --
+      # every archive that was built is correct, and the missing one is missing
+      # from a list nobody re-reads.
+      - name: A target dropped from the release config must fail the check
+        run: |
+          python3 - <<'MUTANT'
+          import pathlib
+          p = pathlib.Path(".goreleaser.yaml")
+          t = p.read_text(encoding="utf-8")
+          old = "    ignore:\n      - goos: windows\n        goarch: arm64\n"
+          new = old + "      - goos: linux\n        goarch: arm64\n"
+          p.write_text(t.replace(old, new), encoding="utf-8")
+          MUTANT
+          if git diff --quiet .goreleaser.yaml; then
+            echo "::error::the mutation changed nothing -- .goreleaser.yaml no longer matches" >&2
+            exit 1
+          fi
+          goreleaser release --snapshot --clean --skip=sign
+          python3 scripts/check-release-artifacts.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .goreleaser.yaml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the check passed with linux/arm64 dropped from the release" >&2
+            exit 1
+          fi
+          if ! grep -q 'nothing was archived for linux/arm64' mutant.log; then
+            echo "::error::the check failed, but not on the missing target" >&2
+            exit 1
+          fi
+
+      # checksums.txt is what every install channel verifies against and what
+      # cosign signs, so a run that wrote a stale one signs a wrong answer and
+      # the signature over it verifies perfectly.
+      - name: An archive that does not match checksums.txt must fail the check
+        run: |
+          goreleaser release --snapshot --clean --skip=sign
+          python3 - <<'MUTANT'
+          import hashlib, pathlib, sys
+          a = next(pathlib.Path("dist").glob("*linux_amd64.tar.gz"))
+          before = hashlib.sha256(a.read_bytes()).hexdigest()
+          a.write_bytes(a.read_bytes() + b"x")
+          if hashlib.sha256(a.read_bytes()).hexdigest() == before:
+              sys.exit("the mutation changed nothing -- the archive still hashes the same")
+          print(f"{a.name} no longer matches its recorded digest")
+          MUTANT
+          python3 scripts/check-release-artifacts.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the check passed with an archive that does not match checksums.txt" >&2
+            exit 1
+          fi
+          if ! grep -q 'Signing that file signs a wrong answer' mutant.log; then
+            echo "::error::the check failed, but not on the digest mismatch" >&2
+            exit 1
+          fi
+
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      # Create the release and upload the assets.
+      contents: write
+      # The keyless identity cosign signs with, and the one the provenance
+      # attestation is minted against. There is no key to store, rotate, or
+      # lose, and no secret in this workflow at all.
+      id-token: write
+      # actions/attest-build-provenance writes to the attestations API, which
+      # is what `gh attestation verify` reads.
+      attestations: write
+    steps:
+      # Full history and tags: GoReleaser reads the tag it is building from.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          install-only: true
+
+      # docs/releases/README.md states that the file there matches the
+      # published body. Nothing enforced it, and the direction that goes wrong
+      # is the release publishing a generated changelog nobody wrote -- which
+      # then has to be corrected on the Release, off the record the invariant
+      # exists to keep. This is the enforcement: no notes file, no release.
+      - name: The notes for this tag are in the tree
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$notes" ]; then
+            echo "::error::$notes is not in this tree, so there is no body to publish. Nothing was published under this tag, so delete it, write the notes, merge them, and tag again from the commit that carries them. The release body is authored in the repository, not typed into the web form." >&2
+            exit 1
+          fi
+          printf 'publishing %s (%s bytes)\n' "$notes" "$(wc -c < "$notes")"
+
+      - name: Build, sign, and upload to a draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: goreleaser release --clean --release-notes "docs/releases/${GITHUB_REF_NAME}.md"
+
+      - name: Which workflow, commit, and runner built each archive
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+      - name: One archive per shipped target, each signed
+        run: python3 scripts/check-release-artifacts.py --signed
+
+      # Everything above asserts what this run built. This asserts what the
+      # release actually carries, which is a different question: an upload can
+      # drop an asset, and the check that reads dist/ cannot see it.
+      #
+      # The identity is pinned to this workflow at this tag. A signature minted
+      # from a branch, from another workflow, or from a fork verifies as a
+      # valid Sigstore signature and must not verify as this release's.
+      - name: The published assets verify as an outside consumer would check them
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --dir published
+          for f in checksums.txt checksums.txt.sig checksums.txt.pem; do
+            if ! cmp -s "dist/$f" "published/$f"; then
+              echo "::error::the published $f is not the one this run built" >&2
+              exit 1
+            fi
+          done
+          cosign verify-blob \
+            --certificate published/checksums.txt.pem \
+            --signature published/checksums.txt.sig \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            published/checksums.txt
+          # How many archives a release publishes, read from the same import
+          # check-release-artifacts.py uses rather than written down here. A
+          # literal is the defect this PR removed from
+          # action-pins-mutation-control, and it would be worse in this block:
+          # it is only reachable on a tag push, after the upload.
+          expected=$(python3 scripts/check-release-artifacts.py --count-targets)
+          if [ -z "$expected" ] || [ "$expected" -lt 1 ]; then
+            echo "::error::could not read the shipped-target count; refusing to verify against an unknown number" >&2
+            exit 1
+          fi
+          cd published
+          sha256sum -c checksums.txt
+          # nullglob, so a pattern that matched nothing expands to nothing
+          # rather than to itself. Without it the count below reaches 5 over a
+          # release missing every zip, because the literal `*.zip` is counted
+          # as an archive -- measured against this block on 2026-08-25.
+          shopt -s nullglob
+          verified=0
+          for f in *.tar.gz *.zip; do
+            gh attestation verify "$f" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+            verified=$((verified + 1))
+          done
+          if [ "$verified" -ne "$expected" ]; then
+            echo "::error::verified provenance for $verified archives, and a release publishes $expected" >&2
+            exit 1
+          fi
+
+      - name: What a maintainer does next
+        run: |
+          printf 'The release is a DRAFT. Nothing reaches a user until someone publishes it.\n\n'
+          printf '  gh release view %s\n' "$GITHUB_REF_NAME"
+          printf '  gh release edit %s --draft=false\n\n' "$GITHUB_REF_NAME"
+          printf 'docs/development/release-process.md carries the sign-off list.\n'
