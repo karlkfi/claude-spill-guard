@@ -22,11 +22,14 @@ func load(t *testing.T, ruleset string) []rules.Rule {
 
 func scan(t *testing.T, path string, buf string, ruleset []rules.Rule) []Finding {
 	t.Helper()
-	findings, err := Buffer(path, []byte(buf), ruleset)
+	got, err := Buffer(path, []byte(buf), ruleset)
 	if err != nil {
 		t.Fatalf("Buffer: %v", err)
 	}
-	return findings
+	if got.Skipped != Scanned {
+		t.Fatalf("the buffer was not read: %s", got.Skipped)
+	}
+	return got.Findings
 }
 
 func ids(findings []Finding) []string {
@@ -152,10 +155,32 @@ func TestBufferSkipsDisabledRules(t *testing.T) {
 	}
 }
 
-func TestBufferSkipsBinaries(t *testing.T) {
+// A skip is reported, not performed quietly. The zero findings are half of the
+// contract and the weaker half: they are what a file that was read and held
+// nothing produces too.
+func TestBufferSkipsBinariesAndSaysSo(t *testing.T) {
 	ruleset := load(t, awsRule)
-	if findings := scan(t, "a.png", "\x00"+key, ruleset); len(findings) != 0 {
-		t.Errorf("a buffer with a NUL in it produced %+v", findings)
+	got, err := Buffer("a.png", []byte("\x00"+key), ruleset)
+	if err != nil {
+		t.Fatalf("Buffer: %v", err)
+	}
+	if len(got.Findings) != 0 {
+		t.Errorf("a buffer with a NUL in it produced %+v", got.Findings)
+	}
+	if got.Skipped != SkippedBinary {
+		t.Errorf("Skipped is %q, want %q", got.Skipped, SkippedBinary)
+	}
+
+	// The positive control on the assertion above: the same key with no NUL in
+	// front of it reports Scanned and finds it, so an empty Skipped is a thing
+	// this test can distinguish rather than the only answer it ever sees.
+	got, err = Buffer("a.env", []byte(key), ruleset)
+	if err != nil {
+		t.Fatalf("Buffer: %v", err)
+	}
+	if got.Skipped != Scanned || len(got.Findings) != 1 {
+		t.Errorf("the control buffer reports Skipped %q and %d finding(s), "+
+			"want Scanned and 1", got.Skipped, len(got.Findings))
 	}
 }
 
@@ -320,12 +345,12 @@ func TestBufferFailsClosedOnAnUnusableRule(t *testing.T) {
 			`names check "handwave"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			findings, err := Buffer("a", []byte("ab"), []rules.Rule{tc.rule})
+			got, err := Buffer("a", []byte("ab"), []rules.Rule{tc.rule})
 			if err == nil {
-				t.Fatalf("no error, and %d findings", len(findings))
+				t.Fatalf("no error, and %d findings", len(got.Findings))
 			}
-			if findings != nil {
-				t.Errorf("an error came back with %d findings beside it", len(findings))
+			if got.Findings != nil {
+				t.Errorf("an error came back with %d findings beside it", len(got.Findings))
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error %q does not name %q", err, tc.want)

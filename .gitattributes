@@ -19,3 +19,8 @@
 # the endings and this attribute, because a rule this easy to undo cannot live
 # in a comment.
 hooks/run-spill-guard.cmd -text
+
+# The UTF-16 corpus fixture is the encoding under test, so nothing may
+# re-encode it. `text=auto` above already leaves a NUL-bearing file alone, and
+# that is a detection rather than a rule -- this is the rule.
+*-utf16le.* -text
