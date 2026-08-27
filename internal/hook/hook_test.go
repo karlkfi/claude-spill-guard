@@ -14,7 +14,7 @@ import (
 // it. internal/rules/capture_test.go already uses it, which is where it comes
 // from; it matches the rule and clears the entropy floor.
 //
-// Not AWS's own AKIAIOSFODNN7EXAMPLE: a rule that drops what a vendor
+// Not AWS's own documented example key: a rule that drops what a vendor
 // publishes as an example is one this repo wants, and it would leave every
 // test below passing while asserting nothing.
 const secret = "AKIA0123456789ABCDEF"

@@ -15,13 +15,13 @@ func TestHasKeyword(t *testing.T) {
 		want     bool
 	}{
 		{"the literal at the head of a real key",
-			"AKIAIOSFODNN7EXAMPLE", aws, true},
+			key, aws, true},
 		{"the literal after whitespace",
-			"aws_access_key_id = AKIAIOSFODNN7EXAMPLE", aws, true},
+			"aws_access_key_id = " + key, aws, true},
 		{"the literal after a quote",
-			`{"key": "AKIAIOSFODNN7EXAMPLE"}`, aws, true},
+			`{"key": "` + key + `"}`, aws, true},
 		{"the second keyword in the list",
-			"ASIAIOSFODNN7EXAMPLE", aws, true},
+			stsKey, aws, true},
 		{"lowercase text against an uppercase keyword",
 			"akiaiosfodnn7example", aws, true},
 		{"a keyword at the very end of the buffer",
@@ -33,20 +33,20 @@ func TestHasKeyword(t *testing.T) {
 		{"a keyword inside a longer word",
 			"disk-containerd-0", []string{"sk-"}, false},
 		{"a word-byte before an alphanumeric keyword",
-			"MYAKIAIOSFODNN7EXAMPLE", aws, false},
+			"MY" + key, aws, false},
 		{"an underscore before it, which RE2's \\b counts as a word byte",
-			"PREFIX_AKIAIOSFODNN7EXAMPLE", aws, false},
+			"PREFIX_" + key, aws, false},
 		{"a digit before it",
-			"7AKIAIOSFODNN7EXAMPLE", aws, false},
+			"7" + key, aws, false},
 		{"nothing resembling the keyword", "package main", aws, false},
 		{"an empty buffer", "", aws, false},
-		{"no keywords at all", "AKIAIOSFODNN7EXAMPLE", nil, false},
+		{"no keywords at all", key, nil, false},
 		// An empty keyword names no literal, so it cannot be found. What the
 		// caller does with that is the question, and it is answered in
 		// scan.go's gates() rather than here.
 		{"an empty keyword", "package main", []string{""}, false},
 		{"an empty keyword against a buffer holding anything at all",
-			"AKIAIOSFODNN7EXAMPLE", []string{""}, false},
+			key, []string{""}, false},
 		{"a keyword longer than the buffer", "AK", aws, false},
 
 		// A keyword opening on punctuation carries its own boundary, so there
@@ -55,7 +55,7 @@ func TestHasKeyword(t *testing.T) {
 		{"a punctuation-led keyword after a word byte",
 			"key=-sk-abcdef", []string{"-sk-"}, true},
 		{"a keyword whose value continues into word bytes",
-			"AKIAIOSFODNN7EXAMPLE", []string{"AKIA"}, true},
+			key, []string{"AKIA"}, true},
 
 		// The search finds candidate positions by first byte and there are two
 		// cases of it, so these are the shapes that structure can get wrong.

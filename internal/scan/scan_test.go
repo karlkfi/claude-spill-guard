@@ -1,12 +1,15 @@
 package scan
 
 import (
+	"fmt"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
+	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 )
 
 // load builds the ruleset the way the binary does, so a fixture that the
@@ -50,7 +53,38 @@ const awsRule = `{"rules": [{
 	"enabled": true
 }]}`
 
-const key = "AKIAIOSFODNN7EXAMPLE"
+// key is AWS's documented access key ID, which the tables in this package use
+// as the thing a rule has to find. It is named rather than written here, and
+// testdata/corpus/README.md says why.
+//
+// A package-level var filled by TestMain rather than a value each test loads:
+// three files and a dozen assertions read it, and threading a *testing.T
+// through the name would rewrite all of them to say nothing new.
+var key string
+
+// stsKey is the same value on the prefix STS issues, which the prefilter's
+// table needs to reach the second keyword in a list.
+var stsKey string
+
+// fatal adapts testvec's TB to TestMain, which has no *testing.T to fail. A
+// vectors file this package cannot read is not a failure worth reporting per
+// test -- every table below would be asserting on an empty string -- so it
+// takes the binary down where the problem is.
+type fatal struct{}
+
+func (fatal) Helper() {}
+
+func (fatal) Fatalf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
+
+func TestMain(m *testing.M) {
+	vec := testvec.Load(fatal{})
+	key = vec.Get(fatal{}, "aws-iam-example")
+	stsKey = vec.Get(fatal{}, "aws-sts-example")
+	os.Exit(m.Run())
+}
 
 func TestBufferReportsRuleIDPathAndOffset(t *testing.T) {
 	ruleset := load(t, awsRule)
