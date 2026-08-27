@@ -12,7 +12,11 @@ import (
 // The value testdata/corpus/planted/aws-access-key-id.env carries, so a rule
 // retuned out from under this file fails the precision gate first rather than
 // leaving these tests quietly asserting nothing.
-const secret = "AKIAIOSFODNN7EXAMPLE"
+//
+// Not AWS's own AKIAIOSFODNN7EXAMPLE, which the fixture used to carry: a rule
+// that drops what a vendor publishes as an example is one this repo wants, and
+// it would leave every test below asserting nothing while still passing.
+const secret = "AKIA5J7QT2WVXMLB4RND"
 
 // drive runs the hook over one payload and hands back everything a caller of
 // the process would see.
