@@ -247,8 +247,10 @@ func clip(buf []byte, at, n int) string {
 }
 
 func TestDecodeUTF16StopsAtTheLimit(t *testing.T) {
-	// Three bytes out per rune, so no limit lands on a rune boundary and the
-	// "at least" half of the contract is what is under test.
+	// Two bytes out per rune, which the assertion on full below pins rather
+	// than this comment. So 1, 5, 199 and 201 fall mid-rune, which is where the
+	// "at least" half of the contract is decided, and 0 and 200 sit on a
+	// boundary and check the ordinary case.
 	body := encodeUTF16(strings.Repeat("é", 100), false)[2:]
 	full := len(decodeUTF16(body, false, noLimit))
 	for _, limit := range []int{0, 1, 5, 199, 200, 201} {
