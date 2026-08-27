@@ -71,8 +71,28 @@ func decode(raw []byte) (payload, Event, error) {
 	default:
 		return got, "", fmt.Errorf(
 			"%w: %q is not an event this binary can withhold content at",
-			errNoEvent, got.HookEventName)
+			errNoEvent, clip(got.HookEventName))
 	}
+}
+
+// maxEventName bounds what a refusal echoes back. An event name is a short
+// identifier -- the longest Claude Code sends is UserPromptSubmit at 16 bytes
+// -- and this is double that.
+const maxEventName = 32
+
+// clip bounds a payload field before it is quoted into a reason.
+//
+// The reason reaches the API, and this field is the one thing a refusal echoes
+// that is neither a path nor a rule id, both of which the design allows by
+// name. Whatever arrives here is a string somebody else chose and its length
+// is not this binary's to assume, so a refusal that quoted it whole would put
+// an unbounded caller-supplied run into the transcript. Escaping is %q's job
+// at the call site; bounding is this.
+func clip(s string) string {
+	if len(s) <= maxEventName {
+		return s
+	}
+	return s[:maxEventName] + "…"
 }
 
 // readInput is one tool's arguments, in the fields this package reads. Both

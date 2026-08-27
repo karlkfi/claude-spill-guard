@@ -142,6 +142,55 @@ func TestNoVerdictCarriesTheValue(t *testing.T) {
 	}
 }
 
+// TestNoVerdictCarriesTheValue drives the paths that FOUND something. This is
+// the other half: a call that lands on a refusal, with the secret somewhere in
+// the payload. Those paths are the ones where nothing was examined, so a
+// refusal that echoed the payload back would send the very thing it declined
+// to scan -- and no test went near them until #43's reviewer said so.
+//
+// What a refusal may name is a path and an operand, both of which the design
+// allows and both of which are decisions rather than accidents. What it must
+// not carry is scanned content: a prompt body, a command string, or a file's
+// contents.
+func TestNoRefusalCarriesScannedContent(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"a command string beside an unresolvable operand",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"echo ` + secret + ` && cat $UNSET"}}`},
+		{"a prompt on an event that cannot withhold",
+			`{"hook_event_name":"PostToolUse","prompt":"` + secret + `"}`},
+		{"a tool_input that does not decode",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":"` + secret + `"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, tc.payload)
+			if code == 0 && stdout == "" {
+				t.Fatalf("the call was allowed, so this asserts nothing about a refusal")
+			}
+			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+				t.Errorf("a refusal carries the value:\nstdout %q\nstderr %q", stdout, stderr)
+			}
+		})
+	}
+}
+
+// The one payload field a refusal echoes that is neither a path nor a rule id.
+// Its length is not this binary's to assume, and the reason reaches the API.
+func TestARefusalBoundsTheEventNameItEchoes(t *testing.T) {
+	long := strings.Repeat("A", maxEventName*3)
+	_, _, stderr := drive(t, `{"hook_event_name":"`+long+`"}`)
+	if strings.Contains(stderr, long) {
+		t.Errorf("the refusal echoed the whole event name: %q", stderr)
+	}
+	if !strings.Contains(stderr, long[:maxEventName]) {
+		t.Errorf("stderr = %q, want it to name what arrived, clipped", stderr)
+	}
+}
+
 // A file that is not there sends nothing, so blocking would claim a safety
 // nobody needed and hide the tool's own error. Every other read failure is a
 // file that exists and went unchecked, which blocks.
