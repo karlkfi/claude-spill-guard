@@ -74,7 +74,11 @@ worth having and neither complete:
 2. Resolve the file operands of the common readers (`cat`, `head`, `tail`,
    `grep`) and scan those files, the same way `Read` is handled. Sibling
    guards already parse Bash to this depth; workspace-guard's segmentation
-   layer is the thing to port rather than to rewrite.
+   layer is the thing to port rather than to rewrite, and so is the
+   per-command table above it that says which of a segment's tokens is a path.
+   That table is `internal/readers`, and its read/write split is this repo's
+   own: workspace-guard asks which files a command touches, writes included,
+   and this asks what is about to leave the machine, which is the reads.
 
 Neither catches a command that synthesizes a secret at runtime. That is a
 stated limitation, not a gap to close later, and `PostToolUse` does not close it

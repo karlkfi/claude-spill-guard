@@ -34,8 +34,9 @@ is not:
 | Run as a Claude Code hook | no |
 | Ship a ruleset | yes |
 
-`spill-guard` builds and answers `hook`, `version`. `internal/bash` is written
-and tested; the binary does not reach it yet.
+`spill-guard` builds, answers `hook`, `version`, and reaches `internal/bash`,
+`internal/hook`, `internal/readers`, `internal/rules`, `internal/scan`,
+`internal/validate`, `rules`.
 <!-- status:end -->
 
 - [`docs/design/`](docs/design/) — the proposed design: threat model, hook

@@ -23,6 +23,7 @@ measured.
 | `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable, encode a verdict. Where fail-closed holds or does not. |
 | `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it read nothing. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
+| `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. The JSON is data; `embed.go` beside it is the `go:embed` that compiles it in, which has to live here because the directive reaches only its own directory. |
 | `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. |
 | `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
@@ -43,10 +44,15 @@ loader change.
 invokes it and the plugin manifests beside it land together in a later item,
 because a repo that is installable as a security tool scanning nothing is the
 failure this project indicts the predecessor for. So the hook fires when it is
-driven and nothing drives it yet. The `Bash` surface is half of itself for the
-same reason — the command string is scanned and its file operands are not,
-because deciding which token is a path needs a per-command table that has its
-own row.
+driven and nothing drives it yet.
+
+The `Bash` surface is now whole: the command string is scanned and so are the
+files its readers are pointed at, `internal/readers` being what decides which
+token is a path. An operand of a known reader that cannot be resolved — a
+`$VAR`, a glob, a relative path after a `cd` — blocks, because a scanner that
+skips one reports a clean result for a file nothing opened. A command with no
+row contributes no operands, which is the design's stated limitation rather
+than a gap.
 
 ## Rules that are not negotiable
 

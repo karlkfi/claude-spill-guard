@@ -131,3 +131,51 @@ func TestEveryAliasResolves(t *testing.T) {
 		}
 	}
 }
+
+// A flag whose value is a file naming other files. Files returns the list,
+// because the list is read; Indirect is what says the files it names are not
+// in that return, so a caller can block rather than report a clean scan for
+// every path inside it.
+func TestIndirect(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		tokens []string
+		want   []string
+	}{
+		{"sort --files0-from", []string{"sort", "--files0-from", "list"}, []string{"--files0-from"}},
+		{"an inline value counts", []string{"wc", "--files0-from=list"}, []string{"--files0-from"}},
+		{"file -f", []string{"file", "-f", "list"}, []string{"-f"}},
+		{"sort with no such flag", []string{"sort", "in"}, nil},
+		{"a command with no indirect flags at all", []string{"cat", "a"}, nil},
+		{"a command with no row", []string{"curl", "x"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Indirect(tc.tokens); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Indirect(%q) = %q, want %q", tc.tokens, got, tc.want)
+			}
+		})
+	}
+}
+
+// Every command named in `indirect` must have a row, or the flags are named
+// against nothing and Indirect silently returns empty for them.
+func TestEveryIndirectCommandHasARow(t *testing.T) {
+	if len(indirect) == 0 {
+		t.Fatal("no indirect commands, so this test asserts nothing")
+	}
+	for name, flags := range indirect {
+		s, ok := specs[name]
+		if !ok {
+			t.Errorf("%q is in indirect and has no row", name)
+			continue
+		}
+		for _, flag := range flags {
+			_, isFile := s.fileFlags[flag]
+			_, isConsume := s.consume[flag]
+			if !isFile && !isConsume {
+				t.Errorf("%q's indirect flag %q is in neither fileFlags nor "+
+					"consume, so splitArgs never records it as seen", name, flag)
+			}
+		}
+	}
+}

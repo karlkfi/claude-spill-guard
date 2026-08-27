@@ -63,6 +63,45 @@ func Files(tokens []string) ([]string, bool) {
 	return append(files, operands...), true
 }
 
+// indirect maps a command to the flags whose value is a file naming OTHER
+// files the command then reads. `sort --files0-from=LIST` reads LIST for a
+// NUL-separated list of paths and reads each of them.
+//
+// Files returns LIST, because LIST is read. It cannot return what LIST names
+// without opening it, and a caller that scanned LIST alone would report a
+// clean result for every file in it. So the flags are named here and Indirect
+// reports them, which is what lets the caller block instead of under-reporting.
+var indirect = map[string][]string{
+	"sort": {"--files0-from"},
+	"wc":   {"--files0-from"},
+	"file": {"-f", "--files-from"},
+}
+
+// Indirect returns the flags in this command whose value names files it cannot
+// enumerate. Empty means every file the command reads is in Files' return.
+func Indirect(tokens []string) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
+	name := path.Base(tokens[0])
+	if target, ok := aliases[name]; ok {
+		name = target
+	}
+	flags, ok := indirect[name]
+	if !ok {
+		return nil
+	}
+	s := specs[name]
+	_, seen, _ := splitArgs(tokens, s)
+	var found []string
+	for _, flag := range flags {
+		if seen[flag] {
+			found = append(found, flag)
+		}
+	}
+	return found
+}
+
 // splitArgs walks one simple command's arguments against its spec, returning
 // the files named by flags, the flags it saw, and the positionals.
 //

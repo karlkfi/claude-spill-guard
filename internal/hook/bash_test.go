@@ -261,3 +261,16 @@ func TestASingleQuotedSubstitutionIsNotFollowed(t *testing.T) {
 		t.Errorf("exit %d, stdout %q, want a silent 0 (stderr: %q)", code, stdout, stderr)
 	}
 }
+
+// The list is read and what it names is not, so scanning the list alone would
+// report a clean result for every path inside it.
+func TestAnIndirectlyNamedFileBlocks(t *testing.T) {
+	dir := t.TempDir()
+	code, stdout, _ := drive(t, bashCall(t, "sort --files0-from list.txt", dir))
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 with a deny object", code)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "named indirectly") {
+		t.Errorf("reason = %q, want it to name the indirection", reason)
+	}
+}

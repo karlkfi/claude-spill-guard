@@ -91,6 +91,15 @@ func bashTargets(command, cwd string) ([]target, error) {
 			if !known {
 				continue
 			}
+			// A flag whose value is a file naming other files. The list itself
+			// is an operand and is scanned; what it names cannot be known
+			// without opening it, and scanning the list alone would report a
+			// clean result for every file in it.
+			if flags := readers.Indirect(tokens); len(flags) > 0 {
+				return nil, fmt.Errorf("a file operand is named indirectly "+
+					"through %q, so which files this command would read is not "+
+					"settled here", strings.Join(flags, ", "))
+			}
 			for _, operand := range operands {
 				path, err := resolve(operand, cwd, movedCwd)
 				if err != nil {
