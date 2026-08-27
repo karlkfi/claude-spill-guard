@@ -46,23 +46,38 @@ func decode(buf []byte) (text []byte, source func(int) int, skip Skip) {
 	switch {
 	case bytes.HasPrefix(buf, bomUTF32LE), bytes.HasPrefix(buf, bomUTF32BE):
 		return nil, source, SkippedUTF32
+
 	case bytes.HasPrefix(buf, bomUTF16LE), bytes.HasPrefix(buf, bomUTF16BE):
 		mark := len(bomUTF16LE)
 		body, bigEndian := buf[mark:], bytes.HasPrefix(buf, bomUTF16BE)
-		text = decodeUTF16(body, bigEndian)
-		source = func(at int) int { return mark + utf16Source(body, bigEndian, at) }
-	default:
-		text = buf
-	}
 
-	// On the decoded bytes rather than the raw ones. Every ASCII character in a
-	// UTF-16 buffer carries a NUL beside it, so reading raw is what made a whole
-	// file class binary on its second byte. A NUL surviving the decode is a NUL
-	// in the text.
-	if IsBinary(text) {
-		return nil, source, SkippedBinary
+		// The sniff window before the rest of it. IsBinary is the cheapest
+		// stage and it is here to keep the expensive ones off work they do not
+		// need to do, so decoding a whole buffer to find out whether to skip it
+		// inverts the one thing the pipeline's order is for. Measured
+		// 2026-08-27 on a 64 MiB UTF-16 buffer whose fourth character is a NUL:
+		// 189 ms and 32 MiB allocated, every byte of it discarded, to learn
+		// what the first four bytes said.
+		//
+		// A prefix is the same answer, not an approximation of it: IsBinary
+		// reads at most sniffLimit bytes, so any prefix reaching sniffLimit
+		// decides identically to the whole buffer.
+		if IsBinary(decodeUTF16(body, bigEndian, sniffLimit)) {
+			return nil, source, SkippedBinary
+		}
+		return decodeUTF16(body, bigEndian, noLimit),
+			func(at int) int { return mark + utf16Source(body, bigEndian, at) },
+			Scanned
+
+	default:
+		// On the raw bytes, which for an undeclared buffer is all there is.
+		// Every ASCII character in a UTF-16 buffer carries a NUL beside it, so
+		// this is where UTF-16 written without a mark still lands.
+		if IsBinary(buf) {
+			return nil, source, SkippedBinary
+		}
+		return buf, source, Scanned
 	}
-	return text, source, Scanned
 }
 
 // utf16Unit reads the UTF-16 code unit at buf[at:at+2].
@@ -106,15 +121,27 @@ func walkUTF16(buf []byte, bigEndian bool, visit func(r rune, at int) bool) {
 	}
 }
 
+// noLimit decodes the whole buffer, for the limit argument below.
+const noLimit = -1
+
 // decodeUTF16 decodes buf, a UTF-16 buffer with its mark already removed, to
-// UTF-8.
-func decodeUTF16(buf []byte, bigEndian bool) []byte {
+// UTF-8, stopping once the output reaches limit bytes.
+//
+// It stops after the rune that reaches the limit rather than before it, so the
+// result is at least limit bytes whenever the input holds that much. That is
+// the direction the caller needs: a prefix shorter than sniffLimit would decide
+// on less than IsBinary reads.
+func decodeUTF16(buf []byte, bigEndian bool, limit int) []byte {
 	// One output byte per code unit is exact for the ASCII-in-UTF-16 this stage
 	// exists for, and a floor for everything else.
-	out := make([]byte, 0, len(buf)/2)
+	size := len(buf) / 2
+	if limit >= 0 && limit < size {
+		size = limit
+	}
+	out := make([]byte, 0, size)
 	walkUTF16(buf, bigEndian, func(r rune, _ int) bool {
 		out = utf8.AppendRune(out, r)
-		return true
+		return limit < 0 || len(out) < limit
 	})
 	return out
 }

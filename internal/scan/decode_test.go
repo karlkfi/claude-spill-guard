@@ -3,6 +3,7 @@ package scan
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -156,7 +157,7 @@ func TestDecodeUTF16(t *testing.T) {
 		{"empty", nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := string(decodeUTF16(tc.buf, false)); got != tc.want {
+			if got := string(decodeUTF16(tc.buf, false, noLimit)); got != tc.want {
 				t.Errorf("decodeUTF16(%v) = %q, want %q", tc.buf, got, tc.want)
 			}
 		})
@@ -170,7 +171,7 @@ func TestUTF16SourceAgreesWithTheDecodeAtEveryByte(t *testing.T) {
 	const text = "aé中\U0001F600z"
 	for _, bigEndian := range []bool{false, true} {
 		body := encodeUTF16(text, bigEndian)[2:]
-		if got := string(decodeUTF16(body, bigEndian)); got != text {
+		if got := string(decodeUTF16(body, bigEndian, noLimit)); got != text {
 			t.Fatalf("the fixture does not round-trip: %q", got)
 		}
 		decoded, source := 0, 0
@@ -228,4 +229,109 @@ func clip(buf []byte, at, n int) string {
 		return "<past the end of the buffer>"
 	}
 	return strings.ToValidUTF8(string(buf[at:min(at+n, len(buf))]), "?")
+}
+
+func TestDecodeUTF16StopsAtTheLimit(t *testing.T) {
+	// Three bytes out per rune, so no limit lands on a rune boundary and the
+	// "at least" half of the contract is what is under test.
+	body := encodeUTF16(strings.Repeat("é", 100), false)[2:]
+	full := len(decodeUTF16(body, false, noLimit))
+	for _, limit := range []int{0, 1, 5, 199, 200, 201} {
+		got := len(decodeUTF16(body, false, limit))
+		// The floor holds only where the buffer has that much to give. Past
+		// that the input is exhausted, which is not the limit stopping short.
+		if limit <= full && got < limit {
+			t.Errorf("limit %d produced %d bytes, which is short -- a prefix "+
+				"under the limit decides on less than IsBinary would read", limit, got)
+		}
+		if limit > full && got != full {
+			t.Errorf("limit %d is past the %d bytes this buffer holds, and it "+
+				"produced %d", limit, full, got)
+		}
+		if got > limit+utf8.UTFMax {
+			t.Errorf("limit %d produced %d bytes, more than one rune past it", limit, got)
+		}
+	}
+	if want := 200; full != want {
+		t.Errorf("noLimit produced %d bytes, want %d", full, want)
+	}
+}
+
+// A UTF-16 buffer whose text really does hold a NUL is binary, and the decode
+// is what makes that a statement about the text rather than about the encoding.
+func TestBufferSkipsAUTF16BufferThatDecodesToBinary(t *testing.T) {
+	// Not at the very start: FF FE 00 00 is the UTF-32LE mark and takes another
+	// branch, which is a different assertion.
+	buf := append(encodeUTF16("a", false), 0x00, 0x00)
+	got, err := Buffer("a.bin", buf, load(t, awsRule))
+	if err != nil {
+		t.Fatalf("Buffer: %v", err)
+	}
+	if got.Skipped != SkippedBinary {
+		t.Errorf("Skipped is %q, want %q", got.Skipped, SkippedBinary)
+	}
+}
+
+// The other side of it: a NUL past the sniff window does not skip, and the text
+// after the window is still decoded. Together with the test above this pins
+// that the prefix decides and the whole buffer is what gets scanned.
+func TestBufferReadsPastTheSniffWindowInAUTF16Buffer(t *testing.T) {
+	text := strings.Repeat("a", sniffLimit+1) + "\x00" + key
+	got, err := Buffer("a.env", encodeUTF16(text, false), load(t, awsRule))
+	if err != nil {
+		t.Fatalf("Buffer: %v", err)
+	}
+	if got.Skipped != Scanned {
+		t.Fatalf("Skipped is %q, want Scanned -- a NUL past the sniff window "+
+			"is not what the window reads", got.Skipped)
+	}
+	if len(got.Findings) != 1 {
+		t.Errorf("got %d findings, want 1 -- the buffer past the window was not "+
+			"decoded", len(got.Findings))
+	}
+}
+
+// The sniff window is decoded before the rest of the buffer, and this is what
+// says so. Both halves are needed: the buffer is large, and the answer is in
+// its first few bytes, so a decode that reads it all allocates on the order of
+// the buffer while one that stops at the window allocates on the order of the
+// window.
+//
+// The bound is loose deliberately. It is separating two magnitudes -- 8 KiB
+// against 32 MiB -- rather than measuring an allocator, and a tight bound here
+// would be a flake waiting for a Go release.
+func TestDecodeSniffsBeforeDecodingTheRest(t *testing.T) {
+	const size = 64 << 20
+	buf := make([]byte, 0, size)
+	buf = append(buf, 0xFF, 0xFE)
+	buf = append(buf, 'a', 0x00, 0x00, 0x00) // one character, then a real NUL
+	for len(buf) < size {
+		buf = append(buf, 'a', 0x00)
+	}
+
+	// The control. Without it a small allocation reads as the sniff working
+	// when it could just as well be a buffer that was never large.
+	if full := len(decodeUTF16(buf[2:], false, noLimit)); full < 8<<20 {
+		t.Fatalf("a full decode of the fixture is %d bytes, which is not large "+
+			"enough for the bound below to separate anything", full)
+	}
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	text, _, skip := decode(buf)
+	runtime.ReadMemStats(&after)
+
+	if skip != SkippedBinary {
+		t.Fatalf("skip is %q, want %q -- nothing is being saved", skip, SkippedBinary)
+	}
+	if text != nil {
+		t.Errorf("a skipped buffer came back with %d bytes of text", len(text))
+	}
+	const bound = 1 << 20
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > bound {
+		t.Errorf("deciding to skip a %d-byte buffer allocated %d bytes, over a "+
+			"bound of %d -- the whole buffer is being decoded before the sniff "+
+			"reads its first 8 KiB", len(buf), allocated, bound)
+	}
 }

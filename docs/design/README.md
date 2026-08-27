@@ -123,8 +123,17 @@ not need to do.
    Windows PowerShell 5.1 is the file class it is for: `>`, `>>` and
    `Out-File` write UTF-16LE, and every Unicode encoding but UTF-7 writes a
    mark, so the encoding a Windows script leaves behind always says what it
-   is. `FF FE 00 00` is UTF-32LE and opens with the whole UTF-16LE mark, so
-   the longer mark is tested first and named rather than decoded.
+   is — [`about_Character_Encoding`][psenc], read 2026-08-27, and the citation
+   is here rather than in a commit message because it is the only evidence
+   this repository has for the claim: there is no `pwsh` on the runners or on
+   a maintainer's Mac, so nothing can drive it. PowerShell 6 and later default
+   to `utf8NoBOM`, which has no NUL and always scanned. `Start-Transcript` is
+   the near miss worth naming: it writes UTF-8 with a mark, not UTF-16, so a
+   transcript is only in this class when a program's output was redirected
+   into it. `FF FE 00 00` is UTF-32LE and opens with the whole UTF-16LE mark,
+   so the longer mark is tested first and named rather than decoded.
+
+[psenc]: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_character_encoding
 
    A finding reports a byte offset, so a decoded match is mapped back to the
    offset in the file. The decode and the map are one walk over the code
@@ -134,6 +143,17 @@ not need to do.
    means skip. In the benchmark corpus one PNG was 55% of all bytes, and the
    three language prototypes disagreed on it because Go keeps raw bytes where
    Rust and Python substitute U+FFFD.
+
+   This stage is cheap and it has to stay ahead of the expensive ones, which
+   is a constraint on step 1 rather than on this one: a decode that runs to
+   the end of the buffer before anything decides to skip it inverts the whole
+   reason for the order. So the decode produces the sniff window first, this
+   check reads it, and the rest of the buffer is decoded only if it passes.
+   The window is a decision identical to the whole buffer's, not an
+   approximation of it, because this check never reads past 8 KiB. Measured
+   2026-08-27 on a 64 MiB UTF-16 buffer whose fourth character is a NUL:
+   189 ms and 32 MiB allocated and discarded, against a bound of 1 MiB the
+   test now holds it to.
 
    UTF-16 written with no mark still lands here and is still skipped. Nothing
    in such a buffer declares its encoding, and the alternative — reading
