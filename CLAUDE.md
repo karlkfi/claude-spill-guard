@@ -24,8 +24,9 @@ measured.
 | `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it read nothing. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
 | `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. |
+| `internal/testvec/` | The loader for `testdata/corpus/vectors/`. Test-only, linked into no binary, and it takes a `TB` rather than `*testing.T` so nothing outside a test imports `testing`. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. The JSON is data; `embed.go` beside it is the `go:embed` that compiles it in, which has to live here because the directive reaches only its own directory. |
-| `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. |
+| `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. `vectors/` is neither: it is the credential-shaped strings the unit tests read, kept where secret scanning is told not to look. |
 | `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |

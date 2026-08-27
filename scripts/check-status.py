@@ -56,6 +56,13 @@ END = "<!-- status:end -->"
 RULESET = ROOT / "rules" / "spill-guard.json"
 WIRING = ROOT / "hooks" / "hooks.json"
 
+# Packages written for the tests and unreachable from the binary on purpose.
+# Without this they read as wiring the binary is still missing, which claims
+# work nobody intends to do. A package named here that the binary *does* reach
+# is a finding rather than a silent correction: the list would then be wrong in
+# the direction that hides a real dependency.
+TEST_ONLY = ("internal/testvec",)
+
 # A command the binary must NOT recognise. It is the positive control on the
 # probe below: if `unknown` is reported for this too, the probe can tell a
 # handled command from an unhandled one. Without it a probe that always says
@@ -162,9 +169,14 @@ def facts(findings):
     commands = probe(declared_commands(findings), findings)
     packages = module_packages(("list", "./..."))
     reachable = module_packages(("list", "-deps", "./cmd/spill-guard"))
+    for pkg in TEST_ONLY:
+        if pkg in reachable:
+            findings.append(f"{pkg} is listed as test-only and the binary "
+                            f"reaches it, so one of the two is wrong")
     return {
         "commands": commands,
-        "packages": [p for p in packages if p != "cmd/spill-guard"],
+        "packages": [p for p in packages
+                     if p != "cmd/spill-guard" and p not in TEST_ONLY],
         "reachable": [p for p in reachable if p != "cmd/spill-guard"],
         "ruleset": RULESET.exists(),
         "wiring": WIRING.exists(),

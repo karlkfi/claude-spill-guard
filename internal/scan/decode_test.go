@@ -194,9 +194,9 @@ func TestUTF16SourceAgreesWithTheDecodeAtEveryByte(t *testing.T) {
 // convention is a fabricated value per file.
 //
 // A planted fixture has to be found, so it cannot be marked by the string the
-// ruleset rejects: AKIAIOSFODNN7EXAMPLE -- which `key` above still uses, and
-// which is right there, because a unit test needs a regex match rather than
-// every validator -- is dropped by aws-placeholder. This value carries the
+// ruleset rejects: AWS's own documented key ID -- which `key` still holds,
+// because a unit test needs a regex match rather than every validator -- is
+// dropped by aws-placeholder. This value carries the
 // project's name instead, which a reader of a public security repo can grep
 // and no issued credential would hold. It matters more here than elsewhere:
 // the fixture has to be decoded before it can be read at all.

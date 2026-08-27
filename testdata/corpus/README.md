@@ -9,6 +9,10 @@ Two halves, and the gate over them is
 | `clean/` | The shipped ruleset reports **zero** findings. That number is pinned. |
 | `planted/` | Each file produces **exactly one** finding, of the rule its filename names. |
 
+`vectors/` sits beside them and is neither: nothing walks it, no rule runs over
+it, and it contributes to neither count. It holds the strings the unit tests
+elsewhere read, and the section below says why they are kept here.
+
 ## Nothing in `planted/` is a real credential
 
 Every value is fabricated to the shape its rule matches and works against
@@ -90,6 +94,35 @@ holds down one validator: removing `aws-placeholder` takes the clean half to 2
 findings and removing `jwt-sample-key` takes it to 1, both measured by driving
 the deletion rather than by reading the rule.
 
+## `vectors/` holds values, not files
+
+`vectors/credentials.json` is keyed by id, and each entry is a value and a note.
+The unit tests elsewhere in the repository name a value rather than writing
+one, so no `_test.go` file has to carry a string shaped like a credential.
+
+They are kept in this tree because of
+[`.github/secret_scanning.yml`](../../.github/secret_scanning.yml), which is
+the one place GitHub is told not to read. A value that could pass for an issued
+credential is a value some detector eventually flags, and the answer to that is
+a place to keep them rather than an exemption for whichever source file gets
+found. GitHub's detector for the `ASIA` prefix opened an alert on
+`internal/validate/aws_test.go` on 2026-08-27, and two days earlier it had
+opened one on `ASIAIOSFODNN7EXAMPLE`, which is the value AWS publishes with the
+word EXAMPLE inside it. No property of the string escapes that.
+
+**What stays inline is what no detector can mistake for a credential.** A body
+one character too long for the rule's `\b`, a lowercase suffix, a padded
+placeholder: those are a validator's edge cases, the exact bytes are what each
+case is about, and they belong beside the assertion. The test is whether the
+string could pass for an issued credential -- a question about the string, not
+about which detectors exist this year.
+
+Nothing reads the `note`. The loader in
+[`../../internal/testvec/`](../../internal/testvec/) takes the value alone, and
+the note is there for the reason the marks in `planted/` are: someone who finds
+a credential-shaped string in a public repository has only what is written
+beside it to tell them it is inert.
+
 ## Adding to it
 
 **A clean file** goes in as it was written, not tidied. Anything it forces you
@@ -100,6 +133,11 @@ argument for pinning the count at zero.
 the `planted` map in `internal/scan/corpus_test.go`. The map is what carries
 the count, which the filename cannot; a file in one and not the other fails the
 gate from either side.
+
+**A vector** is a `value` and a `note` under a new id in
+`vectors/credentials.json`, added when a test needs a string that could pass
+for an issued credential. `minVectors` in `internal/testvec` is a floor at the
+file's current size, so removing an entry means lowering it in the same edit.
 
 `aws-access-key-id-utf16le.env` is the one file here that is not testing a
 rule. It tests an encoding: UTF-16LE with a byte-order mark, which is what
