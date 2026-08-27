@@ -18,8 +18,9 @@ skeleton, the [CI gates](#ci), `internal/validate`, `internal/rules`,
 `internal/scan` and the shipped ruleset exist, and the binary reaches none of
 them — there is no `hook` subcommand to call them from. The validators came
 first because they are pure functions over a candidate and needed nothing to
-call them. The [open questions](#open-questions) are the parts that need a
-decision or a measurement before implementation goes further.
+call them. Nothing under [open questions](#open-questions) blocks that any
+more; the last of them is settled under
+[what gets scanned](#what-gets-scanned-is-the-crossing-not-the-hop).
 
 ## The problem
 
@@ -110,6 +111,96 @@ prevented at `UserPromptSubmit` or `PreToolUse`. For `Bash` that means the
 command string and its resolved file operands are the entire surface, so the
 segmentation layer this design ports from workspace-guard is load-bearing rather
 than an optimisation.
+
+### What gets scanned is the crossing, not the hop
+
+Scanning every field of every hook payload is the safe-looking default and it is
+how a scanner becomes noise: one secret reported at the `Read`, again at the
+`Write` that copies it, again at the heredoc that echoes it. Scanning only what
+a human typed is the opposite error — it catches the pasted credential and
+nothing the model moves.
+
+Authorship is the wrong axis for both. The boundary this tool defends is the
+local filesystem to the model's context, and the question a hook input answers
+is whether its bytes have crossed it yet. A `Write` body composed out of a file
+the model read is neither human-typed nor runtime-written, and deciding which it
+is has no answer because the question does not apply to it.
+
+**Whatever the model composed has already crossed.** The model emits the
+`tool_use` block, so every byte of it is API output before the `PreToolUse` hook
+is called. Denying that call stops a file being written; it unsends nothing. So
+`Write.content`, `Edit.old_string` and `new_string`, a heredoc body inside a
+`Bash` command, and the `description` beside it are re-emissions, and a finding
+on one of them names a crossing that happened at an earlier hop.
+
+**What a hook opens for itself has not crossed.** `PreToolUse` on `Read` carries
+the path and no content, so the hook reads the file, and those bytes are still
+on the local side until it allows the call. Same for the file operands the
+`Bash` reader spec resolves. That, plus the prompt, is the whole set of content
+spill-guard can actually withhold.
+
+Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, by logging the
+raw stdin of a hook wired to all three events in a throwaway project and driving
+a session that read a file, wrote its contents to a second file, and ran `cat`
+on the first:
+
+| Payload field | Where the bytes come from | Crossed already | Scan |
+|---|---|---|---|
+| `UserPromptSubmit.prompt` | the keyboard or the clipboard | No | **Yes** |
+| `PreToolUse` `Read.file_path` → the file the hook opens | the filesystem | No | **Yes** |
+| `PreToolUse` `Bash.command` → resolved read operands, opened by the hook | the filesystem | No | **Yes** |
+| `PreToolUse` `Bash.command`, the string itself | the model — see below | Yes | **Yes** |
+| `PreToolUse` `Bash.description` | the model | Yes | No |
+| `PreToolUse` `Write.content` | the model | Yes | No |
+| `PreToolUse` `Edit.old_string`, `Edit.new_string` | the model | Yes | No |
+| `PostToolUse.tool_response` | the tool, and [already sent](#posttooluse-cannot-withhold-a-result) | Yes | No |
+
+`Read`'s `tool_input` was `{"file_path": …}` and nothing else, which is what
+makes the hook's own open the only way to see the content. `Write`'s carried the
+full 55-byte body the model had assembled from the `Read` that preceded it,
+and the `Bash` heredoc arrived intact inside `command`. Every payload also
+carried `session_id`, `prompt_id`, `cwd`, `transcript_path` and, for a tool, a
+`tool_use_id` beginning `toolu_`.
+
+**The `Bash` command string is scanned, and the reason is authorship rather than
+crossing.** By the rule above a model-composed command has already crossed and a
+finding on it would be a warning, which
+[the `PostToolUse` verdict](#posttooluse-cannot-withhold-a-result) says not to
+count as a control. It is scanned anyway because it is the one payload field
+whose authorship the measurement above did not settle: every `PreToolUse` seen
+there carried a `toolu_` id, so every one was model-issued, and no probe has yet
+established what a command the human runs directly looks like from inside a
+hook. Failing closed on an unmeasured case is this project's rule, and the cost
+is one short string per `Bash` call with no file to open. The backlog holds the
+measurement that would retire the exception.
+
+**Dedup on the content hash is not the mechanism, and would cost more than the
+repetition it removes.** The repetition it targets is real — the same secret at
+four hops — but the rule above deletes three of those hops structurally, without
+keeping anything. Making the scanner quiet by remembering what it has already
+reported would instead need the `Finding` digest to survive between hook
+invocations, and each of those is a fresh process — five invocations in one
+session came back with five distinct PIDs under one parent, measured the same
+day — so the set becomes a file on disk keyed by `session_id`. Three things
+follow, and each of them is a rule this project already made:
+
+- **The file inverts.** `Digest` is the first eight bytes of
+  `sha256(rule id, NUL, value)`, and the rule id is public in
+  `rules/spill-guard.json`. Sixty-four bits pins a guess uniquely, so for any
+  low-entropy value the file is the plaintext with a short walk in front of
+  it. The `pii` family is all such values: a US SSN is 10⁹ candidates, which
+  is 7.5 minutes of single-core Python, measured 2026-08-27 by digesting
+  500,000 of them and scaling. "Never put a raw secret in a struct that
+  outlives the match" is not satisfied by writing a recoverable derivation of
+  one to disk instead.
+- **A cache silences the scanner, which is the fail-open direction.** A stale,
+  corrupt, or planted entry means a real secret goes unreported and the run
+  looks clean, and there is no in-band signal that anything was suppressed. This
+  project blocks on every internal error for that reason.
+- **It is state, and state has to be reaped.** A per-session file outlives the
+  session that made it. The brief rules out a daemon and a persistent process;
+  a directory of digest sets nobody deletes is the same obligation arriving
+  through a side door.
 
 ## Pipeline
 
@@ -484,16 +575,17 @@ Four rules, each of which was learned by getting it wrong
 
 ## Open questions
 
-One left, and it needs an answer before or during implementation because it
-changes the shape of the thing. The other two were measurements rather than
-decisions, and both are taken: see
-[the hook surface](#posttooluse-cannot-withhold-a-result) and
-[the exit-code contract](#the-exit-code-contract-measured).
+None left in this file. The three it opened with are all settled, two by
+measurement and one by argument off them:
 
-### 1. What counts as human-typed
+- **`PostToolUse` cannot withhold a result**, so nothing is catchable after the
+  fact — [measured](#posttooluse-cannot-withhold-a-result).
+- **Only exit 2 blocks, and a `deny` object on stdout outranks the exit code** —
+  [measured](#the-exit-code-contract-measured).
+- **What counts as human-typed** was the wrong axis, and the requirement it came
+  from is met by asking whether a payload field's bytes have crossed the
+  filesystem-to-context boundary yet —
+  [above](#what-gets-scanned-is-the-crossing-not-the-hop).
 
-The audit's carried-over requirement is to distinguish human-typed text from
-runtime-written text when deciding what to scan. `UserPromptSubmit` is clearly
-the first and a tool result is clearly the second, but a `Write` body composed
-by the model from a file it read is neither. The rule that decides this has not
-been written.
+One remains outside it, at the end of [`distribution.md`](distribution.md):
+whether `install.sh` should refuse to proceed without `cosign`.

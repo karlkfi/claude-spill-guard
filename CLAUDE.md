@@ -262,9 +262,12 @@ Everything in there traces to `docs/design/`.
 
 ## Open questions
 
-One left in `docs/design/README.md` under **Open questions** — what counts as
-human-typed — plus one at the end of `distribution.md`, whether `install.sh`
-should refuse to proceed without `cosign`.
+One left, at the end of `distribution.md`: whether `install.sh` should refuse
+to proceed without `cosign`. `docs/design/README.md` has none — what counts as
+human-typed is settled there under
+[**What gets scanned is the crossing, not the hop**](docs/design/README.md#what-gets-scanned-is-the-crossing-not-the-hop),
+which answers it by dropping authorship for whether a payload field's bytes have
+crossed the filesystem-to-context boundary yet.
 
 The three the design turned on are measured: only exit 2 blocks, `PostToolUse`
 cannot withhold a result so nothing is catchable after the fact, and version
