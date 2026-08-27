@@ -214,23 +214,31 @@ follow, and each of them is a rule this project already made:
 
 Typing `@secret.txt` in a prompt puts the file's contents in front of the model,
 and **no hook of any kind runs for it**. Measured 2026-08-27 on 2.1.238, in a
-project wiring all three events to a stdin logger:
+project wiring all three events to a stdin logger. The marker column is read
+from the session transcript named by the hook payload's own `transcript_path`,
+not from what the run printed — a hook's stdout proves nothing here for the same
+reason it proves nothing [for `PostToolUse`](#posttooluse-cannot-withhold-a-result),
+and a blocked turn prints nothing whatever the splice did:
 
-| Prompt | Hook records | Marker reached the model |
-|---|---|---|
-| `Repeat back the second line of @secret.txt … Do not use any tool.` | 1 — `UserPromptSubmit` only | yes |
-| `Use the Read tool on secret.txt …` (control, same directory and config) | 4, including `PreToolUse` `Read` | yes |
-| `@secret.txt` again, with `UserPromptSubmit` exiting 2 | 1 — `UserPromptSubmit` | **no** |
+| Prompt | Hook records | `tool_use_id` in transcript | Marker in transcript |
+|---|---|---|---|
+| `… @secret.txt … Do not use any tool.` | 1 — `UserPromptSubmit` | 0 | 2, in 21,722 bytes |
+| `Use the Read tool on secret.txt …` — control, same directory and config | 4, including `PreToolUse` `Read` | present | present |
+| `… @secret … Do not use any tool.` — near-miss token, file untouched | 1 — `UserPromptSubmit` | 0 | 0, in 21,384 bytes |
+| `… @secret.txt …` again, `UserPromptSubmit` exiting 2 | 1 — `UserPromptSubmit` | 0 | 0, in 1,404 bytes |
 
-The control is what makes the first row an absence rather than a dead hook. The
-model's own account of where the content came from was that it had been
-surfaced by a system reminder, which is the harness splicing the file in on its
-own rather than issuing a tool call.
+Three things that table has to do at once. The `Read` control makes row one an
+absence rather than a dead hook. The **zero `tool_use_id`** makes it a splice
+rather than a hop the design already covers — content arriving is not evidence
+of a splice, because a model free to call `Read` produces the same content by a
+route `PreToolUse` does see. And the near-miss row shows the splice is keyed to
+an exact token: `@secret` next to a file named `secret.txt` moves nothing.
 
 **That is not a limitation to declare, because the operand is visible.**
 `UserPromptSubmit.prompt` carries `@secret.txt` as literal text, unexpanded, and
-denying there suppressed the splice outright — the marker the un-denied run
-returned did not appear. So the prompt is two things at once: content to scan,
+denying there suppressed the crossing rather than merely the echo: the deny
+arm's whole transcript is 1,404 bytes against 21,722, with the marker absent
+from it. So the prompt is two things at once: content to scan,
 and a carrier of file operands, in the same way a `Bash` command string is. The
 resolution rule is the `Bash` reader spec's problem restated with a simpler
 grammar, and it belongs in the scan set rather than in
@@ -491,10 +499,27 @@ with nothing on either stream still blocks, and the model is told `No stderr
 output`. Empty stdout is not the operative part of the failure the launcher
 exists to prevent; the non-2 exit code is.
 
-**A deny on stdout outranks the exit code.** The same `deny` object blocked the
-call on exits 0, 1, 9 and 127, and the reason reached the model byte-identical
-in all four. So a launcher that writes its deny and then dies still blocks — the
-one shape here that fails closed on its own. Prefer it.
+**A deny on stdout outranks the exit code — on `PreToolUse`.** The same `deny`
+object blocked the call on exits 0, 1, 9 and 127, and the reason reached the
+model byte-identical in all four. So a launcher that writes its deny and then
+dies still blocks, which is the one shape here that fails closed on its own.
+Prefer it *for the event it was measured on*, and read the next paragraph before
+writing it anywhere else.
+
+**The encoding is per event, and generalising this row fails open on the one a
+human types into.** On `UserPromptSubmit` the `deny` object is accepted and
+ignored. The encoder and the full table belong with the `hook` subcommand that
+writes them; what matters here is that the sentence above stops at
+`PreToolUse`.
+
+The reading this section needs is the one about `@path`, because
+[the operand](#path-is-an-operand-not-a-hop) rides in on that event. Driven
+2026-08-27 on 2.1.238 with a prompt naming `@secret.txt`, reading the session
+transcript rather than stdout: with a `deny` object the transcript is 22,086
+bytes and the file's marker appears twice; with `{"decision":"block"}` it is
+1,214 bytes with the marker absent; with exit 2, 1,404 bytes, absent. So both
+working encodings suppress the splice and not merely the prompt, and the
+recommended one suppresses neither.
 
 **On exit 2 the reason travels on stderr, and stdout is discarded.** A hook that
 writes `spill-guard: blocked ...` to stdout and exits 2 stops the call and tells
