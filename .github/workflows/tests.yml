@@ -326,19 +326,38 @@ jobs:
             exit 1
           fi
 
-      - name: Wiring the scanner in must fail the check and flip the table
+      # This mutation goes the way the tree does not. It used to add an import
+      # and require the row to flip to `yes`; the hook entry made
+      # `internal/scan` reachable, and a redundant import of something already
+      # in the graph changes nothing -- the table would not move, status-drift
+      # would pass, and the step would fail saying the check was too lax.
+      #
+      # The precondition could not have caught that. It asked whether the
+      # binary reaches `internal/scan`, which was true before the mutation and
+      # after it, so it asserted the mutation had happened rather than that it
+      # had had an effect. Unwiring gives that assertion something to measure.
+      - name: Unwiring the scanner must fail the check and flip the table
         run: |
-          sed -i 's|^import (|import (\n\t_ "github.com/karlkfi/claude-spill-guard/internal/scan"|' cmd/spill-guard/main.go
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("cmd/spill-guard/main.go")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace('\t"github.com/karlkfi/claude-spill-guard/internal/hook"\n', "")
+          s = s.replace('\tcase "hook":\n\t\treturn hook.Run(stdin, stdout, stderr)\n', "")
+          s = s.replace("  hook      scan a Claude Code hook payload read from stdin\n", "")
+          p.write_text(s, encoding="utf-8")
+          PY
           gofmt -w cmd/spill-guard/main.go
-          if ! go list -deps ./cmd/spill-guard | grep -q 'internal/scan'; then
-            echo "::error::the binary still does not reach internal/scan, so this step tested nothing" >&2
+          if go list -deps ./cmd/spill-guard | grep -q 'internal/scan'; then
+            echo "::error::the binary still reaches internal/scan, so this step tested nothing" >&2
+            git checkout -- cmd/spill-guard/main.go
             exit 1
           fi
           make status-drift > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           if [ "$rc" -eq 0 ]; then
-            echo "::error::status-drift passed while the README said the binary cannot scan and it can" >&2
+            echo "::error::status-drift passed while the README said the binary can scan and it cannot" >&2
             git checkout -- cmd/spill-guard/main.go
             exit 1
           fi
@@ -346,10 +365,10 @@ jobs:
           # a generator that always emits the committed text would pass the
           # assertion above and be worth nothing.
           make status > /dev/null 2>&1 || true
-          grep -q '| Scan a file or a buffer | yes |' README.md && flipped=0 || flipped=1
+          grep -q '| Scan a file or a buffer | no |' README.md && flipped=0 || flipped=1
           git checkout -- cmd/spill-guard/main.go README.md
           if [ "$flipped" -ne 0 ]; then
-            echo "::error::the generated table did not flip to yes once the binary reached internal/scan" >&2
+            echo "::error::the generated table did not flip to no once the binary stopped reaching internal/scan" >&2
             exit 1
           fi
 
@@ -1388,27 +1407,33 @@ jobs:
       # frontmatter. Both halves are asserted -- that it fails, and that it
       # offers the status flip. A message naming only `Blocked by …` sends the
       # next completing session to restore a dependency that has shipped.
+      # The subject is written here rather than found in the store. This used
+      # to strip the opener off whichever row was blocked, which made the step
+      # depend on the store holding one -- a property nothing enforces and that
+      # any pull request may remove. Completing Q50 unblocked Q9 and Q10, the
+      # only two, and the step failed on `no blocked row carries an opener to
+      # strip`: a control reporting red because it had nothing to test, which
+      # is the one verdict a control must never give.
+      #
+      # The rank comes from the store's own tool, so the synthetic row is
+      # well-formed and `blocked-opener` is the only class it can trip. A row
+      # with a hand-typed rank also fails this lint, for a reason the grep
+      # below would not have separated from the one being tested.
       - name: A blocked row with no blocker line must fail the gate
         run: |
-          python3 - <<'PY'
-          import pathlib, re, sys
-          for p in sorted(pathlib.Path("docs/queue").glob("Q*.md")):
-              text = p.read_text(encoding="utf-8")
-              if not re.search(r"^status: blocked$", text, re.M):
-                  continue
-              stripped = re.sub(r"\n[ \t]*Blocked (?:by|on)[^\n]*\n", "\n",
-                                text, count=1)
-              if stripped == text:
-                  continue
-              p.write_text(stripped, encoding="utf-8")
-              print(f"took the blocker line out of {p.name}")
-              sys.exit(0)
-          sys.exit("no blocked row carries an opener to strip")
-          PY
+          rank=$(python3 scripts/vendor/claude-skills/queue.py rank --tail)
+          [ -n "$rank" ] || { echo "::error::no rank, so no well-formed subject" >&2; exit 1; }
+          printf -- '---\nid: Q999999\nrank: %s\nlabels:\n    - tests\nstatus: blocked\nsize: S\n---\n\n# A synthetic blocked row, written by the mutation control\n\nIt names no blocker, which is the defect under test.\n' "$rank" \
+            > docs/queue/Q999999.md
+          if [ ! -s docs/queue/Q999999.md ]; then
+            echo "::error::the subject was not written, so this step tested nothing" >&2
+            exit 1
+          fi
           python3 scripts/vendor/claude-skills/queue.py lint --strict blocked-opener \
             > mutant.log 2>&1 && rc=0 || rc=$?
           echo "lint exit: $rc"
           cat mutant.log
+          rm -f docs/queue/Q999999.md
           git checkout -- docs/queue
           if [ "$rc" -eq 0 ]; then
             echo "::error::lint passed with a blocked row that names no blocker" >&2
@@ -1422,28 +1447,40 @@ jobs:
       # The other half of the same defect: the frontmatter stayed blocked and
       # the blocker line stayed too, so only the shipped row is missing. This is
       # the class that is advisory on a PR, so the mutation runs main's set.
+      # Synthesized for the reason the step above is, and it is the same two
+      # rows: this one needs a blocked row whose link resolves, which is a
+      # narrower thing for the store to happen to hold than the step above
+      # needed, and it goes away on exactly the same pull request.
+      #
+      # The pair is linted BEFORE the mutation and required green. Without
+      # that, a synthetic row malformed in some way this step does not think
+      # about would redden `dangling-link` on its own and the assertion below
+      # would read it as the mutation working.
       - name: A row waiting on a shipped item must fail the gate on main
         run: |
-          python3 - <<'PY'
-          import pathlib, re, sys
-          store = pathlib.Path("docs/queue")
-          held = {p.stem for p in store.glob("Q*.md")}
-          for p in sorted(store.glob("Q*.md")):
-              text = p.read_text(encoding="utf-8")
-              if not re.search(r"^status: blocked$", text, re.M):
-                  continue
-              m = re.search(r"^[ \t]*Blocked (?:by|on)[^\n]*?\((Q\d+)\.md\)", text, re.M)
-              if not m or m.group(1) not in held:
-                  continue
-              (store / f"{m.group(1)}.md").unlink()
-              print(f"completed {m.group(1)}, which {p.stem} waits on")
-              sys.exit(0)
-          sys.exit("no blocked row links an item the store still holds")
-          PY
+          blocker=$(python3 scripts/vendor/claude-skills/queue.py rank --tail)
+          waiter=$(python3 scripts/vendor/claude-skills/queue.py rank --after "$blocker")
+          [ -n "$blocker" ] && [ -n "$waiter" ] || { echo "::error::no ranks, so no well-formed subjects" >&2; exit 1; }
+          printf -- '---\nid: Q999998\nrank: %s\nlabels:\n    - tests\nstatus: ready\nsize: S\n---\n\n# A synthetic blocker, written by the mutation control\n\nThe row below waits on this one.\n' "$blocker" \
+            > docs/queue/Q999998.md
+          printf -- '---\nid: Q999999\nrank: %s\nlabels:\n    - tests\nstatus: blocked\nsize: S\n---\n\n# A synthetic waiter, written by the mutation control\n\nBlocked by [Q999998](Q999998.md). The blocker is about to ship.\n' "$waiter" \
+            > docs/queue/Q999999.md
+          python3 scripts/vendor/claude-skills/queue.py lint --strict dangling-link --strict blocked-opener \
+            > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "--- the pair, unmutated -- lint exit: $rc"
+          cat mutant.log
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the synthetic pair is not lint-clean, so the red below would not be the mutation" >&2
+            rm -f docs/queue/Q999998.md docs/queue/Q999999.md
+            exit 1
+          fi
+          rm -f docs/queue/Q999998.md
+          echo "completed Q999998, which Q999999 waits on"
           python3 scripts/vendor/claude-skills/queue.py lint --strict dangling-link \
             > mutant.log 2>&1 && rc=0 || rc=$?
-          echo "lint exit: $rc"
+          echo "--- the blocker shipped -- lint exit: $rc"
           cat mutant.log
+          rm -f docs/queue/Q999998.md docs/queue/Q999999.md
           git checkout -- docs/queue
           if [ "$rc" -eq 0 ]; then
             echo "::error::lint passed with a row waiting on an item that shipped" >&2
@@ -1459,25 +1496,21 @@ jobs:
       # promoted and never shown failing is a claim. This drives the linter
       # directly, so it shows the class can fail and says nothing about which
       # events promote it; the step after it is what reads the gate.
+      #
+      # The parked row is synthesized like the two above. Unlike them, nothing
+      # has emptied the deferred class yet -- Q23 and Q24 are still there. It
+      # is the same mechanism a completion breaks, though, and leaving one step
+      # hunting the store while its neighbours write their own subject is a job
+      # doing one thing two ways with nothing saying which is meant.
       - name: A parked row with no trigger, and a citation past a file's end
         run: |
+          rank=$(python3 scripts/vendor/claude-skills/queue.py rank --tail)
+          [ -n "$rank" ] || { echo "::error::no rank, so no well-formed subject" >&2; exit 1; }
+          printf -- '---\nid: Q999997\nrank: %s\nlabels:\n    - tests\nstatus: deferred\nsize: S\n---\n\n# A synthetic parked row, written by the mutation control\n\nThe note names nothing that would bring it back.\n' "$rank" \
+            > docs/queue/Q999997.md
           python3 - <<'PY'
-          import pathlib, re, sys
+          import pathlib
           store = pathlib.Path("docs/queue")
-          parked = None
-          for p in sorted(store.glob("Q*.md")):
-              text = p.read_text(encoding="utf-8")
-              if not re.search(r"^status: deferred$", text, re.M):
-                  continue
-              stripped = re.sub(r"\*\*(?:Demand|Event|Decision)", "The", text, count=1)
-              if stripped == text:
-                  continue
-              p.write_text(stripped, encoding="utf-8")
-              parked = p.name
-              break
-          if parked is None:
-              sys.exit("no deferred row carries a trigger to strip")
-          print(f"took the revive trigger out of {parked}")
           cited = sorted(store.glob("Q*.md"))[0]
           cited.write_text(
               cited.read_text(encoding="utf-8")
@@ -1491,12 +1524,25 @@ jobs:
           cat mutant.log
           if [ "$rc" -eq 0 ]; then
             echo "::error::lint passed with a parked row nothing can revive" >&2
+            rm -f docs/queue/Q999997.md
+            git checkout -- docs/queue
+            exit 1
+          fi
+          # Anchored on the message, as the two steps beside it are. Asserting
+          # only a non-zero exit would let any other finding stand in for this
+          # one -- a malformed rank fails the same lint, and the class under
+          # test would never be exercised.
+          if ! grep -q 'names no trigger' mutant.log; then
+            echo "::error::lint failed, but not on the missing revive trigger" >&2
+            rm -f docs/queue/Q999997.md
+            git checkout -- docs/queue
             exit 1
           fi
           python3 scripts/vendor/claude-skills/queue.py lint --strict stale-citation \
             > mutant.log 2>&1 && rc=0 || rc=$?
           echo "--- stale-citation -- lint exit: $rc"
           cat mutant.log
+          rm -f docs/queue/Q999997.md
           git checkout -- docs/queue
           if [ "$rc" -eq 0 ]; then
             echo "::error::lint passed with a citation past the end of its file" >&2

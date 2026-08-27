@@ -30,13 +30,12 @@ is not:
 
 | Capability | Today |
 |---|---|
-| Scan a file or a buffer | no |
+| Scan a file or a buffer | yes |
 | Run as a Claude Code hook | no |
 | Ship a ruleset | yes |
 
-`spill-guard` builds and answers `version`. `internal/bash`, `internal/rules`,
-`internal/scan`, `internal/validate` are written and tested; the binary does
-not reach any of them yet.
+`spill-guard` builds and answers `hook`, `version`. `internal/bash` is written
+and tested; the binary does not reach it yet.
 <!-- status:end -->
 
 - [`docs/design/`](docs/design/) — the proposed design: threat model, hook
