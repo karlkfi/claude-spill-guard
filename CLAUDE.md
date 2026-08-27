@@ -22,20 +22,23 @@ measured.
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
 | `internal/scan/` | The pipeline over one buffer. Binary skip, the literal prefilter, the match loop, findings. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
+| `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. Data, not code. |
+| `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. |
 | `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
 | `hooks/` | Not those. The launcher Claude Code invokes, which resolves the binary and denies when it cannot find one. |
 | `.goreleaser.yaml` | What a tag publishes. Release-time only, and never in the shipped module. |
 
-`internal/hook/`, plus `rules/`, is proposed in the design doc and does
-not exist — including `rules/spill-guard.json` itself, which the loader reads
-and the v1 ruleset ships. `hooks/` holds the launcher and nothing else: the
-`hooks.json` that invokes it and the plugin manifests beside it land together
-in a later item, because a repo that is installable as a security tool
-scanning nothing is the failure this project indicts the predecessor for.
-`cmd/spill-guard/` is a skeleton: the subcommands the design names land with
-the pipeline that implements them.
+`internal/hook/` is proposed in the design doc and does not exist. `rules/`
+now does: `rules/spill-guard.json` is the v1 ruleset the loader reads and the
+`precision` gate pins. Embedding it in the binary, which is how the design
+settles version skew, lands with the pipeline. `hooks/` holds the launcher and
+nothing else: the `hooks.json` that invokes it and the plugin manifests beside
+it land together in a later item, because a repo that is installable as a
+security tool scanning nothing is the failure this project indicts the
+predecessor for. `cmd/spill-guard/` is a skeleton: the subcommands the design
+names land with the pipeline that implements them.
 
 ## Rules that are not negotiable
 
@@ -202,6 +205,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `queue` | the backlog store format holds, every filed id holds a claim, no index is committed |
 | `action-pins` | every `uses:` in every workflow names an immutable revision, not a tag |
 | `test` | gofmt, go vet and go test |
+| `precision` | the shipped ruleset stays quiet on the clean corpus and finds every planted secret |
 | `no-deps` | go.mod requires nothing and the build graph is this module plus stdlib |
 | `no-network` | the build graph reaches no net, net/http or os/exec |
 | `vulns` | govulncheck finds no known vulnerability the build graph calls |

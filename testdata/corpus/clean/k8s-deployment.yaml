@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: edge
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: registry.internal/edge/gateway@sha256:9f2c4a1b7e6d3058fbca92714de6b0c58a3d7f1e94b62c05ad38f7e91c04b6da
+          ports:
+            - containerPort: 8080
+            - containerPort: 8443
+          env:
+            - name: LISTEN_BACKLOG
+              value: "65536"
+            - name: READ_BUFFER_BYTES
+              value: "65536"
+            - name: MAX_HEADER_BYTES
+              value: "16384"
+            - name: UPSTREAM_TIMEOUT_MS
+              value: "30000"
+            - name: SLACK_WEBHOOK_URL
+              value: https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-aws
+                  key: access-key-id
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: "2"
+            requests:
+              memory: 256Mi
+              cpu: 500m

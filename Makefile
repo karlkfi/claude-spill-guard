@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift status-drift hooks-check launcher vendor docs queue action-pins test no-deps no-network vulns cross-compile
+GATES := doctor gate-drift status-drift hooks-check launcher vendor docs queue action-pins test precision no-deps no-network vulns cross-compile
 
 doctor.desc        := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc    := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -24,6 +24,7 @@ docs.desc          := every relative link in the repo markdown resolves
 queue.desc         := the backlog store format holds, every filed id holds a claim, no index is committed
 action-pins.desc   := every `uses:` in every workflow names an immutable revision, not a tag
 test.desc          := gofmt, go vet and go test
+precision.desc     := the shipped ruleset stays quiet on the clean corpus and finds every planted secret
 no-deps.desc       := go.mod requires nothing and the build graph is this module plus stdlib
 no-network.desc    := the build graph reaches no net, net/http or os/exec
 vulns.desc         := govulncheck finds no known vulnerability the build graph calls
@@ -171,6 +172,14 @@ action-pins:
 
 test:
 	$(PYTHON) scripts/check-go.py
+
+# The gate the design calls the one that matters most. Recall regressions get
+# reported by whoever missed a secret; precision regressions are invisible
+# until the noise has trained everyone to ignore the tool. check-precision.py
+# runs the corpus tests and asserts each of them reported, because `go test
+# -run` exits 0 when it matches nothing.
+precision:
+	$(PYTHON) scripts/check-precision.py
 
 no-deps:
 	$(PYTHON) scripts/check-supply-chain.py no-deps

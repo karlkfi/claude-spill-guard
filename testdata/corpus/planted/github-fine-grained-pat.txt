@@ -1,0 +1,4 @@
+Scoped to contents:read on one repository, handed over in a chat message and
+pasted here so the next person could reuse it.
+
+  github_pat_11ABCDEFG0qR7wKq2ZmT4b_Xn9Ld6VcP1YsA3EjH5uGf0iQzT8mB2nK4vD6sW9xC1yE3rU5tY7pL0aS
