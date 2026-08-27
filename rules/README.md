@@ -77,8 +77,10 @@ the rule. The shipped count stays at its planted fixtures, 2 of them now. The
 reading that holds is the gated one below.
 
 [`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
-is what holds that down. It quotes four PEM headers in prose, so removing the
-clause takes the clean corpus from 0 findings to 4 and reddens the gate. Before
+is what holds that down. It quotes five private-key headers in prose, so
+removing the clause takes the clean corpus from 0 findings to 5 and reddens the
+gate — six armour lines, of which the `CERTIFICATE` one is public and outside
+the rule's alternation. Before
 that file existed the clause could be reverted with every test still passing,
 which is the shape this whole item is about.
 
@@ -92,11 +94,14 @@ prose, and shows a body line. Naming the two fields admits every encrypted key
 those two toolchains emit and readmits no prose, because a prose line is not
 `Proc-Type:` or `DEK-Info:` and the body still has to begin a line.
 
-Widening to any `Name: value` line was measured too and is quiet on everything
-here. It is not what shipped: nothing separates the two on the corpus, and the
-named pair is the one a reader can check against RFC 1421 without reasoning
-about what prose can look like. A toolchain that writes a third RFC 1421 field
-would go unreported and would be the thing that reverses this.
+Widening to any `Name: value` line was measured too and is quiet over the whole
+corpus, which is why this originally shipped as a judgement call. It is not one.
+`TestPrivateKeyBlockAcrossThePEMLayouts` separates them: a header, an undefined
+field, then a body is reported under `[A-Za-z][A-Za-z0-9-]*:` and not under the
+named pair, and so are `Comment: exported by ssh-keygen` and a prose line ending
+in a colon. The named pair is measurably tighter as well as easier to check
+against RFC 1421. A toolchain that writes a third RFC 1421 field would go
+unreported and would be the thing that reverses this.
 
 **Two arms of the alternation are dead.** `SSH2 ENCRYPTED ` cannot reach RFC
 4716 armor, which is four dashes with inner spaces — `ssh-keygen -e -m
@@ -110,10 +115,15 @@ writes rather than a proof, and with the body-line clause in force all an arm
 can add is a header followed by base64 — a key block, or a document displaying
 one, which is a class every other arm already carries.
 
-What the clause still costs is a key whose header and body reach the scanner
-in different buffers, which reports nothing. Nothing chunks a file today —
-`scan.Buffer` takes the whole thing — so this is a constraint on whatever
-calls it rather than a live gap.
+What the widening costs is a document that displays the encrypted layout
+verbatim — header, `Proc-Type:`, `DEK-Info:`, blank line, base64 — which is now
+reported. That is the same class as any document displaying a key block, which
+every arm already carries, and it is the one user-visible cost of the change.
+
+The clause's other cost is not live: a key whose header and body reach the
+scanner in different buffers reports nothing, and nothing chunks a file today —
+`scan.Buffer` takes the whole thing — so it is a constraint on whatever calls
+it rather than a gap.
 
 **Two rules carry a second check, because their vendor publishes a realistic
 example.** An entropy floor drops a padded placeholder and admits a plausible

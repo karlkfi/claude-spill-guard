@@ -68,9 +68,10 @@ repository is full of and what a scanner has to be silent about.
 `tls-runbook.md` is there for one rule. `private-key-block` requires a base64
 body line after the PEM header, and nothing else in the corpus reaches that
 rule at all — so the clause could be deleted with every test still green. The
-runbook quotes four headers in prose, which turns a deletion into 4 findings
-and a red gate. A rule with no clean file touching it has a guard that cannot
-fire.
+runbook quotes five private-key headers in prose, which turns a deletion into
+5 findings and a red gate. The sixth armour line is a `CERTIFICATE`, which is
+public and which the rule's alternation does not reach. A rule with no clean
+file touching it has a guard that cannot fire.
 
 It holds the *shape* of that clause down as well as its presence. The clause
 steps over `Proc-Type:` and `DEK-Info:` so an RFC 1421 encrypted key is
