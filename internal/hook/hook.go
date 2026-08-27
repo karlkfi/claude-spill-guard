@@ -177,10 +177,9 @@ func toolTargets(call payload) ([]target, error) {
 		if in.Command == nil {
 			return nil, errors.New("the Bash call names no command")
 		}
-		// The command string only. Its file operands are the other half of the
-		// Bash surface and they need a per-command table of which argument is
-		// a path, which internal/bash does not decide and this does not have.
-		return []target{{commandLabel, []byte(*in.Command)}}, nil
+		// The command string, and the files its readers are pointed at.
+		// internal/readers is what decides which token of a segment is a path.
+		return bashTargets(*in.Command, call.CWD)
 	default:
 		// Not a tool this package scans. The set above is closed and named so
 		// that hooks.json's matcher can be held to it; a tool arriving here is
