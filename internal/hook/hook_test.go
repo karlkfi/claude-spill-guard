@@ -189,6 +189,13 @@ func TestNoRefusalCarriesScannedContent(t *testing.T) {
 		{"a command string beside an unresolvable operand",
 			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
 				`,"tool_input":{"command":"echo ` + secret + ` && cat $UNSET"}}`},
+		// The Read arm quoted its file_path where the Bash arm had stopped
+		// quoting its operand -- same binary, same unresolved token, opposite
+		// answers. `file_path` being a path by contract does not change what
+		// happened to this one, which is nothing.
+		{"a relative file_path on a Read",
+			`{"hook_event_name":"PreToolUse","tool_name":"Read",` +
+				`"tool_input":{"file_path":"rel/` + secret + `"}}`},
 		{"a prompt on an event that cannot withhold",
 			`{"hook_event_name":"PostToolUse","prompt":"` + secret + `"}`},
 		{"a tool_input that does not decode",
