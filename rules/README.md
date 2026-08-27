@@ -25,7 +25,7 @@ carried by a planted fixture in
 
 | Rule | Anchor | What keeps it quiet |
 |---|---|---|
-| `aws-access-key-id` | `AKIA` `ASIA` `ABIA` `ACCA` `A3T` | 20 fixed characters, Shannon floor 3.0 |
+| `aws-access-key-id` | `AKIA` `ASIA` `ABIA` `ACCA` `A3T` | 20 fixed characters, Shannon floor 3.0, and no `EXAMPLE` suffix |
 | `github-token` | `ghp_` `gho_` `ghu_` `ghs_` `ghr_` | 36 fixed characters, floor 3.0 |
 | `github-fine-grained-pat` | `github_pat_` | 70–90 characters, floor 3.0 |
 | `slack-token` | `xoxa-` `xoxb-` `xoxe-` `xoxp-` `xoxr-` `xoxs-` | floor 3.0 |
@@ -34,13 +34,15 @@ carried by a planted fixture in
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
 | `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header |
-| `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, floor 3.5 |
+| `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, floor 3.5, and no published sample signature |
 
-**The entropy floors are what make a placeholder quiet.** A repository holds
-far more `AKIAXXXXXXXXXXXXXXXX` than it holds keys, and the two are the same
-shape to a regex. It carries 1.0219 bits per byte against 3.6842 for AWS's own
-documented example, so the floor separates them and no denylist has to. Four of
-the ten rules match
+**The entropy floors are what make a *padded* placeholder quiet.** A repository
+holds far more `AKIAXXXXXXXXXXXXXXXX` than it holds keys, and the two are the
+same shape to a regex; the padded one carries 1.0219 bits per byte against a
+floor of 3.0, so it goes. What a floor cannot reach is a published example
+written to look like a key. AWS's own measures 3.6842 and clears the floor by
+design, and the jwt.io sample token measures 5.4441 against 3.5 — the two
+rules below carry a second check for exactly that. Four of the ten rules match
 [`testdata/corpus/clean/env.example`](../testdata/corpus/clean/env.example) and
 none of the four survives its own validator.
 
@@ -65,6 +67,10 @@ what one looks like carries no such line and is not reported. That was not
 hypothetical: the paragraph you are reading, and the row that filed the
 problem, were both findings until the clause landed. Scanned over every tracked
 file, the rule went from 3 hits to 1, the one being its own planted fixture.
+Re-taken 2026-08-27 over 145 tracked files: still 1, and 8 with the clause
+removed. That second number grows as prose about the rule accumulates — four
+of the eight are the runbook below — so the reading that holds is the gated
+one in the next paragraph rather than this one.
 
 [`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
 is what holds that down. It quotes four PEM headers in prose, so removing the
@@ -80,12 +86,38 @@ actually emit and have been dead since the rule was written. Q69 has all three
 with the measurements, and reading it before trusting this rule's coverage is
 the point of it.
 
-**Two rules still have no answer for their own documentation**, and Q60 carries
-both. `jwt`'s 3.5 bits are real and the jwt.io sample token clears them at
-5.4441, because a sample JWT and a live one differ only in a signing key the
-scanner cannot see. `aws-access-key-id` is the same shape from the other
-direction: AWS's own published example reaches 3.6842 and passes the floor by
-design, which is what makes the floor work on placeholders and useless here.
+**Two rules carry a second check, because their vendor publishes a realistic
+example.** An entropy floor drops a padded placeholder and admits a plausible
+one, which is the shape a documentation page carries. Both checks are in
+[`internal/validate`](../internal/validate/) with the arithmetic; what follows
+is why each one has a boundary, since a suppression list that does not is the
+argument [Q33](../docs/queue/Q33.md) makes against extending
+`card-placeholder`'s table.
+
+`aws-access-key-id` names `aws-placeholder`, which drops a key ID ending in
+`EXAMPLE`. That is AWS's own mark — `AKIAIOSFODNN7EXAMPLE` on the IAM pages,
+`ASIAIOSFODNN7EXAMPLE` on the STS ones, and
+`wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` for the secret printed beside
+them. A suffix rather than a table, so there is no
+vendor list to bound: the boundary is one vendor's convention over its own key
+IDs, which is the entire namespace this rule matches. Over the 145 tracked files
+of this repository on 2026-08-27 the rule went from 13 matches to 2, and every
+one of the 11 it dropped was that pair. A twelfth was the planted fixture, which
+carried the same key and was rewritten rather than dropped. What it costs is a
+real key whose last seven characters are `EXAMPLE`, which is one in 3.4e10 at
+the smallest alphabet that tail can be drawn from.
+
+`jwt` names `jwt-sample-key`, which recomputes the HMAC and drops a token that
+verifies under a published sample secret. A debugger that wants its own example
+reproducible has to publish the key, so what separates that sample from a live
+token is visible after all. One secret is listed, `your-256-bit-secret`, and it
+is measured: HMAC-SHA256 over the first two segments of the token on jwt.io's
+front page reproduces that token's signature exactly. Keys are the better half
+of the pair to enumerate, because the list then also covers a payload somebody
+edited in the debugger before pasting the result — which a token list cannot
+reach. What it costs is a real token whose owner signed it with a copied sample
+secret. That is a false negative on a dangerous file, and not one this tool can
+help with: a token anyone can forge is not protected by stopping the paste.
 
 ## The numeric PII family ships disabled
 

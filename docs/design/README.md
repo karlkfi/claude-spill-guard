@@ -141,6 +141,8 @@ not need to do.
    |---|---|---|
    | `luhn` | Luhn checksum | Payment cards |
    | `card-placeholder` | Denylist of the published test numbers and repeated-digit runs Luhn accepts | Payment cards, beside `luhn` |
+   | `aws-placeholder` | Rejects a key ID ending in `EXAMPLE`, the mark AWS puts on the credentials in its own documentation | `aws-access-key-id`, beside `entropy` |
+   | `jwt-sample-key` | Recomputes the HMAC and rejects a token that verifies under a published sample signing key | `jwt`, beside `entropy` |
    | `mod-11` | ISO 7064 MOD 11-2 | National ID numbers |
    | `entropy` | Shannon floor, read from the rule's `entropy` | High-entropy credential candidates |
    | `reserved-range` | Reserved-range exclusion | IP rules — RFC1918, loopback, link-local, documentation ranges, `0.0.0.0` |

@@ -41,6 +41,8 @@ type Validator string
 const (
 	Luhn            Validator = "luhn"
 	CardPlaceholder Validator = "card-placeholder"
+	AWSPlaceholder  Validator = "aws-placeholder"
+	JWTSampleKey    Validator = "jwt-sample-key"
 	Mod11           Validator = "mod-11"
 	Entropy         Validator = "entropy"
 	ReservedRange   Validator = "reserved-range"
@@ -50,6 +52,8 @@ const (
 var validators = map[Validator]bool{
 	Luhn:            true,
 	CardPlaceholder: true,
+	AWSPlaceholder:  true,
+	JWTSampleKey:    true,
 	Mod11:           true,
 	Entropy:         true,
 	ReservedRange:   true,

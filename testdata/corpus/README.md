@@ -12,9 +12,21 @@ Two halves, and the gate over them is
 ## Nothing in `planted/` is a real credential
 
 Every value is fabricated to the shape its rule matches and works against
-nothing. `aws-access-key-id.env` carries `AKIAIOSFODNN7EXAMPLE`, which is the
-key AWS publishes in its own documentation. The rest were written for this
-directory.
+nothing, and every one of them was written for this directory.
+
+Most of them carry the stem `ZmT4bXn9Ld6VcP1`, matched case-insensitively —
+`aws-access-key-id.env` holds it uppercase, that rule being `[A-Z0-9]{16}`.
+That is deliberate: it makes "fabricated" something a reader can grep for
+rather than something this file asserts. The exceptions are
+`github-fine-grained-pat.txt`, which carries the stem with an underscore
+through the middle because its rule admits one; the PEM blocks, whose bodies
+are base64 of ordinary ASCII; and `slack-webhook-url.yaml`, which predates the
+convention.
+
+`aws-access-key-id.env` is the newest of them. It used to carry
+`AKIAIOSFODNN7EXAMPLE`, the key AWS publishes in its own documentation, and the
+rule now drops that key on the `EXAMPLE` suffix. A fixture proving a rule can
+fire cannot be a value the rule is supposed to stay quiet on.
 
 They are here as literals rather than assembled at scan time because the thing
 under test is a buffer, and a fixture that only exists inside a test is a
@@ -29,9 +41,9 @@ the inherited 5,679 —
 [`docs/design/language-choice.md`](../../docs/design/language-choice.md) §3 has
 them — and both still have to fire:
 
-| Inherited rule | Matches on `clean/`, 2026-08-25 | Floor |
+| Inherited rule | Matches on `clean/`, 2026-08-27 | Floor |
 |---|---|---|
-| `pii-postal-code` `\b\d{5}(?:-\d{4})?\b` | 30 | 20 |
+| `pii-postal-code` `\b\d{5}(?:-\d{4})?\b` | 31 | 20 |
 | `pii-phone-cn` | 8 | 6 |
 
 The three worked examples the design names are all in here deliberately:
@@ -50,6 +62,14 @@ rule at all — so the clause could be deleted with every test still green. The
 runbook quotes four headers in prose, which turns a deletion into 4 findings
 and a red gate. A rule with no clean file touching it has a guard that cannot
 fire.
+
+`iam-policy-notes.md` and `jwt-debugging.md` are two more of the same, for the
+two rules whose vendor publishes an example realistic enough to clear an
+entropy floor. The first quotes AWS's documented access key ID and its STS
+counterpart; the second quotes the sample token on jwt.io's front page. Each
+holds down one validator: removing `aws-placeholder` takes the clean half to 2
+findings and removing `jwt-sample-key` takes it to 1, both measured by driving
+the deletion rather than by reading the rule.
 
 ## Adding to it
 
