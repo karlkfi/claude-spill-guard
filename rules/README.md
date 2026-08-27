@@ -69,12 +69,15 @@ not hypothetical: the paragraph you are reading, and the row that filed the
 problem, were both findings until the clause landed. Scanned over every tracked
 file, the rule went from 3 hits to 1, the one being its own planted fixture.
 
-Do not quote that pair. With the clause removed the same scan reads 8 on
-2026-08-27, and 19 once this rule's own tests and fixtures land — the
-clause-free count measures how much prose about PEM headers the repository
-holds, not how noisy the rule is, and it climbs every time somebody documents
-the rule. The shipped count stays at its planted fixtures, 2 of them now. The
-reading that holds is the gated one below.
+Do not quote that pair, and do not trust the number in this paragraph either.
+With the clause removed the same scan read 8 on 2026-08-27 and reads 21 at the
+commit you are looking at — twelve of those twenty-one are `pemblock_test.go`,
+which exists to exercise this rule. The clause-free count measures how much
+prose about PEM headers the repository holds, not how noisy the rule is, and it
+climbs every time somebody documents it: 19 while this branch was being
+reviewed, 21 after review asked for two more cases. The shipped count stays at
+its planted fixtures, 2 of them. The reading that holds is the gated one
+below.
 
 [`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
 is what holds that down. It quotes four private-key headers inline and displays

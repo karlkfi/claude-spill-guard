@@ -125,7 +125,9 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 			}
 			// A buffer nothing read reports the same empty Findings as a clean
 			// one, and half this table wants empty -- so the negatives mean
-			// nothing without this.
+			// nothing without this. It cannot fire on the rows as they stand,
+			// which are all ASCII: insurance against a row that is not, rather
+			// than a control doing work today.
 			if got.Skipped != Scanned {
 				t.Fatalf("not read: %s", got.Skipped)
 			}
