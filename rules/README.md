@@ -72,10 +72,9 @@ file, the rule went from 3 hits to 1, the one being its own planted fixture.
 Do not quote that pair. With the clause removed the same scan reads 8 on
 2026-08-27, and 19 once this rule's own tests and fixtures land — the
 clause-free count measures how much prose about PEM headers the repository
-holds, not how noisy the rule is, and it climbs every time somebody
-documents the rule. The
-shipped count stays at its planted fixtures, 2 of them now. The reading that
-holds is the gated one below.
+holds, not how noisy the rule is, and it climbs every time somebody documents
+the rule. The shipped count stays at its planted fixtures, 2 of them now. The
+reading that holds is the gated one below.
 
 [`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
 is what holds that down. It quotes four PEM headers in prose, so removing the
@@ -104,12 +103,17 @@ would go unreported and would be the thing that reverses this.
 RFC4716` emits `---- BEGIN SSH2 PUBLIC KEY ----`, byte-checked — where the
 rule requires five and none. `PGP ` cannot reach
 `-----BEGIN PGP PRIVATE KEY BLOCK-----`, because real armor carries ` BLOCK`
-before the dashes; that one is derived from
-the spec rather than measured, `gpg` being absent on the machine it was taken
-on. They stay because deleting them is a judgement about what no toolchain
+before the dashes; that one is derived from the spec rather than measured,
+`gpg` being absent on the machine it was taken on. They stay because deleting
+them is a judgement about what no toolchain
 writes rather than a proof, and with the body-line clause in force all an arm
 can add is a header followed by base64 — a key block, or a document displaying
 one, which is a class every other arm already carries.
+
+What the clause still costs is a key whose header and body reach the scanner
+in different buffers, which reports nothing. Nothing chunks a file today —
+`scan.Buffer` takes the whole thing — so this is a constraint on whatever
+calls it rather than a live gap.
 
 **Two rules carry a second check, because their vendor publishes a realistic
 example.** An entropy floor drops a padded placeholder and admits a plausible
