@@ -32,6 +32,10 @@ const (
 // path that needs one and does not have it blocks.
 type payload struct {
 	HookEventName string `json:"hook_event_name"`
+	// CWD is the directory a relative Bash operand resolves against. Claude
+	// Code sends it on every event; an empty one makes a relative operand
+	// unresolvable rather than a guess.
+	CWD string `json:"cwd"`
 	// Prompt is the text the human typed, on UserPromptSubmit. Nil means the
 	// field was absent, which is not the same as an empty prompt.
 	Prompt *string `json:"prompt"`

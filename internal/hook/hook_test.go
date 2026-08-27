@@ -105,6 +105,16 @@ func TestEachEventGetsTheBlockEncodingMeasuredToWorkForIt(t *testing.T) {
 	})
 }
 
+// It is also the positive control for TestNoRefusalCarriesScannedContent, and
+// that is a second job rather than a side effect. Every refusal in this package
+// now returns nothing of the payload, so that test is a suite of negatives with
+// nothing showing the inspection can see a value at all -- and a zero from a
+// clean binary reads exactly like a zero from a reason-reader that stopped
+// working. The assertion below is the half that says it can: a reason DOES
+// carry a caller-supplied string when the design allows one, which for a path
+// this binary resolved and opened it does.
+//
+// So do not narrow it to the rule id without moving that assertion somewhere.
 func TestReadIsScannedByOpeningTheFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "deploy.env")
 	if err := os.WriteFile(path, []byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
@@ -152,15 +162,55 @@ func TestNoVerdictCarriesTheValue(t *testing.T) {
 // allows and both of which are decisions rather than accidents. What it must
 // not carry is scanned content: a prompt body, a command string, or a file's
 // contents.
+// Its positive control is TestReadIsScannedByOpeningTheFile, which asserts a
+// reason carries the path it names. Without that pairing every case here could
+// pass against a reason-reader that had stopped seeing values, which is the
+// shape this file spent a day finding in other people's tests and then in its
+// own.
 func TestNoRefusalCarriesScannedContent(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct {
 		name    string
 		payload string
 	}{
+		// The secret goes INSIDE the operand the refusal is about. The first
+		// version of this case put it in a neighbouring segment -- `echo
+		// <secret> && cat $UNSET` -- which passes whatever the refusal quotes,
+		// so it could not fail for the shape that matters. Four resolve paths
+		// were echoing the operand verbatim and this test said they were not.
+		{"a variable in the operand",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"cat $HOME/` + secret + `"}}`},
+		{"a glob in the operand",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"cat /secrets/` + secret + `*"}}`},
+		{"another user's home in the operand",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"cat ~alice/` + secret + `"}}`},
+		{"a relative operand after a directory change",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"cd /tmp && cat rel/` + secret + `"}}`},
+		{"a relative operand with no cwd to resolve against",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash",` +
+				`"tool_input":{"command":"cat rel/` + secret + `"}}`},
+		{"an indirectly named list",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"sort --files0-from=` + secret + `"}}`},
+		// argv[0] is the way the leak survives naming the command: the reader
+		// is found by basename, so the directories above it are free text.
+		{"a secret in the reader's own argv[0]",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":"/tmp/` + secret + `/cat $UNSET"}}`},
 		{"a command string beside an unresolvable operand",
 			`{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
 				`,"tool_input":{"command":"echo ` + secret + ` && cat $UNSET"}}`},
+		// The Read arm quoted its file_path where the Bash arm had stopped
+		// quoting its operand -- same binary, same unresolved token, opposite
+		// answers. `file_path` being a path by contract does not change what
+		// happened to this one, which is nothing.
+		{"a relative file_path on a Read",
+			`{"hook_event_name":"PreToolUse","tool_name":"Read",` +
+				`"tool_input":{"file_path":"rel/` + secret + `"}}`},
 		{"a prompt on an event that cannot withhold",
 			`{"hook_event_name":"PostToolUse","prompt":"` + secret + `"}`},
 		{"a tool_input that does not decode",

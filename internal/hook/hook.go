@@ -153,9 +153,15 @@ func toolTargets(call payload) ([]target, error) {
 		// tool's, so a miss here would be a hit there and the file would go
 		// unscanned.
 		if !filepath.IsAbs(*in.FilePath) {
-			return nil, fmt.Errorf("the Read call names a relative file_path, "+
-				"which this cannot resolve to the file the tool would open: %q",
-				*in.FilePath)
+			// The path is not named, for the reason bash.go's resolve does not
+			// name an operand. The design allows a reason to carry a path this
+			// binary resolved and attempted to open, and a relative file_path
+			// is neither: nothing was scanned before this refusal, so quoting
+			// it would send content the scan never examined. That `file_path`
+			// is a path by contract where an operand is a command-string token
+			// does not change what has happened to it here, which is nothing.
+			return nil, errors.New("the Read call names a relative file_path, " +
+				"which this cannot resolve to the file the tool would open")
 		}
 		buf, err := os.ReadFile(*in.FilePath)
 		if err != nil {
@@ -177,10 +183,9 @@ func toolTargets(call payload) ([]target, error) {
 		if in.Command == nil {
 			return nil, errors.New("the Bash call names no command")
 		}
-		// The command string only. Its file operands are the other half of the
-		// Bash surface and they need a per-command table of which argument is
-		// a path, which internal/bash does not decide and this does not have.
-		return []target{{commandLabel, []byte(*in.Command)}}, nil
+		// The command string, and the files its readers are pointed at.
+		// internal/readers is what decides which token of a segment is a path.
+		return bashTargets(*in.Command, call.CWD)
 	default:
 		// Not a tool this package scans. The set above is closed and named so
 		// that hooks.json's matcher can be held to it; a tool arriving here is
