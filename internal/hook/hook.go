@@ -125,7 +125,14 @@ func targets(call payload, event Event) ([]target, error) {
 }
 
 func toolTargets(call payload) ([]target, error) {
-	switch call.ToolName {
+	// A tool this package has no strategy for is a matcher wider than the
+	// scanner, and it is judged below. A payload that names no tool at all is
+	// a different thing: there is nothing to decide with, so it blocks.
+	if call.ToolName == nil || *call.ToolName == "" {
+		return nil, errors.New("the PreToolUse payload names no tool, so what " +
+			"the call would send cannot be decided")
+	}
+	switch *call.ToolName {
 	case ToolRead:
 		var in readInput
 		if err := unmarshalToolInput(ToolRead, call.ToolInput, &in); err != nil {

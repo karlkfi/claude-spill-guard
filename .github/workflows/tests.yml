@@ -1525,6 +1525,17 @@ jobs:
           if [ "$rc" -eq 0 ]; then
             echo "::error::lint passed with a parked row nothing can revive" >&2
             rm -f docs/queue/Q999997.md
+            git checkout -- docs/queue
+            exit 1
+          fi
+          # Anchored on the message, as the two steps beside it are. Asserting
+          # only a non-zero exit would let any other finding stand in for this
+          # one -- a malformed rank fails the same lint, and the class under
+          # test would never be exercised.
+          if ! grep -q 'names no trigger' mutant.log; then
+            echo "::error::lint failed, but not on the missing revive trigger" >&2
+            rm -f docs/queue/Q999997.md
+            git checkout -- docs/queue
             exit 1
           fi
           python3 scripts/vendor/claude-skills/queue.py lint --strict stale-citation \

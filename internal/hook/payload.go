@@ -35,10 +35,16 @@ type payload struct {
 	// Prompt is the text the human typed, on UserPromptSubmit. Nil means the
 	// field was absent, which is not the same as an empty prompt.
 	Prompt *string `json:"prompt"`
-	// ToolName and ToolInput describe the call, on PreToolUse. ToolInput stays
-	// raw because its shape is the tool's, and which tool it is decides which
-	// shape to expect.
-	ToolName  string          `json:"tool_name"`
+	// ToolName and ToolInput describe the call, on PreToolUse. ToolName is a
+	// pointer for the reason Prompt is: absent is a payload nobody can act on,
+	// and as a plain string it collapsed onto "a tool this package does not
+	// scan" -- which is an allow. Driven on a built binary, a PreToolUse
+	// payload with a secret in its command and no tool_name exited 0 with
+	// nothing on either stream, and the same payload naming Bash blocked.
+	//
+	// ToolInput stays raw because its shape is the tool's, and which tool it
+	// is decides which shape to expect.
+	ToolName  *string         `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
 }
 
