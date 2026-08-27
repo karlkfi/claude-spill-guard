@@ -126,8 +126,14 @@ def probe(commands, findings):
         go("build", "-o", str(binary), "./cmd/spill-guard")
 
         def unknown(name):
+            # stdin from /dev/null, because `hook` reads a payload from it and
+            # would otherwise block on whatever this script inherited. A
+            # terminal or an open pipe never reaches EOF, so the probe hangs
+            # rather than failing -- and a CI `run:` step, whose stdin is
+            # already /dev/null, would never show it.
             done = subprocess.run([str(binary), name], capture_output=True,
-                                  text=True, check=False)
+                                  text=True, check=False,
+                                  stdin=subprocess.DEVNULL)
             return "unknown command" in done.stderr
 
         if not unknown(NOT_A_COMMAND):

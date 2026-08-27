@@ -13,13 +13,16 @@ This directory holds the design and the reasoning behind it:
 | [`language-choice.md`](language-choice.md) | Why Go, with the measurements. Verbatim from the analysis that started the project. |
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
-**Status: nothing scans anything yet.** The module, the entry point's
-skeleton, the [CI gates](#ci), `internal/validate`, `internal/rules`,
-`internal/scan` and the shipped ruleset exist, and the binary reaches none of
-them — there is no `hook` subcommand to call them from. The validators came
-first because they are pure functions over a candidate and needed nothing to
-call them. Nothing under [open questions](#open-questions) blocks that any
-more; the last of them is settled under
+**Status: it scans, and nothing invokes it yet.** `spill-guard hook` reads a
+payload, scans what the call would have sent, and blocks — driven end to end
+against a live Claude Code on 2026-08-27, where a `Read` of a file carrying a
+Slack webhook came back denied with the rule, the path and the byte offset and
+no fragment of the value. What is missing is the wiring: `hooks.json` and the
+plugin manifests are deliberately absent until there is a hook that fires, and
+now there is one. `Bash` is scanned as a command string only; its file operands
+need a per-command table of which argument is a path, and that is its own item.
+Nothing under [open questions](#open-questions) blocks that any more; the last
+of them is settled under
 [what gets scanned](#what-gets-scanned-is-the-crossing-not-the-hop).
 
 ## The problem
@@ -580,6 +583,35 @@ writes `spill-guard: blocked ...` to stdout and exits 2 stops the call and tells
 the model nothing about why. The `deny` object has no such trap, and no
 `PreToolUse:Bash hook error: [<path>]:` prefix wrapped around its reason.
 
+### The block encoding is per event, and the wrong one fails open
+
+Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, the same way:
+a real hook in a throwaway project, `--output-format stream-json` read for
+whether the content reached the model. The `PreToolUse` column re-drives the
+table above on the newer version and agrees with it.
+
+| Hook writes | `PreToolUse` on `Bash` | `UserPromptSubmit` |
+|---|---|---|
+| a `deny` decision object | **blocked**, reason verbatim | **runs** |
+| `{"decision":"block","reason":…}` | **blocked**, reason verbatim | **blocked**, reason verbatim |
+| nothing, exit 2, reason on stderr | **blocked**, reason wrapped | **blocked**, reason wrapped |
+
+**The deny object is accepted and ignored on `UserPromptSubmit`.** The prompt
+goes to the model and answers normally, with no warning in the transcript and
+nothing on either stream — the same silence a hook that found nothing produces.
+So a hook entry that writes one encoding for both events reports a safety it is
+not providing on half of what it is wired to, which is this project's own
+failure mode arriving in the verdict writer.
+
+`internal/hook` therefore encodes per event: the deny object at `PreToolUse`,
+matching this table and what the launcher already writes, and `decision`/
+`reason` at `UserPromptSubmit`. Nothing derives one from the other.
+
+**Exit 2 is what is left when the event is unreadable.** A payload that is not
+JSON, or that names no event, gives nothing to write a decision object in — the
+shape depends on the event. Exit 2 blocks both events without one, so that is
+where a payload nobody can act on lands, with the reason on stderr.
+
 ### The two shapes that fail open
 
 Both were driven end to end, not reasoned about. Neither hook can write stdout
@@ -633,7 +665,8 @@ internal/rules/           Schema, registry load and merge, compile.
 internal/scan/            Binary skip, prefilter, match loop, findings.
 internal/validate/        Luhn, card placeholders, mod-11, entropy, reserved ranges, context labels.
 internal/bash/            Segment parsing, ported from workspace-guard.
-rules/spill-guard.json    The shipped ruleset. Data, not code.
+rules/spill-guard.json    The shipped ruleset. Authored and reviewed as JSON.
+rules/embed.go            The go:embed that compiles it in. Reaches only its own directory.
 hooks/hooks.json          Hook wiring.
 hooks/run-spill-guard.cmd Launcher. Resolves the binary, denies when it cannot.
 scripts/install.sh        Install script, POSIX.

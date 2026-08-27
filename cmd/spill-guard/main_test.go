@@ -8,7 +8,7 @@ import (
 
 func TestRunVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"version"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"version"}, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr.String())
 	}
 	if got := strings.TrimSpace(stdout.String()); got != version {
@@ -18,7 +18,7 @@ func TestRunVersion(t *testing.T) {
 
 func TestRunExitsNonZeroWithoutACommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run(nil, &stdout, &stderr); code != 2 {
+	if code := run(nil, nil, &stdout, &stderr); code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
 	}
 	if !strings.Contains(stderr.String(), "usage:") {
@@ -28,7 +28,7 @@ func TestRunExitsNonZeroWithoutACommand(t *testing.T) {
 
 func TestRunExitsNonZeroOnAnUnknownCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"scan"}, &stdout, &stderr); code != 2 {
+	if code := run([]string{"scan"}, nil, &stdout, &stderr); code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
 	}
 	if stdout.Len() != 0 {
@@ -53,7 +53,7 @@ func TestRunEscapesControlCharactersInTheCommandItRejects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			arg := "a" + tc.raw + "b"
 			var stdout, stderr bytes.Buffer
-			run([]string{arg}, &stdout, &stderr)
+			run([]string{arg}, nil, &stdout, &stderr)
 			if strings.Contains(stderr.String(), arg) {
 				t.Errorf("stderr carries the argument raw: %q", stderr.String())
 			}

@@ -326,19 +326,38 @@ jobs:
             exit 1
           fi
 
-      - name: Wiring the scanner in must fail the check and flip the table
+      # This mutation goes the way the tree does not. It used to add an import
+      # and require the row to flip to `yes`; the hook entry made
+      # `internal/scan` reachable, and a redundant import of something already
+      # in the graph changes nothing -- the table would not move, status-drift
+      # would pass, and the step would fail saying the check was too lax.
+      #
+      # The precondition could not have caught that. It asked whether the
+      # binary reaches `internal/scan`, which was true before the mutation and
+      # after it, so it asserted the mutation had happened rather than that it
+      # had had an effect. Unwiring gives that assertion something to measure.
+      - name: Unwiring the scanner must fail the check and flip the table
         run: |
-          sed -i 's|^import (|import (\n\t_ "github.com/karlkfi/claude-spill-guard/internal/scan"|' cmd/spill-guard/main.go
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("cmd/spill-guard/main.go")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace('\t"github.com/karlkfi/claude-spill-guard/internal/hook"\n', "")
+          s = s.replace('\tcase "hook":\n\t\treturn hook.Run(stdin, stdout, stderr)\n', "")
+          s = s.replace("  hook      scan a Claude Code hook payload read from stdin\n", "")
+          p.write_text(s, encoding="utf-8")
+          PY
           gofmt -w cmd/spill-guard/main.go
-          if ! go list -deps ./cmd/spill-guard | grep -q 'internal/scan'; then
-            echo "::error::the binary still does not reach internal/scan, so this step tested nothing" >&2
+          if go list -deps ./cmd/spill-guard | grep -q 'internal/scan'; then
+            echo "::error::the binary still reaches internal/scan, so this step tested nothing" >&2
+            git checkout -- cmd/spill-guard/main.go
             exit 1
           fi
           make status-drift > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           if [ "$rc" -eq 0 ]; then
-            echo "::error::status-drift passed while the README said the binary cannot scan and it can" >&2
+            echo "::error::status-drift passed while the README said the binary can scan and it cannot" >&2
             git checkout -- cmd/spill-guard/main.go
             exit 1
           fi
@@ -346,10 +365,10 @@ jobs:
           # a generator that always emits the committed text would pass the
           # assertion above and be worth nothing.
           make status > /dev/null 2>&1 || true
-          grep -q '| Scan a file or a buffer | yes |' README.md && flipped=0 || flipped=1
+          grep -q '| Scan a file or a buffer | no |' README.md && flipped=0 || flipped=1
           git checkout -- cmd/spill-guard/main.go README.md
           if [ "$flipped" -ne 0 ]; then
-            echo "::error::the generated table did not flip to yes once the binary reached internal/scan" >&2
+            echo "::error::the generated table did not flip to no once the binary stopped reaching internal/scan" >&2
             exit 1
           fi
 
