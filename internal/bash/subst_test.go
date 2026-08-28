@@ -15,6 +15,10 @@ func TestCommandSubstitutions(t *testing.T) {
 		{"a double-quoted one is live", `echo "$(id)"`, true, []string{"id"}},
 		{"a bare one is live", "echo $(id)", true, []string{"id"}},
 		{"a backtick one is live", "echo `id`", true, []string{"id"}},
+		// A backslash inside a backtick body escapes the next byte, so an
+		// escaped backtick does not close it.
+		{"an escaped backtick does not close the body", "cat `a\\`b`", true,
+			[]string{"a\\`b"}},
 		{"arithmetic holds no command", "echo $((1+2))", true, nil},
 		// How bash reads an unquoted heredoc body: the apostrophe in a `don't`
 		// must not switch the scanner off for the rest of the body (Q50).
