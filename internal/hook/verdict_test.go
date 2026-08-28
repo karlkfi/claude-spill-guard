@@ -56,12 +56,17 @@ func TestAReasonCapsTheFindingsItNamesAndStillCountsThemAll(t *testing.T) {
 	}
 }
 
-// Neither reason tells the model how to proceed without a scan. The launcher's
-// two reasons hold the same line, and for the same argument: naming the escape
-// hatch in text the model reads is handing it the bypass.
+// No reason tells the model how to proceed without a scan. The launcher's two
+// reasons hold the same line, and for the same argument: naming the escape hatch
+// in text the model reads is handing it the bypass.
+//
+// The list is hand-kept, so it is one a new verdict helper joins by somebody
+// remembering. It has already been missed once -- unread() was added without
+// it -- and there is no gate that would have said so.
 func TestNoReasonNamesTheOverride(t *testing.T) {
 	reasons := []string{
 		found([]scan.Finding{{RuleID: "some-rule", Path: "f.env"}}),
+		unread([]skipped{{"f.bin", scan.SkippedUTF32}}),
 		failed(errNoEvent),
 	}
 	for _, reason := range reasons {
