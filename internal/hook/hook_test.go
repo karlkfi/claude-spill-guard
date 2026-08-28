@@ -472,9 +472,9 @@ func TestASkipReasonThisPackageWasNotTaughtBlocks(t *testing.T) {
 	}
 }
 
-// utf16 is a UTF-16 buffer with its mark, for the pin below. The first character
-// is deliberately not U+0000: FF FE 00 00 is the UTF-32LE mark and takes a
-// different branch, which is a different assertion.
+// utf16bom is a UTF-16 buffer with its mark, for the pin below. The first
+// character is deliberately not U+0000: FF FE 00 00 is the UTF-32LE mark and
+// takes a different branch, which is a different assertion.
 func utf16bom(t *testing.T, s string, bigEndian bool) []byte {
 	t.Helper()
 	out := []byte{0xFF, 0xFE}
