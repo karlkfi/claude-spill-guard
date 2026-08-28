@@ -55,7 +55,8 @@ skips one reports a clean result for a file nothing opened. A command with no
 row contributes no operands, which is the design's stated limitation rather
 than a gap.
 
-The prompt surface is whole for the same reason and by the same shape. A prompt
+The prompt surface is read the same way and by the same shape, with one
+measured hole named below. A prompt
 is scanned as text *and* read as a carrier of `@` file operands, because typing
 `@deploy.env` splices the file into the model's context with no hook of any
 kind running for it — `UserPromptSubmit` is where that crossing is stopped or
@@ -68,6 +69,23 @@ rather than read once and agreed with. The rest of the class the design names �
 an MCP file reader, a search tool that returns lines, a skill load — is out of
 v1 and stated in *What it is not*, because the tool set is not a list anyone
 can enumerate once.
+
+**The hole is a binary `@` target, and it is the scan pipeline's rather than the
+resolver's.** Read which arm is which before reasoning about it, because the
+harmless one is the one that comes to mind. Measured 2026-08-28: `@logo.png`
+arrives as a `file` attachment whose `content.type` is `image`, carrying no
+text — nothing crosses that a rule could match. `@heap.dump`, a NUL in its
+first bytes, arrives as `content.type` `text` carrying **the whole file**, NUL
+included, with a marker placed after that NUL intact. That second arm is the
+one with a consequence: the resolver opens it and hands it on, `internal/scan`
+skips a buffer with a NUL in the first 8 KiB, and a skipped buffer contributes
+no findings, so a credential inside one is allowed with nothing in the
+transcript. Driven on a built binary, with the control beside it: the same key
+without the NUL blocks and names the rule, and with it the hook exits 0 on
+empty stdout. It is not a regression — nothing scanned an `@` target before
+this — and it is the reason-versus-surface question the `Read` and `Bash`
+surfaces already carry, so it belongs to whoever settles what an unread buffer
+does rather than here.
 
 ## Rules that are not negotiable
 

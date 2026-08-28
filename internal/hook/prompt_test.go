@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -290,6 +291,42 @@ func TestAnAtThatIsNotATokenIsNotJudged(t *testing.T) {
 				prompt, code, stdout, stderr)
 		}
 	}
+}
+
+// A binary `@` target is opened and handed on like any other. What happens to
+// it after that is the pipeline's call and not this package's, so this asserts
+// the target exists rather than what the verdict is -- pinning the verdict here
+// would freeze a fail-open that another row is deciding.
+//
+// It is worth pinning because the harness splices such a file whole. Measured
+// 2026-08-28: `@heap.dump` with a NUL in its first bytes arrived as a `file`
+// attachment whose `content.type` is `text`, carrying the entire file with a
+// marker placed after the NUL intact -- where `@logo.png` arrived with
+// `content.type` `image` and no text at all. So the bytes really do cross, and
+// a resolver that declined to open them would be reporting a clean result for
+// content nothing looked at.
+func TestABinaryTokenIsStillOpenedAndHandedOn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "heap.dump")
+	body := append([]byte("HEAP\x00\x01\x02"), []byte("\nAWS_ACCESS_KEY_ID="+secret+"\n")...)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := promptTargets("look at @heap.dump", dir)
+	if err != nil {
+		t.Fatalf("promptTargets: %v", err)
+	}
+	for _, target := range got {
+		if target.label == path {
+			if !bytes.Equal(target.buf, body) {
+				t.Errorf("the target carries %d bytes, want the whole %d-byte file",
+					len(target.buf), len(body))
+			}
+			return
+		}
+	}
+	t.Errorf("no target for %q -- the resolver skipped a file the harness splices "+
+		"whole, which is a clean result for content nothing opened", path)
 }
 
 // loadOracle reads the fixture, failing rather than skipping if it is gone --

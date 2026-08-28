@@ -307,6 +307,18 @@ Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
 | `@~/.zshrc` | Expands, and reaches outside the project |
 | `@~user/.zshrc` | Nothing, on a run whose `@~/.zshrc` reached that same file. One record came back, and the harness does not dedup — `@x` and `@./x` give two records for one path — so one record there is one splice rather than two collapsed |
 | A 5,001-line file | 2,000 lines. The splice is bounded, and the marker on the last line did not cross |
+| `@logo.png` | A `file` attachment whose `content.type` is `image`, carrying no text |
+| `@heap.dump`, a NUL in its first bytes | A `file` attachment whose `content.type` is `text`, carrying the whole file — NUL included, and a marker placed after it crossed |
+
+That last row is the one with a consequence. The resolver opens such a file and
+hands it on, and [the pipeline](#pipeline) skips a buffer with a NUL in the
+first 8 KiB, so a credential inside one is allowed with nothing in the
+transcript to say so. Driven on a built binary: the same key without the NUL
+blocks and names the rule, and with it the hook exits 0 on empty stdout. That
+is the reason-versus-surface question the `Read` and `Bash` surfaces already
+carry, arriving on a third surface where the argument for the allow — that
+denying every image read gets the hook uninstalled — is weakest, because an
+`@` token is typed deliberately, one file at a time.
 
 Two of those set the resolver's shape where the measurement runs out. The
 leading-boundary rule is matched rather than widened, because thirty
