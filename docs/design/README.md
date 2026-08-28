@@ -865,11 +865,28 @@ on an unanswerable prompt. prod-guard takes the same branch at
 
 The mode is read from the payload, driven 2026-08-28: every PreToolUse payload
 from 2.1.238 carried `permission_mode`, reading `default` and
-`bypassPermissions` to match the flag the session started with. Only that one
-value suppresses the downgrade — an allowlist of interactive modes would turn
-every mode Claude Code adds into a hatch that silently stops working, and
-branch-guard's #33 is the measurement against it: an ask in `auto` reaches a
-prompt somebody answers, so treating it as human-free was the defect there.
+`bypassPermissions` to match the flag the session started with.
+
+**That reading is the whole of the evidence that this branch is live rather than
+dead code, and no test can add to it.** A unit test hands the decoder a payload
+carrying the field, so it exercises the branch whether or not Claude Code ever
+sends one — the fixture supplies the value the mechanism depends on. The tests
+below pin what the branch *does*; only the raw payload says it will ever be
+reached. Re-take it by logging a real payload, not by reading the suite.
+
+Only `bypassPermissions` suppresses the downgrade; absent, empty and unknown all
+still downgrade. An allowlist of interactive modes would turn every mode Claude
+Code adds into a hatch that silently stops working, and branch-guard's #33 is
+the measurement against it: an ask in `auto` reaches a prompt somebody answers,
+so treating it as human-free was the defect there.
+
+**The residual, stated rather than implied.** The two choices fail in opposite
+directions and neither is free. A denylist means a future human-free mode under
+a new name still downgrades to an ask nobody reads. An allowlist means every
+interactive mode Claude Code adds is a hatch that stops working until this
+binary is updated, which is #33's failure re-opened. The denylist is what both
+sibling guards chose, and it is the one whose failure needs Claude Code to add a
+*new* unattended mode rather than merely to add a mode.
 
 **Per-rule disablement in `.claude/spill-guard.json` is not wired, and it is
 not the same kind of thing.** `internal/rules` merges a project ruleset over
