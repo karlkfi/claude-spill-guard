@@ -83,7 +83,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 
 	findings, skips, err := scanCall(call, event)
 	if err != nil {
-		return decide(stdout, stderr, event, overridden, failed(err))
+		return decide(stdout, stderr, call, event, overridden, failed(err))
 	}
 	// Ahead of the findings, because found() says what the matches in this call
 	// are, and a buffer nothing opened makes that a claim about coverage rather
@@ -94,7 +94,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(findings) == 0 {
 		return 0
 	}
-	return decide(stdout, stderr, event, overridden, found(findings))
+	return decide(stdout, stderr, call, event, overridden, found(findings))
 }
 
 // decide writes the verdict for a call that cannot simply be allowed: a block,
@@ -104,21 +104,28 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 // blocked, so the override can turn a block into a prompt and can never turn
 // anything into an allow -- an overridden call that scans clean exits 0 above,
 // as it would have without one.
-func decide(stdout, stderr io.Writer, event Event, overridden bool, body string) int {
-	// The second clause is a backstop rather than a live branch: override
-	// reads command position, which only PreToolUse Bash has. It is here
-	// because the failure if that ever stops being true is the silent one --
-	// a PreToolUse object on UserPromptSubmit is accepted and ignored, so the
-	// prompt would run with the secret in it. Blocking is the wrong answer
-	// less badly than emitting the shape measured to fail open.
-	if !overridden || event != PreToolUse {
+func decide(stdout, stderr io.Writer, call payload, event Event, overridden bool, body string) int {
+	if !overridden {
 		return deny(stdout, stderr, event, blockedLead+body)
 	}
-	if err := confirm(stdout, confirmLead+body); err != nil {
+	// A confirmation that reaches nobody is not a confirmation. Blocking here
+	// takes nothing from the user -- an unanswerable ask stops the call too --
+	// and it sends the reason to the model rather than stalling the session.
+	if call.PermissionMode == bypassPermissions {
+		return deny(stdout, stderr, event, blockedLead+unattended+body)
+	}
+	// confirm refuses an event it has no encoding for, so this cannot emit the
+	// shape that is accepted and ignored on UserPromptSubmit. Its error lands
+	// on exit 2, which blocks.
+	if err := confirm(stdout, event, confirmLead+body); err != nil {
 		return refuse(stderr, err)
 	}
 	return 0
 }
+
+// The one permission mode with nobody in it. Named rather than inlined because
+// the set having exactly one member is a measurement, not an oversight.
+const bypassPermissions = "bypassPermissions"
 
 // scanCall runs the pipeline over everything the call would have sent, and
 // reports what it found beside what it declined to read.

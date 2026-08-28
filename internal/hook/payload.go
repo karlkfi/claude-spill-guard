@@ -36,6 +36,20 @@ type payload struct {
 	// Code sends it on every event; an empty one makes a relative operand
 	// unresolvable rather than a guess.
 	CWD string `json:"cwd"`
+	// PermissionMode is the session's permission mode, and the only thing that
+	// says whether a confirmation can reach anybody. Driven 2026-08-28 against
+	// 2.1.238: every PreToolUse payload carried it, reading "default" and
+	// "bypassPermissions" to match the flag the session was started with.
+	//
+	// A plain string, not a pointer, because absent and empty land where every
+	// unrecognised value does -- not the one mode that suppresses the
+	// downgrade, so the hatch keeps working. That is the permissive direction
+	// on a field this binary does not control, and it is deliberate: the
+	// alternative is an allowlist of interactive modes, which turns every mode
+	// Claude Code adds into a hatch that stops working. branch-guard's #33 is
+	// the measurement against the allowlist -- treating `auto` as human-free
+	// was the defect, because an ask there reaches a prompt somebody answers.
+	PermissionMode string `json:"permission_mode"`
 	// Prompt is the text the human typed, on UserPromptSubmit. Nil means the
 	// field was absent, which is not the same as an empty prompt.
 	Prompt *string `json:"prompt"`

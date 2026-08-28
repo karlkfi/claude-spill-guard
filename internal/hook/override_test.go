@@ -178,16 +178,95 @@ func TestAPrefixOnAnySegmentCoversTheCall(t *testing.T) {
 
 // A confirmation has no encoding on UserPromptSubmit, and the PreToolUse
 // object is accepted and ignored there -- so emitting one would run the prompt
-// with the secret in it. override never returns true for that event; this pins
-// what happens if it ever does.
-func TestAConfirmationIsNeverWrittenForAnEventThatIgnoresIt(t *testing.T) {
-	var out, errs bytes.Buffer
-	code := decide(&out, &errs, UserPromptSubmit, true, found(nil))
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, errs.String())
+// with the secret in it, and nothing would turn red. confirm refuses the event
+// rather than leaving that to its caller, mirroring block.
+func TestConfirmRefusesAnEventItHasNoEncodingFor(t *testing.T) {
+	var out bytes.Buffer
+	if err := confirm(&out, UserPromptSubmit, "because"); err == nil {
+		t.Errorf("confirm accepted an event it cannot encode, writing %q", out.String())
 	}
-	got := decision(t, out.String())
-	if got["decision"] != "block" {
-		t.Errorf("stdout = %q, want the prompt blocked rather than confirmed", out.String())
+	if out.Len() != 0 {
+		t.Errorf("confirm wrote %q for an event it cannot encode", out.String())
+	}
+}
+
+// And decide does not route one there either. Two guards for one failure,
+// because the failure is silent: this pins the caller, the test above pins the
+// function, and a later caller reaching confirm directly meets the second.
+func TestDecideDoesNotConfirmForAnEventThatIgnoresIt(t *testing.T) {
+	var out, errs bytes.Buffer
+	code := decide(&out, &errs, payload{}, UserPromptSubmit, true, found(nil))
+	if code == 0 && out.Len() > 0 {
+		got := decision(t, out.String())
+		if got["decision"] != "block" {
+			t.Errorf("stdout = %q, want the prompt blocked rather than confirmed", out.String())
+		}
+		return
+	}
+	if code != 2 {
+		t.Errorf("exit code = %d with stdout %q; want a block or the exit-2 refusal",
+			code, out.String())
+	}
+}
+
+// The downgrade's safety property is that somebody is told before the call
+// runs, so it must not fire where nobody can be. bypassPermissions is the one
+// mode with nobody in it -- driven 2026-08-28, every PreToolUse payload from
+// 2.1.238 carried permission_mode and it tracked the flag.
+func TestTheOverrideDoesNotDowngradeWhereNobodyCanAnswer(t *testing.T) {
+	dir, name := planted(t)
+	call := func(mode string) string {
+		return `{"hook_event_name":"PreToolUse","tool_name":"Bash","permission_mode":` +
+			quote(t, mode) + `,"cwd":` + quote(t, dir) + `,"tool_input":{"command":` +
+			quote(t, `SPILL_GUARD_OVERRIDE="reviewed" cat `+name) + `}}`
+	}
+	t.Run("bypassPermissions", func(t *testing.T) {
+		_, stdout, _ := drive(t, call("bypassPermissions"))
+		if got := verdictOf(t, stdout); got != "deny" {
+			t.Errorf("permissionDecision = %q, want deny -- no one can answer an ask", got)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, "nobody to answer") {
+			t.Errorf("the block does not say why the override did not apply: %q", reason)
+		}
+	})
+	// Every other value downgrades, including one this binary has never seen.
+	// An allowlist of interactive modes would turn each mode Claude Code adds
+	// into a hatch that silently stops working, and branch-guard's #33 is the
+	// measurement against that: an ask in `auto` reaches a prompt somebody
+	// answers, so treating it as human-free was the defect.
+	for _, mode := range []string{"default", "acceptEdits", "plan", "", "somethingNew"} {
+		t.Run(mode, func(t *testing.T) {
+			_, stdout, _ := drive(t, call(mode))
+			if got := verdictOf(t, stdout); got != "ask" {
+				t.Errorf("permissionDecision = %q, want ask", got)
+			}
+		})
+	}
+}
+
+// bash reads a quoted word in command position as a command NAME and never
+// sets the variable, so `'SPILL_GUARD_OVERRIDE=x' cat f` runs a command with
+// that name. The lexer strips quotes before the assignment shape is matched,
+// so the hook sees a prefix where the shell would not, and the hatch arms on a
+// spelling no reader would call an override.
+//
+// Pinned rather than fixed because the quoting is gone by the time this layer
+// sees a token, and recovering it is a change to internal/bash -- which is a
+// port kept structurally identical to its upstream. Bounded: the destination
+// is a confirmation, so the worst case is a prompt where there should have
+// been a block, never an allow. Q92 carries the fix.
+func TestAQuotedAssignmentInCommandPositionArmsTheHatchToo(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		`'SPILL_GUARD_OVERRIDE=x' cat ` + name,
+		`"SPILL_GUARD_OVERRIDE=x" cat ` + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			_, stdout, _ := drive(t, bashCall(t, command, dir))
+			if got := verdictOf(t, stdout); got != "ask" {
+				t.Errorf("permissionDecision = %q, want ask -- this is the known "+
+					"divergence Q92 tracks, so a change here is a decision", got)
+			}
+		})
 	}
 }

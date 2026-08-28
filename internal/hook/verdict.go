@@ -98,9 +98,18 @@ func block(stdout io.Writer, event Event, reason string) error {
 // resolved at a 41-second median in the corpus behind the `hook-verdict`
 // skill. An interactive session under bypassPermissions is undriven.
 //
-// There is no ask on UserPromptSubmit and none is needed: the override is read
-// from command position, which that event does not have.
-func confirm(stdout io.Writer, reason string) error {
+// There is no ask on UserPromptSubmit, so this refuses that event rather than
+// encoding one, exactly as block refuses an event it has no shape for. The
+// override is read from command position and only PreToolUse has one, so no
+// caller reaches the refusal today -- and the cost of it being a caller's
+// branch instead of this function's is a future caller emitting a PreToolUse
+// object on UserPromptSubmit, which the table above measures as accepted and
+// ignored. The prompt would run with the secret in it and nothing would turn
+// red.
+func confirm(stdout io.Writer, event Event, reason string) error {
+	if event != PreToolUse {
+		return fmt.Errorf("no confirmation encoding for event %q", event)
+	}
 	return json.NewEncoder(stdout).Encode(preToolUseVerdict{preToolUseOutput{
 		HookEventName:            string(PreToolUse),
 		PermissionDecision:       "ask",
@@ -129,6 +138,24 @@ const (
 		"into this confirmation. Nothing has been waved through, and " +
 		"approving sends what is named below. "
 )
+
+// unattended is the body for a hatch armed where no one can answer a
+// confirmation.
+//
+// The downgrade's whole safety property is that somebody is told before the
+// call runs, so it must not fire where the telling cannot happen. Blocking
+// costs the user nothing they had: an ask nobody answers stops the call too,
+// and this way the reason reaches the model instead of the session stalling on
+// an unanswerable prompt. prod-guard 2.5.2 takes the same branch at
+// scripts/bash-prod-guard.py:2547, for both halves of that argument.
+//
+// bypassPermissions and nothing else. The set of human-free modes is exactly
+// that one, which is branch-guard's #33 rather than a reading of the docs:
+// treating `auto` as unattended too was the defect there, because an ask in
+// `auto` reaches a prompt somebody answers.
+const unattended = "an override on this command asked to downgrade this to a " +
+	"confirmation, and this session runs with permission prompts bypassed, so " +
+	"there is nobody to answer one. The block stands. "
 
 // noReasonGiven is the body for an override with nothing after the `=`.
 //

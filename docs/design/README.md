@@ -819,8 +819,12 @@ downgrade to a prompt as well. The argument is this document's own opening —
 what is missing today is any moment where somebody is told a credential is
 about to leave the machine, and an override that allowed silently would delete
 that moment in exactly the calls that have one to lose. So the scan runs on an
-overridden call, the findings are what the confirmation carries, and a call
-that scans clean is silent with the prefix exactly as it is without one.
+overridden call, and the findings are what the confirmation carries. A call
+that scans clean is silent with a prefix exactly as it is without one — except
+where the prefix carries no reason, which is refused before the scan runs and
+so blocks a call that would otherwise have been allowed. That is deliberate:
+articulating why is the whole of what this hatch controls for, and an empty
+value skips exactly that.
 
 The encoding is `permissionDecision: "ask"`, and it needed measuring for the
 reason the block encodings did — a shape that is accepted and ignored runs the
@@ -833,15 +837,39 @@ marker a `Bash` call echoes coming back in a `tool_result`:
 | empty — control | default | present | the command's output |
 | a `deny` object — control | default | **absent** | the reason, verbatim |
 | an `ask` object | default | **absent** | the reason, verbatim |
-| an `ask` object | `bypassPermissions` | **absent** | the reason, verbatim |
 
 So an ask nobody can answer withholds the result exactly as a deny does. Both
-controls fired, which is what separates that from a probe that reports every
-arm blocked. What the table cannot show is the other half: `-p` has no human in
-it, so an ask reaching one rests on prod-guard 2.5.2 shipping this encoding as
-its own override downgrade rather than on anything driven here. An interactive
-session under `bypassPermissions` is undriven, and it is the arm where an ask
-could plausibly be approved without anyone reading it.
+controls fired, which is what separates that from a probe reporting every arm
+blocked.
+
+**What this table cannot show, and a fourth row that pretended otherwise.** An
+earlier version carried an `ask` arm under `bypassPermissions`, returning the
+same result. It was not evidence: `-p` has no permission UI for the mode to act
+on, so the two arms differ by a flag that does nothing there, and a control
+whose result does not move when you vary its input is a reading about the
+instrument. It is dropped rather than kept with a caveat.
+
+So an ask reaching a person is **undriven here** and rests on prod-guard 2.5.2
+shipping this encoding for its own override downgrade. The arm that matters —
+an interactive session under `bypassPermissions`, where an ask might be
+approved with nobody reading it — cannot be driven from a harness with no human
+in it, and is not driven.
+
+**Which is why the downgrade does not fire in that mode at all.** For a
+fail-closed tool the undriven arm must not be the permissive one, so
+`permission_mode` of `bypassPermissions` keeps the block and says so in the
+reason. That costs the user nothing they had — an ask nobody answers stops the
+call too — and it sends the reason to the model instead of stalling the session
+on an unanswerable prompt. prod-guard takes the same branch at
+`scripts/bash-prod-guard.py:2547`, for both halves of that argument.
+
+The mode is read from the payload, driven 2026-08-28: every PreToolUse payload
+from 2.1.238 carried `permission_mode`, reading `default` and
+`bypassPermissions` to match the flag the session started with. Only that one
+value suppresses the downgrade — an allowlist of interactive modes would turn
+every mode Claude Code adds into a hatch that silently stops working, and
+branch-guard's #33 is the measurement against it: an ask in `auto` reaches a
+prompt somebody answers, so treating it as human-free was the defect there.
 
 **Per-rule disablement in `.claude/spill-guard.json` is not wired, and it is
 not the same kind of thing.** `internal/rules` merges a project ruleset over

@@ -66,16 +66,31 @@ func TestAReasonCapsTheFindingsItNamesAndStillCountsThemAll(t *testing.T) {
 // remembering. It has already been missed once -- unread() was added without
 // it -- and there is no gate that would have said so.
 func TestNoReasonNamesTheOverride(t *testing.T) {
-	reasons := []string{
-		blockedLead + found([]scan.Finding{{RuleID: "some-rule", Path: "f.env"}}),
-		blockedLead + unread([]skipped{{"f.bin", scan.SkippedUTF32}}),
-		blockedLead + failed(errNoEvent),
-		blockedLead + noReasonGiven,
-		confirmLead + found([]scan.Finding{{RuleID: "some-rule", Path: "f.env"}}),
+	finding := []scan.Finding{{RuleID: "some-rule", Path: "f.env"}}
+	// Every lead crossed with every body that lead can carry, rather than the
+	// four somebody happened to think of. Still a hand-kept population -- Q89
+	// is the row for deriving it -- but the crossing is what caught
+	// confirmLead+failed, which Run reaches whenever a scan errors on an
+	// overridden call.
+	reasons := []string{blockedLead + unattended + found(finding)}
+	for _, lead := range []string{blockedLead, confirmLead} {
+		for _, body := range []string{found(finding), failed(errNoEvent), noReasonGiven} {
+			reasons = append(reasons, lead+body)
+		}
 	}
+	// refuse writes to stderr rather than through a lead, so it is outside the
+	// crossing above and has to be named separately -- which is itself the
+	// argument for Q89.
+	var errs bytes.Buffer
+	refuse(&errs, errNoEvent)
+	reasons = append(reasons, errs.String())
+
 	for _, reason := range reasons {
 		if strings.Contains(reason, "SPILL_GUARD_OVERRIDE") {
 			t.Errorf("reason names the override: %q", reason)
+		}
+		if !strings.HasPrefix(reason, "spill-guard: ") {
+			t.Errorf("reason does not open with the plugin name: %q", reason)
 		}
 	}
 }
