@@ -472,14 +472,21 @@ func TestASkipReasonThisPackageWasNotTaughtBlocks(t *testing.T) {
 	}
 }
 
-// utf16le is a UTF-16LE buffer with its mark, for the pin below. The first
-// character is deliberately not U+0000: FF FE 00 00 is the UTF-32LE mark and
-// takes a different branch, which is a different assertion.
-func utf16le(t *testing.T, s string) []byte {
+// utf16 is a UTF-16 buffer with its mark, for the pin below. The first character
+// is deliberately not U+0000: FF FE 00 00 is the UTF-32LE mark and takes a
+// different branch, which is a different assertion.
+func utf16bom(t *testing.T, s string, bigEndian bool) []byte {
 	t.Helper()
 	out := []byte{0xFF, 0xFE}
+	if bigEndian {
+		out = []byte{0xFE, 0xFF}
+	}
 	for _, u := range utf16.Encode([]rune(s)) {
-		out = append(out, byte(u), byte(u>>8))
+		if bigEndian {
+			out = append(out, byte(u>>8), byte(u))
+		} else {
+			out = append(out, byte(u), byte(u>>8))
+		}
 	}
 	return out
 }
@@ -500,38 +507,49 @@ func TestADeclaredUTF16BufferWithANULIsAllowed(t *testing.T) {
 		return drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
 			`"tool_input":{"file_path":`+quote(t, path)+`}}`)
 	}
-	dir := t.TempDir()
-	body := "# notes\nAWS_ACCESS_KEY_ID=" + secret + "\n"
+	// Both marks, because the decode stage has an arm for each and they are only
+	// the same constant today. A split that fixed one and missed the other would
+	// leave a little-endian-only pin green with half the class still crossing.
+	for _, mark := range []struct {
+		name      string
+		bigEndian bool
+	}{{"UTF-16LE", false}, {"UTF-16BE", true}} {
+		t.Run(mark.name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := "# notes\nAWS_ACCESS_KEY_ID=" + secret + "\n"
 
-	nulled := filepath.Join(dir, "declared.env")
-	if err := os.WriteFile(nulled, utf16le(t, "# notes\n\x00AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	code, stdout, stderr := read(t, nulled)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
-	}
-	if stdout != "" {
-		t.Errorf("stdout = %q, want nothing -- this buffer reaches blocks() as "+
-			"SkippedBinary, which is allowed", stdout)
-	}
+			nulled := filepath.Join(dir, "declared.env")
+			withNUL := utf16bom(t, "# notes\n\x00AWS_ACCESS_KEY_ID="+secret+"\n", mark.bigEndian)
+			if err := os.WriteFile(nulled, withNUL, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, stdout, stderr := read(t, nulled)
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing -- this buffer reaches blocks() "+
+					"as SkippedBinary, which is allowed", stdout)
+			}
 
-	// The control, and it is what stops the assertion above being satisfied by
-	// a buffer with nothing in it to find: the same text without the U+0000 is
-	// decoded, scanned, and blocked on the key.
-	control := filepath.Join(dir, "control.env")
-	if err := os.WriteFile(control, utf16le(t, body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	code, stdout, stderr = read(t, control)
-	if code != 0 {
-		t.Fatalf("control: exit code = %d, want 0 (stderr: %q)", code, stderr)
-	}
-	if stdout == "" {
-		t.Fatal("the control was allowed too, so this UTF-16 text carries nothing " +
-			"the ruleset matches and the assertion above asserted nothing")
-	}
-	if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
-		t.Errorf("the control blocks for some other reason than the key in it: %q", reason)
+			// The control, and it is what stops the assertion above being
+			// satisfied by a buffer with nothing in it to find: the same text
+			// without the U+0000 is decoded, scanned, and blocked on the key.
+			control := filepath.Join(dir, "control.env")
+			if err := os.WriteFile(control, utf16bom(t, body, mark.bigEndian), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, stdout, stderr = read(t, control)
+			if code != 0 {
+				t.Fatalf("control: exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout == "" {
+				t.Fatal("the control was allowed too, so this UTF-16 text carries " +
+					"nothing the ruleset matches and the assertion above asserted nothing")
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("the control blocks for some other reason than the key in it: %q", reason)
+			}
+		})
 	}
 }
