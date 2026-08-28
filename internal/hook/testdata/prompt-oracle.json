@@ -219,5 +219,15 @@
     "resolver_also_scans": [],
     "harness_also_splices": [],
     "note": "@. and @.. splice nothing, not even a directory attachment, so resolving them would scan the working directory and its parent for no crossing"
+  },
+  {
+    "name": "dot-runs-that-are-legal-filenames",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @... @.... end",
+    "harness_files": [
+      "ok.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "`...` is a legal filename rather than a dot segment, and the skip added for `@.`/`@..` swallows it -- so this case exists to show the skip's width is measured and not merely convenient. The fixture tree really does hold a file called `...`, and the harness splices nothing for `@...` or `@....` anyway."
   }
 ]

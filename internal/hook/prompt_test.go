@@ -379,7 +379,10 @@ func oracleTree(t *testing.T) (root, home string) {
 	// so they have to be on disk for those arms to assert anything.
 	for _, name := range []string{"ok.txt", "u1.txt", "u2.txt", "u3.txt",
 		"t1.txt", "t2.txt", "t3.txt", "t4.txt", "t5.txt", "t6.txt", "t7.txt", "t8.txt",
-		"w1.txt", "w2.txt", "w3.txt", "w4.txt", "x1.txt", "x2.txt"} {
+		"w1.txt", "w2.txt", "w3.txt", "w4.txt", "x1.txt", "x2.txt",
+		// A legal filename, not a dot segment. The dot-run case asserts the
+		// skip's width against a directory where `...` really exists.
+		"..."} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("MARKER_"+name+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
