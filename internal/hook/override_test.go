@@ -190,22 +190,26 @@ func TestConfirmRefusesAnEventItHasNoEncodingFor(t *testing.T) {
 	}
 }
 
-// And decide does not route one there either. Two guards for one failure,
-// because the failure is silent: this pins the caller, the test above pins the
-// function, and a later caller reaching confirm directly meets the second.
-func TestDecideDoesNotConfirmForAnEventThatIgnoresIt(t *testing.T) {
+// And decide does not route one there either -- it has no check of its own, so
+// what stops it is confirm's refusal turning into the exit-2 block. There is
+// one guard, in confirm, and this pins that decide inherits it.
+//
+// Unreachable today: override returns false for anything but a PreToolUse Bash
+// call, so nothing constructs this state outside a test. What it costs is the
+// reason -- an overridden UserPromptSubmit takes the generic refusal rather
+// than that event's own block encoding carrying the findings. Both block, which
+// is why the reason is not worth a branch here; the assertion is on the exit
+// code because that is the part that must not become 0.
+func TestDecideInheritsConfirmsRefusalForAnEventThatIgnoresIt(t *testing.T) {
 	var out, errs bytes.Buffer
 	code := decide(&out, &errs, payload{}, UserPromptSubmit, true, found(nil))
-	if code == 0 && out.Len() > 0 {
-		got := decision(t, out.String())
-		if got["decision"] != "block" {
-			t.Errorf("stdout = %q, want the prompt blocked rather than confirmed", out.String())
-		}
-		return
-	}
 	if code != 2 {
-		t.Errorf("exit code = %d with stdout %q; want a block or the exit-2 refusal",
+		t.Errorf("exit code = %d with stdout %q; want the exit-2 refusal, which blocks",
 			code, out.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing -- a PreToolUse object is accepted and "+
+			"ignored on this event, so writing one would run the prompt", out.String())
 	}
 }
 
