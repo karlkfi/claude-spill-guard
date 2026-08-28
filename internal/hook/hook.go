@@ -120,7 +120,11 @@ func targets(call payload, event Event) ([]target, error) {
 		if call.Prompt == nil {
 			return nil, errors.New("the UserPromptSubmit payload carries no prompt")
 		}
-		return []target{{promptLabel, []byte(*call.Prompt)}}, nil
+		// The prompt text, and the files its `@` tokens name. Typing one
+		// splices a file into the model's context with no hook of any kind
+		// running for it, so this event is where that crossing is stopped or
+		// nowhere -- see prompt.go.
+		return promptTargets(*call.Prompt, call.CWD)
 	case PreToolUse:
 		return toolTargets(call)
 	default:

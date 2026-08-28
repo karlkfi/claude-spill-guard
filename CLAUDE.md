@@ -20,7 +20,7 @@ measured.
 | `cmd/spill-guard/` | The entry point. `hook` and `version`; the rest land with the rows that specify them. |
 | `internal/validate/` | The eight validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
-| `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable, encode a verdict. Where fail-closed holds or does not. |
+| `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. Where fail-closed holds or does not. |
 | `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it read nothing. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
 | `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. |
@@ -54,6 +54,20 @@ token is a path. An operand of a known reader that cannot be resolved — a
 skips one reports a clean result for a file nothing opened. A command with no
 row contributes no operands, which is the design's stated limitation rather
 than a gap.
+
+The prompt surface is whole for the same reason and by the same shape. A prompt
+is scanned as text *and* read as a carrier of `@` file operands, because typing
+`@deploy.env` splices the file into the model's context with no hook of any
+kind running for it — `UserPromptSubmit` is where that crossing is stopped or
+nowhere. The token grammar in `internal/hook/prompt.go` is driven rather than
+reasoned about, and the harness publishes its own answer: a splice arrives in
+the transcript as an attachment whose `attachment.type` is `file` and whose
+`filename` is the path it resolved. That census is
+`internal/hook/testdata/prompt-oracle.json`, compared against on every run
+rather than read once and agreed with. The rest of the class the design names —
+an MCP file reader, a search tool that returns lines, a skill load — is out of
+v1 and stated in *What it is not*, because the tool set is not a list anyone
+can enumerate once.
 
 ## Rules that are not negotiable
 

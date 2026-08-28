@@ -1,0 +1,159 @@
+[
+  {
+    "name": "positives",
+    "prompt": "Say OK. Do not use any tool. @secret.txt @nested/inner.txt @plain @./secret.txt",
+    "harness_files": [
+      "secret.txt",
+      "nested/inner.txt",
+      "plain",
+      "secret.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "the harness recorded secret.txt twice, once for @secret.txt and once for @./secret.txt; the resolver dedups, so the comparison is over sets"
+  },
+  {
+    "name": "absolute-and-home",
+    "prompt": "Say OK. Do not use any tool. @{{root}}/secret.txt @~/.zshrc",
+    "harness_files": [
+      "secret.txt",
+      "~/.zshrc"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "the recorded home-relative path keeps its ~/ spelling: the absolute one it resolved to names the machine the probe ran on"
+  },
+  {
+    "name": "no-such-file-and-mid-word",
+    "prompt": "Say OK. Do not use any tool. @secret @missing.txt foo@secret.txt \\@secret.txt @",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "code-span-and-fenced-block",
+    "prompt": "Say OK. Do not use any tool. `@secret.txt` and\n```\n@nested/inner.txt\n```",
+    "harness_files": [
+      "nested/inner.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "directory",
+    "prompt": "Say OK. Do not use any tool. @nested @nested/",
+    "harness_files": [],
+    "resolver_also_scans": [
+      "nested"
+    ],
+    "harness_also_splices": [],
+    "why": "the harness splices a directory as attachment.type \"directory\" carrying a one-level name listing, which a census of file attachments cannot see; the resolver scans those names, because they crossed"
+  },
+  {
+    "name": "glob",
+    "prompt": "Say OK. Do not use any tool. @*.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "surrounding-punctuation",
+    "prompt": "Say OK. Do not use any tool. (@secret.txt) @nested/inner.txt, @plain.",
+    "harness_files": [
+      "nested/inner.txt",
+      "plain"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "space-in-the-name",
+    "prompt": "Say OK. Do not use any tool. @with space.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "trailing-delimiters",
+    "prompt": "Say OK. Do not use any tool. @secret.txt; then @nested/inner.txt) then @plain: end",
+    "harness_files": [
+      "secret.txt",
+      "nested/inner.txt",
+      "plain"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "leading-quotes-and-brackets",
+    "prompt": "Say OK. Do not use any tool. \"@secret.txt '@nested/inner.txt [@plain <@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "leading-punctuation",
+    "prompt": "Say OK. Do not use any tool. ,@secret.txt -@nested/inner.txt =@plain :@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "leading-symbols",
+    "prompt": "Say OK. Do not use any tool. /@secret.txt *@nested/inner.txt +@plain {@secret.txt }@plain |@secret.txt !@plain ?@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "leading-symbols-and-sigils",
+    "prompt": "Say OK. Do not use any tool. #@secret.txt $@plain %@secret.txt ^@plain &@secret.txt ;@plain >@secret.txt ]@plain ~@secret.txt @@plain",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "mid-word-only",
+    "prompt": "Say OK. Do not use any tool. foo@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "backslash-escaped",
+    "prompt": "Say OK. Do not use any tool. \\@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "dot-segments",
+    "prompt": "Say OK. Do not use any tool. @../probe/secret.txt @nested/../plain",
+    "harness_files": [
+      "secret.txt",
+      "plain"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "tab-and-newline",
+    "prompt": "Say OK. Do not use any tool.\t@secret.txt\n\t@nested/inner.txt",
+    "harness_files": [
+      "secret.txt",
+      "nested/inner.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "truncated-large-file",
+    "prompt": "Say OK. Do not use any tool. @big.txt",
+    "harness_files": [
+      "big.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "the harness spliced 2,000 of the file's 5,001 lines and the marker on the last line did not cross; the resolver scans the whole file, which is the direction that cannot miss a crossing"
+  }
+]

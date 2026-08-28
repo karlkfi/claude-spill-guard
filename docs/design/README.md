@@ -48,6 +48,24 @@ and the model's context.
   inherited ruleset's defect was precision, not coverage — 27.6% of real files
   flagged, 5,679 matches, zero of them credentials
   ([`language-choice.md` §3](language-choice.md)).
+- **Not every reader in the class it defends.** v1 covers the three that are
+  measured — a `Read` path, a `Bash` reader's resolved operands, and an
+  `@path` in a prompt. The class is
+  [wider than those](#what-gets-scanned-is-the-crossing-not-the-hop): an MCP
+  server's file reader, a search tool that returns matching lines, and a skill
+  or subagent load are each a hook input naming a path whose result comes back
+  as content, and none of them has been driven. Two things have to be measured
+  per member before it can be covered, and neither is guessable — whether a
+  hook sees the call at all, and whether the hook can bound what the call
+  would return. A search over a tree cannot be bounded by opening one file.
+
+  **Do not close that gap with a list of tool names.** The tool set is not
+  fixed: a `claude -p` session driven on 2026-08-28 announced nineteen
+  deferred tools in one `deferred_tools_delta`, and a run asked to use `Grep`
+  reached `ToolSearch` twice and never issued a `Grep` call. A matcher of `*`
+  on `PreToolUse` sees every tool including ones installed later, so the
+  member test is a payload shape — a field naming a path — rather than a name
+  somebody has to remember to add.
 
 ## The hook surface
 
@@ -254,6 +272,50 @@ grammar, and it belongs in the scan set rather than in
 Getting it wrong is the failure this project indicts its predecessor for. A user
 who types `@.env` is doing the most obvious dangerous thing available, and a
 scanner that reports clean on it is reporting a safety it is not providing.
+
+#### The token grammar, and the harness as its own oracle
+
+A spliced file arrives in the transcript as an attachment whose
+`attachment.type` is `file` and whose `filename` is the absolute path the
+harness itself resolved the token to. So the resolver does not have to be
+validated by reading that field and agreeing with it: the census is kept in
+`internal/hook/testdata/prompt-oracle.json` and a test compares against it on
+every run.
+
+**Take the census on `attachment.type == "file"`, never on a raw count of
+`"type":"attachment"`.** Skill listings, token reminders, deferred-tool deltas
+and hook records all carry that key, so the raw count is non-zero whether or
+not a file crossed: over the eighteen transcripts the table below is drawn
+from it ranged 5 to 9, and the ten arms where nothing was spliced at all still
+returned 5 or 6. What makes it survive a spot-check is that it is not
+uninformative: it goes to 0 on a turn the hook blocked, so a driver who checks
+a deny arm first sees it working and stops filtering. Separating a blocked turn
+from an allowed one is a different question from whether a file crossed, which
+is the only one this section needs.
+
+Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
+
+| Shape | What the harness does |
+|---|---|
+| `@` at the start of the input, or after a space, tab or newline | Splices |
+| `@` after anything else | Nothing. Thirty characters driven — the ASCII punctuation set and a letter — including a backslash, so an escape is not a case of its own |
+| Inside a fenced code block | Splices. There is no markdown awareness; a token after a backtick is suppressed by the whitespace rule, not by the fence |
+| Token end | The next whitespace. Trailing `.` `,` `;` `:` `)` are trimmed |
+| `@nosuchfile` | Nothing, so nothing crossed |
+| `@a/dir` | An attachment of type `directory` carrying the entry names one level down, not file content |
+| `@*.txt` | Nothing. Globs are not expanded |
+| `@~/.zshrc` | Expands, and reaches outside the project |
+| `@~user/.zshrc` | Nothing, on a run whose `@~/.zshrc` reached that same file. One record came back, and the harness does not dedup — `@x` and `@./x` give two records for one path — so one record there is one splice rather than two collapsed |
+| A 5,001-line file | 2,000 lines. The splice is bounded, and the marker on the last line did not cross |
+
+Two of those set the resolver's shape where the measurement runs out. The
+leading-boundary rule is matched rather than widened, because thirty
+characters of the set that could have shown a looser harness came back the
+other way, and a resolver treating `foo@x.env` as a token would block every
+prompt that writes an address beside a real filename. The trailing trim is
+*wider* than the five characters measured, because the two errors do not cost
+the same: trimming less leaves the file unscanned and spliced anyway, and
+trimming more names a path that does not exist.
 
 ## Pipeline
 
