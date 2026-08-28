@@ -20,7 +20,7 @@ measured.
 | `cmd/spill-guard/` | The entry point. `hook` and `version`; the rest land with the rows that specify them. |
 | `internal/validate/` | The eight validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
-| `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable, encode a verdict. Where fail-closed holds or does not. |
+| `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. Where fail-closed holds or does not. |
 | `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it read nothing. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
 | `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. |
@@ -61,6 +61,51 @@ token is a path. An operand of a known reader that cannot be resolved — a
 skips one reports a clean result for a file nothing opened. A command with no
 row contributes no operands, which is the design's stated limitation rather
 than a gap.
+
+The prompt surface is read the same way and by the same shape, and what it does
+not cover is named below rather than counted — a count here has already gone
+stale twice in a day, because every drive of a new token shape can add one. A
+prompt
+is scanned as text *and* read as a carrier of `@` file operands, because typing
+`@deploy.env` splices the file into the model's context with no hook of any
+kind running for it — `UserPromptSubmit` is where that crossing is stopped or
+nowhere. The token grammar in `internal/hook/prompt.go` is driven rather than
+reasoned about, and the harness publishes its own answer: a splice arrives in
+the transcript as an attachment whose `attachment.type` is `file` and whose
+`filename` is the path it resolved. That census is
+`internal/hook/testdata/prompt-oracle.json`, compared against on every run
+rather than read once and agreed with. The rest of the class the design names —
+an MCP file reader, a search tool that returns lines, a skill load — is out of
+v1 and stated in *What it is not*, because the tool set is not a list anyone
+can enumerate once.
+
+**Do not write that the token grammar matches the harness.** Six boundary
+codepoints and the ASCII punctuation set have been driven, and that is the
+whole of what is known; the class is open and the next codepoint is a drive
+away. Three fail-opens came out of assuming otherwise, and the third is the one
+to remember: `unicode.IsSpace` is wrong here because Unicode removed U+FEFF
+from `White_Space` in 4.0.1 and the harness did not follow. A hand-written
+table invites the question *where did these characters come from*; the standard
+library forecloses it, which makes the idiomatic call the more dangerous of the
+two. Any assumption that Go's notion of a character class matches somebody
+else's parser is settled by driving it and by nothing else.
+
+**The hole is a binary `@` target, and it is the scan pipeline's rather than the
+resolver's.** Read which arm is which before reasoning about it, because the
+harmless one is the one that comes to mind. Measured 2026-08-28: `@logo.png`
+arrives as a `file` attachment whose `content.type` is `image`, carrying no
+text — nothing crosses that a rule could match. `@heap.dump`, a NUL in its
+first bytes, arrives as `content.type` `text` carrying **the whole file**, NUL
+included, with a marker placed after that NUL intact. That second arm is the
+one with a consequence: the resolver opens it and hands it on, `internal/scan`
+skips a buffer with a NUL in the first 8 KiB, and a skipped buffer contributes
+no findings, so a credential inside one is allowed with nothing in the
+transcript. Driven on a built binary, with the control beside it: the same key
+without the NUL blocks and names the rule, and with it the hook exits 0 on
+empty stdout. It is not a regression — nothing scanned an `@` target before
+this — and it is the reason-versus-surface question the `Read` and `Bash`
+surfaces already carry, so it belongs to whoever settles what an unread buffer
+does rather than here.
 
 ## Rules that are not negotiable
 

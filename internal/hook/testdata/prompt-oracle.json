@@ -1,0 +1,233 @@
+[
+  {
+    "name": "positives",
+    "prompt": "Say OK. Do not use any tool. @secret.txt @nested/inner.txt @plain @./secret.txt",
+    "harness_files": [
+      "secret.txt",
+      "nested/inner.txt",
+      "plain",
+      "secret.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "the harness recorded secret.txt twice, once for @secret.txt and once for @./secret.txt; the resolver dedups, so the comparison is over sets"
+  },
+  {
+    "name": "absolute-and-home",
+    "prompt": "Say OK. Do not use any tool. @{{root}}/secret.txt @~/.zshrc",
+    "harness_files": [
+      "secret.txt",
+      "~/.zshrc"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "the recorded home-relative path keeps its ~/ spelling: the absolute one it resolved to names the machine the probe ran on"
+  },
+  {
+    "name": "no-such-file-and-mid-word",
+    "prompt": "Say OK. Do not use any tool. @secret @missing.txt foo@secret.txt \\@secret.txt @",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "code-span-and-fenced-block",
+    "prompt": "Say OK. Do not use any tool. `@secret.txt` and\n```\n@nested/inner.txt\n```",
+    "harness_files": [
+      "nested/inner.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "directory",
+    "prompt": "Say OK. Do not use any tool. @nested @nested/",
+    "harness_files": [],
+    "resolver_also_scans": [
+      "nested"
+    ],
+    "harness_also_splices": [],
+    "why": "the harness splices a directory as attachment.type \"directory\" carrying a one-level name listing, which a census of file attachments cannot see; the resolver scans those names, because they crossed"
+  },
+  {
+    "name": "glob",
+    "prompt": "Say OK. Do not use any tool. @*.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "surrounding-punctuation",
+    "prompt": "Say OK. Do not use any tool. (@secret.txt) @nested/inner.txt, @plain.",
+    "harness_files": [
+      "nested/inner.txt",
+      "plain"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "space-in-the-name",
+    "prompt": "Say OK. Do not use any tool. @with space.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "trailing-delimiters",
+    "prompt": "Say OK. Do not use any tool. @secret.txt; then @nested/inner.txt) then @plain: end",
+    "harness_files": [
+      "secret.txt",
+      "nested/inner.txt",
+      "plain"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "leading-quotes-and-brackets",
+    "prompt": "Say OK. Do not use any tool. \"@secret.txt '@nested/inner.txt [@plain <@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "leading-punctuation",
+    "prompt": "Say OK. Do not use any tool. ,@secret.txt -@nested/inner.txt =@plain :@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "leading-symbols",
+    "prompt": "Say OK. Do not use any tool. /@secret.txt *@nested/inner.txt +@plain {@secret.txt }@plain |@secret.txt !@plain ?@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "leading-symbols-and-sigils",
+    "prompt": "Say OK. Do not use any tool. #@secret.txt $@plain %@secret.txt ^@plain &@secret.txt ;@plain >@secret.txt ]@plain ~@secret.txt @@plain",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "mid-word-only",
+    "prompt": "Say OK. Do not use any tool. foo@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "backslash-escaped",
+    "prompt": "Say OK. Do not use any tool. \\@secret.txt",
+    "harness_files": [],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "dot-segments",
+    "prompt": "Say OK. Do not use any tool. @../probe/secret.txt @nested/../plain",
+    "harness_files": [
+      "secret.txt",
+      "plain"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "tab-and-newline",
+    "prompt": "Say OK. Do not use any tool.\t@secret.txt\n\t@nested/inner.txt",
+    "harness_files": [
+      "secret.txt",
+      "nested/inner.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": []
+  },
+  {
+    "name": "truncated-large-file",
+    "prompt": "Say OK. Do not use any tool. @big.txt",
+    "harness_files": [
+      "big.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "the harness spliced 2,000 of the file's 5,001 lines and the marker on the last line did not cross; the resolver scans the whole file, which is the direction that cannot miss a crossing"
+  },
+  {
+    "name": "trailing-punctuation-the-harness-trims",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @t1.txt- @t2.txt& @t3.txt= @t4.txt+ @t5.txt# @t6.txt/ @t7.txt\\ end",
+    "harness_files": [
+      "ok.txt",
+      "t1.txt",
+      "t2.txt",
+      "t3.txt",
+      "t4.txt",
+      "t5.txt",
+      "t6.txt",
+      "t7.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "every one of these characters is trimmed by the harness and none was in the resolver's first, hand-picked set; eight of the nine went unscanned"
+  },
+  {
+    "name": "non-breaking-space-and-non-punctuation-suffix",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @t8.txt @u1.txtZZZ @u2.txt%% @u3",
+    "harness_files": [
+      "ok.txt",
+      "t8.txt",
+      "u2.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "U+00A0 is a token boundary, and `@u1.txtZZZ` beside an existing u1.txt splices nothing -- so the trim is a punctuation set rather than a longest-existing-prefix search"
+  },
+  {
+    "name": "format-characters-at-the-boundary",
+    "prompt": "Say OK. Do not use any tool. @ok.txt​@w1.txt ﻿@w2.txt 　@w3.txt ­@w4.txt end",
+    "harness_files": [
+      "w2.txt",
+      "w3.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "U+FEFF and U+3000 split, U+200B and U+00AD do not -- and the U+FEFF arm is the one Go's unicode.IsSpace gets wrong, because Unicode removed it from White_Space in 4.0.1"
+  },
+  {
+    "name": "format-characters-at-the-token-end",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @x1.txt﻿TAIL @x2.txtTAIL end",
+    "harness_files": [
+      "ok.txt",
+      "x1.txt"
+    ],
+    "resolver_also_scans": [
+      "x2.txt"
+    ],
+    "harness_also_splices": [],
+    "note": "U+FEFF ends a token and U+0085 does not, which is the second direction: Go calls U+0085 a space and the harness keeps it, so x2.txt is left unspliced and this resolver over-scans there",
+    "why": "U+0085 is the divergence running the other way: Go's unicode.IsSpace calls it a space and the harness does not, so the harness leaves `x2.txt<U+0085>TAIL` as one token naming nothing while this resolver splits and scans x2.txt. Over-scan, and the direction that cannot miss a crossing -- JS `\\s`, which the harness's four other answers fit, excludes U+0085 where Unicode White_Space includes it"
+  },
+  {
+    "name": "bare-dot-segments",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @. @.. end",
+    "harness_files": [
+      "ok.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "@. and @.. splice nothing, not even a directory attachment, so resolving them would scan the working directory and its parent for no crossing"
+  },
+  {
+    "name": "dot-runs-that-are-legal-filenames",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @... @.... end",
+    "harness_files": [
+      "ok.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "`...` is a legal filename rather than a dot segment, and the skip added for `@.`/`@..` swallows it -- so this case exists to show the skip's width is measured and not merely convenient. The fixture tree really does hold a file called `...`, and the harness splices nothing for `@...` or `@....` anyway."
+  }
+]
