@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/karlkfi/claude-spill-guard/internal/scan"
 )
 
 // A counting sequence and the first six hex letters, so a reader meeting it in
@@ -363,5 +365,108 @@ func TestAReadWithARelativePathBlocks(t *testing.T) {
 	}
 	if !strings.Contains(reasonOf(t, stdout), "relative file_path") {
 		t.Errorf("reason = %q, want it to name the relative path", reasonOf(t, stdout))
+	}
+}
+
+// The per-reason verdict Q74 decided. blocks() carries the argument for it; this
+// pins both arms end to end, through the process a caller actually runs.
+func TestAnUnreadBufferBlocksByTheReasonItWentUnread(t *testing.T) {
+	read := func(t *testing.T, path string) (int, string, string) {
+		t.Helper()
+		return drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
+			`"tool_input":{"file_path":`+quote(t, path)+`}}`)
+	}
+
+	t.Run("UTF-32 blocks", func(t *testing.T) {
+		// A byte-order mark is a declaration the file makes about itself, so
+		// this is text this build cannot read rather than a buffer something
+		// inferred was not text. The content is innocuous on purpose: the block
+		// has to come from the skip, and a secret in here would leave a reader
+		// unable to say which of the two produced it.
+		body := []byte{0xFF, 0xFE, 0x00, 0x00}
+		for _, r := range "the quick brown fox" {
+			body = append(body, byte(r), byte(r>>8), byte(r>>16), byte(r>>24))
+		}
+		path := filepath.Join(t.TempDir(), "notes.txt")
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr := read(t, path)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout == "" {
+			t.Fatal("the call was allowed with nothing on stdout, so a buffer " +
+				"that declared itself text and went unread was reported clean")
+		}
+		reason := reasonOf(t, stdout)
+		if !strings.Contains(reason, string(scan.SkippedUTF32)) {
+			t.Errorf("the reason does not say why the buffer went unread: %q", reason)
+		}
+		if !strings.Contains(reason, path) {
+			t.Errorf("the reason does not name the file that went unread: %q", reason)
+		}
+		if strings.Contains(reason, "rule match") {
+			t.Errorf("this is found()'s verdict, whose sentence claims a coverage "+
+				"this call did not have: %q", reason)
+		}
+	})
+
+	// The allowed arm, and the control beside it is what makes it a measurement.
+	// Identical bytes without the leading NUL are scanned and blocked, so the
+	// silence above is the skip rather than there being nothing in the file to
+	// find -- which is the one other thing that would produce it.
+	t.Run("a binary is allowed, and the same bytes without the NUL are not", func(t *testing.T) {
+		body := "AWS_ACCESS_KEY_ID=" + secret + "\n"
+		dir := t.TempDir()
+
+		skipped := filepath.Join(dir, "core.dump")
+		if err := os.WriteFile(skipped, append([]byte{0x00}, body...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr := read(t, skipped)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("stdout = %q, want nothing -- the binary skip is the one the "+
+				"design took with a measurement, and it is allowed", stdout)
+		}
+
+		control := filepath.Join(dir, "deploy.env")
+		if err := os.WriteFile(control, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr = read(t, control)
+		if code != 0 {
+			t.Fatalf("control: exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout == "" {
+			t.Fatal("the control was allowed too, so these bytes carry nothing " +
+				"this ruleset matches and the arm above asserted nothing")
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+			t.Errorf("the control blocks for some other reason than the key in it: %q", reason)
+		}
+	})
+}
+
+// The default arm, which is the half no fixture reaches: internal/scan can grow
+// a skip reason without internal/hook being taught it, and a switch that let an
+// unknown one through would allow a buffer nothing opened.
+func TestASkipReasonThisPackageWasNotTaughtBlocks(t *testing.T) {
+	if !blocks(scan.Skip("a reason internal/scan grew after this switch was written")) {
+		t.Error("an unrecognised skip reason does not block, which is the fail-open direction")
+	}
+	// The three it was taught, so a default arm wide enough to swallow them all
+	// fails here rather than passing as a stricter policy.
+	if blocks(scan.Scanned) {
+		t.Error("a buffer the pipeline read blocks")
+	}
+	if blocks(scan.SkippedBinary) {
+		t.Error("SkippedBinary blocks; blocks() is where the argument for it not to lives")
+	}
+	if !blocks(scan.SkippedUTF32) {
+		t.Error("SkippedUTF32 does not block")
 	}
 }

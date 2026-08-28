@@ -6,8 +6,11 @@
 // decided here or nowhere. They fail silent, on the grounds that a hook on
 // every call must never be the reason ordinary work breaks; a secret scanner
 // cannot afford that trade, because one that fails quietly reports a safety it
-// is not providing. So every internal error blocks with a reason, and the only
-// silence this package produces is a scan that ran and found nothing.
+// is not providing. So every internal error blocks with a reason, and so does a
+// buffer the pipeline declined to read. The one exception is the binary skip,
+// which the design chose with a measurement rather than for want of a decoder;
+// blocks() is where that is argued, and it is the only silence here that is not
+// a scan which ran.
 //
 // Two events reach it. UserPromptSubmit and PreToolUse can withhold content;
 // PostToolUse cannot, measured, so nothing is catchable after the fact. The
@@ -63,9 +66,15 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 		return refuse(stderr, err)
 	}
 
-	findings, err := scanCall(call, event)
+	findings, skips, err := scanCall(call, event)
 	if err != nil {
 		return deny(stdout, stderr, event, failed(err))
+	}
+	// Ahead of the findings, because found() says what the matches in this call
+	// are, and a buffer nothing opened makes that a claim about coverage rather
+	// than a report of one.
+	if len(skips) > 0 {
+		return deny(stdout, stderr, event, unread(skips))
 	}
 	if len(findings) == 0 {
 		return 0
@@ -73,34 +82,83 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	return deny(stdout, stderr, event, found(findings))
 }
 
-// scanCall runs the pipeline over everything the call would have sent.
+// scanCall runs the pipeline over everything the call would have sent, and
+// reports what it found beside what it declined to read.
 //
 // Targets come before the ruleset because a call with nothing to scan needs no
 // rules, and compiling the set is the fixed cost of every invocation.
-func scanCall(call payload, event Event) ([]scan.Finding, error) {
+//
+// The loop runs to the end rather than returning at the first unread buffer. A
+// call naming several files should name every one of them that went unread, and
+// by here they are all in memory anyway.
+func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 	buffers, err := targets(call, event)
 	if err != nil || len(buffers) == 0 {
-		return nil, err
+		return nil, nil, err
 	}
 	set, err := rules.Load(embedded.Shipped, nil)
 	if err != nil {
-		return nil, fmt.Errorf("loading the compiled-in ruleset: %w", err)
+		return nil, nil, fmt.Errorf("loading the compiled-in ruleset: %w", err)
 	}
 	var findings []scan.Finding
+	var skips []skipped
 	for _, t := range buffers {
 		got, err := scan.Buffer(t.label, t.buf, set)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		// got.Skipped names a buffer the pipeline did not read -- a binary, or
-		// UTF-32 it declined to decode. Nothing here acts on it yet, so such a
-		// buffer contributes no findings and the call is allowed, which is a
-		// clean answer for content nothing opened. Q74 is that gap: the reason
-		// exists now, and deciding per reason whether it blocks is its work
-		// rather than this row's.
+		if blocks(got.Skipped) {
+			skips = append(skips, skipped{t.label, got.Skipped})
+			continue
+		}
 		findings = append(findings, got.Findings...)
 	}
-	return findings, nil
+	return findings, skips, nil
+}
+
+// A skipped is one buffer the pipeline declined to read, carried with the label
+// a finding in it would have been reported against so a verdict can name it.
+type skipped struct {
+	label string
+	why   scan.Skip
+}
+
+// blocks reports whether a skip reason means this call cannot be allowed.
+//
+// The axis is the one the decode stage already runs on: a byte-order mark is a
+// declaration the buffer makes about itself, and a NUL in the sniff window is an
+// inference drawn from its bytes. What blocks is a buffer that declared itself
+// text and this build could not read.
+//
+// SkippedUTF32 is that. The class is text by declaration, so credential-shaped
+// bytes can be in it, and internal/scan skips it because no measurement said the
+// class was worth decoding -- a capability this build does not have rather than
+// a trade it made. Blocking costs close to nothing, because close to nothing is
+// written in UTF-32, and the reason names a remedy the user can act on.
+//
+// SkippedBinary is the trade, and it was taken against a measurement: one PNG
+// was 55% of the benchmark corpus. Denying every image read is not a
+// convenience cost -- a hook that does it gets uninstalled, and an uninstalled
+// scanner enforces nothing at all, which lands on the same side of the ledger as
+// failing open. The class is dominated by buffers that are not text in any
+// encoding, and the one population in it that is -- UTF-16 written with no mark
+// -- cannot be separated out here: telling those apart is exactly the heuristic
+// the NUL check was chosen instead of, so blocking the class would not buy that
+// half without taking the whole of it. It stays the design's stated gap
+// (docs/design/README.md, "Pipeline" step 2), and closing it is a question for
+// the decode stage rather than for this verdict.
+//
+// Anything else blocks. A Skip this switch does not know is internal/scan having
+// grown a reason internal/hook was not taught, and allowing it would be the
+// fail-open direction -- the reading passes() already takes in the pipeline for
+// a validator name it does not run.
+func blocks(why scan.Skip) bool {
+	switch why {
+	case scan.Scanned, scan.SkippedBinary:
+		return false
+	default:
+		return true
+	}
 }
 
 // A target is one buffer to scan and what a finding in it is reported against.

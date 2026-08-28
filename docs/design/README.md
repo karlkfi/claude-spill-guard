@@ -512,6 +512,38 @@ Two mechanisms carry this:
   upgrade: re-run the probe against a new version instead of trusting the
   table.
 
+### An unread buffer is not a clean one, and the two reasons are not alike
+
+Step 6 has every path that declines to read name its reason. What the hook does
+with that reason is a second decision, and it comes out differently for the two
+the pipeline can give. The axis is the one step 1 already runs on: a byte-order
+mark is a declaration the buffer makes about itself, and a NUL in the sniff
+window is an inference drawn from its bytes. What blocks is a buffer that
+declared itself text and could not be read.
+
+**A declared encoding this build cannot decode blocks.** A UTF-32 mark says the
+file is text, so the class is text by declaration and credential-shaped bytes
+can be in it. The skip is a decoder this build does not have rather than a trade
+it made — step 1 names the encoding because no measurement said the class was
+worth carrying. Blocking costs close to nothing, because close to nothing is
+written in UTF-32, and the reason names a remedy: convert the file, or override.
+
+**The binary skip does not block.** That one *is* the trade, and step 2 took it
+against a measurement — one PNG was 55% of the benchmark corpus. Denying every
+image read is not a convenience cost: a hook that does it gets uninstalled, and
+an uninstalled scanner enforces nothing, which lands on the same side of the
+ledger as failing open.
+
+The residue is stated rather than closed. UTF-16 written with no mark lands in
+the binary skip and is allowed with it, and that is exactly text a secret sits
+in. Blocking the class would not buy that half without taking the whole of it,
+because telling the two apart is the heuristic step 2 chose the NUL check
+instead of. So it stays a decode question rather than a verdict one.
+
+A reason the hook has not been taught blocks. `internal/scan` can grow one
+without `internal/hook` being told, and of the two directions that mismatch can
+fail in, only one of them ships a scanner that waves a buffer through.
+
 ## The exit-code contract, measured
 
 Measured 2026-08-21 against Claude Code 2.1.220 on darwin/arm64. A throwaway
