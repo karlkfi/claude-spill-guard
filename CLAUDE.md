@@ -41,6 +41,13 @@ ruleset at `.claude/spill-guard.json` is deliberately not read yet — it is a
 file the model can write, which is a question about a bypass rather than a
 loader change.
 
+A buffer the pipeline declined to read is now a verdict rather than a field
+nobody consumes, and the two reasons do not get the same one: a declared
+encoding this build cannot decode blocks, and the binary skip does not, because
+that one the design chose against a measurement. `blocks` in
+[`internal/hook/hook.go`](internal/hook/hook.go) carries the argument, and a
+skip reason it has not been taught blocks.
+
 `hooks/` still holds the launcher and nothing else: the `hooks.json` that
 invokes it and the plugin manifests beside it land together in a later item,
 because a repo that is installable as a security tool scanning nothing is the

@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf16"
+
+	"github.com/karlkfi/claude-spill-guard/internal/scan"
 )
 
 // A counting sequence and the first six hex letters, so a reader meeting it in
@@ -363,5 +366,190 @@ func TestAReadWithARelativePathBlocks(t *testing.T) {
 	}
 	if !strings.Contains(reasonOf(t, stdout), "relative file_path") {
 		t.Errorf("reason = %q, want it to name the relative path", reasonOf(t, stdout))
+	}
+}
+
+// The per-reason verdict Q74 decided. blocks() carries the argument for it; this
+// pins both arms end to end, through the process a caller actually runs.
+func TestAnUnreadBufferBlocksByTheReasonItWentUnread(t *testing.T) {
+	read := func(t *testing.T, path string) (int, string, string) {
+		t.Helper()
+		return drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
+			`"tool_input":{"file_path":`+quote(t, path)+`}}`)
+	}
+
+	t.Run("UTF-32 blocks", func(t *testing.T) {
+		// A byte-order mark is a declaration the file makes about itself, so
+		// this is text this build cannot read rather than a buffer something
+		// inferred was not text. The content is innocuous on purpose: the block
+		// has to come from the skip, and a secret in here would leave a reader
+		// unable to say which of the two produced it.
+		body := []byte{0xFF, 0xFE, 0x00, 0x00}
+		for _, r := range "the quick brown fox" {
+			body = append(body, byte(r), byte(r>>8), byte(r>>16), byte(r>>24))
+		}
+		path := filepath.Join(t.TempDir(), "notes.txt")
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr := read(t, path)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout == "" {
+			t.Fatal("the call was allowed with nothing on stdout, so a buffer " +
+				"that declared itself text and went unread was reported clean")
+		}
+		reason := reasonOf(t, stdout)
+		if !strings.Contains(reason, string(scan.SkippedUTF32)) {
+			t.Errorf("the reason does not say why the buffer went unread: %q", reason)
+		}
+		if !strings.Contains(reason, path) {
+			t.Errorf("the reason does not name the file that went unread: %q", reason)
+		}
+		if strings.Contains(reason, "rule match") {
+			t.Errorf("this is found()'s verdict, whose sentence claims a coverage "+
+				"this call did not have: %q", reason)
+		}
+	})
+
+	// The allowed arm, and the control beside it is what makes it a measurement.
+	// Identical bytes without the leading NUL are scanned and blocked, so the
+	// silence above is the skip rather than there being nothing in the file to
+	// find -- which is the one other thing that would produce it.
+	t.Run("a binary is allowed, and the same bytes without the NUL are not", func(t *testing.T) {
+		body := "AWS_ACCESS_KEY_ID=" + secret + "\n"
+		dir := t.TempDir()
+
+		skipped := filepath.Join(dir, "core.dump")
+		if err := os.WriteFile(skipped, append([]byte{0x00}, body...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr := read(t, skipped)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("stdout = %q, want nothing -- the binary skip is the one the "+
+				"design took with a measurement, and it is allowed", stdout)
+		}
+
+		control := filepath.Join(dir, "deploy.env")
+		if err := os.WriteFile(control, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr = read(t, control)
+		if code != 0 {
+			t.Fatalf("control: exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout == "" {
+			t.Fatal("the control was allowed too, so these bytes carry nothing " +
+				"this ruleset matches and the arm above asserted nothing")
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+			t.Errorf("the control blocks for some other reason than the key in it: %q", reason)
+		}
+	})
+}
+
+// The default arm, which is the half no fixture reaches: internal/scan can grow
+// a skip reason without internal/hook being taught it, and a switch that let an
+// unknown one through would allow a buffer nothing opened.
+func TestASkipReasonThisPackageWasNotTaughtBlocks(t *testing.T) {
+	if !blocks(scan.Skip("a reason internal/scan grew after this switch was written")) {
+		t.Error("an unrecognised skip reason does not block, which is the fail-open direction")
+	}
+	// The three it was taught, so a default arm wide enough to swallow them all
+	// fails here rather than passing as a stricter policy.
+	if blocks(scan.Scanned) {
+		t.Error("a buffer the pipeline read blocks")
+	}
+	if blocks(scan.SkippedBinary) {
+		t.Error("SkippedBinary blocks; blocks() is where the argument for it not to lives")
+	}
+	if !blocks(scan.SkippedUTF32) {
+		t.Error("SkippedUTF32 does not block")
+	}
+}
+
+// utf16bom is a UTF-16 buffer with its mark, for the pin below. The first
+// character is deliberately not U+0000: FF FE 00 00 is the UTF-32LE mark and
+// takes a different branch, which is a different assertion.
+func utf16bom(t *testing.T, s string, bigEndian bool) []byte {
+	t.Helper()
+	out := []byte{0xFF, 0xFE}
+	if bigEndian {
+		out = []byte{0xFE, 0xFF}
+	}
+	for _, u := range utf16.Encode([]rune(s)) {
+		if bigEndian {
+			out = append(out, byte(u>>8), byte(u))
+		} else {
+			out = append(out, byte(u), byte(u>>8))
+		}
+	}
+	return out
+}
+
+// The one population that satisfies blocks()' description of what blocks and is
+// allowed anyway. A UTF-16 mark declares the buffer text; internal/scan decodes
+// it, finds a U+0000 in the sniff window, and returns SkippedBinary, which this
+// package allows. So declaration and decoded content disagree here and the
+// decoded side wins.
+//
+// This pins what the tree does, not what it should do. blocks()' comment now
+// describes this case, and a comment nothing exercises is the next one to go
+// stale -- so if a decode-stage change makes such a buffer block, this test is
+// meant to fail and be rewritten, and Q91 is where that argument lives.
+func TestADeclaredUTF16BufferWithANULIsAllowed(t *testing.T) {
+	read := func(t *testing.T, path string) (int, string, string) {
+		t.Helper()
+		return drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
+			`"tool_input":{"file_path":`+quote(t, path)+`}}`)
+	}
+	// Both marks, because the decode stage has an arm for each and they are only
+	// the same constant today. A split that fixed one and missed the other would
+	// leave a little-endian-only pin green with half the class still crossing.
+	for _, mark := range []struct {
+		name      string
+		bigEndian bool
+	}{{"UTF-16LE", false}, {"UTF-16BE", true}} {
+		t.Run(mark.name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := "# notes\nAWS_ACCESS_KEY_ID=" + secret + "\n"
+
+			nulled := filepath.Join(dir, "declared.env")
+			withNUL := utf16bom(t, "# notes\n\x00AWS_ACCESS_KEY_ID="+secret+"\n", mark.bigEndian)
+			if err := os.WriteFile(nulled, withNUL, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, stdout, stderr := read(t, nulled)
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing -- this buffer reaches blocks() "+
+					"as SkippedBinary, which is allowed", stdout)
+			}
+
+			// The control, and it is what stops the assertion above being
+			// satisfied by a buffer with nothing in it to find: the same text
+			// without the U+0000 is decoded, scanned, and blocked on the key.
+			control := filepath.Join(dir, "control.env")
+			if err := os.WriteFile(control, utf16bom(t, body, mark.bigEndian), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, stdout, stderr = read(t, control)
+			if code != 0 {
+				t.Fatalf("control: exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout == "" {
+				t.Fatal("the control was allowed too, so this UTF-16 text carries " +
+					"nothing the ruleset matches and the assertion above asserted nothing")
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("the control blocks for some other reason than the key in it: %q", reason)
+			}
+		})
 	}
 }

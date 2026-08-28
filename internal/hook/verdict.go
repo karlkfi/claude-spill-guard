@@ -110,6 +110,38 @@ func found(findings []scan.Finding) string {
 		"name, then try again.", len(findings), strings.Join(items, "; "))
 }
 
+// unread is what the model is told about a call carrying a buffer the pipeline
+// declined to read.
+//
+// It is not failed(), which says nothing scanned this call: here the rest of the
+// call was scanned, and a verdict that misreports its own coverage is the shape
+// this package exists to refuse. It is not found() either, whose sentence names
+// the matches in what this call would have sent -- true only of a call every
+// buffer of which was read, which is why hook.go writes this one ahead of it.
+//
+// The label comes out of the call, so %q escapes it; the reason is this
+// package's own fixed text and is not escaped. It does not name
+// SPILL_GUARD_OVERRIDE, for found()'s reason.
+func unread(skips []skipped) string {
+	listed, extra := skips, 0
+	if len(listed) > maxListed {
+		extra = len(listed) - maxListed
+		listed = listed[:maxListed]
+	}
+	items := make([]string, 0, len(listed)+1)
+	for _, s := range listed {
+		items = append(items, fmt.Sprintf("%q (%s)", s.label, s.why))
+	}
+	if extra > 0 {
+		items = append(items, fmt.Sprintf("and %d more", extra))
+	}
+	return fmt.Sprintf("spill-guard: blocked. %d buffer(s) of what this call would "+
+		"have sent went unread: %s. A buffer nothing opened produces no findings, "+
+		"exactly like one that was read and held none, so this blocks rather than "+
+		"reporting a clean result for content nothing examined.",
+		len(skips), strings.Join(items, "; "))
+}
+
 // failed is what the model is told when the scan could not be completed.
 //
 // Every internal error blocks. That is the inversion this project makes
