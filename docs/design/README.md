@@ -285,10 +285,10 @@ every run.
 **Take the census on `attachment.type == "file"`, never on a raw count of
 `"type":"attachment"`.** Skill listings, token reminders, deferred-tool deltas
 and hook records all carry that key, so the raw count is non-zero whether or
-not a file crossed: over the twenty transcripts the table below is drawn from
-it ranged 5 to 14, and the ten arms where nothing was spliced at all still
-returned 5 or 6. It read 5 to 9 until two transcripts were added, which is the
-argument against calibrating on it made by the census itself. What makes it survive a spot-check is that it is not
+not a file crossed: over the twenty-three transcripts the table below is drawn
+from it ranges 5 to 14, and the ten arms where nothing was spliced at all still
+returned 5 or 6. It read 5 to 9 over the first eighteen, which is the argument
+against calibrating on it made by the census itself. What makes it survive a spot-check is that it is not
 uninformative: it goes to 0 on a turn the hook blocked, so a driver who checks
 a deny arm first sees it working and stops filtering. Separating a blocked turn
 from an allowed one is a different question from whether a file crossed, which
@@ -301,7 +301,8 @@ Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
 | `@` at the start of the input, or after a space, tab or newline | Splices |
 | `@` after anything else | Nothing. Thirty characters driven — the ASCII punctuation set and a letter — including a backslash, so an escape is not a case of its own |
 | Inside a fenced code block | Splices. There is no markdown awareness; a token after a backtick is suppressed by the whitespace rule, not by the fence |
-| Token end | The next whitespace — Unicode's, not ASCII's: U+00A0 ends a token |
+| Token end and boundary | Whitespace, but the harness's notion of it. U+00A0, U+3000 and **U+FEFF** split; U+200B, U+00AD and **U+0085** do not. Go's `unicode.IsSpace` disagrees on two of those, one each way |
+| `@.`, `@..` | Nothing — no attachment of any type, not even a directory one |
 | Trailing punctuation | Trimmed, and repeats with it. Driven: `.` `,` `;` `:` `)` `-` `&` `=` `+` `#` `\` `%`. The trim is a punctuation set rather than a longest-existing-prefix search — `@u1.txtZZZ` beside an existing `u1.txt` spliced nothing |
 | `@nosuchfile` | Nothing, so nothing crossed |
 | `@a/dir` | An attachment of type `directory` carrying the entry names one level down, not file content |
@@ -331,16 +332,38 @@ other way, and a resolver treating `foo@x.env` as a token would block every
 prompt that writes an address beside a real filename.
 
 The **trailing trim** and the **whitespace class** are widened past what is
-driven, and the first version of this resolver did neither. It carried a
-hand-picked list of five trim characters and an ASCII-only space test, and a
-single driven prompt naming nine spliced files put eight of them through
-unscanned while a plain `@ok.txt` in the same prompt blocked. So the trim is
-now the ASCII punctuation set bar `/`, and whitespace is `unicode.IsSpace`.
-Both are strict supersets of what was measured, and the asymmetry is why:
-under-trimming leaves a file unscanned and spliced anyway, while over-trimming
-names a path that does not exist and costs one `os.Stat`. Only one of those is
-a fail-open, and a set assembled by hand from the characters someone happened
-to type is the way the wrong one ships.
+driven, and the resolver got both wrong before it got them right. Three
+fail-opens, in the order they were found:
+
+1. **The trim set was five characters somebody typed.** One prompt naming nine
+   spliced files put eight through unscanned while a plain `@ok.txt` in it
+   blocked. The set is now the ASCII punctuation set bar `/`; every ASCII
+   punctuation character driven is trimmed except `_`.
+2. **The space test was ASCII-only.** U+00A0 splits, so `@a<NBSP>@b` was one
+   token naming nothing and both files were invisible rather than skipped.
+3. **`unicode.IsSpace` was still wrong**, and this is the one worth
+   generalising. The argument for it was that it is a strict superset of the
+   six ASCII characters, so widening could not lose a boundary — true, and
+   beside the point. The exposure is a boundary the *harness* has and Go does
+   not, and there is one: Unicode removed U+FEFF from `White_Space` in 4.0.1.
+   Go implements the current standard and the harness splits on U+FEFF anyway,
+   so a BOM-led paste went unscanned.
+
+A hand-written table invites the question *where did these characters come
+from*. `unicode.IsSpace` forecloses it, which is what makes the stdlib idiom
+the more dangerous of the two: the standard moved in 2003 and the harness did
+not follow.
+
+The asymmetry is why all three repairs widen rather than match: under-trimming
+leaves a file unscanned and spliced anyway, while over-trimming names a path
+that does not exist and costs one `os.Stat`. Only one direction is a
+fail-open. The resolver over-scans on U+0085 for exactly that reason — Go calls
+it a space, the harness does not, and the oracle declares the divergence rather
+than hiding it.
+
+**None of this is a claim that the boundary class is settled.** Six codepoints
+have been driven. The rest of the class is not, and the way to extend it is to
+drive more rather than to reason from whichever standard looks authoritative.
 
 ## Pipeline
 

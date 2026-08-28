@@ -65,6 +65,14 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 	seen := make(map[string]bool)
 	for _, token := range atTokens(prompt) {
 		for _, candidate := range candidates(token) {
+			if strings.Trim(candidate, "./") == "" {
+				// `@.` and `@..` splice nothing -- driven, no attachment of
+				// any type, not even a directory one. Resolving them would
+				// scan the working directory and its parent for no crossing,
+				// and a filename in either listing matching a rule would be a
+				// block on a prompt that sent nothing.
+				continue
+			}
 			path, err := resolveAt(candidate, cwd)
 			if err != nil {
 				return nil, err
@@ -137,20 +145,45 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 // are not: a `foo@x.env` this treated as a token would over-block every prompt
 // that mentions an address beside a real filename.
 //
-// # Whitespace is Unicode's, not ASCII's, and that was a fail-open
+// # The boundary class is the harness's, and neither ASCII nor Go's is it
 //
-// This tested one byte against six ASCII characters, and the harness takes
-// U+00A0 as a boundary: driven 2026-08-28, `@ok.txt<NBSP>@t8.txt` spliced
-// t8.txt, while this function saw one token running from `ok.txt` through
-// `@t8.txt` and resolved neither. An NBSP arrives from any paste out of a
-// browser, a rendered document, or a chat client, so it is ordinary input
-// rather than an adversarial one.
+// This tested one byte against six ASCII characters and fail-opened twice
+// before it was right, which is worth the space it takes to say why.
 //
-// `unicode.IsSpace` is a strict superset of the six, so widening cannot lose a
-// boundary this used to honour, and every rune it adds is genuine whitespace
-// -- none of it makes `foo@x.env` a token. Only NBSP is driven; the rest of
-// the set is the same over-approximation trailingPunct makes, in the direction
-// that cannot report a clean result for a file that crossed.
+// First it missed U+00A0. `@ok.txt<NBSP>@t8.txt` splices t8.txt, and the ASCII
+// rule saw a single token spanning both -- so it lost the NBSP-preceded file
+// AND the one before it. An NBSP arrives from any paste out of a browser or a
+// chat client.
+//
+// `unicode.IsSpace` was the obvious repair and it was still wrong, in the way
+// worth generalising: the argument for it was that it is a strict superset of
+// the six, so widening could not lose a boundary. True, and beside the point.
+// The exposure is never a boundary the old rule had -- it is a boundary the
+// HARNESS has and Go does not, and there is one: Unicode removed U+FEFF from
+// White_Space in 4.0.1. Go implements the current standard correctly and the
+// harness splits on U+FEFF anyway, so `<BOM>@deploy.env` at the head of a
+// pasted prompt went unscanned. That is ordinary input too -- a BOM leads any
+// text saved by a Windows editor.
+//
+// Driven 2026-08-28, both positions and both directions:
+//
+//	U+FEFF  harness splits, unicode.IsSpace false  -> the fail-open, fixed here
+//	U+0085  harness does NOT split, IsSpace true   -> over-scan, left alone
+//	U+3000  both split                             -> agree
+//	U+200B  neither splits                         -> agree
+//	U+00AD  neither splits                         -> agree
+//
+// Those five are what JavaScript's `\s` matches, which is Unicode White_Space
+// plus U+FEFF and minus U+0085 -- so the two classes differ in exactly two
+// codepoints, one each way, and only one of them can hide a file. That the
+// harness tokenises with a JS regex is inferred from the five and not read
+// from any source, so isSplitSpace adds the one measured codepoint rather than
+// reimplementing `\s`: U+0085 stays a boundary here, which over-scans in the
+// direction that cannot miss a crossing.
+//
+// The generalisable half is that `unicode.IsSpace` forecloses the question a
+// hand-written table invites. Nobody asks where the standard library got its
+// characters, and here the standard moved in 2003 and the harness did not.
 //
 // Invalid UTF-8 before an `@` decodes to RuneError, which is not a space, so a
 // malformed byte suppresses the token. That is the conservative direction for
@@ -163,14 +196,14 @@ func atTokens(prompt string) []string {
 		}
 		if i > 0 {
 			prev, _ := utf8.DecodeLastRuneInString(prompt[:i])
-			if !unicode.IsSpace(prev) {
+			if !isSplitSpace(prev) {
 				continue
 			}
 		}
 		j := i + 1
 		for j < len(prompt) {
 			r, size := utf8.DecodeRuneInString(prompt[j:])
-			if unicode.IsSpace(r) {
+			if isSplitSpace(r) {
 				break
 			}
 			j += size
@@ -181,6 +214,14 @@ func atTokens(prompt string) []string {
 		i = j
 	}
 	return out
+}
+
+// isSplitSpace reports whether r ends an `@` token, which is Go's whitespace
+// plus the one codepoint the harness splits on and Go does not. See atTokens
+// for the measurement and for why this is not a reimplementation of JS `\s`.
+func isSplitSpace(r rune) bool {
+	const bom = '\uFEFF'
+	return unicode.IsSpace(r) || r == bom
 }
 
 // candidates is a token and every prefix of it left by stripping trailing

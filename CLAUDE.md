@@ -72,6 +72,17 @@ an MCP file reader, a search tool that returns lines, a skill load — is out of
 v1 and stated in *What it is not*, because the tool set is not a list anyone
 can enumerate once.
 
+**Do not write that the token grammar matches the harness.** Six boundary
+codepoints and the ASCII punctuation set have been driven, and that is the
+whole of what is known; the class is open and the next codepoint is a drive
+away. Three fail-opens came out of assuming otherwise, and the third is the one
+to remember: `unicode.IsSpace` is wrong here because Unicode removed U+FEFF
+from `White_Space` in 4.0.1 and the harness did not follow. A hand-written
+table invites the question *where did these characters come from*; the standard
+library forecloses it, which makes the idiomatic call the more dangerous of the
+two. Any assumption that Go's notion of a character class matches somebody
+else's parser is settled by driving it and by nothing else.
+
 **The hole is a binary `@` target, and it is the scan pipeline's rather than the
 resolver's.** Read which arm is which before reasoning about it, because the
 harmless one is the one that comes to mind. Measured 2026-08-28: `@logo.png`

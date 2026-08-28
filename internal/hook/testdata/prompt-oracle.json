@@ -184,5 +184,40 @@
     "resolver_also_scans": [],
     "harness_also_splices": [],
     "note": "U+00A0 is a token boundary, and `@u1.txtZZZ` beside an existing u1.txt splices nothing -- so the trim is a punctuation set rather than a longest-existing-prefix search"
+  },
+  {
+    "name": "format-characters-at-the-boundary",
+    "prompt": "Say OK. Do not use any tool. @ok.txt​@w1.txt ﻿@w2.txt 　@w3.txt ­@w4.txt end",
+    "harness_files": [
+      "w2.txt",
+      "w3.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "U+FEFF and U+3000 split, U+200B and U+00AD do not -- and the U+FEFF arm is the one Go's unicode.IsSpace gets wrong, because Unicode removed it from White_Space in 4.0.1"
+  },
+  {
+    "name": "format-characters-at-the-token-end",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @x1.txt﻿TAIL @x2.txtTAIL end",
+    "harness_files": [
+      "ok.txt",
+      "x1.txt"
+    ],
+    "resolver_also_scans": [
+      "x2.txt"
+    ],
+    "harness_also_splices": [],
+    "note": "U+FEFF ends a token and U+0085 does not, which is the second direction: Go calls U+0085 a space and the harness keeps it, so x2.txt is left unspliced and this resolver over-scans there",
+    "why": "U+0085 is the divergence running the other way: Go's unicode.IsSpace calls it a space and the harness does not, so the harness leaves `x2.txt<U+0085>TAIL` as one token naming nothing while this resolver splits and scans x2.txt. Over-scan, and the direction that cannot miss a crossing -- JS `\\s`, which the harness's four other answers fit, excludes U+0085 where Unicode White_Space includes it"
+  },
+  {
+    "name": "bare-dot-segments",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @. @.. end",
+    "harness_files": [
+      "ok.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "@. and @.. splice nothing, not even a directory attachment, so resolving them would scan the working directory and its parent for no crossing"
   }
 ]
