@@ -320,10 +320,11 @@ row whose pointer describes the merged tree rather than your branch — a file, 
 fragment, or a line number a sibling PR is still adding — is red on your branch
 until that PR lands. Mark it `exhibit:`, or write it afterwards.
 Completing an item is `git rm docs/queue/QN.md` **and flipping any row that
-waited on it to `status: ready`**, since git history is the archive and a row
-left blocked waits on nothing.
-[`docs/queue/README.md`](docs/queue/README.md) has the frontmatter, the
-conventions, and which classes bind on which event.
+waited on it to `status: ready`**, since a row left blocked waits on nothing
+and git history is the archive — except for a row filed and completed in the
+same pull request, which a squash erases.
+[`docs/queue/README.md`](docs/queue/README.md) has that case, the frontmatter,
+the conventions, and which classes bind on which event.
 
 Everything in there traces to `docs/design/`.
 

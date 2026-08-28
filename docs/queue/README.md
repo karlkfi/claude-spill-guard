@@ -127,4 +127,30 @@ anything downstream of them.
 
 Picking, completing, deferring and grooming live in the `session-backlog` skill.
 Completing an item is `git rm docs/queue/QN.md` in its own commit — git history
-is the archive.
+is the archive, with one exception worth knowing before relying on it.
+
+**Filing and completing a row in the same pull request is allowed, and under a
+squash it forfeits that archive.** It is the right shape when the item did not
+exist when the work started: a row live for the length of one pull request is a
+row nobody would ever pick up. What it costs depends on how the pull request
+lands, and nothing here fixes that — `allow_merge_commit` is `false`, but
+`allow_squash_merge` and `allow_rebase_merge` are both `true`, there are no
+rulesets, and `main` is unprotected. The practice has already changed once: #1
+to #6 landed as merge commits, and the 47 that have merged since, #7 through
+#54, each landed as one single-parent commit on `main`.
+
+Under that squash an add in one commit and a delete in another cancel, and the
+row reaches `main` in no form. Measured on #50, which filed and completed Q82
+while filing Q83:
+
+```
+git log origin/main -- docs/queue/Q82.md   # nothing
+git log origin/main -- docs/queue/Q83.md   # 7ed48cb ... (#50)
+```
+
+A rebase merge would keep both commits and the row's prose with them, so the
+loss is a property of the strategy rather than of the shape — and since nothing
+guarantees the strategy, write as though the squash applies. Put anything a
+later reader needs — the measurement, the reason, the caveat — in the tree or
+in a row that outlives the merge, not in the body. [Q93](Q93.md) is the item
+covering that boundary generally.
