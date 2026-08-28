@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/karlkfi/claude-spill-guard/internal/scan"
 )
 
 // writeFile puts one file in dir and returns its base name, which is what a
@@ -54,6 +56,57 @@ func TestTheOverrideDowngradesABlockToAConfirmation(t *testing.T) {
 		reason := reasonOf(t, stdout)
 		if !strings.Contains(reason, "aws-access-key-id") {
 			t.Errorf("the confirmation does not name the rule: %q", reason)
+		}
+		if !strings.Contains(reason, name) {
+			t.Errorf("the confirmation does not name the file: %q", reason)
+		}
+	})
+}
+
+// The unread-buffer block is a block like any other, so the hatch reaches it.
+// Left on deny it would be the one class of refusal with nothing past it and
+// nothing saying so, and the design asks for the opposite -- the reason for a
+// declared encoding this build cannot decode "names a remedy: convert the file,
+// or override".
+//
+// The control beside it is the same call without the prefix, so the ask is the
+// override's doing rather than a property of a call carrying an unread buffer.
+func TestTheOverrideReachesTheUnreadBufferBlock(t *testing.T) {
+	dir := t.TempDir()
+	// A byte-order mark is a declaration the file makes about itself, so this
+	// is text this build cannot decode rather than bytes something inferred
+	// were not text. The content is innocuous on purpose: the verdict has to
+	// come from the skip, and a secret in here would leave a reader unable to
+	// say which of the two produced it.
+	body := []byte{0xFF, 0xFE, 0x00, 0x00}
+	for _, r := range "the quick brown fox" {
+		body = append(body, byte(r), byte(r>>8), byte(r>>16), byte(r>>24))
+	}
+	const name = "notes.txt"
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("without it", func(t *testing.T) {
+		_, stdout, _ := drive(t, bashCall(t, "cat "+name, dir))
+		if got := verdictOf(t, stdout); got != "deny" {
+			t.Errorf("permissionDecision = %q, want deny", got)
+		}
+	})
+	t.Run("with it", func(t *testing.T) {
+		code, stdout, stderr := drive(t,
+			bashCall(t, `SPILL_GUARD_OVERRIDE="a UTF-32 fixture I wrote" cat `+name, dir))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if got := verdictOf(t, stdout); got != "ask" {
+			t.Errorf("permissionDecision = %q, want ask", got)
+		}
+		// A confirmation is worth what it says, so the skip reason and the
+		// file it names have to survive the downgrade.
+		reason := reasonOf(t, stdout)
+		if !strings.Contains(reason, string(scan.SkippedUTF32)) {
+			t.Errorf("the confirmation does not say why the buffer went unread: %q", reason)
 		}
 		if !strings.Contains(reason, name) {
 			t.Errorf("the confirmation does not name the file: %q", reason)

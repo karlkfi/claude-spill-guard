@@ -88,8 +88,13 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	// Ahead of the findings, because found() says what the matches in this call
 	// are, and a buffer nothing opened makes that a claim about coverage rather
 	// than a report of one.
+	//
+	// Through decide, not deny: every other block this package writes can be
+	// downgraded to a confirmation, and one that cannot is a class of refusal
+	// with no way past it and nothing saying so. The design asks for it too --
+	// "the reason names a remedy: convert the file, or override".
 	if len(skips) > 0 {
-		return deny(stdout, stderr, event, unread(skips))
+		return decide(stdout, stderr, call, event, overridden, unread(skips))
 	}
 	if len(findings) == 0 {
 		return 0

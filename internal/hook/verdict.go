@@ -221,8 +221,8 @@ func unread(skips []skipped) string {
 	}
 	return fmt.Sprintf("%d buffer(s) of what this call would have sent went "+
 		"unread: %s. A buffer nothing opened produces no findings, exactly like "+
-		"one that was read and held none, so this blocks rather than reporting a "+
-		"clean result for content nothing examined.",
+		"one that was read and held none, so an unread buffer is never reported "+
+		"as a clean one.",
 		len(skips), strings.Join(items, "; "))
 }
 
