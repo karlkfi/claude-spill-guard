@@ -1,16 +1,22 @@
 # The shipped ruleset
 
 `spill-guard.json` is the v1 ruleset: ten credential rules, and four numeric
-PII rules that ship off. A project layers `.claude/spill-guard.json` over it —
-an entry whose `id` is already here overrides the fields it names, so
+PII rules that ship off. `internal/rules` can layer `.claude/spill-guard.json`
+over it — an entry whose `id` is already here overrides the fields it names, so
 
 ```json
 {"rules": [{"id": "jwt", "enabled": false}]}
 ```
 
-is how a project turns one off. The schema, the merge, and what the loader
+is the shape that turns one off. The schema, the merge, and what the loader
 refuses are in
 [`docs/design/README.md`](../docs/design/README.md#rule-schema).
+
+**Nothing reads that file yet.** `spill-guard hook` loads the compiled-in set
+and passes no override, so the paragraph above describes the loader rather than
+the shipped tool. Honouring a disablement written by whatever can write files
+in the project is a decision about a bypass, and it is
+[Q73](../docs/queue/Q73.md).
 
 JSON has no comments, so the reasoning is here.
 

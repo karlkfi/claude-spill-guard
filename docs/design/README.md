@@ -807,8 +807,79 @@ before anything is written.
 a prompt-injection surface, because any content the model reads can contain it —
 including the file being scanned. The escape hatch is `SPILL_GUARD_OVERRIDE=`
 in command position, matching `WORKSPACE_GUARD_OVERRIDE` and
-`PROD_GUARD_OVERRIDE`, plus per-rule disablement in config. Both are places the
-model cannot write to from inside a scanned buffer.
+`PROD_GUARD_OVERRIDE`. `internal/hook/override.go` reads it from an inline
+assignment prefix on a `Bash` command and from nowhere else — not from
+`os.Getenv`, because an exported variable and a `settings.json` `env` block are
+both durable, both silent, and both writable by the model, one of them at
+`.claude/settings.local.json`.
+
+**It downgrades a block to a confirmation, never to an allow.** That is the
+half of "matching those two" that decides what the hatch is worth: both of them
+downgrade to a prompt as well. The argument is this document's own opening —
+what is missing today is any moment where somebody is told a credential is
+about to leave the machine, and an override that allowed silently would delete
+that moment in exactly the calls that have one to lose. So the scan runs on an
+overridden call, the findings are what the confirmation carries, and a call
+that scans clean is silent with the prefix exactly as it is without one.
+
+The encoding is `permissionDecision: "ask"`, and it needed measuring for the
+reason the block encodings did — a shape that is accepted and ignored runs the
+call. Measured 2026-08-28 against Claude Code 2.1.238 on darwin/arm64, driving
+a real hook under `-p --output-format stream-json`, with the observable the
+marker a `Bash` call echoes coming back in a `tool_result`:
+
+| Hook stdout | Permission mode | The marker | What the model receives |
+|---|---|---|---|
+| empty — control | default | present | the command's output |
+| a `deny` object — control | default | **absent** | the reason, verbatim |
+| an `ask` object | default | **absent** | the reason, verbatim |
+| an `ask` object | `bypassPermissions` | **absent** | the reason, verbatim |
+
+So an ask nobody can answer withholds the result exactly as a deny does. Both
+controls fired, which is what separates that from a probe that reports every
+arm blocked. What the table cannot show is the other half: `-p` has no human in
+it, so an ask reaching one rests on prod-guard 2.5.2 shipping this encoding as
+its own override downgrade rather than on anything driven here. An interactive
+session under `bypassPermissions` is undriven, and it is the arm where an ask
+could plausibly be approved without anyone reading it.
+
+**Per-rule disablement in `.claude/spill-guard.json` is not wired, and it is
+not the same kind of thing.** `internal/rules` merges a project ruleset over
+the shipped one and `Load` takes the bytes, so the loader call is one argument.
+What that argument would admit is a two-step bypass: write the file with
+`{"id": "…", "enabled": false}`, then read the secret. Neither step is caught.
+`Write` and `Edit` are not in the scanned set, and a `cat > .claude/spill-guard.json`
+heredoc that *is* scanned carries no secret, so a scanner looking for
+credentials passes it either way.
+
+Saying the model can author both hatches is true and settles nothing, because
+the design does not defend against a user who means it. What separates them is
+scope and legibility. The prefix excuses one call and sits in the command the
+human is being asked to approve; a config entry disables a rule for every later
+call in every later session, and the write that made it is one line of
+scrollback. One is a decision somebody takes; the other is a decision somebody
+took once and nobody re-reads.
+
+The three guards that suggest themselves each fail on their own terms:
+
+- **Scan `Write` and `Edit`.** Does not close it. The bypass is the
+  disablement, and the disablement carries no secret to find.
+- **Let a project entry make a rule stricter and never weaker.** Not decidable
+  from the schema, because every field an override can set has a weakening
+  direction — `enabled: false`, a regex that matches nothing, keywords the
+  prefilter will never find in the buffer, a raised entropy floor under the
+  ceiling `compile` already enforces. The one mechanically clean version is *a
+  project entry may add a rule and may not touch a shipped one*, which
+  `apply` is already shaped to express and which removes the reason the file
+  exists: turning a noisy rule off is the precision case the whole ruleset is
+  tuned for.
+- **Require a signature from outside the workspace.** Needs a key, a verifier
+  and somebody to hold both, in a binary whose stated property is an empty
+  supply chain.
+
+So this half stays a decision rather than a loader change, and [Q73](../queue/Q73.md)
+is narrowed to it. The environment prefix had no such question, which is why it
+landed first.
 
 ## Repo layout
 

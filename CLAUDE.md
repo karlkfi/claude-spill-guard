@@ -36,10 +36,13 @@ measured.
 `internal/hook/` now exists and the binary reaches the pipeline through it, so
 `spill-guard hook` scans a payload and blocks. The ruleset it uses is the one
 `rules/embed.go` compiles in, which is how the design settles version skew: a
-binary and a ruleset that cannot be separated cannot disagree, and the project
-ruleset at `.claude/spill-guard.json` is deliberately not read yet — it is a
-file the model can write, which is a question about a bypass rather than a
-loader change.
+binary and a ruleset that cannot be separated cannot disagree. One of the two
+escape hatches the design names is wired — `SPILL_GUARD_OVERRIDE=` on a `Bash`
+command, read from an inline assignment prefix and never from the environment,
+and it downgrades a block to a confirmation rather than to an allow. The
+project ruleset at `.claude/spill-guard.json` is still read by nobody, and Q73
+is narrowed to why: it is a file the model can write, so honouring a
+disablement in it is a question about a bypass rather than a loader change.
 
 A buffer the pipeline declined to read is now a verdict rather than a field
 nobody consumes, and the two reasons do not get the same one: a declared

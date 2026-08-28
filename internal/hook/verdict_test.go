@@ -57,17 +57,21 @@ func TestAReasonCapsTheFindingsItNamesAndStillCountsThemAll(t *testing.T) {
 }
 
 // No reason tells the model how to proceed without a scan. The launcher's two
-// reasons hold the same line, and for the same argument: naming the escape hatch
-// in text the model reads is handing it the bypass.
+// reasons hold the same line, and for the same argument: naming the escape
+// hatch in text the model reads is handing it the bypass. The confirmation is
+// in here too -- it is the one reason that says an override exists, and it
+// still must not spell what to type.
 //
-// The list is hand-kept, so it is one a new verdict helper joins by somebody
+// The list is hand-kept, so a new verdict helper joins it by somebody
 // remembering. It has already been missed once -- unread() was added without
 // it -- and there is no gate that would have said so.
 func TestNoReasonNamesTheOverride(t *testing.T) {
 	reasons := []string{
-		found([]scan.Finding{{RuleID: "some-rule", Path: "f.env"}}),
-		unread([]skipped{{"f.bin", scan.SkippedUTF32}}),
-		failed(errNoEvent),
+		blockedLead + found([]scan.Finding{{RuleID: "some-rule", Path: "f.env"}}),
+		blockedLead + unread([]skipped{{"f.bin", scan.SkippedUTF32}}),
+		blockedLead + failed(errNoEvent),
+		blockedLead + noReasonGiven,
+		confirmLead + found([]scan.Finding{{RuleID: "some-rule", Path: "f.env"}}),
 	}
 	for _, reason := range reasons {
 		if strings.Contains(reason, "SPILL_GUARD_OVERRIDE") {
