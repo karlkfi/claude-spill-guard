@@ -534,11 +534,19 @@ image read is not a convenience cost: a hook that does it gets uninstalled, and
 an uninstalled scanner enforces nothing, which lands on the same side of the
 ledger as failing open.
 
-The residue is stated rather than closed. UTF-16 written with no mark lands in
-the binary skip and is allowed with it, and that is exactly text a secret sits
-in. Blocking the class would not buy that half without taking the whole of it,
-because telling the two apart is the heuristic step 2 chose the NUL check
-instead of. So it stays a decode question rather than a verdict one.
+The residue is stated rather than closed, and it is two populations rather than
+one. UTF-16 written with no mark lands in the binary skip and is allowed with
+it — step 2's own stated gap, where nothing declares anything and separating it
+is the heuristic the NUL check was chosen instead of. The second one *did*
+declare itself: a UTF-16 mark whose decoded sniff window holds a `U+0000` is
+classified as binary deliberately, after the decode, on the rule that a NUL in
+decoded text describes the text rather than the encoding. That population
+satisfies the description of what blocks and is allowed anyway, because step 2
+routes on decoded content where this routes on declaration.
+
+Neither is settled by this verdict, and the second is not a defect in step 2
+read on its own terms. They are two rules meeting, and Q91 carries the
+measurement and what a split would cost.
 
 A reason the hook has not been taught blocks. `internal/scan` can grow one
 without `internal/hook` being told, and of the two directions that mismatch can

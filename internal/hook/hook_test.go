@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/karlkfi/claude-spill-guard/internal/scan"
 )
@@ -468,5 +469,69 @@ func TestASkipReasonThisPackageWasNotTaughtBlocks(t *testing.T) {
 	}
 	if !blocks(scan.SkippedUTF32) {
 		t.Error("SkippedUTF32 does not block")
+	}
+}
+
+// utf16le is a UTF-16LE buffer with its mark, for the pin below. The first
+// character is deliberately not U+0000: FF FE 00 00 is the UTF-32LE mark and
+// takes a different branch, which is a different assertion.
+func utf16le(t *testing.T, s string) []byte {
+	t.Helper()
+	out := []byte{0xFF, 0xFE}
+	for _, u := range utf16.Encode([]rune(s)) {
+		out = append(out, byte(u), byte(u>>8))
+	}
+	return out
+}
+
+// The one population that satisfies blocks()' description of what blocks and is
+// allowed anyway. A UTF-16 mark declares the buffer text; internal/scan decodes
+// it, finds a U+0000 in the sniff window, and returns SkippedBinary, which this
+// package allows. So declaration and decoded content disagree here and the
+// decoded side wins.
+//
+// This pins what the tree does, not what it should do. blocks()' comment now
+// describes this case, and a comment nothing exercises is the next one to go
+// stale -- so if a decode-stage change makes such a buffer block, this test is
+// meant to fail and be rewritten, and Q91 is where that argument lives.
+func TestADeclaredUTF16BufferWithANULIsAllowed(t *testing.T) {
+	read := func(t *testing.T, path string) (int, string, string) {
+		t.Helper()
+		return drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
+			`"tool_input":{"file_path":`+quote(t, path)+`}}`)
+	}
+	dir := t.TempDir()
+	body := "# notes\nAWS_ACCESS_KEY_ID=" + secret + "\n"
+
+	nulled := filepath.Join(dir, "declared.env")
+	if err := os.WriteFile(nulled, utf16le(t, "# notes\n\x00AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := read(t, nulled)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing -- this buffer reaches blocks() as "+
+			"SkippedBinary, which is allowed", stdout)
+	}
+
+	// The control, and it is what stops the assertion above being satisfied by
+	// a buffer with nothing in it to find: the same text without the U+0000 is
+	// decoded, scanned, and blocked on the key.
+	control := filepath.Join(dir, "control.env")
+	if err := os.WriteFile(control, utf16le(t, body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr = read(t, control)
+	if code != 0 {
+		t.Fatalf("control: exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if stdout == "" {
+		t.Fatal("the control was allowed too, so this UTF-16 text carries nothing " +
+			"the ruleset matches and the assertion above asserted nothing")
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+		t.Errorf("the control blocks for some other reason than the key in it: %q", reason)
 	}
 }

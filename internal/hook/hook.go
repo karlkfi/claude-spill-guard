@@ -140,13 +140,23 @@ type skipped struct {
 // was 55% of the benchmark corpus. Denying every image read is not a
 // convenience cost -- a hook that does it gets uninstalled, and an uninstalled
 // scanner enforces nothing at all, which lands on the same side of the ledger as
-// failing open. The class is dominated by buffers that are not text in any
-// encoding, and the one population in it that is -- UTF-16 written with no mark
-// -- cannot be separated out here: telling those apart is exactly the heuristic
-// the NUL check was chosen instead of, so blocking the class would not buy that
-// half without taking the whole of it. It stays the design's stated gap
-// (docs/design/README.md, "Pipeline" step 2), and closing it is a question for
-// the decode stage rather than for this verdict.
+// failing open.
+//
+// The class is not all non-text, and it holds two text populations rather than
+// one. UTF-16 written with no mark is the design's stated gap
+// (docs/design/README.md, "Pipeline" step 2): nothing in such a buffer declares
+// anything, so separating it is the heuristic the NUL check was chosen instead
+// of. The second did declare itself -- a UTF-16 mark whose decoded sniff window
+// holds a U+0000 -- and internal/scan classifies it as binary on purpose, after
+// decoding it, on the rule that a NUL in the decoded text is a statement about
+// the text rather than about the encoding. That is pinned on the trunk by
+// TestBufferSkipsAUTF16BufferThatDecodesToBinary and predates this verdict.
+//
+// So the second population satisfies the description of what blocks and is
+// allowed anyway, because internal/scan routes on decoded content where this
+// routes on declaration, and the two disagree for exactly that case. One Skip
+// constant is standing for two situations, and splitting it is a decode-stage
+// change rather than a verdict one. Q91 carries it, with the measurement.
 //
 // Anything else blocks. A Skip this switch does not know is internal/scan having
 // grown a reason internal/hook was not taught, and allowing it would be the
