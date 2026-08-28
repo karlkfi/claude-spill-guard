@@ -6,27 +6,34 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // trailingPunct is stripped from the end of an `@` token one character at a
 // time, and every prefix left that names an existing path is scanned.
 //
-// The harness trims here too -- `@plain.` and `@x,` both spliced with the
-// punctuation gone -- and this set is wider than the five characters that
-// measurement covers, because the two errors do not cost the same. Trimming
-// less than the harness leaves `@deploy.env]` naming nothing, so the file goes
-// unscanned and is spliced anyway. Trimming more names a path that usually
-// does not exist, and where it does the cost is one extra file read. Only the
-// first is a fail-open. `/` is deliberately not in the set: stripping it would
-// walk up out of the directory the token named.
+// It is the whole ASCII punctuation set bar one, and being generous is the
+// point rather than laziness. The two errors do not cost the same: trimming
+// less than the harness leaves `@deploy.env-` naming nothing, so the file goes
+// unscanned and is spliced anyway, while trimming more names a path that
+// usually does not exist and costs one `os.Stat`. Only the first is a
+// fail-open, and the full token is always tried before any prefix, so nothing
+// that resolves today stops resolving.
 //
-// The markup delimiters are in it for the same reason and were found the same
-// way. A prompt writing a filename inside a code span puts a backtick at both
-// ends, and the leading one already suppresses the splice -- but only the
-// leading one is measured, so a token opened with whitespace and closed with a
-// backtick is a shape nothing here has driven. Stripping it costs a candidate
-// that does not exist.
-const trailingPunct = ".,;:!?)]}>'\"`*_"
+// This was a hand-picked list of five characters and it shipped a majority
+// fail-open. Driven 2026-08-28 against 2.1.238, one prompt naming nine files
+// the harness spliced: `- & = + # \ %` were all trimmed by the harness and
+// none of them was in the set, so eight of the nine went unscanned while a
+// plain `@ok.txt` in the same prompt blocked. The rule is a punctuation set
+// rather than a longest-existing-prefix search -- `@u1.txtZZZ` beside an
+// existing `u1.txt` spliced nothing -- and repeats are trimmed, which is what
+// `@u2.txt%%` settles.
+//
+// `/` is the exclusion, and it is the reason this is not simply
+// `unicode.IsPunct`: stripping a trailing `/` would walk up out of the
+// directory the token named, and `filepath.Join` already cleans it.
+const trailingPunct = "!\"#$%&'()*+,-.:;<=>?@[\\]^_`{|}~"
 
 // errFileUnreadable is every failure to read what a token named, and it names
 // nothing of what it read.
@@ -126,19 +133,47 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 // rather than two.
 //
 // Matching that rule rather than widening it is a decision the measurement
-// earns. The fail-open direction would be a harness looser than this function,
-// and thirty characters of the set that could have shown that came back the
-// other way; a `foo@x.env` this treated as a token would over-block every
-// prompt that mentions an address beside a real filename.
+// earns, and it is about which *characters* are boundaries rather than which
+// are not: a `foo@x.env` this treated as a token would over-block every prompt
+// that mentions an address beside a real filename.
+//
+// # Whitespace is Unicode's, not ASCII's, and that was a fail-open
+//
+// This tested one byte against six ASCII characters, and the harness takes
+// U+00A0 as a boundary: driven 2026-08-28, `@ok.txt<NBSP>@t8.txt` spliced
+// t8.txt, while this function saw one token running from `ok.txt` through
+// `@t8.txt` and resolved neither. An NBSP arrives from any paste out of a
+// browser, a rendered document, or a chat client, so it is ordinary input
+// rather than an adversarial one.
+//
+// `unicode.IsSpace` is a strict superset of the six, so widening cannot lose a
+// boundary this used to honour, and every rune it adds is genuine whitespace
+// -- none of it makes `foo@x.env` a token. Only NBSP is driven; the rest of
+// the set is the same over-approximation trailingPunct makes, in the direction
+// that cannot report a clean result for a file that crossed.
+//
+// Invalid UTF-8 before an `@` decodes to RuneError, which is not a space, so a
+// malformed byte suppresses the token. That is the conservative direction for
+// a boundary check and is not measured either way.
 func atTokens(prompt string) []string {
 	var out []string
 	for i := 0; i < len(prompt); i++ {
-		if prompt[i] != '@' || (i > 0 && !isPromptSpace(prompt[i-1])) {
+		if prompt[i] != '@' {
 			continue
 		}
+		if i > 0 {
+			prev, _ := utf8.DecodeLastRuneInString(prompt[:i])
+			if !unicode.IsSpace(prev) {
+				continue
+			}
+		}
 		j := i + 1
-		for j < len(prompt) && !isPromptSpace(prompt[j]) {
-			j++
+		for j < len(prompt) {
+			r, size := utf8.DecodeRuneInString(prompt[j:])
+			if unicode.IsSpace(r) {
+				break
+			}
+			j += size
 		}
 		if token := prompt[i+1 : j]; token != "" {
 			out = append(out, token)
@@ -146,12 +181,6 @@ func atTokens(prompt string) []string {
 		i = j
 	}
 	return out
-}
-
-// isPromptSpace reports whether b ends a token. A multi-byte rune's bytes are
-// all >= 0x80, so testing one byte cannot split one.
-func isPromptSpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
 }
 
 // candidates is a token and every prefix of it left by stripping trailing

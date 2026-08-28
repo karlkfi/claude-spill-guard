@@ -40,10 +40,11 @@ type oracleCase struct {
 // it would do, and separates a blocked turn from an allowed one perfectly,
 // which is what lets it survive a spot-check -- but it carries skill listings,
 // token reminders, deferred-tool deltas and hook records too, so it answers a
-// different question from whether a file crossed. Over the eighteen transcripts behind
-// this fixture it ranged 5 to 9, and the ten arms that spliced nothing at all
-// still returned 5 or 6 -- so a threshold calibrated on those numbers is
-// wrong on the next run, and this compares identities instead.
+// different question from whether a file crossed. Over the twenty transcripts
+// behind this fixture it ranged 5 to 14, and the ten arms that spliced nothing
+// at all still returned 5 or 6. That range was 5 to 9 until two transcripts
+// were added to this fixture, which is the argument against a threshold made
+// by the fixture itself -- so this compares identities instead.
 func TestThePromptResolverAgreesWithTheHarnessOracle(t *testing.T) {
 	cases := loadOracle(t)
 	root, home := oracleTree(t)
@@ -369,6 +370,15 @@ func oracleTree(t *testing.T) (root, home string) {
 		filepath.Join(home, ".zshrc"):                     "export PATH=$PATH\n",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The trailing-punctuation and NBSP cases name these. u1 and u3 exist and
+	// are meant NOT to be reached -- `@u1.txtZZZ` and `@u3` splice nothing --
+	// so they have to be on disk for those arms to assert anything.
+	for _, name := range []string{"ok.txt", "u1.txt", "u2.txt", "u3.txt",
+		"t1.txt", "t2.txt", "t3.txt", "t4.txt", "t5.txt", "t6.txt", "t7.txt", "t8.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("MARKER_"+name+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

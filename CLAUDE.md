@@ -55,8 +55,10 @@ skips one reports a clean result for a file nothing opened. A command with no
 row contributes no operands, which is the design's stated limitation rather
 than a gap.
 
-The prompt surface is read the same way and by the same shape, with one
-measured hole named below. A prompt
+The prompt surface is read the same way and by the same shape, and what it does
+not cover is named below rather than counted — a count here has already gone
+stale twice in a day, because every drive of a new token shape can add one. A
+prompt
 is scanned as text *and* read as a carrier of `@` file operands, because typing
 `@deploy.env` splices the file into the model's context with no hook of any
 kind running for it — `UserPromptSubmit` is where that crossing is stopped or

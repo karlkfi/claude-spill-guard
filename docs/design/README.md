@@ -285,9 +285,10 @@ every run.
 **Take the census on `attachment.type == "file"`, never on a raw count of
 `"type":"attachment"`.** Skill listings, token reminders, deferred-tool deltas
 and hook records all carry that key, so the raw count is non-zero whether or
-not a file crossed: over the eighteen transcripts the table below is drawn
-from it ranged 5 to 9, and the ten arms where nothing was spliced at all still
-returned 5 or 6. What makes it survive a spot-check is that it is not
+not a file crossed: over the twenty transcripts the table below is drawn from
+it ranged 5 to 14, and the ten arms where nothing was spliced at all still
+returned 5 or 6. It read 5 to 9 until two transcripts were added, which is the
+argument against calibrating on it made by the census itself. What makes it survive a spot-check is that it is not
 uninformative: it goes to 0 on a turn the hook blocked, so a driver who checks
 a deny arm first sees it working and stops filtering. Separating a blocked turn
 from an allowed one is a different question from whether a file crossed, which
@@ -300,7 +301,8 @@ Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
 | `@` at the start of the input, or after a space, tab or newline | Splices |
 | `@` after anything else | Nothing. Thirty characters driven — the ASCII punctuation set and a letter — including a backslash, so an escape is not a case of its own |
 | Inside a fenced code block | Splices. There is no markdown awareness; a token after a backtick is suppressed by the whitespace rule, not by the fence |
-| Token end | The next whitespace. Trailing `.` `,` `;` `:` `)` are trimmed |
+| Token end | The next whitespace — Unicode's, not ASCII's: U+00A0 ends a token |
+| Trailing punctuation | Trimmed, and repeats with it. Driven: `.` `,` `;` `:` `)` `-` `&` `=` `+` `#` `\` `%`. The trim is a punctuation set rather than a longest-existing-prefix search — `@u1.txtZZZ` beside an existing `u1.txt` spliced nothing |
 | `@nosuchfile` | Nothing, so nothing crossed |
 | `@a/dir` | An attachment of type `directory` carrying the entry names one level down, not file content |
 | `@*.txt` | Nothing. Globs are not expanded |
@@ -320,14 +322,25 @@ carry, arriving on a third surface where the argument for the allow — that
 denying every image read gets the hook uninstalled — is weakest, because an
 `@` token is typed deliberately, one file at a time.
 
-Two of those set the resolver's shape where the measurement runs out. The
-leading-boundary rule is matched rather than widened, because thirty
+Two of those set the resolver's shape where the measurement runs out, and they
+go opposite ways.
+
+The **leading-boundary** rule is matched rather than widened, because thirty
 characters of the set that could have shown a looser harness came back the
 other way, and a resolver treating `foo@x.env` as a token would block every
-prompt that writes an address beside a real filename. The trailing trim is
-*wider* than the five characters measured, because the two errors do not cost
-the same: trimming less leaves the file unscanned and spliced anyway, and
-trimming more names a path that does not exist.
+prompt that writes an address beside a real filename.
+
+The **trailing trim** and the **whitespace class** are widened past what is
+driven, and the first version of this resolver did neither. It carried a
+hand-picked list of five trim characters and an ASCII-only space test, and a
+single driven prompt naming nine spliced files put eight of them through
+unscanned while a plain `@ok.txt` in the same prompt blocked. So the trim is
+now the ASCII punctuation set bar `/`, and whitespace is `unicode.IsSpace`.
+Both are strict supersets of what was measured, and the asymmetry is why:
+under-trimming leaves a file unscanned and spliced anyway, while over-trimming
+names a path that does not exist and costs one `os.Stat`. Only one of those is
+a fail-open, and a set assembled by hand from the characters someone happened
+to type is the way the wrong one ships.
 
 ## Pipeline
 

@@ -155,5 +155,34 @@
     "resolver_also_scans": [],
     "harness_also_splices": [],
     "note": "the harness spliced 2,000 of the file's 5,001 lines and the marker on the last line did not cross; the resolver scans the whole file, which is the direction that cannot miss a crossing"
+  },
+  {
+    "name": "trailing-punctuation-the-harness-trims",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @t1.txt- @t2.txt& @t3.txt= @t4.txt+ @t5.txt# @t6.txt/ @t7.txt\\ end",
+    "harness_files": [
+      "ok.txt",
+      "t1.txt",
+      "t2.txt",
+      "t3.txt",
+      "t4.txt",
+      "t5.txt",
+      "t6.txt",
+      "t7.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "every one of these characters is trimmed by the harness and none was in the resolver's first, hand-picked set; eight of the nine went unscanned"
+  },
+  {
+    "name": "non-breaking-space-and-non-punctuation-suffix",
+    "prompt": "Say OK. Do not use any tool. @ok.txt @t8.txt @u1.txtZZZ @u2.txt%% @u3",
+    "harness_files": [
+      "ok.txt",
+      "t8.txt",
+      "u2.txt"
+    ],
+    "resolver_also_scans": [],
+    "harness_also_splices": [],
+    "note": "U+00A0 is a token boundary, and `@u1.txtZZZ` beside an existing u1.txt splices nothing -- so the trim is a punctuation set rather than a longest-existing-prefix search"
   }
 ]
