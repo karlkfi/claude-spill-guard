@@ -248,8 +248,24 @@ disagreement that no longer exists.
 `selftest` asserts the launcher and the binary agree anyway, because there it is
 free and a human is asking the question directly.
 
-## Open
+## Settled
 
-- **Whether `install.sh` should refuse to proceed without `cosign`.** Failing
-  closed is this project's rule everywhere else, and most machines do not have
-  cosign installed.
+- **`install.sh` verifies with whichever verifier is present, and refuses only
+  when neither is.** sha256 against `checksums.txt` always, then the cosign
+  keyless signature where `cosign` is installed, else `gh attestation verify`
+  against the build provenance. The question was framed as fail-closed against
+  reach, and that was the wrong axis: `cosign` is one of two verifiers for the
+  same property, and `gh` is the one a person installing from GitHub is likelier
+  to hold. Both artifacts are already published by the release workflow, so this
+  asks it for nothing new.
+
+  The sha256 is not the fallback it appears to be. A `checksums.txt` fetched
+  from the same place as the archive answers corruption and not substitution, so
+  authenticity needs a verifier and the only live question was which. Refusing
+  when neither is present costs reach almost nothing either: the Homebrew
+  formula and the Scoop manifest pin the sha256 themselves and ask the user for
+  no tool at all.
+
+  Install-time only, and structurally so — the shipped binary cannot reach
+  either verifier, because `scripts/check-supply-chain.py` forbids `os/exec`
+  across the build graph.
