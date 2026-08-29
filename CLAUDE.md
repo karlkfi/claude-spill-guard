@@ -333,9 +333,12 @@ Everything in there traces to `docs/design/`.
 
 ## Open questions
 
-One left, at the end of `distribution.md`: whether `install.sh` should refuse
-to proceed without `cosign`. `docs/design/README.md` has none — what counts as
-human-typed is settled there under
+None left. The last one — whether `install.sh` should refuse without `cosign` —
+is settled under **Settled** at the end of `distribution.md`: verify with
+whichever of `cosign` or `gh` is present, refuse only when neither is. The
+framing was the defect rather than the answer, since `cosign` was never the only
+verifier for what it checks. `docs/design/README.md` has none either — what
+counts as human-typed is settled there under
 [**What gets scanned is the crossing, not the hop**](docs/design/README.md#what-gets-scanned-is-the-crossing-not-the-hop),
 which answers it by dropping authorship for whether a payload field's bytes have
 crossed the filesystem-to-context boundary yet.
