@@ -21,6 +21,12 @@
 // .claude/spill-guard.json is in the design and is not read here: it is a file
 // the model can write, so wiring it up is a question about a bypass rather
 // than a loader change, and it has a row of its own.
+//
+// The design's other escape hatch is wired, in override.go. It is read from
+// command position on a Bash call and nowhere else, and it downgrades a block
+// to a confirmation rather than to an allow -- so the one thing this tool
+// exists to provide, a moment where somebody is told a credential is about to
+// leave the machine, survives the hatch being used.
 package hook
 
 import (
@@ -66,21 +72,65 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 		return refuse(stderr, err)
 	}
 
+	// The scan runs either way. The override decides what a match does, never
+	// whether this package looks -- a hatch that skipped the pipeline would
+	// hand the human a confirmation prompt with nothing in it to confirm, and
+	// what is in it is the whole of what an approval is worth.
+	why, overridden := override(call, event)
+	if overridden && why == "" {
+		return deny(stdout, stderr, event, blockedLead+noReasonGiven)
+	}
+
 	findings, skips, err := scanCall(call, event)
 	if err != nil {
-		return deny(stdout, stderr, event, failed(err))
+		return decide(stdout, stderr, call, event, overridden, failed(err))
 	}
 	// Ahead of the findings, because found() says what the matches in this call
 	// are, and a buffer nothing opened makes that a claim about coverage rather
 	// than a report of one.
+	//
+	// Through decide, not deny: every other block this package writes can be
+	// downgraded to a confirmation, and one that cannot is a class of refusal
+	// with no way past it and nothing saying so. The design asks for it too --
+	// "the reason names a remedy: convert the file, or override".
 	if len(skips) > 0 {
-		return deny(stdout, stderr, event, unread(skips))
+		return decide(stdout, stderr, call, event, overridden, unread(skips))
 	}
 	if len(findings) == 0 {
 		return 0
 	}
-	return deny(stdout, stderr, event, found(findings))
+	return decide(stdout, stderr, call, event, overridden, found(findings))
 }
+
+// decide writes the verdict for a call that cannot simply be allowed: a block,
+// or the confirmation an override downgrades it to.
+//
+// The downgrade runs one way only. Every path that reaches here would have
+// blocked, so the override can turn a block into a prompt and can never turn
+// anything into an allow -- an overridden call that scans clean exits 0 above,
+// as it would have without one.
+func decide(stdout, stderr io.Writer, call payload, event Event, overridden bool, body string) int {
+	if !overridden {
+		return deny(stdout, stderr, event, blockedLead+body)
+	}
+	// A confirmation that reaches nobody is not a confirmation. Blocking here
+	// takes nothing from the user -- an unanswerable ask stops the call too --
+	// and it sends the reason to the model rather than stalling the session.
+	if call.PermissionMode == bypassPermissions {
+		return deny(stdout, stderr, event, blockedLead+unattended+body)
+	}
+	// confirm refuses an event it has no encoding for, so this cannot emit the
+	// shape that is accepted and ignored on UserPromptSubmit. Its error lands
+	// on exit 2, which blocks.
+	if err := confirm(stdout, event, confirmLead+body); err != nil {
+		return refuse(stderr, err)
+	}
+	return 0
+}
+
+// The one permission mode with nobody in it. Named rather than inlined because
+// the set having exactly one member is a measurement, not an oversight.
+const bypassPermissions = "bypassPermissions"
 
 // scanCall runs the pipeline over everything the call would have sent, and
 // reports what it found beside what it declined to read.

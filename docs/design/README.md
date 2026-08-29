@@ -807,8 +807,124 @@ before anything is written.
 a prompt-injection surface, because any content the model reads can contain it —
 including the file being scanned. The escape hatch is `SPILL_GUARD_OVERRIDE=`
 in command position, matching `WORKSPACE_GUARD_OVERRIDE` and
-`PROD_GUARD_OVERRIDE`, plus per-rule disablement in config. Both are places the
-model cannot write to from inside a scanned buffer.
+`PROD_GUARD_OVERRIDE`. `internal/hook/override.go` reads it from an inline
+assignment prefix on a `Bash` command and from nowhere else — not from
+`os.Getenv`, because an exported variable and a `settings.json` `env` block are
+both durable, both silent, and both writable by the model, one of them at
+`.claude/settings.local.json`.
+
+**It downgrades a block to a confirmation, never to an allow.** That is the
+half of "matching those two" that decides what the hatch is worth: both of them
+downgrade to a prompt as well. The argument is this document's own opening —
+what is missing today is any moment where somebody is told a credential is
+about to leave the machine, and an override that allowed silently would delete
+that moment in exactly the calls that have one to lose. So the scan runs on an
+overridden call, and the findings are what the confirmation carries. A call
+that scans clean is silent with a prefix exactly as it is without one — except
+where the prefix carries no reason, which is refused before the scan runs and
+so blocks a call that would otherwise have been allowed. That is deliberate:
+articulating why is the whole of what this hatch controls for, and an empty
+value skips exactly that.
+
+The encoding is `permissionDecision: "ask"`, and it needed measuring for the
+reason the block encodings did — a shape that is accepted and ignored runs the
+call. Measured 2026-08-28 against Claude Code 2.1.238 on darwin/arm64, driving
+a real hook under `-p --output-format stream-json`, with the observable the
+marker a `Bash` call echoes coming back in a `tool_result`:
+
+| Hook stdout | Permission mode | The marker | What the model receives |
+|---|---|---|---|
+| empty — control | default | present | the command's output |
+| a `deny` object — control | default | **absent** | the reason, verbatim |
+| an `ask` object | default | **absent** | the reason, verbatim |
+
+So an ask nobody can answer withholds the result exactly as a deny does. Both
+controls fired, which is what separates that from a probe reporting every arm
+blocked.
+
+**What this table cannot show, and a fourth row that pretended otherwise.** An
+earlier version carried an `ask` arm under `bypassPermissions`, returning the
+same result. It was not evidence: `-p` has no permission UI for the mode to act
+on, so the two arms differ by a flag that does nothing there, and a control
+whose result does not move when you vary its input is a reading about the
+instrument. It is dropped rather than kept with a caveat.
+
+So an ask reaching a person is **undriven here** and rests on prod-guard 2.5.2
+shipping this encoding for its own override downgrade. The arm that matters —
+an interactive session under `bypassPermissions`, where an ask might be
+approved with nobody reading it — cannot be driven from a harness with no human
+in it, and is not driven.
+
+**Which is why the downgrade does not fire in that mode at all.** For a
+fail-closed tool the undriven arm must not be the permissive one, so
+`permission_mode` of `bypassPermissions` keeps the block and says so in the
+reason. That costs the user nothing they had — an ask nobody answers stops the
+call too — and it sends the reason to the model instead of stalling the session
+on an unanswerable prompt. prod-guard takes the same branch at
+`scripts/bash-prod-guard.py:2547`, for both halves of that argument.
+
+The mode is read from the payload, driven 2026-08-28: every PreToolUse payload
+from 2.1.238 carried `permission_mode`, reading `default` and
+`bypassPermissions` to match the flag the session started with.
+
+**That reading is the whole of the evidence that this branch is live rather than
+dead code, and no test can add to it.** A unit test hands the decoder a payload
+carrying the field, so it exercises the branch whether or not Claude Code ever
+sends one — the fixture supplies the value the mechanism depends on. The tests
+below pin what the branch *does*; only the raw payload says it will ever be
+reached. Re-take it by logging a real payload, not by reading the suite.
+
+Only `bypassPermissions` suppresses the downgrade; absent, empty and unknown all
+still downgrade. An allowlist of interactive modes would turn every mode Claude
+Code adds into a hatch that silently stops working, and branch-guard's #33 is
+the measurement against it: an ask in `auto` reaches a prompt somebody answers,
+so treating it as human-free was the defect there.
+
+**The residual, stated rather than implied.** The two choices fail in opposite
+directions and neither is free. A denylist means a future human-free mode under
+a new name still downgrades to an ask nobody reads. An allowlist means every
+interactive mode Claude Code adds is a hatch that stops working until this
+binary is updated, which is #33's failure re-opened. The denylist is what both
+sibling guards chose, and it is the one whose failure needs Claude Code to add a
+*new* unattended mode rather than merely to add a mode.
+
+**Per-rule disablement in `.claude/spill-guard.json` is not wired, and it is
+not the same kind of thing.** `internal/rules` merges a project ruleset over
+the shipped one and `Load` takes the bytes, so the loader call is one argument.
+What that argument would admit is a two-step bypass: write the file with
+`{"id": "…", "enabled": false}`, then read the secret. Neither step is caught.
+`Write` and `Edit` are not in the scanned set, and a `cat > .claude/spill-guard.json`
+heredoc that *is* scanned carries no secret, so a scanner looking for
+credentials passes it either way.
+
+Saying the model can author both hatches is true and settles nothing, because
+the design does not defend against a user who means it. What separates them is
+scope and legibility. The prefix excuses one call and sits in the command the
+human is being asked to approve; a config entry disables a rule for every later
+call in every later session, and the write that made it is one line of
+scrollback. One is a decision somebody takes; the other is a decision somebody
+took once and nobody re-reads.
+
+The three guards that suggest themselves each fail on their own terms:
+
+- **Scan `Write` and `Edit`.** Does not close it. The bypass is the
+  disablement, and the disablement carries no secret to find.
+- **Let a project entry make a rule stricter and never weaker.** Not decidable
+  from the schema, because every field an override can set has a weakening
+  direction — `enabled: false`, a regex that matches nothing, keywords the
+  prefilter will never find in the buffer, a raised entropy floor under the
+  ceiling `compile` already enforces. The one mechanically clean version is *a
+  project entry may add a rule and may not touch a shipped one*, which
+  `apply` is already shaped to express and which removes the reason the file
+  exists: turning a noisy rule off is the precision case the whole ruleset is
+  tuned for.
+- **Require a signature from outside the workspace.** Needs a key, a verifier
+  and somebody to hold both, in a binary whose stated property is an empty
+  supply chain.
+
+So this half stays a decision rather than a loader change, and [Q73](../queue/Q73.md)
+is narrowed to it. The environment prefix had no such question, which is why it
+landed first.
 
 ## Repo layout
 

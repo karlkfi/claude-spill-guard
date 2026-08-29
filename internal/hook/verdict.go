@@ -74,19 +74,104 @@ func block(stdout io.Writer, event Event, reason string) error {
 	return json.NewEncoder(stdout).Encode(verdict)
 }
 
+// confirm writes the PreToolUse ask encoding, which is what the override
+// downgrades a block to. It is stdout and exit 0 for the reason block is.
+//
+// Measured 2026-08-28 against Claude Code 2.1.238 on darwin/arm64, driving a
+// real hook under `-p --output-format stream-json` and reading whether a
+// marker the command echoes comes back in a tool_result:
+//
+//	hook stdout       | permission mode   | the marker | the model receives
+//	empty (control)   | default           | present    | the command's output
+//	a `deny` object   | default           | ABSENT     | the reason, verbatim
+//	an `ask` object   | default           | ABSENT     | the reason, verbatim
+//	an `ask` object   | bypassPermissions | ABSENT     | the reason, verbatim
+//
+// So an ask nobody can answer withholds the result exactly as a deny does,
+// rather than running the call -- which is the direction that had to be ruled
+// out before an escape hatch could be built on it, because the failure would
+// have been an override that silently sent the secret.
+//
+// What that table does not establish is the other half: `-p` has no human in
+// it, so it cannot show an ask reaching one. That rests on prod-guard 2.5.2
+// shipping this encoding as its own override downgrade, and on the 2,457 asks
+// resolved at a 41-second median in the corpus behind the `hook-verdict`
+// skill. An interactive session under bypassPermissions is undriven.
+//
+// There is no ask on UserPromptSubmit, so this refuses that event rather than
+// encoding one, exactly as block refuses an event it has no shape for. The
+// override is read from command position and only PreToolUse has one, so no
+// caller reaches the refusal today -- and the cost of it being a caller's
+// branch instead of this function's is a future caller emitting a PreToolUse
+// object on UserPromptSubmit, which the table above measures as accepted and
+// ignored. The prompt would run with the secret in it and nothing would turn
+// red.
+func confirm(stdout io.Writer, event Event, reason string) error {
+	if event != PreToolUse {
+		return fmt.Errorf("no confirmation encoding for event %q", event)
+	}
+	return json.NewEncoder(stdout).Encode(preToolUseVerdict{preToolUseOutput{
+		HookEventName:            string(PreToolUse),
+		PermissionDecision:       "ask",
+		PermissionDecisionReason: reason,
+	}})
+}
+
 // The most findings a reason names. A file can match a rule hundreds of times
 // and the reason is read by a model, not walked by a tool: past the first few
 // the list stops telling anyone anything and starts being the message.
 const maxListed = 10
 
-// found is what the model is told about a blocked call.
+// The opener on every reason this package writes, one per verdict. The name is
+// at position 0 of both: a hook leaves no other record of having run, and a
+// session with several installed cannot attribute a refusal that does not say
+// which one made it.
+//
+// Neither names SPILL_GUARD_OVERRIDE, matching the launcher's reasons: telling
+// the model how to proceed without a scan is handing it the bypass. The
+// confirmation says an override is in play because one demonstrably is -- the
+// text is unreachable otherwise -- and still does not spell it, because the
+// human being asked can read it in the command in front of them.
+const (
+	blockedLead = "spill-guard: blocked. "
+	confirmLead = "spill-guard: an override on this command turned a block " +
+		"into this confirmation. Nothing has been waved through, and " +
+		"approving sends what is named below. "
+)
+
+// unattended is the body for a hatch armed where no one can answer a
+// confirmation.
+//
+// The downgrade's whole safety property is that somebody is told before the
+// call runs, so it must not fire where the telling cannot happen. Blocking
+// costs the user nothing they had: an ask nobody answers stops the call too,
+// and this way the reason reaches the model instead of the session stalling on
+// an unanswerable prompt. prod-guard 2.5.2 takes the same branch at
+// scripts/bash-prod-guard.py:2547, for both halves of that argument.
+//
+// bypassPermissions and nothing else. The set of human-free modes is exactly
+// that one, which is branch-guard's #33 rather than a reading of the docs:
+// treating `auto` as unattended too was the defect there, because an ask in
+// `auto` reaches a prompt somebody answers.
+const unattended = "an override on this command asked to downgrade this to a " +
+	"confirmation, and this session runs with permission prompts bypassed, so " +
+	"there is nobody to answer one. The block stands. "
+
+// noReasonGiven is the body for an override with nothing after the `=`.
+//
+// Articulating why is the whole of what this hatch controls for: it cannot
+// stop a session that means it, and it can make one that is about to send a
+// key by accident say out loud why it is fine. An empty value skips exactly
+// that, so it is not an override.
+const noReasonGiven = "The override on this command says nothing about why. " +
+	"An override is an audit record before it is a switch, and an empty one " +
+	"is a record nobody can read -- give it a reason and try again."
+
+// found is the body of what the model is told about a call that matched.
 //
 // Rule id, path and byte offset, and nothing else. This text reaches the API,
 // so a redacted eight-character window would be eight characters of the secret
 // delivered to the place this tool exists to keep it away from.
-//
-// It does not name SPILL_GUARD_OVERRIDE, matching the launcher's reasons:
-// telling the model how to proceed without a scan is handing it the bypass.
 func found(findings []scan.Finding) string {
 	listed, extra := findings, 0
 	if len(listed) > maxListed {
@@ -104,14 +189,14 @@ func found(findings []scan.Finding) string {
 	if extra > 0 {
 		items = append(items, fmt.Sprintf("and %d more", extra))
 	}
-	return fmt.Sprintf("spill-guard: blocked. %d rule match(es) in what this call "+
-		"would have sent: %s. Nothing was sent. The values are not repeated here, "+
-		"because this text reaches the API as well. Remove or rotate what the rules "+
-		"name, then try again.", len(findings), strings.Join(items, "; "))
+	return fmt.Sprintf("%d rule match(es) in what this call would have sent: %s. "+
+		"Nothing was sent. The values are not repeated here, because this text "+
+		"reaches the API as well. Remove or rotate what the rules name, then try "+
+		"again.", len(findings), strings.Join(items, "; "))
 }
 
-// unread is what the model is told about a call carrying a buffer the pipeline
-// declined to read.
+// unread is the body for a call carrying a buffer the pipeline declined to
+// read.
 //
 // It is not failed(), which says nothing scanned this call: here the rest of the
 // call was scanned, and a verdict that misreports its own coverage is the shape
@@ -120,8 +205,7 @@ func found(findings []scan.Finding) string {
 // buffer of which was read, which is why hook.go writes this one ahead of it.
 //
 // The label comes out of the call, so %q escapes it; the reason is this
-// package's own fixed text and is not escaped. It does not name
-// SPILL_GUARD_OVERRIDE, for found()'s reason.
+// package's own fixed text and is not escaped.
 func unread(skips []skipped) string {
 	listed, extra := skips, 0
 	if len(listed) > maxListed {
@@ -135,14 +219,14 @@ func unread(skips []skipped) string {
 	if extra > 0 {
 		items = append(items, fmt.Sprintf("and %d more", extra))
 	}
-	return fmt.Sprintf("spill-guard: blocked. %d buffer(s) of what this call would "+
-		"have sent went unread: %s. A buffer nothing opened produces no findings, "+
-		"exactly like one that was read and held none, so this blocks rather than "+
-		"reporting a clean result for content nothing examined.",
+	return fmt.Sprintf("%d buffer(s) of what this call would have sent went "+
+		"unread: %s. A buffer nothing opened produces no findings, exactly like "+
+		"one that was read and held none, so an unread buffer is never reported "+
+		"as a clean one.",
 		len(skips), strings.Join(items, "; "))
 }
 
-// failed is what the model is told when the scan could not be completed.
+// failed is the body for a scan that could not be completed.
 //
 // Every internal error blocks. That is the inversion this project makes
 // against its sibling guards, and it is the whole of what a hook entry is for:
@@ -150,8 +234,8 @@ func unread(skips []skipped) string {
 // through, reports a safety it is not providing and leaves nothing in the
 // transcript to say so.
 func failed(err error) string {
-	return fmt.Sprintf("spill-guard: blocked. Nothing scanned this call for secrets, "+
-		"because the scan could not be completed: %q. A scanner that cannot run blocks "+
-		"rather than passing quietly -- silence from this hook is supposed to mean "+
-		"checked.", err.Error())
+	return fmt.Sprintf("Nothing scanned this call for secrets, because the scan "+
+		"could not be completed: %q. A scanner that cannot run blocks rather than "+
+		"passing quietly -- silence from this hook is supposed to mean checked.",
+		err.Error())
 }
