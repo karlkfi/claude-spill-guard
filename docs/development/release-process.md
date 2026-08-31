@@ -8,7 +8,7 @@ Nothing reaches a user until a person publishes that draft.
 
 Everything below is the part a person does.
 
-## No file carries the version
+## The tag carries the version, except in the plugin manifests
 
 The binary reports whatever the tag said, with the leading `v` stripped.
 `cmd/spill-guard/main.go` carries `dev` as the default and `-ldflags -X
@@ -16,32 +16,47 @@ main.version={{ .Version }}` overrides it at build time, so a working tree says
 `dev` and the tag `v1.2.3` produces a binary reporting `1.2.3`. GoReleaser's
 `.Version` is the tag without the `v`; `.Tag` is the raw tag. The archive name
 carries the same stripped form, so the binary and the file it ships in agree —
-measured on a real annotated tag, not read off the template docs. There is no
-version to bump in a manifest and no bump commit, which is why this document
-does not describe a direct-to-`main` exception for one — sibling repos need it
-and this one has nothing for it to apply to.
+measured on a real annotated tag, not read off the template docs.
 
-That changes when the plugin manifests land (`Q10`): `plugin.json` carries its
-own version, a marketplace entry compares that string and nothing else, and a
-release whose manifest still says the old number cannot be delivered by `claude
-plugin update` at all. Add the bump step here in the same PR that adds the
-manifest.
+**The plugin manifests are the exception, and they are the whole of it.**
+`.claude-plugin/plugin.json` carries its own `version`, and
+`.claude-plugin/marketplace.json` repeats it in the entry that points at this
+repo. A marketplace entry compares that string and nothing else, so a release
+whose manifest still says the old number cannot be delivered by `claude plugin
+update` at all — the tag would publish archives nobody's plugin install ever
+reaches.
+
+So the bump is a step a person takes, in the pull request that precedes the
+tag. Edit both files to the tag without its `v`, then read them back rather
+than trusting the edit:
+
+```bash
+python3 -c 'import json;print("plugin.json     ", json.load(open(".claude-plugin/plugin.json"))["version"]);print("marketplace.json", [p["version"] for p in json.load(open(".claude-plugin/marketplace.json"))["plugins"]])'
+```
+
+Both lines must read the tag you are about to push. This is a commit on a
+branch and a pull request like any other — nothing about a two-line version
+bump needs a direct-to-`main` exception, which is why this document still
+describes none.
 
 ## Before the tag
 
-1. **`main` is green on the exact commit you are about to tag.** Not green this
+1. **The plugin manifests say the version you are about to tag**, merged. The
+   section above has the read-back. Nothing checks this at tag time, and a
+   stale number costs the whole plugin channel rather than one asset.
+2. **`main` is green on the exact commit you are about to tag.** Not green this
    morning. Run `make check` over the same tree as well — every gate runs even
    when an earlier one fails, so one pass reports the whole thing.
-2. **Read the public surface this tag publishes for the first time.** A
+3. **Read the public surface this tag publishes for the first time.** A
    subcommand name, a flag, a rule ID, an exit code, a finding's JSON shape:
    each costs a rename now and a compatibility shim afterwards. Nothing lints
    this. Deciding to ship a name as it stands is a fine answer; freezing one by
    not looking is not.
-3. **Write the notes.** `docs/releases/vX.Y.Z.md`, holding the release body
+4. **Write the notes.** `docs/releases/vX.Y.Z.md`, holding the release body
    verbatim. [`docs/releases/README.md`](../releases/README.md) has the format
    and where the contents come from. The workflow refuses to run without this
    file, so it has to be merged before the tag is pushed.
-4. **Sign off on the worktree itself.** `git status` clean, `git log` reading
+5. **Sign off on the worktree itself.** `git status` clean, `git log` reading
    the way you want it read, and the diff since the previous tag one you have
    actually looked at. The tag is a permanent version number: a release
    published in error is superseded by a higher patch, never retagged.

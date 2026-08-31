@@ -1,0 +1,17 @@
+{
+  "name": "spill-guard",
+  "owner": { "name": "karlkfi", "url": "https://github.com/karlkfi" },
+  "description": "Keeps secrets and PII from reaching the API through a Claude Code session.",
+  "plugins": [
+    {
+      "name": "spill-guard",
+      "version": "0.1.0",
+      "description": "Blocks secrets and PII before they reach the API: scans the prompt, a Read path, a Bash command, and the files each one would open, then denies the call rather than letting it cross.",
+      "author": { "name": "Karl Isenberg" },
+      "source": {
+        "source": "github",
+        "repo": "karlkfi/claude-spill-guard"
+      }
+    }
+  ]
+}

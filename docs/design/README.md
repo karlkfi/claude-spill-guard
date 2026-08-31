@@ -13,16 +13,19 @@ This directory holds the design and the reasoning behind it:
 | [`language-choice.md`](language-choice.md) | Why Go, with the measurements. Verbatim from the analysis that started the project. |
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
-**Status: it scans, and nothing invokes it yet.** `spill-guard hook` reads a
-payload, scans what the call would have sent, and blocks — driven end to end
-against a live Claude Code on 2026-08-27, where a `Read` of a file carrying a
-Slack webhook came back denied with the rule, the path and the byte offset and
-no fragment of the value. What is missing is the wiring: `hooks.json` and the
-plugin manifests are deliberately absent until there is a hook that fires, and
-now there is one. `Bash` is scanned as a command string only; its file operands
-need a per-command table of which argument is a path, and that is its own item.
-Nothing under [open questions](#open-questions) blocks that any more; the last
-of them is settled under
+**Status: it scans, and it is wired.** `spill-guard hook` reads a payload,
+scans what the call would have sent, and blocks — driven end to end against a
+live Claude Code on 2026-08-27, where a `Read` of a file carrying a Slack
+webhook came back denied with the rule, the path and the byte offset and no
+fragment of the value. `hooks/hooks.json` and the plugin manifests now point
+Claude Code at that binary, at `PreToolUse` on `Read` and `Bash` and at
+`UserPromptSubmit`; they were held back until there was a hook to fire, because
+a repo installable as a security tool scanning nothing is the failure this
+document indicts the predecessor for. `Bash` is scanned as a command string
+**and** as the files its readers are pointed at, `internal/readers` being the
+per-command table of which argument is a path. Nothing under
+[open questions](#open-questions) blocks that any more; the last of them is
+settled under
 [what gets scanned](#what-gets-scanned-is-the-crossing-not-the-hop).
 
 ## The problem
@@ -1057,8 +1060,9 @@ internal/validate/        Luhn, card placeholders, mod-11, entropy, reserved ran
 internal/bash/            Segment parsing, ported from workspace-guard.
 rules/spill-guard.json    The shipped ruleset. Authored and reviewed as JSON.
 rules/embed.go            The go:embed that compiles it in. Reaches only its own directory.
-hooks/hooks.json          Hook wiring.
+hooks/hooks.json          Hook wiring. The events and the matcher.
 hooks/run-spill-guard.cmd Launcher. Resolves the binary, denies when it cannot.
+.claude-plugin/           plugin.json and marketplace.json. The only version.
 scripts/install.sh        Install script, POSIX.
 scripts/install.ps1       Install script, Windows.
 testdata/corpus/          Precision fixtures — clean files that must not flag.
