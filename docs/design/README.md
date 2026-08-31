@@ -676,8 +676,12 @@ pipeline would:
 | Surface | Buffers reaching the pipeline | Skipped binary | Rate |
 |---|---|---|---|
 | `Bash` operands | 40,416 | 21 | 0.052% |
-| prompt `@` targets | 130 | 4 | 3.1% |
+| prompt `@` targets | 130 | 4 — *all of them fixtures this repo wrote* | 3.1%, and none of it organic |
 | `Read` `file_path` | 3,026 | 96 | 3.2% |
+
+Read the prompt row with its caveat attached. At 3.1% beside `Read`'s 3.2% it
+invites the reading that the two surfaces behave alike, and they are as unlike
+as the corpus can make them: strike the fixtures and the row is 0 of 126.
 
 The rates are not what settles it. What those 21 and 4 buffers *are*, is:
 
@@ -686,7 +690,28 @@ The rates are not what settles it. What those 21 and 4 buffers *are*, is:
   favicons, and one `.dylib` a sibling repository built for a trace probe.
 - All 4 prompt buffers are this repository's own fixtures — two `logo.png` and
   two `heap.dump`, written into worktree scratchpads by the sessions that drove
-  the `@` measurement above. Organic rate on that surface: 0 in 881 `@` tokens.
+  the `@` measurement above. Nothing organic was observed in 881 `@` tokens.
+
+  That denominator needs the same name sweep the `Bash` bullet below describes,
+  and for a sharper reason. `promptTargets` skips a token whose file is gone, so
+  the content sweep classified 130 buffers out of 881 tokens and was blind to
+  the rest — worse attrition than the `Bash` arm's. Sweeping all 881 by name
+  instead, deleted targets included, returns four binary-shaped names and they
+  are the same four fixtures: `heap.dump` twice and `logo.png` twice. The other
+  877 are `.txt`, `.head`, `.md`, `.zshrc` and extensionless paths.
+
+  **None observed is not a rate of zero.** Nought events in 881 puts the 95%
+  upper bound near 0.34%, so what the corpus supports is that nothing organic
+  turned up, not that nothing organic exists. It changes no decision here — the
+  residue routes to Q84 regardless of surface — and it is the sentence most
+  likely to be quoted later as though it were a measured rate.
+
+  The self-reference cuts three ways and the third is the one worth writing
+  down. It does not make the defect unreal: the crossing happens and step 2
+  still skips those bytes. It does make frequency the wrong axis, which is what
+  the row said. And it leaves the prompt arm with no organic data in *either*
+  direction — an absence of events rather than a low rate, which is normally a
+  weak thing to decide on. Here it is the criterion the row itself set.
 - The population the split exists to catch is absent. The table classifies
   files as they stand today, and 37,710 of the 83,141 resolvable operands point
   at something since deleted — which is exactly what a heap dump does, so the
@@ -700,6 +725,16 @@ So a surface split would fire 25 times in that corpus, block the wrong thing 23
 of them, and catch two files this project wrote to demonstrate the defect. That
 is not a second policy this repository can keep true. The verdict stays keyed on
 the reason alone.
+
+**Read the whole of it as a dated reading rather than a property of the tree.**
+It is one maintainer's agent sessions on one machine, no gate re-runs it, and
+nothing in CI can: the transcripts are not in the repository. "The population is
+absent" means absent from this corpus, whose composition shows what it is — the
+commonest `Bash` operand extensions are `.log`, `.md`, `.go`, `.sh` and `.py`.
+A forensics or data-science user reads differently and this cannot speak for
+them. That bounds the claim rather than undermining it, because the tool is a
+net for the accident rather than a wall against intent, and accidental frequency
+is what an ordinary-session corpus measures well.
 
 What the measurement does not retire is the crossing. A binary buffer carrying
 a credential is still allowed in silence on every surface, and the remedy the
