@@ -79,6 +79,23 @@ jobs:
       - name: One archive per shipped target, named as the channels expect
         run: python3 scripts/check-release-artifacts.py
 
+      # The install jobs install these exact bytes rather than each building
+      # their own, so all three operating systems install one set of archives
+      # against the one checksums.txt the step above just read. `error` on no
+      # files found, because an empty upload would reach those jobs as a dist
+      # directory with nothing in it -- which reads like a build that produced
+      # nothing rather than an upload that matched nothing.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+            dist/metadata.json
+          if-no-files-found: error
+          retention-days: 1
+
   # Two mutations, for the two halves of the check that fail in opposite
   # directions. Both assert the mutation landed before asking for red: a break
   # that silently did not happen leaves the checker reading clean input, and a
@@ -162,6 +179,169 @@ jobs:
           fi
           if ! grep -q 'Signing that file signs a wrong answer' mutant.log; then
             echo "::error::the check failed, but not on the digest mismatch" >&2
+            exit 1
+          fi
+
+  # The install scripts, driven on the three operating systems they are aimed
+  # at. Nothing else in this repository runs them, and both reasons are
+  # structural. `make check` cannot: they install out of a dist directory only
+  # GoReleaser produces, and scripts/check-tools.sh puts goreleaser in the tier
+  # a contributor fixing a bug has no reason to install -- which is the same
+  # reason this whole file is not in GATES. And the release job would first
+  # execute them on a permanent version number.
+  #
+  # An install script that broke is indistinguishable from a tool nobody
+  # installed: the people who would report it are the people who could not
+  # install it.
+  #
+  # macOS and Linux take install.sh, Windows takes install.ps1, and
+  # check-install-scripts.py decides which rather than the matrix. The pair
+  # covers three operating systems and neither script covers all three --
+  # install.ps1 on Linux would be building %LOCALAPPDATA% paths that do not
+  # exist there.
+  #
+  # fail-fast is off. Three platforms is the whole point, and a first failure
+  # that cancels the other two turns a three-platform report into a
+  # one-platform one on exactly the runs where the report matters.
+  install-dry-run:
+    if: github.event_name == 'pull_request'
+    needs: dry-run
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+
+      # bash on Windows too, so one command covers the matrix. Which name
+      # setup-python leaves on PATH is asked rather than assumed: `python3` is
+      # what the rest of this repository invokes and `python` is what a Windows
+      # image is likelier to carry, and a wrong guess here is a `command not
+      # found` on one leg of a three-platform report.
+      - name: The install script installs, runs, and refuses
+        shell: bash
+        run: |
+          py=python3
+          if ! command -v "$py" > /dev/null 2>&1; then
+            py=python
+          fi
+          if ! command -v "$py" > /dev/null 2>&1; then
+            echo "::error::setup-python left neither python3 nor python on PATH, so nothing below ran" >&2
+            exit 1
+          fi
+          "$py" scripts/check-install-scripts.py
+
+  # The row's own words: break the checksum comparison and require the job to
+  # go red. The mutation is on the install script rather than on an archive --
+  # check-install-scripts.py already corrupts an archive as one of its arms, so
+  # corrupting one here would exercise that arm instead of controlling it.
+  #
+  # Two legs, one per script: the comparison is written twice in two languages,
+  # and a control over one says nothing about the other. macOS is not here
+  # because it runs the same install.sh Linux does, and the happy path above is
+  # where its leg earns its keep.
+  install-dry-run-mutation-control:
+    if: github.event_name == 'pull_request'
+    needs: dry-run
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            script: install/install.sh
+          - os: windows-latest
+            script: install/install.ps1
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+
+      - name: An install script that stopped comparing the digest must fail the check
+        shell: bash
+        env:
+          MUTANT_SCRIPT: ${{ matrix.script }}
+        run: |
+          py=python3
+          if ! command -v "$py" > /dev/null 2>&1; then
+            py=python
+          fi
+          if ! command -v "$py" > /dev/null 2>&1; then
+            echo "::error::setup-python left neither python3 nor python on PATH, so nothing below ran" >&2
+            exit 1
+          fi
+          "$py" - <<'MUTANT'
+          import os
+          import pathlib
+          import sys
+
+          # Each spelling compares the digest to itself, so the comparison is
+          # always true and the refusal under it never runs. One token each:
+          # a mutation that broke the syntax would fail the check for a reason
+          # that says nothing about the digest, and the grep at the end is what
+          # separates those two outcomes.
+          MUTATIONS = {
+              "install/install.sh": ('[ "$actual" = "$expected" ] ||',
+                                     '[ "$actual" = "$actual" ] ||'),
+              "install/install.ps1": ("if ($actual -ne $expected) {",
+                                      "if ($actual -ne $actual) {"),
+          }
+          name = os.environ["MUTANT_SCRIPT"]
+          old, new = MUTATIONS[name]
+          path = pathlib.Path(name)
+          # newline="" both ways: a text write on Windows would translate every
+          # line ending in the file, which is a second mutation nobody asked
+          # for and one .gitattributes pins LF against.
+          with open(path, "r", encoding="utf-8", newline="") as fh:
+              text = fh.read()
+          if old not in text:
+              sys.exit(f"{name} no longer carries {old!r}, so this control has "
+                       f"nothing to break and the assertion below would be "
+                       f"about an unmutated script")
+          with open(path, "w", encoding="utf-8", newline="") as fh:
+              fh.write(text.replace(old, new))
+          MUTANT
+          if git diff --quiet "$MUTANT_SCRIPT"; then
+            echo "::error::the mutation left $MUTANT_SCRIPT byte-identical, so the check below read the real script" >&2
+            exit 1
+          fi
+          "$py" scripts/check-install-scripts.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- "$MUTANT_SCRIPT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the check passed against an install script that no longer compares the archive against checksums.txt" >&2
+            exit 1
+          fi
+          # The check's own corrupted-archive arm asserts that appending a
+          # byte moved the digest, and reports `changed nothing` when it did
+          # not. That report also names a corrupted archive, so it would
+          # satisfy the grep below while proving nothing -- read it first.
+          if grep -q 'changed nothing' mutant.log; then
+            echo "::error::the check could not corrupt an archive, so it never reached the comparison this control removed" >&2
+            exit 1
+          fi
+          # Measured on darwin/arm64 2026-08-31 against this exact mutation:
+          # gzip ignores the appended byte, so tar extracts and the finding is
+          # `accepted a corrupted archive`. The looser phrase also covers the
+          # other arm the mutation can land on -- a refusal that happened for
+          # some reason other than the digest -- and both are the comparison
+          # being gone. Nothing else this check reports names one.
+          if ! grep -q 'a corrupted archive' mutant.log; then
+            echo "::error::the check failed, and not on the corrupted archive" >&2
             exit 1
           fi
 

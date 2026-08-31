@@ -77,9 +77,23 @@ to `.github/workflows/release.yml@refs/tags/<tag>`, so a signature minted from a
 branch, from another workflow, or from a fork is a valid Sigstore signature that
 this check rejects.
 
-**Nothing here checks that the binaries work.** They are cross-compiled and not
-run; `make check` covers the tests, and the install scripts (`Q12`) are what
-will exercise an installed artifact on all three operating systems.
+**The tag does not check that the binaries work, and a pull request does.** The
+`release` job cross-compiles and never runs what it built. `install-dry-run`
+does: on every pull request it installs the snapshot archive on Linux, macOS
+and Windows through [`install/install.sh`](../../install/install.sh) and
+[`install/install.ps1`](../../install/install.ps1), runs `spill-guard version`
+from where it landed, and asserts that the version the binary reports is the
+one its archive name carries — two values set by different mechanisms,
+`-ldflags -X` and `name_template`.
+
+One step of that install is covered nowhere yet, and deliberately rather than
+by oversight. `install-dry-run` fetches from a loopback server through
+`--rehearse`, which skips signature verification: artifacts served from a
+loopback port carry no release provenance to check. `cosign verify-blob` and
+`gh attestation verify` need a signed release, and the first one is a permanent
+version number. What CI does drive is the step before them — which verifier the
+script picks, and that it refuses when there is none. The manual step under
+**Publishing the draft** is what closes the rest.
 
 ## Publishing the draft
 
@@ -94,6 +108,23 @@ The Releases page does the same thing; `gh` is a convenience here and not a
 tool the release needs. Either way, read the rendered body before publishing. The notes file targets GitHub's
 comment-flavour renderer, where a single newline becomes a `<br>` — a hard-wrapped
 paragraph looks fine in the diff and wrong on the page.
+
+**Then install from the published release, once, on one machine.** This is the
+only occasion on which the signature verification inside the install scripts
+runs at all, for the reason above, so a release nobody installs from ships that
+step untested:
+
+```bash
+curl -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/download/install.sh
+sh install.sh
+```
+
+It has to name a verifier and say which — `cosign verified checksums.txt
+against karlkfi/claude-spill-guard at vX.Y.Z`, or `gh verified the build
+provenance of ...`. A run that installed and said neither took a path nobody
+intended, and the sha256 line above it is not a substitute: `checksums.txt`
+comes from the same place the archive did. `sh install.sh --verifier` answers
+which tool the machine has without downloading anything.
 
 ## Rehearsing without spending a version number
 
@@ -126,3 +157,15 @@ validating the config against a schema that is not the one a release will read.
 
 The same two commands run on every pull request, so a config that stopped
 producing five archives is caught there rather than on a tag.
+
+To drive the install scripts against what that produced:
+
+```bash
+python3 scripts/check-install-scripts.py
+```
+
+It serves `dist/` on a loopback port, installs from it, runs the binary it
+installed, and requires a refusal for a corrupted archive, a `checksums.txt`
+that does not list the archive, a machine with neither verifier, and a
+`--rehearse` aimed at github.com. It is not a gate for the same reason nothing
+else on this page is: it needs the `dist/` only GoReleaser produces.

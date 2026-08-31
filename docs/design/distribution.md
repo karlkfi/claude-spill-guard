@@ -132,9 +132,10 @@ later without changing anything above.
 
 `install.sh` and `install.ps1`, both living in this repo so they are reviewable
 at a versioned URL. Each detects OS and architecture, downloads the matching
-archive, **verifies the sha256 against `checksums.txt`**, verifies the Sigstore
-signature when `cosign` is present, and installs to `~/.local/bin` or
-`%LOCALAPPDATA%`.
+archive, **verifies the sha256 against `checksums.txt`**, verifies the
+signature with whichever of `cosign` and `gh` is installed, refuses when
+neither is, and installs to `~/.local/bin` or `%LOCALAPPDATA%`. **Settled**
+below has the argument for that last part.
 
 The documented form is two steps:
 
@@ -148,8 +149,29 @@ leads with. For a tool whose entire pitch is that nothing leaves your machine,
 opening with "pipe this remote script into your shell" undercuts the claim
 before a reader gets to the second paragraph. Download, read, run.
 
-CI runs both scripts on all three operating systems every release. An install
-script that broke is indistinguishable from a tool nobody installed.
+**This is built.** [`install/`](../../install/) holds both scripts and
+[`.goreleaser.yaml`](../../.goreleaser.yaml) uploads them as release assets, so
+the two-step form above has something to fetch — and the launcher's own deny
+message, which tells a user with no binary to download `install.sh` from the
+latest release, is true rather than aspirational.
+
+CI drives both on all three operating systems on every pull request rather than
+every release, which is stronger than this design asked for and was free once
+the artifacts existed: `install-dry-run` in
+[`release.yml`](../../.github/workflows/release.yml) installs out of the same
+snapshot `dry-run` already builds. An install script that broke is
+indistinguishable from a tool nobody installed, because the people who would
+report it are the people who could not install it.
+
+Two things the implementation had to settle. The scripts fetch from a loopback
+HTTP server in CI, through a `--rehearse URL` flag that refuses a github.com
+URL — it skips signature verification, so it must not be aimable at the one
+place a signature exists. And that skip is the limit of what a pull request
+reaches: `cosign verify-blob` and `gh attestation verify` need a signed
+release, so what CI drives is which verifier the script picks and that it
+refuses when there is none. The rest is a manual step in
+[`release-process.md`](../development/release-process.md), taken once a draft
+is published.
 
 ### For anyone with a Go toolchain
 
