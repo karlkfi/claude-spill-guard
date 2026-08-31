@@ -105,9 +105,17 @@ The `Bash` surface is now whole: the command string is scanned and so are the
 files its readers are pointed at, `internal/readers` being what decides which
 token is a path. An operand of a known reader that cannot be resolved — a
 `$VAR`, a glob, a relative path after a `cd` — blocks, because a scanner that
-skips one reports a clean result for a file nothing opened. A command with no
-row contributes no operands, which is the design's stated limitation rather
-than a gap.
+skips one reports a clean result for a file nothing opened. An operand that
+resolves to something other than a regular file blocks as well, and so does a
+`Read` call's `file_path`: opening a fifo waits for a writer that never comes,
+which hangs the call instead of deciding it, and neither answer this project
+chooses between is reached. A device is refused with it rather than skipped,
+because the class is not safe — `/dev/zero` returns bytes for as long as
+anything reads them — and because the traffic it costs was measured at 12 of
+129,000 `Bash` calls. The reading is `os.Stat`, which follows a symlink the way
+the tools do; `os.Lstat` cannot tell a link to a fifo from a link to a file. A
+command with no row contributes no operands, which is the design's stated
+limitation rather than a gap.
 
 The prompt surface is read the same way and by the same shape, and what it does
 not cover is named below rather than counted — a count here has already gone

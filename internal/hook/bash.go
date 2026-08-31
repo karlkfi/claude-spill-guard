@@ -128,7 +128,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 					continue
 				}
 				seen[path] = true
-				buf, err := os.ReadFile(path)
+				info, err := os.Stat(path)
 				if err != nil {
 					if errors.Is(err, fs.ErrNotExist) {
 						// Nothing there sends nothing, and the command will
@@ -136,6 +136,34 @@ func bashTargets(command, cwd string) ([]target, error) {
 						// absent file.
 						continue
 					}
+					return nil, fmt.Errorf("reading a file this command would "+
+						"send: %w", err)
+				}
+				// Only a regular file. os.ReadFile on a fifo blocks until
+				// something writes, which hangs the call rather than deciding it --
+				// neither answer this project chooses between, and nothing in the
+				// transcript to say which was reached.
+				//
+				// A device is refused with it rather than skipped, against the way
+				// the row leaned, so the traffic was measured instead of guessed.
+				// Over 129,000 Bash calls in this machine's transcripts `/dev/*`
+				// reaches a reader's operand list 12 times, every one `/dev/null`
+				// in the `grep -l . /dev/null` idiom -- the 18,509 ordinary ones
+				// are redirect targets, which Segments keeps in Redirects and this
+				// loop never reads. Skipping instead would claim nothing crossed,
+				// and /dev/zero and /dev/random return bytes for as long as
+				// anything reads, with no bound on os.ReadFile.
+				//
+				// os.Stat, not os.Lstat: it is the reading `cat` takes, and Lstat
+				// reports a symlink to a fifo and one to a regular file
+				// identically -- driven, both Lrwxr-xr-x where Stat separates them.
+				if !info.Mode().IsRegular() {
+					return nil, fmt.Errorf("in the %q here, a file operand names "+
+						"something that is not a regular file, so what this "+
+						"command would send cannot be read here", command)
+				}
+				buf, err := os.ReadFile(path)
+				if err != nil {
 					return nil, fmt.Errorf("reading a file this command would "+
 						"send: %w", err)
 				}
