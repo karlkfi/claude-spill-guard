@@ -658,6 +658,54 @@ Neither is settled by this verdict, and the second is not a defect in step 2
 read on its own terms. They are two rules meeting, and Q91 carries the
 measurement and what a split would cost.
 
+#### The verdict is per reason and not per surface, measured
+
+The binary allow is argued from `Read`, where an image is opened on purpose.
+The reason is what the hook is handed; the surface is not, so the allow reaches
+`Bash` operands and prompt `@` targets on an argument that was never about
+them. The case for a second axis is that those populations look different —
+nobody `cat`s a PNG by accident, and what a reader is pointed at when the
+operand *is* binary might be a heap dump with a token in it.
+
+Measured 2026-08-31 over the 1,580 session transcripts under
+`~/.claude/projects/` (898,099 records, 128,963 `Bash` calls, 12,271 typed
+prompts) by running this repository's own `bashTargets`, `promptTargets` and
+`scan.Buffer` over every call in them and classifying each buffer the way the
+pipeline would:
+
+| Surface | Buffers reaching the pipeline | Skipped binary | Rate |
+|---|---|---|---|
+| `Bash` operands | 40,416 | 21 | 0.052% |
+| prompt `@` targets | 130 | 4 | 3.1% |
+| `Read` `file_path` | 3,026 | 96 | 3.2% |
+
+The rates are not what settles it. What those 21 and 4 buffers *are*, is:
+
+- All 21 `Bash` buffers are an executable or an image somebody opened on
+  purpose: the Claude Code binary itself 13 times, `powermetrics` 4, two
+  favicons, and one `.dylib` a sibling repository built for a trace probe.
+- All 4 prompt buffers are this repository's own fixtures — two `logo.png` and
+  two `heap.dump`, written into worktree scratchpads by the sessions that drove
+  the `@` measurement above. Organic rate on that surface: 0 in 881 `@` tokens.
+- The population the split exists to catch is absent. The table classifies
+  files as they stand today, and 37,710 of the 83,141 resolvable operands point
+  at something since deleted — which is exactly what a heap dump does, so the
+  content sweep alone would not settle this. A second sweep over the operand
+  *names* covers the deleted ones, because a name survives its file: of 103,330
+  file operands named across those `Bash` calls, resolvable or not and present
+  or not, **none** is a `.dump`, a `.pack`, an SQLite file or a core file.
+  Fourteen carry a binary-shaped name at all, and eight of those are images.
+
+So a surface split would fire 25 times in that corpus, block the wrong thing 23
+of them, and catch two files this project wrote to demonstrate the defect. That
+is not a second policy this repository can keep true. The verdict stays keyed on
+the reason alone.
+
+What the measurement does not retire is the crossing. A binary buffer carrying
+a credential is still allowed in silence on every surface, and the remedy the
+corpus supports is telling the user the buffer went unread — which needs no
+ruling on which surface it happened on, and is Q84 rather than this.
+
 A reason the hook has not been taught blocks. `internal/scan` can grow one
 without `internal/hook` being told, and of the two directions that mismatch can
 fail in, only one of them ships a scanner that waves a buffer through.
