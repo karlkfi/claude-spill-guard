@@ -24,3 +24,8 @@ hooks/run-spill-guard.cmd -text
 # re-encode it. `text=auto` above already leaves a NUL-bearing file alone, and
 # that is a detection rather than a rule -- this is the rule.
 *-utf16le.* -text
+
+# The failing-launcher fixture is a byte-exact artifact from a measurement on a
+# Windows runner, and uniform LF is the property under test, so nothing may
+# normalise it. Its sha256 is asserted by the control that drives it.
+testdata/launcher/*.cmd -text

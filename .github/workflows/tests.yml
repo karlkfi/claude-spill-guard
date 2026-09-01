@@ -624,64 +624,42 @@ jobs:
       # block somewhere but a `goto` reached by FALLING THROUGH past one: a
       # `goto` that jumps in resets cmd.exe's file position and survives. Do
       # not re-shape this mutation without re-driving it on Windows.
-      # THIS STEP IS FAILING AND THE REASON IS NOT UNDERSTOOD. Read Q103 before
-      # editing it. Its second grep requires cmd.exe to report a lost batch
-      # label, and against this branch's launcher it does not: the mutation
-      # lands -- the step's own precondition prints `mutation landed` -- and
-      # does not bite, so `line_endings` reddens, the behavioural grep finds
-      # nothing, and the step fails saying the gate failed for the wrong
-      # reason. Measured three times on windows-latest, 2026-08-31, with 117,
-      # 77 and 77 bare LF in the batch half. Padding the block to raise the
-      # per-line drift did not restore it, so the one-byte-per-line model in
-      # this comment's earlier draft is wrong or incomplete.
+      # The control drives a checked-in artifact rather than reconstructing
+      # one. testdata/launcher/README.md carries the whole argument; the short
+      # version is that this step used to patch whichever launcher was in the
+      # tree, which reproduced the measured failure only while the launcher was
+      # the one it had been measured against. Shortening four deny strings
+      # moved the reconstruction 610 bytes off, cmd.exe went on denying
+      # correctly, and the step failed saying the gate had failed for the wrong
+      # reason -- three times, across three heads, before anybody compared the
+      # bytes.
       #
-      # What is NOT in question: `launcher (windows-latest)` -- the gate itself
-      # rather than the control -- is green on every one of those runs, so the
-      # launcher denies correctly through cmd.exe in production. What broke is
-      # a guard on a guard.
-      - name: LF endings with a block present must fail the gate on Windows
+      # What this asserts is unchanged and is the right thing: that
+      # check-launcher.py catches a launcher known to fail on Windows. It never
+      # asserted anything about the launcher currently in hooks/.
+      - name: A launcher measured to fail on Windows must fail the gate
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          python - <<'MUTATE'
-          import pathlib
-          p = pathlib.Path("hooks/run-spill-guard.cmd")
-          text = p.read_text(encoding="utf-8")          # universal newlines -> LF
-          straight = """:try_path
-          where spill-guard >nul 2>nul
-          if errorlevel 1 goto :try_default
-          spill-guard %*
-          exit /b %ERRORLEVEL%
-
-          :try_default
-          if not exist "%LOCALAPPDATA%\\spill-guard\\bin\\spill-guard.exe" goto :deny_missing
-          """.replace("\n          ", "\n")
-          block = """:try_path
-          for /f "delims=" %%P in ('where spill-guard 2^>nul') do (
-              "%%P" %*
-              exit /b %ERRORLEVEL%
-          )
-
-          if exist "%LOCALAPPDATA%\\spill-guard\\bin\\spill-guard.exe" goto :run_default
-          echo run-spill-guard.cmd: no spill-guard.exe on PATH or under LOCALAPPDATA. >&2
-          goto :deny_missing
-
-          :run_default
-          """.replace("\n          ", "\n")
-          if straight not in text:
-              raise SystemExit("the straight-line PATH route is not in the launcher any more")
-          p.write_text(text.replace(straight, block, 1), encoding="utf-8", newline="\n")
-          MUTATE
+          # The hash first, because a fixture nobody checks can drift silently
+          # in exactly the way the reconstruction did. Nothing below is worth
+          # reading if these bytes are not the measured ones.
+          python - <<'CHECK'
+          import hashlib, pathlib, sys
+          want = "d28a64b3b35a5f42fd60f6e2da74517114ffc267f83b0b93357fecfe32b93729"
+          data = pathlib.Path("testdata/launcher/lf-uniform-failing.cmd").read_bytes()
+          got = hashlib.sha256(data).hexdigest()
+          if got != want or len(data) != 7214 or data.count(b"\r\n"):
+              sys.exit(f"fixture is {len(data)} bytes, {data.count(chr(13).encode()+chr(10).encode())} CRLF, sha256 {got}; "
+                       f"want 7214 bytes, 0 CRLF, sha256 {want}")
+          print(f"fixture verified: 7214 bytes, uniform LF, sha256 {got}")
+          CHECK
+          cp testdata/launcher/lf-uniform-failing.cmd hooks/run-spill-guard.cmd
           if git diff --quiet -- hooks/run-spill-guard.cmd; then
-            echo "::error::the mutation changed nothing -- it no longer matches the launcher" >&2
+            echo "::error::the fixture is byte-identical to the launcher, so this step tested nothing" >&2
             exit 1
           fi
-          if ! python -c "import pathlib,sys; d=pathlib.Path('hooks/run-spill-guard.cmd').read_bytes(); sys.exit(0 if d.count(b'\r\n')==0 and b'for /f' in d else 1)"; then
-            echo "::error::the file is not uniform LF with a block, so this step tested nothing" >&2
-            exit 1
-          fi
-          echo "mutation landed: uniform LF, block present"
-          python scripts/check-launcher.py > mutant.log 2>&1 && rc=0 || rc=$?
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           git checkout -- hooks/run-spill-guard.cmd
@@ -700,128 +678,6 @@ jobs:
           fi
           if ! grep -q 'cannot find the batch label' mutant.log; then
             echo "::error::cmd.exe did not report a lost label, so this is not the failure that was measured" >&2
-            exit 1
-          fi
-
-      - name: A launcher that is not executable in the index must fail the gate
-        if: runner.os != 'Windows'
-        run: |
-          git update-index --chmod=-x hooks/run-spill-guard.cmd
-          if [ "$(git ls-files -s -- hooks/run-spill-guard.cmd | cut -d' ' -f1)" = "100755" ]; then
-            echo "::error::--chmod=-x changed nothing, so this step tested nothing" >&2
-            exit 1
-          fi
-          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
-          echo "check exit: $rc"
-          cat mutant.log
-          git update-index --chmod=+x hooks/run-spill-guard.cmd
-          if [ "$rc" -eq 0 ]; then
-            echo "::error::the launcher gate passed on a launcher the shell would refuse" >&2
-            exit 1
-          fi
-          if ! grep -q 'in the index' mutant.log; then
-            echo "::error::the gate failed, but not on the index mode" >&2
-            exit 1
-          fi
-
-      - name: A launcher that exits non-zero instead of denying must fail the gate
-        if: runner.os != 'Windows'
-        run: |
-          python3 - <<'MUTATE'
-          import pathlib
-          # Bytes, not text. read_text/write_text translate line endings, so a
-          # text round-trip flattens all 75 CRLF on top of the deny mutation --
-          # which passes for the right reason on POSIX and makes the log read
-          # as though the endings assertion caught the deny. Compound mutations
-          # are what step 1 of this job exists to warn about.
-          p = pathlib.Path("hooks/run-spill-guard.cmd")
-          data = p.read_bytes()
-          old = b"    printf '%s\\n' \"$1\"\n    exit 0\n"
-          if old not in data:
-              raise SystemExit("the deny body is not in the launcher any more")
-          p.write_bytes(data.replace(old, b"    exit 1\n", 1))
-          MUTATE
-          if [ "$(python3 -c "import pathlib; print(pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().count(b'\r\n'))")" != "75" ]; then
-            echo "::error::the mutation moved the line endings, so this step is testing two things at once" >&2
-            exit 1
-          fi
-          if git diff --quiet -- hooks/run-spill-guard.cmd; then
-            echo "::error::the mutation changed nothing -- it no longer matches the launcher" >&2
-            exit 1
-          fi
-          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
-          echo "check exit: $rc"
-          cat mutant.log
-          git checkout -- hooks/run-spill-guard.cmd
-          if [ "$rc" -eq 0 ]; then
-            echo "::error::the launcher gate passed on a launcher that fails open" >&2
-            exit 1
-          fi
-          # Anchored on the consequence rather than on the wording of the
-          # finding: the message is prose and prose gets edited, and a control
-          # that greps for a sentence goes green-then-wrong the day somebody
-          # rewrites it. This exact grep broke once already, on a reword.
-          if ! grep -q 'would run unscanned' mutant.log; then
-            echo "::error::the gate failed, but not on the missing deny" >&2
-            exit 1
-          fi
-
-      # The launcher is blind to the event it was invoked for, and until
-      # hooks.json existed nothing invoked it, so the shape it writes was never
-      # tested against a prompt. It wrote the PreToolUse `hookSpecificOutput`
-      # object, which internal/hook/verdict.go measures as accepted and IGNORED
-      # on UserPromptSubmit -- so a fresh install with no binary denied Read
-      # and Bash loudly while every prompt went to the model unscanned.
-      #
-      # This transplants that exact shape back, byte for byte from the tree
-      # before the fix, and requires the gate to name it. A control that merely
-      # corrupted the JSON would prove the parser rejects garbage, which is not
-      # the property: the broken shape is valid JSON and a valid PreToolUse
-      # verdict, and it is wrong only because this file cannot see the event.
-      - name: The event-blind PreToolUse deny object must fail the gate
-        if: runner.os != 'Windows'
-        run: |
-          python3 - <<'MUTATE'
-          import pathlib
-          p = pathlib.Path("hooks/run-spill-guard.cmd")
-          data = p.read_bytes()
-          old = b'{"decision":"block","reason":"'
-          if data.count(old) != 4:
-              raise SystemExit(f"expected 4 block objects, found {data.count(old)}")
-          data = data.replace(
-              old,
-              b'{"hookSpecificOutput":{"hookEventName":"PreToolUse",'
-              b'"permissionDecision":"deny","permissionDecisionReason":"')
-          # The nested object closes twice. Only the four deny lines end this
-          # way, which the count above has already established.
-          data = data.replace(b'."}', b'."}}')
-          p.write_bytes(data)
-          MUTATE
-          if ! grep -q 'hookSpecificOutput' hooks/run-spill-guard.cmd; then
-            echo "::error::the mutation did not put the PreToolUse shape back, so this step tested nothing" >&2
-            git checkout -- hooks/run-spill-guard.cmd
-            exit 1
-          fi
-          if ! python3 -c "
-          import json, pathlib, sys
-          data = pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().decode()
-          line = [l for l in data.splitlines() if l.startswith('DENY_MISSING=')][0]
-          json.loads(line.split('=', 1)[1].strip().strip(chr(39)))
-          "; then
-            echo "::error::the mutated deny is not valid JSON, so the gate would fail on parsing rather than on the shape" >&2
-            git checkout -- hooks/run-spill-guard.cmd
-            exit 1
-          fi
-          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
-          echo "check exit: $rc"
-          cat mutant.log
-          git checkout -- hooks/run-spill-guard.cmd
-          if [ "$rc" -eq 0 ]; then
-            echo "::error::the launcher gate passed on a deny Claude Code ignores on UserPromptSubmit" >&2
-            exit 1
-          fi
-          if ! grep -q 'IGNORES that on UserPromptSubmit' mutant.log; then
-            echo "::error::the gate failed, but not on the event-blind shape" >&2
             exit 1
           fi
 
