@@ -264,6 +264,11 @@ def both_halves_block_the_same(findings):
     halves from either platform, and it complements the drives rather than
     standing in for them: a literal that parses correctly and never reaches
     stdout is still a launcher that does not deny.
+
+    So it is never a reason to relax one of the drives. All this asserts is
+    that the four literals are the flat shape; that either half reaches stdout,
+    on the platform that runs it, is what the drives are for and is not
+    recoverable from here.
     """
     raw = LAUNCHER.read_bytes()
     lines = raw.split(b"\n")
