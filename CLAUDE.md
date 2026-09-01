@@ -17,13 +17,14 @@ measured.
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
 | `docs/development/release-process.md` | Cutting a release: what a person does, and what the tag does. |
-| `cmd/spill-guard/` | The entry point. `hook` and `version`; the rest land with the rows that specify them. |
+| `cmd/spill-guard/` | The entry point. `hook`, `selftest` and `version`; the rest land with the rows that specify them. |
 | `internal/validate/` | The eight validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
 | `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. Where fail-closed holds or does not. |
 | `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it read nothing. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
 | `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. |
+| `internal/selftest/` | The `selftest` subcommand. Canary payloads through the real hook entry, with an allowing control per surface, and a report that says what it cannot establish. |
 | `internal/testvec/` | The loader for `testdata/corpus/vectors/`. Test-only, linked into no binary, and it takes a `TB` rather than `*testing.T` so nothing outside a test imports `testing`. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. The JSON is data; `embed.go` beside it is the `go:embed` that compiles it in, which has to live here because the directive reaches only its own directory. |
 | `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. `vectors/` is neither: it is the credential-shaped strings the unit tests read, kept where secret scanning is told not to look. |
@@ -185,8 +186,19 @@ in good faith is the failure mode here, and review does not reliably catch it.
 **Fail closed.** The sibling guards fail silent so that a hook on every call
 never breaks ordinary work. This one inverts that, because a secret scanner that
 fails quietly reports a safety it is not providing. Every internal error blocks
-with a reason. `spill-guard selftest` proves the hook is live rather than
-installed and inert.
+with a reason.
+
+`spill-guard selftest` is the check a user runs, and what it can answer is
+narrower than "is the hook live". It drives canary payloads through `hook.Run`
+in-process -- prompt, `Read`, `Bash` command, `Bash` operand -- and asserts a
+block naming the rule, with an allowing control on every surface, because a
+report made only of blocks is what a ruleset that failed to load produces. It
+cannot spawn the launcher: `os/exec` is forbidden across the build graph, so
+the launcher is covered by *how* it is invoked, and running
+`run-spill-guard.cmd selftest` puts the resolution order in the path and
+reports the binary it found. Whether Claude Code is invoking the hook at all is
+not reachable from outside a session, and the report says so rather than
+letting a green run imply it.
 
 **Never put a raw secret in a struct that outlives the match.** The
 predecessor's `Finding` carried `secretValue` beside `matchRedacted`; it was
