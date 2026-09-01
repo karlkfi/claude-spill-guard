@@ -694,11 +694,16 @@ The rates are not what settles it. What those 21 and 4 buffers *are*, is:
 
   That denominator needs the same name sweep the `Bash` bullet below describes,
   and for a sharper reason. `promptTargets` skips a token whose file is gone, so
-  the content sweep classified 130 buffers out of 881 tokens and was blind to
-  the rest — worse attrition than the `Bash` arm's. Sweeping all 881 by name
+  the content sweep classified 130 buffers out of 881 tokens — 14.8% of its own
+  denominator, worse attrition than the `Bash` arm's. Sweeping all 881 by name
   instead, deleted targets included, returns four binary-shaped names and they
-  are the same four fixtures: `heap.dump` twice and `logo.png` twice. The other
-  877 are `.txt`, `.head`, `.md`, `.zshrc` and extensionless paths.
+  are the same four fixtures: `heap.dump` twice and `logo.png` twice.
+
+  The remainder is `.txt`, `.head`, `.md`, `.zshrc` and extensionless paths —
+  and five `.env` tokens, `deploy.env` four times and `secret.env` once, which
+  are fixtures too: `deploy.env` is this document's own worked example under
+  [`@path` is an operand](#path-is-an-operand-not-a-hop). So are the
+  `.txtzzz` and zero-width-suffixed tokens the grammar drives left behind.
 
   **None observed is not a rate of zero.** Nought events in 881 puts the 95%
   upper bound near 0.34%, so what the corpus supports is that nothing organic
@@ -712,6 +717,14 @@ The rates are not what settles it. What those 21 and 4 buffers *are*, is:
   the row said. And it leaves the prompt arm with no organic data in *either*
   direction — an absence of events rather than a low rate, which is normally a
   weak thing to decide on. Here it is the criterion the row itself set.
+
+  It is also wider than the binary targets. Once the `.env` tokens are counted,
+  **every security-shaped token in these 881 is one this project wrote**, and
+  the organic remainder is `.txt`, `.head`, `.md`, `.zshrc` and paths with no
+  extension. That is the honest statement of what this corpus can support: not
+  that credential-shaped prompt traffic is rare, but that there is none of it
+  here to measure, because the only sessions that produced any were the ones
+  driving this scanner.
 - The population the split exists to catch is absent. The table classifies
   files as they stand today, and 37,710 of the 83,141 resolvable operands point
   at something since deleted — which is exactly what a heap dump does, so the
