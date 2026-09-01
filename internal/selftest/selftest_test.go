@@ -165,7 +165,8 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 //     against an arm list somebody edits, not because it is a fail-open today.
 //
 // `payload could not be encoded` is absent for a stronger reason than either:
-// every payload here is a map of strings, which `json.Marshal` cannot fail on,
+// every payload here is a map of strings and nested maps of strings, neither
+// of which `json.Marshal` can fail on,
 // so a case for it would assert an unreachable line and read as coverage.
 func anomalies(t *testing.T) []struct {
 	name    string
