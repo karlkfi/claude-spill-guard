@@ -678,6 +678,79 @@ image read is not a convenience cost: a hook that does it gets uninstalled, and
 an uninstalled scanner enforces nothing, which lands on the same side of the
 ledger as failing open.
 
+#### An allowed skip says so, and the channel for saying it is measured
+
+Not blocking is not the same as not saying. Step 6 asks every path that
+declines to read to name its reason and have the caller carry that as far as
+the user, and an allow meant exit 0 on an empty stdout — the one silence the
+hook produces that is not a scan which ran. It now writes a `systemMessage`
+naming the buffer and the reason, and the call goes through carrying it.
+
+Which field does that is a measurement rather than a reading of the docs.
+Driven 2026-09-01 against Claude Code 2.1.251 on darwin/arm64: seven arms of a
+real `UserPromptSubmit` hook in a throwaway project, each emitting one marker
+one way, read back out of the `--output-format stream-json` stream and the
+session transcript both.
+
+| The hook writes (exit 0 unless noted) | The stream | The transcript |
+|---|---|---|
+| nothing — the control | — | — |
+| the marker on stderr | — | — |
+| the marker on stderr, exit 1 | — | `hook_non_blocking_error` |
+| the marker on stdout, as plain text | — | `hook_success`, injected as context |
+| `{"systemMessage": marker}` | `system`/`informational`, `level` `notice` | `hook_system_message` |
+| `{"…additionalContext": marker}` | — | `hook_additional_context` |
+
+**Of the six driven, `systemMessage` is the only one that reaches the
+person.** The two that carry
+text to the model — `additionalContext` and a hook's plain stdout — reach it
+while telling nobody, and a hook's stderr on exit 0 reaches neither: absent from
+the stream, absent from the transcript, absent from the session. The
+`systemMessage` rows are the control for the blanks, since the same instrument
+found the marker there. None of the seven withheld anything; the `systemMessage`
+arm's transcript carries the user message and reaches the same next step the
+control does.
+
+**Routing it to the person rather than the model is the decision, not a
+detail.** The remedies are a human's to take — convert the file, arm an
+override — and the model can take neither. The same text sent to the model
+would be spent on every image read: 59 of the 1,878 distinct `Read` targets in
+this machine's transcripts that still exist on disk are binary, 58 of them PNGs
+and one a PDF. Targets that did not survive are outside that denominator, so it
+is a rate over durable files rather than over all reads.
+
+**The notice names the two text populations, because the reason cannot.**
+`SkippedBinary` is one reason over a NUL in the sniff window, so UTF-16 written
+with no byte-order mark and a UTF-8 mark ahead of a NUL both arrive wearing a
+screenshot's label. Naming them is what lets a reader who knows their file is
+text act on a notice that says *binary* — and it is why this closes both
+members without deciding anything about the UTF-8 decode arm, which is `Q102`.
+
+**The event driven is `UserPromptSubmit`, and `PreToolUse` is where most of
+this class lands.** That half is not measured and nothing above claims it.
+`PreToolUse` cannot reach a hook before the model has chosen a tool call, which
+is an API call, so it is unreachable from an unauthenticated session — the
+boundary `Q94` establishes independently. The corpus cannot stand in either:
+across 1,654 session transcripts here, all 407 `hook_system_message`
+attachments carry `UserPromptSubmit` or `Stop` and none carries `PreToolUse`,
+and that zero measures the population, because no installed hook emits the field
+on that event — the two that emit it at all are an `effort-router` notice on
+`UserPromptSubmit` and pr-sentinel's `Stop` hook. The one `PreToolUse` emitter
+anywhere under `~/.claude/plugins` is in a plugin that is not installed, on the
+branch it takes when it crashes.
+
+Emitting it there ahead of the measurement is safe in the direction that
+matters, and the exit-code table above is what says so: on `PreToolUse`, stdout
+that is not a decision object runs the call. So a dropped field costs the
+silence that was already there, never a call that should have been stopped.
+Re-drive it when a session can authenticate, the way the exit-code table itself
+gets re-taken against a new version.
+
+A verdict that blocks still does not carry the notice, and `Q111` is that: the
+fix puts a `systemMessage` beside a deny object, which changes an encoding this
+document measured rather than reasoned about, and doing that on inference is
+the move this section is written against.
+
 The residue was two populations rather than one, and one of them is now closed.
 UTF-16 written with no mark lands in the binary skip and is allowed with it —
 step 2's own stated gap, where nothing declares anything and separating it is
