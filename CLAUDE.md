@@ -191,8 +191,19 @@ with a reason.
 `spill-guard selftest` is the check a user runs, and what it can answer is
 narrower than "is the hook live". It drives canary payloads through `hook.Run`
 in-process -- prompt, `Read`, `Bash` command, `Bash` operand -- and asserts a
-block naming the rule, with an allowing control on every surface, because a
-report made only of blocks is what a ruleset that failed to load produces. It
+block naming the rule, with an allowing arm on every surface.
+
+**The allowing arms are what can see an over-block, and they only can because
+`drive` has a third outcome.** With two, an arm was `blocks` or `allows`, and
+the three situations that are neither -- refused, a verdict that is not a
+block, blocked by a rule that is not the canary's -- collapsed onto `allows`.
+A blocking arm caught them by disagreeing; an allowing arm agreed and printed
+`ok`. Measured: one over-matching rule added to the shipped set turned all
+three allowing arms into blocks, and the report read `7 of 7 arms as expected.
+This binary scans and blocks.` at exit 0. That is a precision regression -- the
+thing this repo calls the product -- invisible to the check a user runs.
+`anomalous` is a want no arm may hold, so it disagrees with every arm, and the
+same mutation now reads `3 of 7 arms did not do what they must` at exit 1. It
 cannot spawn the launcher: `os/exec` is forbidden across the build graph, so
 the launcher is covered by *how* it is invoked, and running
 `run-spill-guard.cmd selftest` puts the resolution order in the path and

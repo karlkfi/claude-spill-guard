@@ -128,9 +128,9 @@ An installed scanner that enforces nothing and a session with no secrets in it
 produce the same silence, so *installed* is not something to take on trust.
 Two steps, and they answer different questions.
 
-**Does the binary scan?** `spill-guard selftest` drives a canary through the
-real hook path — a prompt, a `Read`, a `Bash` command, and a file a reader is
-pointed at — and reports what happened to each:
+**Does the binary scan?** `spill-guard selftest` builds hook payloads and runs
+the scanner over them in-process — a prompt, a `Read`, a `Bash` command, and a
+file a reader is pointed at — reporting what happened to each:
 
 ```
 spill-guard dev selftest
@@ -143,9 +143,17 @@ ruleset: compiled in
   ...
 ```
 
-The allowing rows are not filler. A scanner that blocks everything and one that
-works are the same report if the report is only made of blocks, and the
-commonest way to get the first is a ruleset that did not load.
+The allowing rows are not filler, and they are the half that catches the
+failure this tool is most likely to have. A scanner that blocks everything and
+one that works produce the same report if the report is only made of blocks —
+and a rule that matches too much is the ordinary shape of that. An allowing row
+goes `FAIL` if its call is blocked at all, by any rule, so one bad regex turns
+three rows red rather than leaving seven green.
+
+It also does not run the dispatch a session would. `selftest` calls the
+scanner directly, so it cannot tell you that `spill-guard hook` itself still
+answers — only that the scanning underneath it works. The suite covers the
+dispatch at build time; nothing at install time does.
 
 It reports `dev` unless it came from a release: `go install` does not stamp a
 version, and only the release build passes one in.

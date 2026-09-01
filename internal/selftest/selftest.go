@@ -55,19 +55,42 @@ const canaryRule = "aws-access-key-id"
 // asserting a block wants to know it got one rather than an ask.
 const blockedLead = "spill-guard: blocked."
 
-// What an arm expects the hook to do.
+// What the hook did with an arm, and what an arm can ask for.
+//
+// `anomalous` is the third outcome and no arm may want it. Without it `drive`
+// had two states to report four situations, and the three that are neither a
+// clean allow nor a block-by-the-canary-rule collapsed onto `allows` -- which
+// is correct for a blocking arm, since it then disagrees and fails, and wrong
+// for an allowing one, which agrees and passes.
+//
+// Measured: adding one over-matching rule to the shipped ruleset -- regex
+// `(credentials|repo|nothing)`, no validators, entropy 0, the ordinary shape
+// of a precision regression -- made all three allowing arms block, and every
+// one of them printed `ok` beside a detail reading "blocked, but not by
+// aws-access-key-id". The report said `7 of 7 arms as expected. This binary
+// scans and blocks.` and exited 0.
+//
+// That is the failure this repo calls the product: precision regressions are
+// invisible until the noise has trained everyone to ignore the tool, and
+// selftest is the check a user runs. A third state costs one constant and
+// closes it, because an outcome no arm wants disagrees with every arm.
 type expectation int
 
 const (
 	blocks expectation = iota
 	allows
+	anomalous
 )
 
 func (e expectation) String() string {
-	if e == blocks {
+	switch e {
+	case blocks:
 		return "blocked"
+	case allows:
+		return "allowed"
+	default:
+		return "neither"
 	}
-	return "allowed"
 }
 
 // An arm is one payload and what has to happen to it.
@@ -151,8 +174,11 @@ func report(stdout io.Writer, list []arm) int {
 	failed := 0
 	for _, a := range list {
 		got, detail := drive(a)
+		// `anomalous` is never a want, so the inequality below already fails
+		// on it. This says so out loud rather than leaving it to a future arm
+		// not to reopen the hole.
 		mark := "ok  "
-		if got != a.want {
+		if got != a.want || a.want == anomalous {
 			mark = "FAIL"
 			failed++
 		}
@@ -240,15 +266,15 @@ func arms(planted, quiet string) []arm {
 func drive(a arm) (expectation, string) {
 	raw, err := json.Marshal(a.payload)
 	if err != nil {
-		return allows, fmt.Sprintf("payload could not be encoded: %v", err)
+		return anomalous, fmt.Sprintf("payload could not be encoded: %v", err)
 	}
 	var out, errs strings.Builder
 	code := hook.Run(strings.NewReader(string(raw)), &out, &errs)
 
-	// A refusal is exit 2 with stderr and no verdict. It blocks the call, and
-	// reporting it as a block would hide that the scan never ran.
+	// A refusal is exit 2 with stderr and no verdict. It stops the call, and
+	// calling it a block would hide that the scan never ran.
 	if code != 0 {
-		return allows, fmt.Sprintf("refused (exit %d): %s", code,
+		return anomalous, fmt.Sprintf("refused (exit %d): %s", code,
 			strings.TrimSpace(errs.String()))
 	}
 	if out.Len() == 0 {
@@ -256,12 +282,13 @@ func drive(a arm) (expectation, string) {
 	}
 	reason := reasonOf(out.String())
 	if !strings.HasPrefix(reason, blockedLead) {
-		return allows, fmt.Sprintf("a verdict that is not a block: %q", clip(reason))
+		return anomalous, fmt.Sprintf("a verdict that is not a block: %q", clip(reason))
 	}
 	if !strings.Contains(reason, canaryRule) {
-		// Blocked, and not by the rule. The commonest way this happens is a
-		// ruleset that would not compile, which blocks every call there is.
-		return allows, fmt.Sprintf("blocked, but not by %s: %q", canaryRule, clip(reason))
+		// Blocked, and not by the rule. A ruleset that would not compile does
+		// this to every call, and so does one rule too many -- which is the
+		// over-block this arm has to be able to see.
+		return anomalous, fmt.Sprintf("blocked, but not by %s: %q", canaryRule, clip(reason))
 	}
 	return blocks, "blocked (" + canaryRule + ")"
 }

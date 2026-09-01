@@ -135,6 +135,58 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 	}
 }
 
+// An outcome that is neither a clean allow nor a block by the canary rule
+// fails whatever the arm wanted.
+//
+// This is the hole the third state closed. With two states, `drive` reported
+// four situations as two, and the three anomalies collapsed onto `allows` --
+// so a *blocking* arm caught them and an *allowing* arm reported `ok`. A
+// scanner that blocks everything then produces "7 of 7 arms as expected" at
+// exit 0, which is the precision regression this repo calls the product.
+//
+// The payload here is refused rather than scanned, which is the cheapest
+// anomaly to produce: `hook.Run` takes exit 2 on an event it cannot withhold
+// content at. Both arms below are the same payload and differ only in what
+// they ask for, so a fix that made one pass by loosening the comparison would
+// be caught by the other.
+func TestAnAnomalousOutcomeFailsWhicheverWayTheArmLeans(t *testing.T) {
+	refused := map[string]any{"hook_event_name": "PostToolUse"}
+	if got, _ := drive(arm{payload: refused}); got != anomalous {
+		t.Fatalf("the refused payload came back %s, not anomalous, so neither "+
+			"case below tests anything", got)
+	}
+
+	for _, want := range []expectation{blocks, allows} {
+		var out strings.Builder
+		failed := report(&out, []arm{{
+			name:    "an anomaly, wanted as " + want.String(),
+			want:    want,
+			payload: refused,
+		}})
+		if failed != 1 {
+			t.Errorf("an arm wanting %s got an anomaly and %d failure(s) were "+
+				"counted, want 1:\n%s", want, failed, out.String())
+		}
+		if !strings.Contains(out.String(), "FAIL") {
+			t.Errorf("an arm wanting %s got an anomaly and was not marked:\n%s",
+				want, out.String())
+		}
+	}
+}
+
+// No arm may want the anomalous outcome.
+//
+// report() fails such an arm unconditionally, so setting one would produce a
+// permanently red report rather than a silent hole -- but the shipped set
+// asking for it at all would mean somebody had misread what the state is for.
+func TestNoArmWantsTheAnomalousOutcome(t *testing.T) {
+	for i, a := range arms("a", "b") {
+		if a.want == anomalous {
+			t.Errorf("arm %d (%q) wants the outcome no arm may want", i, a.name)
+		}
+	}
+}
+
 // fixtures writes the two files the payloads point at.
 func fixtures(t *testing.T) (planted, quiet string) {
 	t.Helper()
