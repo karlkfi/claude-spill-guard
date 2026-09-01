@@ -269,9 +269,17 @@ LF, block present", both true, while the launcher went on denying: the mutation
 landed and did not bite. Five such controls in one batch, three carrying an
 explicit precondition that passed.
 
-The checkable form is comparison against a case already measured — that control
-now transplants the failing arm byte for byte, 7,214 bytes verified identical,
-from the CI run that measured it failing. Where no such case exists, build one,
+The checkable form is comparison against a case already measured, and it has to
+be the artifact rather than a recipe for rebuilding one. That control read as
+transplanting the failing arm byte for byte — 7,214 bytes verified identical —
+and was in fact *reconstructing* it by patching whichever launcher was in the
+tree, so it landed on the measured file only while the launcher was the one it
+had been measured against. Shortening four deny strings moved the
+reconstruction 610 bytes, cmd.exe went on denying correctly, and the step
+failed three heads running saying the gate had failed for the wrong reason. The
+7,214 bytes are now a hashed fixture under `testdata/launcher/`, which is what
+the sentence always claimed. **A mutation is only valid against the artifact it
+was measured on**, and nothing said the reconstruction was one; Q103 carries it. Where no such case exists, build one,
 and give any probe whose answer matters when it is *empty* a positive control
 proving it can come back non-empty.
 
