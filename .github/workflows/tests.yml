@@ -624,18 +624,21 @@ jobs:
       # block somewhere but a `goto` reached by FALLING THROUGH past one: a
       # `goto` that jumps in resets cmd.exe's file position and survives. Do
       # not re-shape this mutation without re-driving it on Windows.
-      # The `rem pad` run inside the block is load-bearing and is not padding
-      # for its own sake. cmd.exe's file position drifts by one byte per line
-      # it reads out of a parenthesized block when the endings are LF rather
-      # than CRLF, so the drift is proportional to the block's line count -- and
-      # with the four-line block this step originally carried, whether the
-      # `goto` after it landed mid-label depended on the byte layout of the
-      # rest of the batch half. Shortening the four deny strings in this PR was
-      # enough to make the failure stop reproducing, while `line_endings` went
-      # on reddening, so the step failed reporting the wrong reason and read as
-      # a gate defect rather than a control one. Forty lines put the drift well
-      # past any single line, which is what makes the reproduction a property
-      # of LF rather than of this file's current bytes.
+      # THIS STEP IS FAILING AND THE REASON IS NOT UNDERSTOOD. Read Q103 before
+      # editing it. Its second grep requires cmd.exe to report a lost batch
+      # label, and against this branch's launcher it does not: the mutation
+      # lands -- the step's own precondition prints `mutation landed` -- and
+      # does not bite, so `line_endings` reddens, the behavioural grep finds
+      # nothing, and the step fails saying the gate failed for the wrong
+      # reason. Measured three times on windows-latest, 2026-08-31, with 117,
+      # 77 and 77 bare LF in the batch half. Padding the block to raise the
+      # per-line drift did not restore it, so the one-byte-per-line model in
+      # this comment's earlier draft is wrong or incomplete.
+      #
+      # What is NOT in question: `launcher (windows-latest)` -- the gate itself
+      # rather than the control -- is green on every one of those runs, so the
+      # launcher denies correctly through cmd.exe in production. What broke is
+      # a guard on a guard.
       - name: LF endings with a block present must fail the gate on Windows
         if: runner.os == 'Windows'
         shell: bash
@@ -657,7 +660,7 @@ jobs:
           for /f "delims=" %%P in ('where spill-guard 2^>nul') do (
               "%%P" %*
               exit /b %ERRORLEVEL%
-          """ + "    rem pad\n" * 40 + """)
+          )
 
           if exist "%LOCALAPPDATA%\\spill-guard\\bin\\spill-guard.exe" goto :run_default
           echo run-spill-guard.cmd: no spill-guard.exe on PATH or under LOCALAPPDATA. >&2
