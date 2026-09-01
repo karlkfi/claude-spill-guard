@@ -144,12 +144,27 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 // pins only the cheapest of them. The first version of this pinned the refusal
 // alone, and reverting either of the other two branches to `allows` left the
 // whole repository's suite green -- including the wrong-rule branch, which is
-// the one the review was about. A test that cannot fail for the reason it was
-// written is worth what the branch it guards is worth.
+// the one the review was about.
 //
-// `payload could not be encoded` is deliberately absent. Every payload here is
-// a map of strings, which `json.Marshal` cannot fail on, so a case for it
-// would assert an unreachable line and read as coverage.
+// The three are not equally load-bearing, and the difference is worth knowing
+// before anyone trims this table. A collapsed outcome is a *fail-open* only
+// where a payload that produces no findings can reach it: a blocking arm
+// disagrees with `allows` and `anomalous` alike and fails either way, so only
+// an allowing arm can silently agree.
+//
+//   - the wrong-rule branch is that, and reachable the moment one rule matches
+//     too much. It is the defect this table was written for.
+//   - the confirmation branch is not, for THIS arm list, because no arm here
+//     carries an override. That is a property of the list rather than of
+//     hook.Run: a zero-findings payload does reach a confirmation, through the
+//     `len(skips) > 0` arm that sits ahead of the `len(findings) == 0` early
+//     return -- driven, with an override and a UTF-32 file, giving an `ask`
+//     carrying `unread` and no findings at all. So it is pinned as hardening
+//     against an arm list somebody edits, not because it is a fail-open today.
+//
+// `payload could not be encoded` is absent for a stronger reason than either:
+// every payload here is a map of strings, which `json.Marshal` cannot fail on,
+// so a case for it would assert an unreachable line and read as coverage.
 func anomalies(t *testing.T) []struct {
 	name    string
 	payload map[string]any
