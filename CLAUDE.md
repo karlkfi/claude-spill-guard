@@ -226,22 +226,27 @@ with a reason.
 `spill-guard selftest` is the check a user runs, and what it can answer is
 narrower than "is the hook live". It drives canary payloads through `hook.Run`
 in-process -- prompt, `Read`, `Bash` command, `Bash` operand -- and asserts a
-block naming the rule, with an allowing arm on every surface.
+block naming the rule, with an allowing arm on every surface. One arm carries
+no canary and names no rule: a `Read` of a file behind a UTF-32 mark, whose
+block names the skip reason instead, because it is the one payload here that
+reaches a verdict with no finding behind it. It is a blocking arm, so it makes
+that branch cheaply reachable and adds nothing an allowing arm can see.
 
 **The allowing arms are what can see an over-block, and they only can because
 `drive` has a third outcome.** With two, an arm was `blocks` or `allows`, and
 the three situations that are neither -- refused, a verdict that is not a
 block, blocked by a rule that is not the canary's -- collapsed onto `allows`.
 A blocking arm caught them by disagreeing; an allowing arm agreed and printed
-`ok`. Measured: one over-matching rule added to the shipped set turned all
-three allowing arms into blocks, and the report read `7 of 7 arms as expected.
-This binary scans and blocks.` at exit 0. That is a precision regression -- the
-thing this repo calls the product -- invisible to the check a user runs.
-`anomalous` is a want no arm may hold, so it disagrees with every arm, and the
-same mutation now reads `3 of 7 arms did not do what they must` at exit 1. It
-cannot spawn the launcher: `os/exec` is forbidden across the build graph, so
-the launcher is covered by *how* it is invoked, and running
-`run-spill-guard.cmd selftest` puts the resolution order in the path and
+`ok`. Measured on the seven arms of the time: one over-matching rule added to
+the shipped set turned all three allowing arms into blocks, and the report read
+`7 of 7 arms as expected. This binary scans and blocks.` at exit 0. That is a
+precision regression -- the thing this repo calls the product -- invisible to
+the check a user runs. `anomalous` is a want no arm may hold, so it disagrees
+with every arm, and the same mutation on today's eight reads `3 of 8 arms did
+not do what they must` at exit 1. It cannot spawn the launcher: `os/exec` is
+forbidden across the build graph, so the launcher is covered by *how* it is
+invoked, and running `run-spill-guard.cmd selftest` puts the resolution order
+in the path and
 reports the binary it found. Whether Claude Code is invoking the hook at all is
 not reachable from outside a session, and the report says so rather than
 letting a green run imply it.

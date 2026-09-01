@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/karlkfi/claude-spill-guard/internal/hook"
+	"github.com/karlkfi/claude-spill-guard/internal/scan"
 	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 )
 
@@ -36,7 +37,7 @@ func TestSelftestPassesOnTheShippedRuleset(t *testing.T) {
 	if strings.Contains(stdout, "FAIL") {
 		t.Errorf("an arm failed on the shipped ruleset:\n%s", stdout)
 	}
-	for _, a := range arms("a", "b") {
+	for _, a := range arms("a", "b", "c") {
 		if !strings.Contains(stdout, a.name) {
 			t.Errorf("the report does not name the %q arm, so it either did "+
 				"not run or ran without saying so:\n%s", a.name, stdout)
@@ -54,8 +55,8 @@ func TestSelftestPassesOnTheShippedRuleset(t *testing.T) {
 // the arms are not independent, and no fewer, because a flip nothing notices
 // is an arm asserting nothing.
 func TestEveryArmDiscriminates(t *testing.T) {
-	planted, quiet := fixtures(t)
-	list := arms(planted, quiet)
+	planted, quiet, undecodable := fixtures(t)
+	list := arms(planted, quiet, undecodable)
 	if len(list) < 4 {
 		t.Fatalf("only %d arms, which is too few for the report to mean "+
 			"anything -- every surface needs a blocking arm and a control", len(list))
@@ -68,7 +69,7 @@ func TestEveryArmDiscriminates(t *testing.T) {
 	}
 
 	for i := range list {
-		flipped := arms(planted, quiet)
+		flipped := arms(planted, quiet, undecodable)
 		was := flipped[i].want
 		if was == blocks {
 			flipped[i].want = allows
@@ -90,8 +91,8 @@ func TestEveryArmDiscriminates(t *testing.T) {
 
 // A failing arm has to reach the exit code and the report, not just a counter.
 func TestAFailingArmIsVisibleAndNonZero(t *testing.T) {
-	planted, quiet := fixtures(t)
-	broken := arms(planted, quiet)
+	planted, quiet, undecodable := fixtures(t)
+	broken := arms(planted, quiet, undecodable)
 	broken[0].want = allows
 	if broken[0].want == blocks {
 		t.Fatal("the first arm was already an allowing one, so this case " +
@@ -127,14 +128,59 @@ func TestTheReportStatesWhatItCannotEstablish(t *testing.T) {
 // this says so out loud, because the constant is what a rule rename breaks and
 // the failure would otherwise read as "selftest is broken".
 func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
-	planted, quiet := fixtures(t)
+	planted, quiet, undecodable := fixtures(t)
 	var out strings.Builder
-	if failed := report(&out, arms(planted, quiet)); failed != 0 {
+	if failed := report(&out, arms(planted, quiet, undecodable)); failed != 0 {
 		t.Fatalf("%d arm(s) failed:\n%s", failed, out.String())
 	}
 	if !strings.Contains(out.String(), "blocked ("+canaryRule+")") {
 		t.Errorf("no arm was blocked by %s, so either the canary or the rule "+
 			"id has moved:\n%s", canaryRule, out.String())
+	}
+}
+
+// The unread-buffer arm is blocked by a skip reason and by no rule at all,
+// and the same payload is still an anomaly to an arm that expects a rule.
+//
+// Both halves are needed. The first is the branch the arm was added for: a
+// verdict hook.Run reaches with zero findings, through `len(skips) > 0`, which
+// no other arm here produces. The second is the control that keeps it from
+// being a loosening -- `drive` reporting a block by anything other than what
+// the arm named is what catches an over-matching rule, and an arm that has not
+// named the skip has to still land there.
+//
+// What this does not establish is anything about an *allowing* arm. The arm is
+// a blocking one, so it disagrees with every wrong value the way the blocking
+// arms already did; the asymmetry Q107 named is untouched.
+func TestTheUnreadArmNamesTheSkipAndTheCanaryArmsStillDoNot(t *testing.T) {
+	planted, quiet, undecodable := fixtures(t)
+	var unread arm
+	for _, a := range arms(planted, quiet, undecodable) {
+		if a.by == string(scan.SkippedUTF32) {
+			unread = a
+		}
+	}
+	if unread.payload == nil {
+		t.Fatal("no arm names the UTF-32 skip, so the branch reached with no " +
+			"findings behind it is unexercised again")
+	}
+
+	got, detail := drive(unread)
+	if got != blocks {
+		t.Errorf("the unread arm came back %s (%s), want blocked", got, detail)
+	}
+	if strings.Contains(detail, canaryRule) {
+		t.Errorf("the unread arm's block names %s, so it is not the "+
+			"no-finding branch: %s", canaryRule, detail)
+	}
+
+	// The same payload with no marker of its own, which is what every other
+	// arm is. It has to be an anomaly, or naming a skip would have widened
+	// what counts as a block for all of them.
+	got, detail = drive(arm{payload: unread.payload})
+	if got != anomalous {
+		t.Errorf("the same payload wanting the canary's rule came back %s "+
+			"(%s), want anomalous", got, detail)
 	}
 }
 
@@ -155,7 +201,9 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 //   - the wrong-rule branch is that. Two ways in, not one: a rule that matches
 //     too much, and -- with a perfectly correct ruleset -- any buffer the
 //     pipeline declines to read, whose block names the skip rather than a rule.
-//     It is the defect this table was written for.
+//     It is the defect this table was written for. An arm that names that skip
+//     as its own `by` lands on `blocks` instead, which is the point of the
+//     field and is why the case below leaves `by` unset.
 //   - the confirmation branch is not, for THIS arm list, because no arm here
 //     carries an override. That is a property of the list rather than of
 //     hook.Run: a zero-findings payload does reach a confirmation, through the
@@ -256,15 +304,15 @@ func TestEveryAnomalyFailsWhicheverWayTheArmLeans(t *testing.T) {
 // permanently red report rather than a silent hole -- but the shipped set
 // asking for it at all would mean somebody had misread what the state is for.
 func TestNoArmWantsTheAnomalousOutcome(t *testing.T) {
-	for i, a := range arms("a", "b") {
+	for i, a := range arms("a", "b", "c") {
 		if a.want == anomalous {
 			t.Errorf("arm %d (%q) wants the outcome no arm may want", i, a.name)
 		}
 	}
 }
 
-// fixtures writes the two files the payloads point at.
-func fixtures(t *testing.T) (planted, quiet string) {
+// fixtures writes the three files the payloads point at.
+func fixtures(t *testing.T) (planted, quiet, undecodable string) {
 	t.Helper()
 	dir := t.TempDir()
 	planted = filepath.Join(dir, "deploy.env")
@@ -275,5 +323,9 @@ func fixtures(t *testing.T) (planted, quiet string) {
 	if err := os.WriteFile(quiet, []byte("no credentials in this one\n"), 0o600); err != nil {
 		t.Fatalf("writing the control file: %v", err)
 	}
-	return planted, quiet
+	undecodable = filepath.Join(dir, "notes.utf32")
+	if err := os.WriteFile(undecodable, utf32LE("no credentials in this one\n"), 0o600); err != nil {
+		t.Fatalf("writing the undecodable file: %v", err)
+	}
+	return planted, quiet, undecodable
 }

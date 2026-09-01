@@ -148,7 +148,13 @@ failure this tool is most likely to have. A scanner that blocks everything and
 one that works produce the same report if the report is only made of blocks —
 and a rule that matches too much is the ordinary shape of that. An allowing row
 goes `FAIL` if its call is blocked at all, by any rule, so one bad regex turns
-three rows red rather than leaving seven green.
+three rows red rather than leaving eight green.
+
+One row is neither an allowing row nor a block by a rule: a `Read` of a file
+behind a UTF-32 byte-order mark, which this build does not decode and therefore
+refuses to call clean. It reports `blocked` on the skip reason rather than on a
+rule id, and it is there because it is the only payload in the list that
+reaches a verdict with nothing found.
 
 It also does not run the dispatch a session would. `selftest` calls the
 scanner directly, so it cannot tell you that `spill-guard hook` itself still
