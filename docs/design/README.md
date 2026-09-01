@@ -435,11 +435,19 @@ not need to do.
    as an image is. Driven end to end on a built binary: a UTF-8 mark, a NUL and
    an AWS-shaped key exits 0 on empty stdout, while the same file without the
    NUL denies and names the rule — at byte 29 against 26, the three bytes of the
-   mark, which is its own evidence that nothing decoded it. Whether step 1
-   should grow that arm is a separate question with a real cost: of 63
-   UTF-8-marked files on this machine, the 2 that carry a NUL are both `.wasm`
-   binaries, so an arm that blocked on the mark would block only true binaries
-   in the only population there is to check it against.
+   mark, which is its own evidence that nothing decoded it.
+
+   Whether step 1 should grow that arm is a separate question, and `Q102`
+   carries it rather than this section. The mark alone cannot be the trigger:
+   63 files in this machine's Go module cache carry `EF BB BF` and 61 are
+   ordinary text — `.html`, `.yaml`, `.md`, `.json`, `.env` and a
+   Windows-authored `.wxs` among them. Of the 2 that also carry a NUL, both are
+   `.wasm`.
+
+   **That is a cost reading and it does not bound the benefit.** It says what an
+   arm on mark-plus-NUL would cost here; it says nothing about how often a
+   Windows-authored file carries the mark, a NUL and a credential, because that
+   population is exactly as unobservable on these machines as the UTF-16 one.
 
 3. **Literal prefilter.** Word-boundary search for each credential rule's
    keywords, 255–307 MiB/s against 1.0 MiB/s for the regex pass — roughly 280x.
@@ -696,7 +704,10 @@ section below: 2 of 40,416 `Bash` operands carry a UTF-16 mark, neither of them
 decoding to binary, and the `Read` and prompt surfaces have none at all. Over
 `~/go/pkg/mod` and this repository's own tree — 245,397 files, every marked one
 listed rather than sampled — 43 carry a UTF-16 mark, **none** decodes to binary,
-and nothing carries a UTF-32 mark.
+and nothing carries a UTF-32 mark. Widened to `~/workspace`, `~/.claude`, `~/go`
+and the Go toolchain, 6,589,166 files, the shape is the same: 45 marked, none
+decoding to binary, no UTF-32 mark, and every organic one still in the module
+cache.
 
 **21 of those 43 are organic**, in seven unrelated modules: `subosito/gotenv`,
 `docker/cli`, `golang.org/x/net`'s `html/charset`, `gopkg.in/ini.v1`,
