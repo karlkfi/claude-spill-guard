@@ -112,7 +112,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-NO_VERIFIER='neither cosign nor gh is installed, so nothing here could establish that an archive came from this repository. The sha256 check answers corruption and not substitution, so it is not a fallback. Install either one and run this again -- `brew install cosign`, or gh from https://cli.github.com. With a Go toolchain and no wish to install either, `go install github.com/karlkfi/claude-spill-guard/cmd/spill-guard@latest` builds from source and the module checksum database does the verifying instead.'
+NO_VERIFIER='neither cosign nor gh is installed, so nothing here could establish that an archive came from this repository. The sha256 check answers corruption and not substitution, so it is not a fallback. Install either one and run this again -- `brew install cosign`, or gh from https://cli.github.com. With a Go toolchain, `go install github.com/karlkfi/claude-spill-guard/cmd/spill-guard@latest` builds from source instead. That is a weaker guarantee and worth knowing as one: the module checksum database proves you got the same code as everyone else, and it does not tie what you built to this repository'"'"'s release workflow the way a cosign signature does.'
 
 # Which verifier this machine has, as a name on stdout, or a non-zero exit.
 # Resolved without touching the network, which is what lets `--verifier` answer

@@ -288,6 +288,16 @@ free and a human is asking the question directly.
   formula and the Scoop manifest pin the sha256 themselves and ask the user for
   no tool at all.
 
+  **That last leg is not true yet, and the scripts say so rather than assuming
+  it.** Neither channel exists — `.goreleaser.yaml` carries no `brews:` and no
+  `scoops:` block, and Q13 and Q14 are both still open — so until they land, a
+  refused user has nowhere cheaper to go and refusing costs them everything.
+  `install/install.sh` names `go install` instead, which needs a Go toolchain
+  and gives a weaker guarantee than either verifier: the module checksum
+  database proves you got the same code as everyone else and does not tie it to
+  this repository's release workflow. The decision stands; the reach argument
+  for it becomes sound when the tap and the bucket ship.
+
   Install-time only, and structurally so — the shipped binary cannot reach
   either verifier, because `scripts/check-supply-chain.py` forbids `os/exec`
   across the build graph.
