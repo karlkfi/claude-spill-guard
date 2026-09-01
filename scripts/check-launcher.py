@@ -189,26 +189,60 @@ def exits_zero(findings, what, rc, out, err):
 
 
 def deny_reason(out):
-    """The permissionDecisionReason in `out`, or None if it is not a deny.
+    """The block reason in `out`, or None if it is not a block Claude Code reads.
 
     Parsed rather than grepped: the property is that Claude Code can read this
     as a decision object, and a string that merely contains the word deny is
     the failure mode -- the launcher's own stdout is the only thing standing
     between a missing binary and a tool call nobody scanned.
+
+    The shape is `{"decision":"block","reason":...}` and the PreToolUse
+    `permissionDecision` object is refused by name, which is the half of this
+    function that is a gate rather than a parser.
+
+    The launcher never learns which event it was invoked for. hooks.json points
+    it at `PreToolUse` and at `UserPromptSubmit`, and the payload naming the
+    event goes past on stdin. internal/hook/verdict.go measures both encodings
+    against 2.1.238: the PreToolUse deny object is accepted and **ignored** on
+    UserPromptSubmit, so a launcher writing it denies `Read` and `Bash` loudly
+    while every prompt goes to the model with whatever is in it. That shipped
+    -- the launcher carried it from the day it was written until the day
+    hooks.json first pointed at a prompt -- and it was invisible here because
+    this function asserted the broken shape.
     """
     try:
         decoded = json.loads(out)
     except (ValueError, TypeError):
         return None
-    block = decoded.get("hookSpecificOutput")
-    if not isinstance(block, dict):
+    if isinstance(decoded.get("hookSpecificOutput"), dict):
+        # Named rather than falling through to None: this is the regression,
+        # and "did not write anything Claude Code reads as a deny" would send
+        # a reader looking for a launcher that wrote nothing.
+        return _PRE_TOOL_USE_SHAPE
+    if decoded.get("decision") != "block":
         return None
-    if block.get("hookEventName") != "PreToolUse":
-        return None
-    if block.get("permissionDecision") != "deny":
-        return None
-    reason = block.get("permissionDecisionReason")
+    reason = decoded.get("reason")
     return reason if isinstance(reason, str) and reason else None
+
+
+# What deny_reason hands back for the one wrong shape it can name. A sentinel
+# rather than None so a caller can say which of the two failures it got.
+_PRE_TOOL_USE_SHAPE = object()
+
+
+def blocks_both_events(findings, what, out):
+    """The block has to be the event-agnostic shape, and say so when it is not."""
+    reason = deny_reason(out)
+    if reason is _PRE_TOOL_USE_SHAPE:
+        findings.append(
+            f"{what} is the PreToolUse `hookSpecificOutput` object. Claude Code "
+            f"accepts and IGNORES that on UserPromptSubmit -- measured in "
+            f"internal/hook/verdict.go -- and this launcher cannot see which "
+            f"event it was invoked for, so every prompt would reach the model "
+            f"unscanned while Read and Bash denied loudly. Write "
+            f'{{"decision":"block","reason":...}}, which blocks both.')
+        return None
+    return reason
 
 
 # The line the batch half ends on. cmd.exe never reads past it and sh treats
@@ -330,17 +364,38 @@ def denies_with_nothing_installed(findings, tmp):
                         f"a spill-guard at {found!r}, so a deny below would "
                         f"prove nothing and a run would prove nothing either")
         return
-    rc, out, err = run(env, ("hook",))
-    reason = deny_reason(out)
+    # A prompt payload, not a tool one. The launcher passes stdin through
+    # rather than reading it, so this cannot change what it writes -- which is
+    # the property being asserted. The event that reaches a real hook is the
+    # one this file's deny has to block, and the launcher has no way to know
+    # which it was, so the arm below pins that the two agree byte for byte.
+    prompt_payload = ('{"hook_event_name":"UserPromptSubmit",'
+                      '"prompt":"whatever this session typed"}')
+    rc, out, err = run(env, ("hook",), stdin=prompt_payload)
+    reason = blocks_both_events(findings, "the deny for a missing binary", out)
     if reason is None:
-        findings.append(f"with no binary anywhere the launcher did not write "
-                        f"anything Claude Code reads as a deny, so the tool "
-                        f"call would run unscanned -- {evidence(rc, out, err)}")
+        if deny_reason(out) is None:
+            findings.append(f"with no binary anywhere the launcher did not write "
+                            f"anything Claude Code reads as a block, so the tool "
+                            f"call would run unscanned -- {evidence(rc, out, err)}")
         return
     exits_zero(findings, "the deny for a missing binary", rc, out, err)
     if "install" not in reason.lower():
         findings.append(f"the deny for a missing binary names no way to "
                         f"install one: {reason!r}")
+
+    # Byte-identical on a tool payload. The launcher is event-blind by
+    # construction and this is what says so out loud: if a later change ever
+    # made the output depend on the event, one shape would be right and the
+    # other would be the fail-open above.
+    tool_payload = ('{"hook_event_name":"PreToolUse","tool_name":"Bash",'
+                    '"tool_input":{"command":"echo hi"}}')
+    _, tool_out, _ = run(env, ("hook",), stdin=tool_payload)
+    if tool_out != out:
+        findings.append(f"the launcher's block differs between a "
+                        f"UserPromptSubmit payload and a PreToolUse one, so it "
+                        f"is reading stdin rather than passing it through -- "
+                        f"prompt {out!r} against tool {tool_out!r}")
 
 
 def denies_on_an_unusable_explicit_path(findings, tmp, stub):
@@ -361,11 +416,14 @@ def denies_on_an_unusable_explicit_path(findings, tmp, stub):
                         f"fell back and found nothing")
         return
     rc, out, err = run(env, ("hook",))
-    if deny_reason(out) is None:
-        findings.append(f"SPILL_GUARD_BIN naming a path that is not executable "
-                        f"did not deny -- an explicit path that does not work "
-                        f"is a configuration error, not a reason to run some "
-                        f"other binary -- {evidence(rc, out, err)}")
+    if blocks_both_events(findings, "the deny for an unusable SPILL_GUARD_BIN",
+                          out) is None:
+        if deny_reason(out) is None:
+            findings.append(f"SPILL_GUARD_BIN naming a path that is not "
+                            f"executable did not deny -- an explicit path that "
+                            f"does not work is a configuration error, not a "
+                            f"reason to run some other binary -- "
+                            f"{evidence(rc, out, err)}")
         return
     exits_zero(findings, "the deny for an unusable SPILL_GUARD_BIN", rc, out, err)
 

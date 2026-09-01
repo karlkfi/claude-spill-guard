@@ -881,8 +881,26 @@ not providing on half of what it is wired to, which is this project's own
 failure mode arriving in the verdict writer.
 
 `internal/hook` therefore encodes per event: the deny object at `PreToolUse`,
-matching this table and what the launcher already writes, and `decision`/
-`reason` at `UserPromptSubmit`. Nothing derives one from the other.
+matching this table, and `decision`/`reason` at `UserPromptSubmit`. Nothing
+derives one from the other.
+
+**The launcher cannot do that, and for a while it did not have to.** It never
+learns which event it was invoked for — `hooks.json` points it at both, and the
+payload naming the event goes past on stdin, which it passes through rather
+than reads. So it wrote the deny object, matching the `PreToolUse` row and
+nothing else, and until `hooks.json` existed nothing invoked it at all. The
+moment the prompt entry was wired, a fresh install with no binary yet denied
+`Read` and `Bash` loudly and let every prompt through — half loud, which is
+worse than silent, because the visible denials are evidence the guard is live.
+Driven end to end on 2.1.251 in both directions: with the deny object the
+prompt reached the model, and with `{"decision":"block","reason":…}` it came
+back `UserPromptSubmit operation blocked by hook` with the reason verbatim.
+
+A component blind to the event has to write the row that holds for every event,
+which is the second one. `scripts/check-launcher.py` refuses the `PreToolUse`
+shape by name rather than merely accepting the right one, because the wrong
+shape is valid JSON and a valid verdict and fails only on the surface nothing
+was testing.
 
 **Exit 2 is what is left when the event is unreadable.** A payload that is not
 JSON, or that names no event, gives nothing to write a decision object in — the

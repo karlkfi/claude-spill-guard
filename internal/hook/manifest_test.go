@@ -163,3 +163,116 @@ func minus(from, remove []string) []string {
 	sort.Strings(left)
 	return left
 }
+
+// pluginPath and marketplacePath are the two manifests, from the package
+// directory a `go test` runs in.
+var (
+	pluginPath      = filepath.Join("..", "..", ".claude-plugin", "plugin.json")
+	marketplacePath = filepath.Join("..", "..", ".claude-plugin", "marketplace.json")
+)
+
+func loadJSON(t *testing.T, path string, into any) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	if err := json.Unmarshal(raw, into); err != nil {
+		t.Fatalf("%s does not decode: %v", path, err)
+	}
+}
+
+// The two manifests have to agree on the version, and nothing else in the tree
+// says so.
+//
+// A marketplace entry compares that string and nothing else, so a release
+// whose plugin.json still names the old number cannot be delivered by `claude
+// plugin update` at all -- the tag publishes archives no plugin install ever
+// reaches. docs/development/release-process.md makes the bump a step a person
+// takes, and a step a person takes is a step a person forgets.
+//
+// `claude plugin validate` does not cover it: run against this repo as it
+// ships, with a marketplace.json beside the plugin.json, it validates the
+// marketplace manifest only and never opens the other file. Driven 2026-08-31
+// -- deleting `name` from plugin.json with both files present exits 0, and the
+// same deletion with plugin.json alone exits 1. So the shipped layout is the
+// one arrangement where that command says nothing, which is why this is here
+// and not on the CLI.
+func TestTheTwoManifestsCarryTheSameVersion(t *testing.T) {
+	var plugin struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	loadJSON(t, pluginPath, &plugin)
+
+	var market struct {
+		Plugins []struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"plugins"`
+	}
+	loadJSON(t, marketplacePath, &market)
+
+	if plugin.Version == "" {
+		t.Fatalf("%s carries no version, so a marketplace entry has nothing to "+
+			"compare and `claude plugin update` can never deliver a release",
+			pluginPath)
+	}
+	if len(market.Plugins) != 1 {
+		t.Fatalf("%s lists %d plugins; this repo ships one, and the loop below "+
+			"is written for that", marketplacePath, len(market.Plugins))
+	}
+	entry := market.Plugins[0]
+	if entry.Name != plugin.Name {
+		t.Errorf("the marketplace entry names %q and the plugin manifest names "+
+			"%q", entry.Name, plugin.Name)
+	}
+	if entry.Version != plugin.Version {
+		t.Errorf("the marketplace entry says version %q and %s says %q -- one "+
+			"of them is the number a release will publish and the other is "+
+			"what an install compares against", entry.Version, pluginPath,
+			plugin.Version)
+	}
+}
+
+// Every key the install channels read is present.
+//
+// docs/design/distribution.md counted these across the five sibling plugins
+// installed on the author's machine and found the same eight everywhere, which
+// is the closest thing to a schema this format has. A missing one is not a
+// parse error -- Claude Code tolerates it -- so nothing else in this tree
+// would say the manifest had lost `repository` or `license`.
+func TestThePluginManifestCarriesEveryKeyTheChannelsRead(t *testing.T) {
+	var got map[string]json.RawMessage
+	loadJSON(t, pluginPath, &got)
+
+	want := []string{"name", "version", "description", "author",
+		"homepage", "repository", "license", "keywords"}
+	var missing []string
+	for _, key := range want {
+		if len(got[key]) == 0 {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("%s is missing %s", pluginPath, strings.Join(missing, ", "))
+	}
+	// Both directions, for the reason the matcher above is checked both ways:
+	// a key nothing reads is a key somebody added expecting it to do something.
+	for key := range got {
+		if !slicesContains(want, key) {
+			t.Errorf("%s carries %q, which no install channel reads -- either "+
+				"it does something and this list is stale, or it does nothing",
+				pluginPath, key)
+		}
+	}
+}
+
+func slicesContains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}

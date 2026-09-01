@@ -16,11 +16,21 @@ REM Both codes were driven end to end; the table is in docs/design/README.md
 REM under "The exit-code contract, measured". exit-status-guard shipped that
 REM bug at 126 in its 1.0.0 and the guard never fired once.
 REM
-REM So when this cannot resolve a binary it DENIES, by writing a deny decision
+REM So when this cannot resolve a binary it DENIES, by writing a block decision
 REM object to stdout. That blocks whatever the process then exits with, which
 REM is the one spelling that fails closed on its own. Not exit 2: on exit 2
 REM stdout is discarded and the model is told the hook errored, so the reason
 REM never arrives. Exit 0 is deliberate and is the whole point of the file.
+REM
+REM The object is the flat {"decision":"block","reason":...} and not the
+REM PreToolUse permissionDecision shape. That is not cosmetic. This file never
+REM learns which event it was invoked for: hooks.json points it at PreToolUse
+REM AND at UserPromptSubmit, and the payload naming the event is on stdin,
+REM which is passed through untouched rather than read. internal/hook/verdict.go
+REM measures both encodings against 2.1.238 -- the PreToolUse deny object is
+REM accepted and IGNORED on UserPromptSubmit, so the prompt reaches the model
+REM with nothing anywhere saying so. This shape blocks both. A launcher blind
+REM to the event has to write the encoding that does not depend on it.
 REM
 REM Resolution order, from docs/design/distribution.md: SPILL_GUARD_BIN, then
 REM PATH, then the default install location, then deny.
@@ -59,18 +69,18 @@ if not exist "%LOCALAPPDATA%\spill-guard\bin\spill-guard.exe" goto :deny_missing
 exit /b %ERRORLEVEL%
 
 REM Both reasons below are fixed strings. Nothing from the environment is
-REM interpolated into either, because a permissionDecisionReason reaches the
+REM interpolated into either, because the reason reaches the
 REM model verbatim -- a path or a variable's value spliced in there is text an
 REM attacker controls arriving where the model reads instructions. It is also
 REM why neither names SPILL_GUARD_OVERRIDE: telling the model how to proceed
 REM without a scan is handing it the bypass.
 
 :deny_explicit
-echo {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"spill-guard: blocked. SPILL_GUARD_BIN names a path that is not a runnable spill-guard, so nothing scanned this call for secrets. This launcher does not fall back to PATH when SPILL_GUARD_BIN is set: an explicit path that does not work is a configuration error, not a reason to run some other binary. Fix the path or unset the variable, then start a new session."}}
+echo {"decision":"block","reason":"spill-guard: blocked. SPILL_GUARD_BIN names a path that is not a runnable spill-guard, so nothing scanned this call for secrets. This launcher does not fall back to PATH when SPILL_GUARD_BIN is set: an explicit path that does not work is a configuration error, not a reason to run some other binary. Fix the path or unset the variable, then start a new session."}
 exit /b 0
 
 :deny_missing
-echo {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"spill-guard: blocked. The spill-guard binary was not found, so nothing scanned this call for secrets. Install it and start a new session: scoop bucket add karlkfi https://github.com/karlkfi/scoop-bucket then scoop install spill-guard, or download install.ps1 from the latest release and run it. A scanner that cannot run blocks rather than passing quietly -- silence from this hook is supposed to mean checked."}}
+echo {"decision":"block","reason":"spill-guard: blocked. The spill-guard binary was not found, so nothing scanned this call for secrets. Install it and start a new session: scoop bucket add karlkfi https://github.com/karlkfi/scoop-bucket then scoop install spill-guard, or download install.ps1 from the latest release and run it. A scanner that cannot run blocks rather than passing quietly -- silence from this hook is supposed to mean checked."}
 exit /b 0
 CMDBLOCK
 
@@ -86,10 +96,12 @@ CMDBLOCK
 set -eu
 
 deny() {
-    # A deny object on stdout blocks whatever this exits with, and the reason
-    # reaches the model byte-identical. Exit 0 rather than 2: exit 2 discards
-    # stdout, and 1, 9 and 127 are the codes a launcher that FAILED produces,
-    # which is the state this deny exists to be distinguishable from.
+    # A block decision object on stdout blocks whatever this exits with, and
+    # the reason reaches the model byte-identical -- on either of the two
+    # events hooks.json wires, which is why this shape and not the PreToolUse
+    # one. Exit 0 rather than 2: exit 2 discards stdout, and 1, 9 and 127 are
+    # the codes a launcher that FAILED produces, which is the state this deny
+    # exists to be distinguishable from.
     printf '%s\n' "$1"
     exit 0
 }
@@ -104,9 +116,9 @@ usable() {
     return 1
 }
 
-DENY_EXPLICIT='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"spill-guard: blocked. SPILL_GUARD_BIN names a path that is not a runnable spill-guard, so nothing scanned this call for secrets. This launcher does not fall back to PATH when SPILL_GUARD_BIN is set: an explicit path that does not work is a configuration error, not a reason to run some other binary. Fix the path or unset the variable, then start a new session."}}'
+DENY_EXPLICIT='{"decision":"block","reason":"spill-guard: blocked. SPILL_GUARD_BIN names a path that is not a runnable spill-guard, so nothing scanned this call for secrets. This launcher does not fall back to PATH when SPILL_GUARD_BIN is set: an explicit path that does not work is a configuration error, not a reason to run some other binary. Fix the path or unset the variable, then start a new session."}'
 
-DENY_MISSING='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"spill-guard: blocked. The spill-guard binary was not found, so nothing scanned this call for secrets. Install it and start a new session: brew install karlkfi/tap/spill-guard, or download install.sh from the latest release and run it. A scanner that cannot run blocks rather than passing quietly -- silence from this hook is supposed to mean checked."}}'
+DENY_MISSING='{"decision":"block","reason":"spill-guard: blocked. The spill-guard binary was not found, so nothing scanned this call for secrets. Install it and start a new session: brew install karlkfi/tap/spill-guard, or download install.sh from the latest release and run it. A scanner that cannot run blocks rather than passing quietly -- silence from this hook is supposed to mean checked."}'
 
 if [ -n "${SPILL_GUARD_BIN:-}" ]; then
     if usable "$SPILL_GUARD_BIN"; then

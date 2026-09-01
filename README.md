@@ -99,8 +99,9 @@ request, against the archives that same pull request built.
 
 Two halves, and neither is any use alone. The plugin is the wiring — it tells
 Claude Code which calls to hand over. The binary is what reads them. A plugin
-installed without a binary denies every call it sees, because the launcher
-fails closed rather than waving a call through unscanned.
+installed without a binary blocks every call it sees, prompts included, and
+names the install command in the refusal: the launcher fails closed rather than
+waving anything through unscanned.
 
 There is no release yet, so the binary comes from source:
 

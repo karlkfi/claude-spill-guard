@@ -726,7 +726,7 @@ jobs:
               raise SystemExit("the deny body is not in the launcher any more")
           p.write_bytes(data.replace(old, b"    exit 1\n", 1))
           MUTATE
-          if [ "$(python3 -c "import pathlib; print(pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().count(b'\r\n'))")" != "75" ]; then
+          if [ "$(python3 -c "import pathlib; print(pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().count(b'\r\n'))")" != "85" ]; then
             echo "::error::the mutation moved the line endings, so this step is testing two things at once" >&2
             exit 1
           fi
@@ -748,6 +748,65 @@ jobs:
           # rewrites it. This exact grep broke once already, on a reword.
           if ! grep -q 'would run unscanned' mutant.log; then
             echo "::error::the gate failed, but not on the missing deny" >&2
+            exit 1
+          fi
+
+      # The launcher is blind to the event it was invoked for, and until
+      # hooks.json existed nothing invoked it, so the shape it writes was never
+      # tested against a prompt. It wrote the PreToolUse `hookSpecificOutput`
+      # object, which internal/hook/verdict.go measures as accepted and IGNORED
+      # on UserPromptSubmit -- so a fresh install with no binary denied Read
+      # and Bash loudly while every prompt went to the model unscanned.
+      #
+      # This transplants that exact shape back, byte for byte from the tree
+      # before the fix, and requires the gate to name it. A control that merely
+      # corrupted the JSON would prove the parser rejects garbage, which is not
+      # the property: the broken shape is valid JSON and a valid PreToolUse
+      # verdict, and it is wrong only because this file cannot see the event.
+      - name: The event-blind PreToolUse deny object must fail the gate
+        if: runner.os != 'Windows'
+        run: |
+          python3 - <<'MUTATE'
+          import pathlib
+          p = pathlib.Path("hooks/run-spill-guard.cmd")
+          data = p.read_bytes()
+          old = b'{"decision":"block","reason":"'
+          if data.count(old) != 4:
+              raise SystemExit(f"expected 4 block objects, found {data.count(old)}")
+          data = data.replace(
+              old,
+              b'{"hookSpecificOutput":{"hookEventName":"PreToolUse",'
+              b'"permissionDecision":"deny","permissionDecisionReason":"')
+          # The nested object closes twice. Only the four deny lines end this
+          # way, which the count above has already established.
+          data = data.replace(b'."}', b'."}}')
+          p.write_bytes(data)
+          MUTATE
+          if ! grep -q 'hookSpecificOutput' hooks/run-spill-guard.cmd; then
+            echo "::error::the mutation did not put the PreToolUse shape back, so this step tested nothing" >&2
+            git checkout -- hooks/run-spill-guard.cmd
+            exit 1
+          fi
+          if ! python3 -c "
+          import json, pathlib, sys
+          data = pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().decode()
+          line = [l for l in data.splitlines() if l.startswith('DENY_MISSING=')][0]
+          json.loads(line.split('=', 1)[1].strip().strip(chr(39)))
+          "; then
+            echo "::error::the mutated deny is not valid JSON, so the gate would fail on parsing rather than on the shape" >&2
+            git checkout -- hooks/run-spill-guard.cmd
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the launcher gate passed on a deny Claude Code ignores on UserPromptSubmit" >&2
+            exit 1
+          fi
+          if ! grep -q 'IGNORES that on UserPromptSubmit' mutant.log; then
+            echo "::error::the gate failed, but not on the event-blind shape" >&2
             exit 1
           fi
 
