@@ -21,15 +21,24 @@ import (
 //	{"decision":"block","reason":…} | blocked           | blocked
 //	exit 2, reason on stderr        | blocked           | blocked
 //
-// So the PreToolUse deny object -- the shape docs/design/README.md measures,
-// and the one hooks/run-spill-guard.cmd writes -- is accepted, ignored, and
-// the prompt goes to the model. No warning anywhere. Writing one encoding for
-// both events would report a safety it is not providing on half of them.
+// So the PreToolUse deny object -- the shape docs/design/README.md measures --
+// is accepted, ignored, and the prompt goes to the model. No warning anywhere.
+// Writing one encoding for both events would report a safety it is not
+// providing on half of them.
 //
 // PreToolUse keeps the deny object rather than moving to the shape that works
-// for both: it is what the design measured, it is what the launcher already
-// emits and check-launcher.py already parses, and `decision`/`reason` is the
+// for both: it is what the design measured, and `decision`/`reason` is the
 // older spelling of a PreToolUse verdict.
+//
+// The launcher deliberately disagrees with this package, and that is not
+// drift. It writes `{"decision":"block","reason":…}` on both events, because
+// it never learns which event it was invoked for -- hooks.json points it at
+// both and the payload naming the event goes past on stdin. This package does
+// know, so it writes the row the table gives each event; a component that does
+// not has to write the row that holds for every event.
+// scripts/check-launcher.py refuses the deny object there by name for exactly
+// that reason. Restoring "consistency" between the two by moving the launcher
+// back is the change that reintroduces a measured fail-open on every prompt.
 //
 // docs/design/README.md, "The exit-code contract, measured", carries the table
 // and the version it was taken against.

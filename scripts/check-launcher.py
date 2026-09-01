@@ -245,6 +245,85 @@ def blocks_both_events(findings, what, out):
     return reason
 
 
+def both_halves_block_the_same(findings):
+    """Every block literal in the file, in both halves, is the flat shape.
+
+    The dynamic arms above drive one half: the POSIX one everywhere but
+    Windows, the batch one only on a Windows runner. So each half's payload is
+    unasserted on the other platform, and the two can drift apart silently --
+    a Windows user then gets the fail-open this file's `deny_reason` exists to
+    prevent, with nothing red anywhere.
+
+    Found by a reviewer transplanting the broken object into the batch half on
+    darwin: the mutation landed, `git diff --quiet` returned 1, and the gate
+    stayed green at exit 0. The precondition was satisfied and the mutation did
+    not bite, which is the shape CLAUDE.md warns about.
+
+    This reads the literals rather than driving them, so it holds for both
+    halves from either platform, and it is a complement to the drives rather
+    than a replacement: a literal that parses correctly and never reaches
+    stdout is still a launcher that does not deny.
+    """
+    raw = LAUNCHER.read_bytes()
+    lines = raw.split(b"\n")
+    cut = next((i for i, line in enumerate(lines)
+                if line.rstrip(b"\r") == TERMINATOR), None)
+    if cut is None:
+        # line_endings has already said so, and with no split there is no way
+        # to attribute a literal to a half.
+        return
+    halves = (("batch", lines[:cut + 1]), ("POSIX", lines[cut + 1:]))
+
+    seen = 0
+    for name, body in halves:
+        for line in body:
+            literal = block_literal(line)
+            if literal is None:
+                continue
+            seen += 1
+            try:
+                decoded = json.loads(literal)
+            except ValueError as err:
+                findings.append(f"a block literal in the {name} half is not "
+                                f"JSON ({err}), so Claude Code reads nothing "
+                                f"and the call runs unscanned: {literal!r}")
+                continue
+            if sorted(decoded) != ["decision", "reason"]:
+                findings.append(
+                    f"a block literal in the {name} half carries "
+                    f"{sorted(decoded)!r} rather than the flat "
+                    f"{{'decision', 'reason'}}. The PreToolUse object is "
+                    f"accepted and IGNORED on UserPromptSubmit and this file "
+                    f"cannot see which event it was invoked for, so that half "
+                    f"would let every prompt through: {literal!r}")
+            elif decoded.get("decision") != "block":
+                findings.append(f"a block literal in the {name} half decides "
+                                f"{decoded.get('decision')!r}, not 'block': "
+                                f"{literal!r}")
+
+    # Two per half: DENY_EXPLICIT and DENY_MISSING. A split that found none in
+    # one half is a rename this check would otherwise pass silently, which is
+    # the same vacuous-instrument failure it exists to catch.
+    if seen != 4:
+        findings.append(f"found {seen} block literal(s) across the two halves, "
+                        f"want 4 -- either a deny path has gone or this check "
+                        f"has stopped recognising one, and both read as green")
+
+
+def block_literal(line):
+    """The JSON object on a launcher line that writes a block, or None.
+
+    Two spellings, one per half: the batch half echoes it and the POSIX half
+    assigns it to a shell variable in single quotes.
+    """
+    text = line.rstrip(b"\r").decode("utf-8", "replace").strip()
+    if text.startswith("echo {"):
+        return text[len("echo "):]
+    if text.startswith("DENY_") and "='{" in text:
+        return text.split("=", 1)[1].strip().strip("'")
+    return None
+
+
 # The line the batch half ends on. cmd.exe never reads past it and sh treats
 # everything above it as heredoc content, which is what lets one file carry two
 # sets of line endings without either half noticing the other's.
@@ -459,6 +538,7 @@ def main():
     findings = []
     index_mode(findings)
     line_endings(findings)
+    both_halves_block_the_same(findings)
 
     with tempfile.TemporaryDirectory() as work:
         work = Path(work)
@@ -481,9 +561,9 @@ def main():
         return 1
     half = "batch" if WINDOWS else "POSIX"
     print(f"launcher: executable in the index, split line endings intact, "
-          f"denies with nothing installed and on an unusable SPILL_GUARD_BIN, "
-          f"and resolves by all three routes -- driven through the {half} half "
-          f"on {sys.platform}")
+          f"4 block literals flat in both halves, denies with nothing "
+          f"installed and on an unusable SPILL_GUARD_BIN, and resolves by all "
+          f"three routes -- driven through the {half} half on {sys.platform}")
     return 0
 
 
