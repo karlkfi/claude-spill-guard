@@ -80,7 +80,7 @@ echo {"decision":"block","reason":"spill-guard: blocked. SPILL_GUARD_BIN names a
 exit /b 0
 
 :deny_missing
-echo {"decision":"block","reason":"spill-guard: blocked. The spill-guard binary was not found, so nothing scanned this call for secrets. Install it and start a new session: scoop bucket add karlkfi https://github.com/karlkfi/scoop-bucket then scoop install spill-guard, or download install.ps1 from the latest release and run it. A scanner that cannot run blocks rather than passing quietly -- silence from this hook is supposed to mean checked."}
+echo {"decision":"block","reason":"spill-guard: blocked. The spill-guard binary was not found, so nothing scanned this call for secrets. Install it and start a new session: download install.ps1 from the latest release and run it. A scanner that cannot run blocks rather than passing quietly -- silence from this hook is supposed to mean checked."}
 exit /b 0
 CMDBLOCK
 
@@ -118,7 +118,7 @@ usable() {
 
 DENY_EXPLICIT='{"decision":"block","reason":"spill-guard: blocked. SPILL_GUARD_BIN names a path that is not a runnable spill-guard, so nothing scanned this call for secrets. This launcher does not fall back to PATH when SPILL_GUARD_BIN is set: an explicit path that does not work is a configuration error, not a reason to run some other binary. Fix the path or unset the variable, then start a new session."}'
 
-DENY_MISSING='{"decision":"block","reason":"spill-guard: blocked. The spill-guard binary was not found, so nothing scanned this call for secrets. Install it and start a new session: brew install karlkfi/tap/spill-guard, or download install.sh from the latest release and run it. A scanner that cannot run blocks rather than passing quietly -- silence from this hook is supposed to mean checked."}'
+DENY_MISSING='{"decision":"block","reason":"spill-guard: blocked. The spill-guard binary was not found, so nothing scanned this call for secrets. Install it and start a new session: download install.sh from the latest release and run it. A scanner that cannot run blocks rather than passing quietly -- silence from this hook is supposed to mean checked."}'
 
 if [ -n "${SPILL_GUARD_BIN:-}" ]; then
     if usable "$SPILL_GUARD_BIN"; then
