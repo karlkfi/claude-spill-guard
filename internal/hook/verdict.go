@@ -215,7 +215,10 @@ func found(findings []scan.Finding) string {
 //
 // The label comes out of the call, so %q escapes it; the reason is this
 // package's own fixed text and is not escaped.
-func unread(skips []skipped) string {
+// listSkips names each buffer and why it went unread, capped at maxListed. The
+// label comes out of the call, so %q escapes it; the reason is this package's
+// own fixed text.
+func listSkips(skips []skipped) string {
 	listed, extra := skips, 0
 	if len(listed) > maxListed {
 		extra = len(listed) - maxListed
@@ -228,11 +231,15 @@ func unread(skips []skipped) string {
 	if extra > 0 {
 		items = append(items, fmt.Sprintf("and %d more", extra))
 	}
+	return strings.Join(items, "; ")
+}
+
+func unread(skips []skipped) string {
 	return fmt.Sprintf("%d buffer(s) of what this call would have sent went "+
 		"unread: %s. A buffer nothing opened produces no findings, exactly like "+
 		"one that was read and held none, so an unread buffer is never reported "+
 		"as a clean one.",
-		len(skips), strings.Join(items, "; "))
+		len(skips), listSkips(skips))
 }
 
 // failed is the body for a scan that could not be completed.
@@ -247,4 +254,67 @@ func failed(err error) string {
 		"could not be completed: %q. A scanner that cannot run blocks rather than "+
 		"passing quietly -- silence from this hook is supposed to mean checked.",
 		err.Error())
+}
+
+// noticeVerdict is text for the person, on a call this hook is allowing.
+//
+// `systemMessage` rather than stderr or a reason field, and that is measured.
+// Driven 2026-09-01 against Claude Code 2.1.251 on darwin/arm64: six shapes
+// from a real `UserPromptSubmit` hook, read back out of the
+// `--output-format stream-json` stream and the session transcript both.
+//
+//	the hook writes (exit 0 unless noted) | the stream                   | the transcript
+//	nothing -- the control                | --                           | --
+//	a marker on stderr                    | --                           | --
+//	a marker on stderr, exit 1            | --                           | hook_non_blocking_error
+//	a marker on stdout, plain text        | --                           | hook_success, as context
+//	{"systemMessage": marker}             | system/informational, notice | hook_system_message
+//	{"…additionalContext": marker}        | --                           | hook_additional_context
+//
+// The `systemMessage` rows are the control for the blanks: the same instrument
+// found the marker there, so those are absences rather than a probe that could
+// not fire. None of the six withheld anything.
+//
+// PreToolUse is not measured and this does not claim it. It cannot reach a hook
+// before the model has chosen a tool call, so an unauthenticated session cannot
+// drive it. Emitting the field there anyway is safe in the direction that
+// matters, and the table above the block encodings is what says so: stdout that
+// is not a decision object runs the call, so a dropped field costs the silence
+// that was already there rather than a call that should have stopped.
+//
+// docs/design/README.md, "An allowed skip says so", carries the argument, the
+// corpus census behind it, and what would make it worth re-driving.
+type noticeVerdict struct {
+	SystemMessage string `json:"systemMessage"`
+}
+
+// notify writes a notice and withholds nothing. It is stdout and exit 0, and
+// unlike block and confirm it takes no event: the field is the same on both,
+// which is the half of the table above that is measured on one of them.
+func notify(stdout io.Writer, message string) error {
+	return json.NewEncoder(stdout).Encode(noticeVerdict{message})
+}
+
+// The opener on the notice, at position 0 for blockedLead's reason: a hook
+// leaves no other record of having run, and this one is addressed to a person
+// reading a session with several installed.
+const noticeLead = "spill-guard: "
+
+// unscanned is the body for buffers the pipeline declined to read on a call
+// that is being allowed anyway.
+//
+// It is addressed to the person because the remedies are -- converting a file,
+// arming an override -- and because the model would pay for it on every image
+// read. It names the two text populations because the skip reason cannot tell them
+// from an image: SkippedBinary is one reason over a NUL in the sniff window,
+// so a UTF-16 buffer with no byte-order mark and a UTF-8 mark ahead of a NUL
+// arrive here wearing a screenshot's label. Naming them is what lets a reader
+// who knows their file is text act on a notice that says "binary".
+func unscanned(skips []skipped) string {
+	return fmt.Sprintf("this call was allowed, and %d buffer(s) of it went "+
+		"unread: %s. Nothing scanned those for secrets. Text this build cannot "+
+		"read arrives here wearing the same label as an image -- UTF-16 written "+
+		"with no byte-order mark, or a UTF-8 mark ahead of a NUL -- so if one of "+
+		"them is text, converting it to UTF-8 gets it scanned.",
+		len(skips), listSkips(skips))
 }

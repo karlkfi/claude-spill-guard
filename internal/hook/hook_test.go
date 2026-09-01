@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -415,7 +416,7 @@ func TestAnUnreadBufferBlocksByTheReasonItWentUnread(t *testing.T) {
 
 	// The allowed arm, and the control beside it is what makes it a measurement.
 	// Identical bytes without the leading NUL are scanned and blocked, so the
-	// silence above is the skip rather than there being nothing in the file to
+	// allow above is the skip rather than there being nothing in the file to
 	// find -- which is the one other thing that would produce it.
 	t.Run("a binary is allowed, and the same bytes without the NUL are not", func(t *testing.T) {
 		body := "AWS_ACCESS_KEY_ID=" + secret + "\n"
@@ -429,9 +430,30 @@ func TestAnUnreadBufferBlocksByTheReasonItWentUnread(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
 		}
-		if stdout != "" {
-			t.Errorf("stdout = %q, want nothing -- the binary skip is the one the "+
-				"design took with a measurement, and it is allowed", stdout)
+		// Allowed, and no longer in silence. Both halves are asserted here
+		// because either one alone passes for the wrong reason: a notice with
+		// a decision object beside it is a block wearing a notice's text, and
+		// an allow with nothing on stdout is the state this row was filed
+		// about.
+		got := decision(t, stdout)
+		if _, ok := got["hookSpecificOutput"]; ok {
+			t.Errorf("the binary skip carries a decision object, so it is not "+
+				"allowed: %q", stdout)
+		}
+		message, ok := got["systemMessage"].(string)
+		if !ok {
+			t.Fatalf("stdout carries no systemMessage, so the allowed skip told "+
+				"nobody: %q", stdout)
+		}
+		if !strings.Contains(message, string(scan.SkippedBinary)) {
+			t.Errorf("the notice does not say why the buffer went unread: %q", message)
+		}
+		if !strings.Contains(message, skipped) {
+			t.Errorf("the notice does not name the file that went unread: %q", message)
+		}
+		if !strings.HasPrefix(message, "spill-guard: ") {
+			t.Errorf("the notice does not open with the name of the hook that "+
+				"emitted it, which is the only record a session keeps: %q", message)
 		}
 
 		control := filepath.Join(dir, "deploy.env")
@@ -589,5 +611,51 @@ func TestAReadCallNamingADirectorySaysSo(t *testing.T) {
 	}
 	if reason := reasonOf(t, stdout); !strings.Contains(reason, "names a directory") {
 		t.Errorf("reason = %q, want it to name the directory case", reason)
+	}
+}
+
+// A call carrying both kinds of skip blocks, and the notice does not soften it.
+//
+// partition() is the whole of the new branch, and the direction that fails
+// quietly is a blocking buffer being sorted into the allowed pile: the call
+// would then go through wearing a notice, which reads as the hook having
+// spoken. So this drives a Bash command naming two files at once -- one UTF-32,
+// which blocks, and one binary, which alone would only be noticed.
+func TestABlockingSkipOutranksAnAllowedOneOnTheSameCall(t *testing.T) {
+	dir := t.TempDir()
+
+	declared := filepath.Join(dir, "notes.txt")
+	body := []byte{0xFF, 0xFE, 0x00, 0x00}
+	for _, r := range "the quick brown fox" {
+		body = append(body, byte(r), byte(r>>8), byte(r>>16), byte(r>>24))
+	}
+	if err := os.WriteFile(declared, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	image := filepath.Join(dir, "logo.png")
+	if err := os.WriteFile(image, append([]byte{0x00}, "not a real png"...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":` +
+		strconv.Quote("cat "+declared+" "+image) + `}}`
+	code, stdout, stderr := drive(t, payload)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	got := decision(t, stdout)
+	if _, ok := got["hookSpecificOutput"]; !ok {
+		t.Fatalf("the call carries no decision object, so a buffer that declared "+
+			"itself text and went unread was allowed: %q", stdout)
+	}
+	reason := reasonOf(t, stdout)
+	if !strings.Contains(reason, string(scan.SkippedUTF32)) {
+		t.Errorf("the block does not name the reason that produced it: %q", reason)
+	}
+	// The allowed buffer is not in the block's reason, which is unread()'s
+	// list and is what the model is told it must act on. Naming a skip nothing
+	// is being asked to fix there would make the deny's own list unreadable.
+	if strings.Contains(reason, image) {
+		t.Errorf("the block names a buffer that does not block: %q", reason)
 	}
 }
