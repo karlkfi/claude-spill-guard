@@ -54,8 +54,9 @@ is not:
 **There is no release yet, so nothing here works today** — follow
 [releases](https://github.com/karlkfi/claude-spill-guard/releases) for the
 first one. The commands are written down now because the scripts in
-[`install/`](install/) already do this, and because a script you are asked to
-run should be readable at a versioned URL before you run it.
+[`install/`](install/) already carry out exactly these steps, and because a
+script you are asked to run should be readable at a versioned URL before you
+run it.
 
 macOS and Linux:
 
@@ -71,6 +72,9 @@ curl.exe -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/do
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
+Either one installs a single binary — to `~/.local/bin`, or to
+`%LOCALAPPDATA%\spill-guard\bin` on Windows — and writes nothing else.
+
 Two steps rather than one. The one-liner that pipes the script into a shell
 works, and it is not what this page leads with: for a tool whose whole pitch is
 that nothing leaves your machine, opening with "pipe this remote script into
@@ -79,8 +83,8 @@ it, read it, run it.
 
 Each script works out your OS and architecture, checks the archive's sha256
 against `checksums.txt`, and then checks the signature with whichever of
-`cosign` or `gh` you have — cosign against the keyless Sigstore signature, `gh`
-against the build provenance. With neither installed it **refuses**. The sha256
+`cosign` or `gh` you have — `cosign` against the keyless Sigstore signature,
+`gh` against the build provenance. With neither installed it **refuses**. The sha256
 is not the fallback it looks like: `checksums.txt` comes from the same place
 the archive did, so it answers corruption and not substitution, and
 authenticity needs a verifier. A machine with no verifier is what the planned

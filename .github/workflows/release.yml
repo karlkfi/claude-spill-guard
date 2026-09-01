@@ -334,12 +334,20 @@ jobs:
             echo "::error::the check could not corrupt an archive, so it never reached the comparison this control removed" >&2
             exit 1
           fi
-          # Measured on darwin/arm64 2026-08-31 against this exact mutation:
-          # gzip ignores the appended byte, so tar extracts and the finding is
-          # `accepted a corrupted archive`. The looser phrase also covers the
-          # other arm the mutation can land on -- a refusal that happened for
-          # some reason other than the digest -- and both are the comparison
-          # being gone. Nothing else this check reports names one.
+          # The phrase is loose because the mutation lands on two different
+          # arms and which one depends on the gzip, so a leg-specific string
+          # would redden somewhere. Both measured against this exact mutation:
+          #
+          #   darwin/arm64 -- BSD gzip ignores the appended byte, tar extracts,
+          #     and the finding is `accepted a corrupted archive`.
+          #   ubuntu-latest -- GNU gzip rejects it (`gzip: stdin: unexpected end
+          #     of file`), so the script stops at the extract and the finding is
+          #     `refused a corrupted archive and not for that reason`.
+          #
+          # Read from job 99688412664 on 7195bca for the ubuntu arm, and
+          # reproduced locally for the darwin one. Both are the comparison being
+          # gone, which is what this control asserts; nothing else this check
+          # reports names a corrupted archive.
           if ! grep -q 'a corrupted archive' mutant.log; then
             echo "::error::the check failed, and not on the corrupted archive" >&2
             exit 1

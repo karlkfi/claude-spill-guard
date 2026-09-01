@@ -26,10 +26,18 @@
 #
 # It refuses when neither is installed. `cosign` and `gh` are two verifiers of
 # one property rather than a strict mode and a lax one, so the question was
-# never fail-closed against reach -- and refusing costs reach almost nothing
-# anyway, since the Homebrew formula and the Scoop manifest pin the sha256
-# themselves and ask the user for no tool at all. The argument is in
+# never fail-closed against reach. The argument is in
 # docs/design/distribution.md under "Settled".
+#
+# One leg of that argument is not true yet, which is why the refusal below
+# names neither channel. It says refusing costs reach almost nothing because
+# the Homebrew formula and the Scoop manifest pin the sha256 themselves and ask
+# the user for no tool at all -- and neither exists: .goreleaser.yaml carries no
+# `brews:` and no `scoops:` block, and Q13 and Q14 are both still open. Until
+# they land, a refused user is a user with nowhere else to go, so the message
+# names what actually works today. Sending them to `brew install
+# karlkfi/tap/spill-guard` would be telling somebody who is already stuck to run
+# a command that fails.
 #
 # POSIX sh, because the documented invocation is `sh install.sh` and that is
 # dash on Debian and Ubuntu: no `local`, no arrays, no `pipefail`, no `[[`.
@@ -104,7 +112,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-NO_VERIFIER='neither cosign nor gh is installed, so nothing here could establish that an archive came from this repository. The sha256 check answers corruption and not substitution, so it is not a fallback. Install one of them -- `brew install cosign`, or gh from https://cli.github.com -- or install through Homebrew or Scoop, which pin the sha256 themselves and ask you for no tool at all.'
+NO_VERIFIER='neither cosign nor gh is installed, so nothing here could establish that an archive came from this repository. The sha256 check answers corruption and not substitution, so it is not a fallback. Install either one and run this again -- `brew install cosign`, or gh from https://cli.github.com. With a Go toolchain and no wish to install either, `go install github.com/karlkfi/claude-spill-guard/cmd/spill-guard@latest` builds from source and the module checksum database does the verifying instead.'
 
 # Which verifier this machine has, as a name on stdout, or a non-zero exit.
 # Resolved without touching the network, which is what lets `--verifier` answer
@@ -133,7 +141,7 @@ if [ "$mode" = verifier ]; then
 fi
 
 command -v curl >/dev/null 2>&1 ||
-	die 'curl is not installed, and it is what this script downloads with. Install curl, or use `brew install karlkfi/tap/spill-guard`.'
+	die 'curl is not installed, and it is what this script downloads with. Install curl and run this again.'
 
 case "$(uname -s)" in
 Darwin) goos=darwin ;;

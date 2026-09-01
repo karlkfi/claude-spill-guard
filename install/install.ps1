@@ -5,17 +5,16 @@
 #   curl.exe -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/download/install.ps1
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
-# The one-liner that pipes this into a shell works and is not what the README
-# leads with. For a tool whose whole pitch is that nothing leaves your machine,
-# opening with "pipe this remote script into your shell" undercuts the claim
-# before a reader reaches the second paragraph.
+# Two steps rather than one, for the reason install.sh's header gives.
 #
 # This is install.sh's argument in PowerShell, and the verification is the same
 # in the same order: the archive's sha256 against checksums.txt always, then
 # the signature with cosign if it is installed, else `gh attestation verify`,
-# and a refusal when neither is. The reasoning is in install.sh's header and in
-# docs/design/distribution.md under "Settled"; it is not repeated here, because
-# two copies of an argument are two things to keep in step.
+# and a refusal when neither is -- which names no install channel, because
+# neither the Homebrew tap nor the Scoop bucket exists yet. The reasoning for
+# all of it is in install.sh's header and in docs/design/distribution.md under
+# "Settled". None of it is repeated here, because two copies of an argument are
+# two things to keep in step.
 #
 # One thing genuinely differs. install.sh resolves `latest` by reading the URL
 # curl's redirect landed on, because POSIX sh cannot parse JSON without a tool
@@ -43,6 +42,17 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# UNMEASURED, and set anyway because it costs nothing on either side of the
+# version it is about. From PowerShell 7.4 $PSNativeCommandUseErrorActionPreference
+# defaults to $true, which with the line above would turn a non-zero exit from
+# cosign, gh or the installed binary into a terminating error -- so the
+# `if ($LASTEXITCODE -ne 0) { Die ... }` after each of those three calls would
+# never run and the written refusal would be replaced by a raw exception. It
+# still fails closed either way; what is lost is the message. There is no
+# PowerShell on the machine this was written on, so the 7.4 default is a claim
+# nobody here has read. Assigning it is inert on 5.1, where the variable does
+# not exist.
+$PSNativeCommandUseErrorActionPreference = $false
 # Invoke-WebRequest's progress bar costs more than the download does on 5.1.
 $ProgressPreference = 'SilentlyContinue'
 
@@ -50,7 +60,7 @@ $Repo = 'karlkfi/claude-spill-guard'
 $Workflow = '.github/workflows/release.yml'
 $OidcIssuer = 'https://token.actions.githubusercontent.com'
 
-$NoVerifier = 'neither cosign nor gh is installed, so nothing here could establish that an archive came from this repository. The sha256 check answers corruption and not substitution, so it is not a fallback. Install one of them -- `winget install sigstore.cosign`, or gh from https://cli.github.com -- or install through Scoop, which pins the sha256 itself and asks you for no tool at all.'
+$NoVerifier = 'neither cosign nor gh is installed, so nothing here could establish that an archive came from this repository. The sha256 check answers corruption and not substitution, so it is not a fallback. Install either one and run this again -- `winget install sigstore.cosign`, or gh from https://cli.github.com. With a Go toolchain and no wish to install either, `go install github.com/karlkfi/claude-spill-guard/cmd/spill-guard@latest` builds from source and the module checksum database does the verifying instead.'
 
 # The console streams by name rather than Write-Host, which writes to the
 # host's information stream: a caller capturing `... 2>&1` gets nothing from
