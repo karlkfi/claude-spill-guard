@@ -53,7 +53,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -148,13 +150,17 @@ def hosts():
     return found
 
 
-def flag(label, name, value=None):
-    """A flag as the script's own shell spells it. install.sh takes
-    --rehearse; install.ps1 takes -Rehearse."""
-    if label == "sh":
-        spelling = "--" + name.lower()
-    else:
+def flag(name, value=None):
+    """A flag as the script that runs here spells it. install.sh takes
+    --rehearse; install.ps1 takes -Rehearse.
+
+    Keyed on the platform rather than on a host's label: install.sh runs
+    nowhere but POSIX and install.ps1 nowhere but Windows, so the platform is
+    the fact, and a label is a string somebody may add another of."""
+    if WINDOWS:
         spelling = "-" + name[0].upper() + name[1:]
+    else:
+        spelling = "--" + name.lower()
     return [spelling] if value is None else [spelling, value]
 
 
@@ -260,7 +266,20 @@ def main(argv):
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         for label, launch in shells:
-            findings += drive(label, launch, dist, tmp, archive, version)
+            try:
+                findings += drive(label, launch, dist, tmp, archive, version)
+            except Exception:
+                # The contract at the top of this file is that one run reports
+                # every finding, and an exception escaping one shell breaks it
+                # in the direction that hides work already done: the shells
+                # before it accumulated findings that are then never printed.
+                # Measured on windows-latest 2026-09-01, where a FileExistsError
+                # under the second PowerShell discarded everything the first had
+                # found. So a crash becomes a finding and the next shell runs.
+                findings.append(
+                    f"[{label}] the check itself failed while driving this "
+                    f"shell, so this shell asserted nothing:\n"
+                    + textwrap.indent(traceback.format_exc().rstrip(), "    "))
 
     for entry in findings:
         print(f"install-scripts: {entry}", file=sys.stderr)
@@ -282,16 +301,25 @@ def drive(label, launch, dist, tmp, archive, version):
     binary = "spill-guard.exe" if WINDOWS else "spill-guard"
     n = 0
 
+    # Under its own directory, because Windows drives install.ps1 twice -- once
+    # per PowerShell -- and the counter below restarts with each call. Sharing
+    # the parent made the second host's first copytree land on a directory the
+    # first host had already made, which is a FileExistsError rather than a
+    # finding: it aborts the run, so the first host's findings are accumulated
+    # and never printed. Measured on windows-latest 2026-09-01, and reproduced
+    # here by driving `sh` twice.
+    root = tmp / "".join(c if c.isalnum() else "-" for c in label)
+    root.mkdir()
+
     def where(what):
         nonlocal n
         n += 1
-        path = tmp / f"{what}-{n}"
-        return path
+        return root / f"{what}-{n}"
 
     def rehearse(base, dest):
-        return (flag(label, "version", version)
-                + flag(label, "rehearse", base)
-                + flag(label, "dir", str(dest)))
+        return (flag("version", version)
+                + flag("rehearse", base)
+                + flag("dir", str(dest)))
 
     # The whole point, and the arm every other one is a control on.
     dest = where("installed")
@@ -325,7 +353,7 @@ def drive(label, launch, dist, tmp, archive, version):
     # and it is also the answer that leaves the mutation below nothing to hide
     # -- so the same read decides both, and says out loud when the arm did not
     # run.
-    verifier_rc, verifier_out = run(launch, flag(label, "verifier"))
+    verifier_rc, verifier_out = run(launch, flag("verifier"))
     if verifier_rc != 0:
         if "neither cosign nor gh" not in verifier_out:
             findings.append(f"[{label}] --verifier exited {verifier_rc} "
@@ -371,7 +399,7 @@ def drive(label, launch, dist, tmp, archive, version):
     if verifier_rc == 0:
         empty = where("empty")
         empty.mkdir()
-        rc, out = run(launch, flag(label, "verifier"), blind_env(empty))
+        rc, out = run(launch, flag("verifier"), blind_env(empty))
         if rc == 0:
             findings.append(f"[{label}] the no-verifier mutation hid nothing "
                             f"-- the script resolved one anyway, so the arm "
@@ -383,8 +411,8 @@ def drive(label, launch, dist, tmp, archive, version):
     # --rehearse must not be usable as an install path. It skips the signature,
     # so aiming it at the release would install an unverified archive from the
     # one place that can be verified.
-    rc, out = run(launch, flag(label, "version", version)
-                  + flag(label, "rehearse",
+    rc, out = run(launch, flag("version", version)
+                  + flag("rehearse",
                          "https://github.com/karlkfi/claude-spill-guard/releases/download/v9.9.9"))
     if rc == 0:
         findings.append(f"[{label}] --rehearse accepted a github.com URL, so "
