@@ -69,6 +69,44 @@ const (
 	// UTF-16 and no measurement says the file class is worth carrying, so this
 	// build names the encoding rather than guessing at the bytes.
 	SkippedUTF32 Skip = "UTF-32: declared by a byte-order mark, and not decoded"
+	// SkippedUTF16Binary is a UTF-16 byte-order mark whose *decoded* sniff
+	// window holds a NUL. It is still the NUL check that decided -- what this
+	// separates from SkippedBinary is that the buffer declared an encoding
+	// first, which SkippedBinary's own class never does.
+	//
+	// The distinction is internal/hook's rather than this package's, and it is
+	// carried here because this is the only stage that can still see it: by the
+	// time a Result is returned, the mark is gone and both cases are a NUL in
+	// eight kilobytes. Two things turn on it, one of them a bug this closes.
+	//
+	// The verdict. A buffer this stage decoded is text it read, so it can hold
+	// credential-shaped bytes whatever its decoded prefix looks like, and
+	// internal/hook blocks on that where it allows the undecoded class.
+	//
+	// Declaration is the axis the design keys on, and decode reads two of the
+	// three marks: UTF-8's is a declaration it does not read. EF BB BF is a
+	// byte-order mark by the same registry as FF FE, so such a buffer falls to
+	// the default arm, its NUL is read raw, and it comes back SkippedBinary and
+	// is allowed. Driven end to end -- the same key after a NUL under a UTF-8
+	// mark exits 0 on empty stdout, while the no-NUL control denies at byte 29
+	// rather than 26, the three bytes of the mark scanned as ordinary content,
+	// which is what having no arm looks like from outside this package.
+	//
+	// So the gap is named rather than defined away. Saying the axis is whichever
+	// declaration this build happens to route on would make the law true by
+	// construction and unfalsifiable, which is how this one got through. Whether
+	// decode should grow that arm is its own row.
+	//
+	// And the ambiguity in FF FE 00 00, which is the half no frequency argument
+	// reaches. Those bytes are the UTF-32LE mark and equally a UTF-16LE mark
+	// followed by U+0000; decode resolves them the way the Unicode standard
+	// does, longer mark first. So before this constant existed the same UTF-16
+	// buffer got two different verdicts depending on where its NUL sat -- a
+	// leading one returned SkippedUTF32, which internal/hook blocks, and one
+	// character later returned SkippedBinary, which it allows. The pair is
+	// TestAUTF16NULIsNamedAsDeclaredWhereverItSits here and
+	// TestADeclaredUTF16BufferWithANULBlocks in internal/hook.
+	SkippedUTF16Binary Skip = "UTF-16: declared by a byte-order mark, and a NUL byte in the first 8 KiB of the decoded text"
 )
 
 // A Result is what the pipeline made of one buffer.

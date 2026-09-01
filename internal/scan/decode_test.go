@@ -276,16 +276,88 @@ func TestDecodeUTF16StopsAtTheLimit(t *testing.T) {
 
 // A UTF-16 buffer whose text really does hold a NUL is binary, and the decode
 // is what makes that a statement about the text rather than about the encoding.
+//
+// That rule is unchanged and this test still asserts it: the buffer is skipped,
+// and it is skipped because IsBinary read a NUL in the decoded text. What moved
+// is the name. SkippedUTF16Binary records that the buffer declared an encoding
+// before the NUL check ran, which SkippedBinary's own class -- an image, an
+// executable, UTF-16 with no mark -- never does, and internal/hook keys its
+// verdict on exactly that declaration. So the constant carries more of what
+// this test always meant rather than reversing it: the encoding claim and the
+// content finding are both facts about the buffer, and one label could only
+// ever carry one of them.
 func TestBufferSkipsAUTF16BufferThatDecodesToBinary(t *testing.T) {
 	// Not at the very start: FF FE 00 00 is the UTF-32LE mark and takes another
-	// branch, which is a different assertion.
+	// branch, which is a different assertion -- and the one below.
 	buf := append(encodeUTF16("a", false), 0x00, 0x00)
 	got, err := Buffer("a.bin", buf, load(t, awsRule))
 	if err != nil {
 		t.Fatalf("Buffer: %v", err)
 	}
-	if got.Skipped != SkippedBinary {
-		t.Errorf("Skipped is %q, want %q", got.Skipped, SkippedBinary)
+	if got.Skipped != SkippedUTF16Binary {
+		t.Errorf("Skipped is %q, want %q", got.Skipped, SkippedUTF16Binary)
+	}
+	// The half the constant exists for, and the half a rename alone would
+	// satisfy without buying anything: this must not read as the undeclared
+	// class, because internal/hook allows that one.
+	if got.Skipped == SkippedBinary {
+		t.Error("a declared buffer reports the undeclared class's reason")
+	}
+}
+
+// The ambiguity in FF FE 00 00, which is what the split is really for. Those
+// four bytes are the UTF-32LE mark and equally a UTF-16LE mark followed by
+// U+0000, and decode resolves them longer-mark-first, as Unicode says to.
+//
+// So one UTF-16LE buffer holding a NUL in its sniff window takes a different
+// branch from another depending only on where the NUL sits. Both branches have
+// to name a declared encoding, because internal/hook routes on the declaration
+// and these two reasons used to fall on opposite sides of it: the leading-NUL
+// buffer blocked as UTF-32 and its neighbour, one character later, was allowed.
+func TestAUTF16NULIsNamedAsDeclaredWhereverItSits(t *testing.T) {
+	ruleset := load(t, awsRule)
+	// One body, so the three buffers below differ by the NUL and its position
+	// and by nothing else. The assignment prefix is not decoration: the rule
+	// needs a word boundary in front of the key, and a bare concatenation puts
+	// a letter there -- which reports zero findings for a reason that has
+	// nothing to do with the skip and would make the control below vacuous.
+	body := "AWS_ACCESS_KEY_ID=" + key
+	for _, tc := range []struct {
+		name string
+		text string
+		want Skip
+	}{
+		{"NUL first", "\x00" + body, SkippedUTF32},
+		{"NUL second", "#\x00" + body, SkippedUTF16Binary},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Buffer("creds.env", encodeUTF16(tc.text, false), ruleset)
+			if err != nil {
+				t.Fatalf("Buffer: %v", err)
+			}
+			if got.Skipped != tc.want {
+				t.Errorf("Skipped is %q, want %q", got.Skipped, tc.want)
+			}
+			if got.Skipped == SkippedBinary {
+				t.Error("a UTF-16 buffer reports the undeclared class's reason, " +
+					"which internal/hook allows -- the key in it crosses")
+			}
+			if len(got.Findings) != 0 {
+				t.Errorf("an unread buffer produced %+v", got.Findings)
+			}
+		})
+	}
+	// The control on both arms: the same shape without the NUL is read and the
+	// key is found, so the skips above are the skip rather than a buffer with
+	// nothing in it to report.
+	got, err := Buffer("creds.env", encodeUTF16("#"+body, false), ruleset)
+	if err != nil {
+		t.Fatalf("control: Buffer: %v", err)
+	}
+	if got.Skipped != Scanned || len(got.Findings) != 1 {
+		t.Fatalf("control: Skipped is %q with %d finding(s), want Scanned with 1 "+
+			"-- the assertions above are not distinguishing anything",
+			got.Skipped, len(got.Findings))
 	}
 }
 
@@ -387,8 +459,8 @@ func TestDecodeSniffsBeforeDecodingTheRest(t *testing.T) {
 	text, _, skip := decode(buf)
 	runtime.ReadMemStats(&after)
 
-	if skip != SkippedBinary {
-		t.Fatalf("skip is %q, want %q -- nothing is being saved", skip, SkippedBinary)
+	if skip != SkippedUTF16Binary {
+		t.Fatalf("skip is %q, want %q -- nothing is being saved", skip, SkippedUTF16Binary)
 	}
 	if text != nil {
 		t.Errorf("a skipped buffer came back with %d bytes of text", len(text))

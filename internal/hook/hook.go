@@ -202,21 +202,29 @@ type skipped struct {
 // docs/design/README.md, "The verdict is per reason and not per surface", has
 // the table and what the corpus cannot answer.
 //
-// The class is not all non-text, and it holds two text populations rather than
-// one. UTF-16 written with no mark is the design's stated gap
+// The class is not all non-text, and it used to hold two text populations
+// rather than one. UTF-16 written with no mark is the design's stated gap
 // (docs/design/README.md, "Pipeline" step 2): nothing in such a buffer declares
 // anything, so separating it is the heuristic the NUL check was chosen instead
-// of. The second did declare itself -- a UTF-16 mark whose decoded sniff window
-// holds a U+0000 -- and internal/scan classifies it as binary on purpose, after
-// decoding it, on the rule that a NUL in the decoded text is a statement about
-// the text rather than about the encoding. That is pinned on the trunk by
-// TestBufferSkipsAUTF16BufferThatDecodesToBinary and predates this verdict.
+// of, and it stays here. The second did declare itself -- a UTF-16 mark whose
+// decoded sniff window holds a U+0000 -- and it satisfied the description of
+// what blocks and was allowed anyway, because internal/scan routes on decoded
+// content where this routes on declaration.
 //
-// So the second population satisfies the description of what blocks and is
-// allowed anyway, because internal/scan routes on decoded content where this
-// routes on declaration, and the two disagree for exactly that case. One Skip
-// constant is standing for two situations, and splitting it is a decode-stage
-// change rather than a verdict one. Q91 carries it, with the measurement.
+// That one is now scan.SkippedUTF16Binary and lands on the default arm below,
+// which is the whole of the change: no case here, no signature, and the reason
+// carries the declaration this switch was always keyed on. internal/scan still
+// classifies the buffer binary and still does it on the decoded content, which
+// is what TestBufferSkipsAUTF16BufferThatDecodesToBinary has pinned since
+// before this verdict existed and still pins.
+//
+// The argument for it is not how often the class turns up -- measured, 2 of
+// 40,416 Bash operands carry a UTF-16 mark and neither decodes to binary. It is
+// that FF FE 00 00 is both the UTF-32LE mark and a UTF-16LE mark followed by
+// U+0000, so before the split the same UTF-16 buffer blocked or was allowed
+// depending on where its NUL sat. A verdict should not turn on an ambiguity the
+// Unicode standard leaves open, and now it does not: both readings block, and
+// they differ only over which encoding to name.
 //
 // Anything else blocks. A Skip this switch does not know is internal/scan having
 // grown a reason internal/hook was not taught, and allowing it would be the

@@ -470,6 +470,16 @@ func TestASkipReasonThisPackageWasNotTaughtBlocks(t *testing.T) {
 	if !blocks(scan.SkippedUTF32) {
 		t.Error("SkippedUTF32 does not block")
 	}
+	// Q91's constant reaches the default arm on purpose rather than by
+	// omission: it is a declared encoding, so it blocks for the reason
+	// SkippedUTF32 does, and there is no case for it because the default
+	// already gives that answer. Asserted here so the reasoning is exercised
+	// and not merely written down -- adding a case returning false would leave
+	// every other assertion in this test green.
+	if !blocks(scan.SkippedUTF16Binary) {
+		t.Error("SkippedUTF16Binary does not block; a declared encoding whose " +
+			"decoded text is binary is still a buffer that declared itself text")
+	}
 }
 
 // utf16bom is a UTF-16 buffer with its mark, for the pin below. The first
@@ -491,17 +501,22 @@ func utf16bom(t *testing.T, s string, bigEndian bool) []byte {
 	return out
 }
 
-// The one population that satisfies blocks()' description of what blocks and is
-// allowed anyway. A UTF-16 mark declares the buffer text; internal/scan decodes
-// it, finds a U+0000 in the sniff window, and returns SkippedBinary, which this
-// package allows. So declaration and decoded content disagree here and the
-// decoded side wins.
+// The population that used to satisfy blocks()' description of what blocks and
+// be allowed anyway. A UTF-16 mark declares the buffer text; internal/scan
+// decodes it and finds a U+0000 in the sniff window. That returned
+// SkippedBinary, which this package allows, so declaration and decoded content
+// disagreed and the decoded side won.
 //
-// This pins what the tree does, not what it should do. blocks()' comment now
-// describes this case, and a comment nothing exercises is the next one to go
-// stale -- so if a decode-stage change makes such a buffer block, this test is
-// meant to fail and be rewritten, and Q91 is where that argument lives.
-func TestADeclaredUTF16BufferWithANULIsAllowed(t *testing.T) {
+// The predecessor of this test pinned that, said it pinned what the tree did
+// rather than what it should do, and named the row that would rewrite it. This
+// is the rewrite: internal/scan returns SkippedUTF16Binary now, which reaches
+// blocks() as a reason it was never taught and blocks on the default arm.
+//
+// Nothing about the decode changed. The buffer is still classified binary and
+// still classified so on its decoded content -- what it also carries now is
+// that an encoding was declared before that check ran, which is the fact this
+// package's verdict was always keyed on and the one the old constant dropped.
+func TestADeclaredUTF16BufferWithANULBlocks(t *testing.T) {
 	read := func(t *testing.T, path string) (int, string, string) {
 		t.Helper()
 		return drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
@@ -527,9 +542,17 @@ func TestADeclaredUTF16BufferWithANULIsAllowed(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
 			}
-			if stdout != "" {
-				t.Errorf("stdout = %q, want nothing -- this buffer reaches blocks() "+
-					"as SkippedBinary, which is allowed", stdout)
+			if stdout == "" {
+				t.Fatalf("stdout is empty, so the call was allowed -- a declared " +
+					"UTF-16 buffer holding a key crossed with nothing said")
+			}
+			// The reason, not just the block. What this buffer's user can act
+			// on is being told the encoding and that the decoded text is what
+			// held the NUL; the undeclared class's phrase would tell them their
+			// file is binary, which for a PowerShell-written .env it is not.
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, string(scan.SkippedUTF16Binary)) {
+				t.Errorf("the reason is %q, and it does not name the declared "+
+					"UTF-16 skip", reason)
 			}
 
 			// The control, and it is what stops the assertion above being
