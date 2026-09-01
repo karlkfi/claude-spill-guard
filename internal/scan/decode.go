@@ -19,9 +19,16 @@ import (
 // Dropping these two cases does not let a UTF-32 file through -- measured, and
 // it is the reason to say what the branch buys. Read as UTF-16 the file decodes
 // to alternating NULs and the binary check takes it anyway, so what changes is
-// the sentence: a user with a UTF-32 file is told the encoding this build does
-// not read instead of being told their text is binary, which is a wrong answer
-// that happens to end in the right place.
+// the sentence a user gets: the encoding this build does not read, instead of a
+// NUL in their decoded text, which is a wrong answer that ends in the right
+// place.
+//
+// It is only the sentence now. FF FE 00 00 is genuinely both marks, so which
+// one wins here used to decide block against allow -- the UTF-32 arm blocks and
+// the binary skip does not. Since the UTF-16 arm returns SkippedUTF16Binary the
+// two readings agree on the verdict and disagree only about which encoding to
+// name, which is the most an ambiguity the standard leaves open should ever
+// cost. TestAUTF16NULIsNamedAsDeclaredWhereverItSits is the pair.
 var (
 	bomUTF32LE = []byte{0xFF, 0xFE, 0x00, 0x00}
 	bomUTF32BE = []byte{0x00, 0x00, 0xFE, 0xFF}
@@ -63,7 +70,10 @@ func decode(buf []byte) (text []byte, source func(int) int, skip Skip) {
 		// reads at most sniffLimit bytes, so any prefix reaching sniffLimit
 		// decides identically to the whole buffer.
 		if IsBinary(decodeUTF16(body, bigEndian, sniffLimit)) {
-			return nil, source, SkippedBinary
+			// Not SkippedBinary. The check is the same one; the buffer that
+			// failed it declared an encoding first, and the constant is where
+			// that survives -- see its comment for the two things keyed on it.
+			return nil, source, SkippedUTF16Binary
 		}
 		return decodeUTF16(body, bigEndian, noLimit),
 			func(at int) int { return mark + utf16Source(body, bigEndian, at) },

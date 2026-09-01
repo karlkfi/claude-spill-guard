@@ -418,6 +418,13 @@ not need to do.
    is exactly the heuristic the NUL check was chosen instead of. It is a
    stated gap rather than a silent one, which is what step 6 is for.
 
+   The check gives two reasons, not one, and which it gives is decided by
+   whether step 1 decoded. A buffer that declared a UTF-16 mark and whose
+   *decoded* window holds a NUL is still skipped, and by this same check — but
+   it declared an encoding first, and that is a fact about it the undeclared
+   class never has. Step 6 keys on the declaration, so the two cannot share a
+   reason without the verdict losing the thing it routes on.
+
 3. **Literal prefilter.** Word-boundary search for each credential rule's
    keywords, 255–307 MiB/s against 1.0 MiB/s for the regex pass — roughly 280x.
    Use word boundaries, not `strings.Contains`: naive matching finds `sk-`
@@ -647,19 +654,56 @@ image read is not a convenience cost: a hook that does it gets uninstalled, and
 an uninstalled scanner enforces nothing, which lands on the same side of the
 ledger as failing open.
 
-The residue is stated rather than closed, and it is two populations rather than
-one. UTF-16 written with no mark lands in the binary skip and is allowed with
-it — step 2's own stated gap, where nothing declares anything and separating it
-is the heuristic the NUL check was chosen instead of. The second one *did*
-declare itself: a UTF-16 mark whose decoded sniff window holds a `U+0000` is
-classified as binary deliberately, after the decode, on the rule that a NUL in
-decoded text describes the text rather than the encoding. That population
-satisfies the description of what blocks and is allowed anyway, because step 2
-routes on decoded content where this routes on declaration.
+The residue was two populations rather than one, and one of them is now closed.
+UTF-16 written with no mark lands in the binary skip and is allowed with it —
+step 2's own stated gap, where nothing declares anything and separating it is
+the heuristic the NUL check was chosen instead of. That one stands. The second
+*did* declare itself: a UTF-16 mark whose decoded sniff window holds a `U+0000`
+is classified as binary deliberately, after the decode, on the rule that a NUL
+in decoded text describes the text rather than the encoding. It satisfied the
+description of what blocks and was allowed anyway, because step 2 routed on
+decoded content where this routes on declaration and one skip reason stood for
+both.
 
-Neither is settled by this verdict, and the second is not a defect in step 2
-read on its own terms. They are two rules meeting, and Q91 carries the
-measurement and what a split would cost.
+#### A declared encoding whose decoded text is binary blocks
+
+Step 2 gives that case its own reason now, so it arrives here as a reason
+nothing was taught and blocks on the fail-closed default. The classification is
+untouched — the buffer is still binary, and still binary because of its decoded
+content, which is step 2's rule read on its own terms and was never the thing in
+dispute. What a separate reason adds is the declaration, which is what this
+verdict has always routed on.
+
+**The argument is not how often the class turns up, and this repository cannot
+find out.** Measured 2026-08-31, twice. Over the same session corpus as the
+section below: 2 of 40,416 `Bash` operands carry a UTF-16 mark, neither of them
+decoding to binary, and the `Read` and prompt surfaces have none at all. Over
+this machine's filesystem — 6,585,005 files under `~/workspace`, `~/.claude`,
+`~/go` and the Go toolchain — 38 files carry a UTF-16 mark, **none** decodes to
+binary, and nothing carries a UTF-32 mark. Every one of the 38 is a copy of this
+repository's own planted fixture, spread across worktrees.
+
+Both numbers are close to worthless for the question, and step 1 says why: the
+file class the decode exists for is Windows PowerShell 5.1, and there is no
+`pwsh` on the runners or on a maintainer's Mac. A near-zero drawn from machines
+that cannot produce the population is not evidence the population is rare — it
+is a measurement of the platform. Nothing available here can put a number on how
+often a Windows-authored file lands in this class, so the case for the split had
+to be made on something other than frequency.
+
+**What settles it is `FF FE 00 00`.** Those bytes are the UTF-32LE mark and
+equally a UTF-16LE mark followed by `U+0000`, and step 1 resolves them
+longer-mark-first because that is what the Unicode standard says to do. Before
+the split, that resolution decided *block against allow*: a UTF-16LE buffer
+whose first character was a `U+0000` took the UTF-32 arm and blocked, while the
+same buffer with the `U+0000` one character later took the binary skip and was
+allowed. Two neighbours, the same encoding, the same credential, opposite
+verdicts, and the only difference between them an ambiguity nobody here chose.
+Now both block, and the two readings differ only over which encoding to name —
+the most such an ambiguity should ever cost.
+`TestAUTF16NULIsNamedAsDeclaredWhereverItSits` is that pair. Undo the split and
+it fails on the `NUL second` arm alone: `NUL first` stays green, because it
+never went through the UTF-16 branch.
 
 #### The verdict is per reason and not per surface, measured
 

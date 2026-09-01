@@ -48,11 +48,26 @@ is narrowed to why: it is a file the model can write, so honouring a
 disablement in it is a question about a bypass rather than a loader change.
 
 A buffer the pipeline declined to read is now a verdict rather than a field
-nobody consumes, and the two reasons do not get the same one: a declared
-encoding this build cannot decode blocks, and the binary skip does not, because
-that one the design chose against a measurement. `blocks` in
+nobody consumes, and the axis is declaration rather than content: a buffer that
+declared an encoding blocks, and one that declared nothing does not, because
+that second case the design chose against a measurement. So a UTF-32 mark
+blocks, a UTF-16 mark whose *decoded* text holds a NUL blocks, and a NUL in a
+buffer nothing declared — an image, an executable, UTF-16 written with no
+mark — is allowed. `blocks` in
 [`internal/hook/hook.go`](internal/hook/hook.go) carries the argument, and a
-skip reason it has not been taught blocks.
+skip reason it has not been taught blocks, which is how the middle case gets
+its verdict without a case of its own.
+
+**Two things about that middle case are settled and should not be re-derived.**
+It does not turn on frequency: 38 files in 6,585,005 on this machine carry a
+UTF-16 mark, none decodes to binary, and every one of the 38 is this repo's own
+fixture — but the decode exists for Windows PowerShell 5.1, and nothing here
+runs `pwsh`, so that zero measures the platform rather than the population. What
+settles it is that `FF FE 00 00` is both the UTF-32LE mark and a UTF-16LE mark
+followed by `U+0000`, so before the split the same UTF-16 buffer blocked or was
+allowed depending on where its NUL sat. And the surface a call arrived on is
+*not* a second axis — measured and rejected, in `docs/design/README.md` under
+"The verdict is per reason and not per surface".
 
 The plugin is real now: `hooks/hooks.json` wires the two events
 [`internal/hook`](internal/hook/hook.go) answers to, and `.claude-plugin/`
