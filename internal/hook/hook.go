@@ -192,6 +192,16 @@ type skipped struct {
 // scanner enforces nothing at all, which lands on the same side of the ledger as
 // failing open.
 //
+// That argument is about Read, and a reason is all this function is given, so it
+// governs a Bash operand and a prompt `@` target on a case that was never about
+// them. Keying the verdict on the surface as well was measured rather than
+// argued: over 1,580 local transcripts, 21 of 40,416 Bash operands are binary
+// and every one is an executable or an image opened on purpose, and the only
+// binary `@` targets in 881 prompt tokens are 4 fixtures this repo wrote. A
+// split would fire 25 times and be wrong 23 of them, so the surface stays out.
+// docs/design/README.md, "The verdict is per reason and not per surface", has
+// the table and what the corpus cannot answer.
+//
 // The class is not all non-text, and it holds two text populations rather than
 // one. UTF-16 written with no mark is the design's stated gap
 // (docs/design/README.md, "Pipeline" step 2): nothing in such a buffer declares
