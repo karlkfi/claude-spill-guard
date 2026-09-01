@@ -280,3 +280,51 @@ func TestAnIndirectlyNamedFileBlocks(t *testing.T) {
 		t.Errorf("reason = %q, want it to name the indirection", reason)
 	}
 }
+
+// `grep -rn pat docs/` is the whole of what this refusal meets in practice --
+// 7.1% of the calls that carry a reader operand, measured over this machine's
+// transcripts -- so it says "directory" rather than reporting the mode class,
+// and it says what to do instead. Before the guard that refused it, the OS
+// error said `is a directory`; one reason for every mode would have been less
+// to go on than the tree already had.
+//
+// Pinned because the wording is the decision. Whether this should walk the
+// tree rather than refuse is Q95 and is open; a change that made the reason
+// generic again would close nothing and would read as tidying.
+func TestADirectoryOperandSaysSoAndSaysWhatToDoInstead(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "grep -rn pat sub", dir))
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 with a deny object (stderr %q)", code, stderr)
+	}
+	reason := reasonOf(t, stdout)
+	if !strings.Contains(reason, "names a directory") {
+		t.Errorf("reason = %q, want it to name the directory case", reason)
+	}
+	if !strings.Contains(reason, "name the files instead") {
+		t.Errorf("reason = %q, want it to carry the remedy", reason)
+	}
+	if strings.Contains(reason, "neither a file nor a directory") {
+		t.Errorf("reason = %q, want the directory case told apart from a fifo", reason)
+	}
+}
+
+// The reason a deny carries is read by the model, and `verdict.go` argues that
+// naming SPILL_GUARD_OVERRIDE there hands it the bypass. The remedy above is
+// the other kind: it tells the model what to read, not how to skip reading.
+// Pinned so that making a refusal more helpful cannot quietly cross that line.
+func TestNoRefusalReasonNamesTheOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"grep -rn pat sub", "cat $HOME/x.env", "cat *.env"} {
+		_, stdout, _ := drive(t, bashCall(t, command, dir))
+		if reason := reasonOf(t, stdout); strings.Contains(reason, overrideVar) {
+			t.Errorf("the reason for %q names the hatch: %q", command, reason)
+		}
+	}
+}

@@ -75,7 +75,7 @@ func TestABashOperandNamingAFifoBlocksInsteadOfHanging(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 with a decision object", code)
 	}
-	if !strings.Contains(reasonOf(t, stdout), "not a regular file") {
+	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
 		t.Errorf("reason = %q, want it to name what it declined to open",
 			reasonOf(t, stdout))
 	}
@@ -97,7 +97,7 @@ func TestABashOperandNamingASymlinkToAFifoBlocks(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 with a decision object", code)
 	}
-	if !strings.Contains(reasonOf(t, stdout), "not a regular file") {
+	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
 		t.Errorf("reason = %q, want it to name what it declined to open",
 			reasonOf(t, stdout))
 	}
@@ -112,7 +112,7 @@ func TestAReadCallNamingAFifoBlocksInsteadOfHanging(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 with a decision object", code)
 	}
-	if !strings.Contains(reasonOf(t, stdout), "not a regular file") {
+	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
 		t.Errorf("reason = %q, want it to name what it declined to open",
 			reasonOf(t, stdout))
 	}
@@ -137,7 +137,7 @@ func TestASymlinkToARegularFileIsStillScanned(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
 	}
-	if reason := reasonOf(t, stdout); strings.Contains(reason, "not a regular file") {
+	if reason := reasonOf(t, stdout); strings.Contains(reason, "neither a file nor a directory") {
 		t.Fatalf("a symlink to a regular file was refused as one: %q", reason)
 	}
 }
@@ -154,7 +154,7 @@ func TestABashOperandNamingADeviceIsRefusedRatherThanSkipped(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 with a decision object", code)
 	}
-	if !strings.Contains(reasonOf(t, stdout), "not a regular file") {
+	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
 		t.Errorf("reason = %q, want the device refused rather than skipped",
 			reasonOf(t, stdout))
 	}

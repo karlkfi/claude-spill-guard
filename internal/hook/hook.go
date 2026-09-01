@@ -315,11 +315,22 @@ func toolTargets(call payload) ([]target, error) {
 		// The decision that was close on the Bash surface is not close here.
 		// A `/dev/null` operand is a real idiom there and had to be weighed;
 		// a Read call carries one path, chosen because the model wants what
-		// is in it, and a device is not that. So this refuses the whole class
-		// with no carve-out to argue about.
+		// is in it, and a device is not that. Counted rather than asserted:
+		// of 9,719 Read calls in this machine's transcripts, 0 name a path
+		// under /dev/. So the whole class is refused with no carve-out.
+		//
+		// A directory says so, for bash.go's reason: it is the case a user
+		// actually meets, and one reason for every mode would say less than
+		// the OS error this replaced.
+		if info.IsDir() {
+			return nil, errors.New("the Read call names a directory, and this " +
+				"reads files rather than listing them, so what it would send " +
+				"was not read")
+		}
 		if !info.Mode().IsRegular() {
-			return nil, errors.New("the Read call names something that is not a " +
-				"regular file, so what it would send cannot be read here")
+			return nil, errors.New("the Read call names something that is " +
+				"neither a file nor a directory, so what it would send cannot " +
+				"be read here")
 		}
 		buf, err := os.ReadFile(*in.FilePath)
 		if err != nil {

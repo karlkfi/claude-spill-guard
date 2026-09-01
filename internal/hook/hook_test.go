@@ -553,3 +553,18 @@ func TestADeclaredUTF16BufferWithANULIsAllowed(t *testing.T) {
 		})
 	}
 }
+
+// The Read arm's directory case, told apart from a fifo for bash.go's reason.
+// Before the guard the OS error said `is a directory`; the refusal replaced it
+// and has to say at least as much.
+func TestAReadCallNamingADirectorySaysSo(t *testing.T) {
+	dir := t.TempDir()
+	code, stdout, stderr := drive(t, `{"hook_event_name":"PreToolUse",`+
+		`"tool_name":"Read","tool_input":{"file_path":`+quote(t, dir)+`}}`)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 with a deny object (stderr %q)", code, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "names a directory") {
+		t.Errorf("reason = %q, want it to name the directory case", reason)
+	}
+}
