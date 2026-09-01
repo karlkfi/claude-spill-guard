@@ -30,7 +30,8 @@ measured.
 | `scripts/` | The gate scripts CI runs, `check-install-scripts.py` which only the release workflow can run, and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
-| `hooks/` | Not those. The launcher Claude Code invokes, which resolves the binary and denies when it cannot find one. |
+| `hooks/` | Not those. `hooks.json`, the wiring Claude Code reads, and the launcher it names — which resolves the binary and denies when it cannot find one. |
+| `.claude-plugin/` | `plugin.json` and `marketplace.json`. The only place a version is written, and the two have to carry the same one. |
 | `install/` | `install.sh` and `install.ps1`, the fallback channel. Here so they are reviewable at a versioned URL, and uploaded as release assets so the documented two-step form has something to fetch. |
 | `.goreleaser.yaml` | What a tag publishes. Release-time only, and never in the shipped module. |
 
@@ -52,11 +53,33 @@ that one the design chose against a measurement. `blocks` in
 [`internal/hook/hook.go`](internal/hook/hook.go) carries the argument, and a
 skip reason it has not been taught blocks.
 
-`hooks/` still holds the launcher and nothing else: the `hooks.json` that
-invokes it and the plugin manifests beside it land together in a later item,
-because a repo that is installable as a security tool scanning nothing is the
-failure this project indicts the predecessor for. So the hook fires when it is
-driven and nothing drives it yet.
+The plugin is real now: `hooks/hooks.json` wires the two events
+[`internal/hook`](internal/hook/hook.go) answers to, and `.claude-plugin/`
+carries the manifests that make the repo installable. That order was deliberate
+— a repo installable as a security tool scanning nothing is the failure this
+project indicts the predecessor for, so the wiring waited for something to
+fire.
+
+**The matcher is held to the Go constants, not kept in step by hand.**
+`internal/hook/manifest_test.go` reads `hooks/hooks.json` and asserts set
+equality both ways against `PreToolUse`/`UserPromptSubmit` and
+`ToolRead`/`ToolBash`. Containment would only catch the loud direction. A
+matcher wider than the scanner delivers calls the hook returns clean on, and
+the hook still runs; an event the scanner handles and the manifest omits fires
+nothing at all — no payload, no verdict, no line in the transcript — so the
+surface is absent and reads exactly like a call that carried no secret.
+
+**Neither direction is readable from the source**, which is why the wiring was
+driven rather than reviewed. `claude plugin details spill-guard` reports the
+events it registered, and the first run of it reported `Hooks (0)` — the
+marketplace entry names a GitHub source, so the install cloned `main`, which
+had no manifests. That failing arm is what makes the `Hooks (2) PreToolUse,
+UserPromptSubmit` beside it worth anything.
+
+The timeout is 60 seconds, matching branch-guard. What Claude Code does with a
+hook that exceeds it is unmeasured, so the value is picked in the direction
+that cannot fail open: if expiry allows the call, a longer timeout is safer,
+and if it blocks, a longer timeout only ever costs a stall.
 
 `install/` is the fallback channel, and both scripts are driven rather than
 reviewed. `scripts/check-install-scripts.py` serves a GoReleaser dist directory
@@ -246,9 +269,29 @@ LF, block present", both true, while the launcher went on denying: the mutation
 landed and did not bite. Five such controls in one batch, three carrying an
 explicit precondition that passed.
 
-The checkable form is comparison against a case already measured — that control
-now transplants the failing arm byte for byte, 7,214 bytes verified identical,
-from the CI run that measured it failing. Where no such case exists, build one,
+The checkable form is comparison against a case already measured, and **the
+case is a file, not a recipe for producing one.** That control copies
+`testdata/launcher/lf-uniform-failing.cmd` over the launcher and asserts its
+sha256, byte count and uniform LF before driving it — 7,214 bytes,
+`d28a64b3…`, checked in because it is the exact artifact a `windows-latest`
+runner was measured failing on. The hash assertion is the load-bearing half: a
+fixture nobody checks drifts silently, which is what happened to the thing it
+replaced.
+
+What it replaced *read* as that and was not. It rebuilt the failing arm by
+patching whichever launcher was in the tree, so it landed on the measured file
+only while the launcher was the one it had been measured against — and the
+sentence describing it, "transplants the failing arm byte for byte, 7,214 bytes
+verified identical", was true of the *substitution text* and false of the
+resulting file, which is what made it read as rigorous. Shortening four deny
+strings moved the reconstruction 610 bytes, cmd.exe went on denying correctly,
+and the step failed three heads running saying the gate had failed for the
+wrong reason. Padding the mutation to raise the drift made it worse, because it
+moved the file further from 7,214 rather than nearer.
+
+**A mutation is only valid against the artifact it was measured on**, and
+nothing anywhere said the reconstruction was a reconstruction. Q103 carries the
+byte table and the class. Where no such case exists, build one,
 and give any probe whose answer matters when it is *empty* a positive control
 proving it can come back non-empty.
 
@@ -266,8 +309,10 @@ the failure.
 `spill-guard` directly: an absent binary exits 127, and only exit 2 blocks, so
 the call goes through with nothing in the transcript. Empty stdout is not what
 makes it pass — a hook exiting 2 with empty stdout still blocks — the exit code
-is. The launcher denies with a `deny` object on stdout, which blocks whatever it
-exits with. Anything `hooks.json` invokes ships executable, with the mode set in
+is. The launcher blocks with `{"decision":"block","reason":…}` on stdout, which
+blocks whatever it exits with — and that shape rather than the `PreToolUse`
+deny object, because the launcher never learns which event it was invoked for
+and the deny object is accepted and ignored on `UserPromptSubmit`. Anything `hooks.json` invokes ships executable, with the mode set in
 the git index via `git update-index --chmod=+x`. Both of those are shipped bugs
 from sibling repos, not hypotheticals. The measured table is in
 [`docs/design/README.md`](docs/design/README.md#the-exit-code-contract-measured).

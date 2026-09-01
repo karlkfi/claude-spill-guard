@@ -13,16 +13,19 @@ This directory holds the design and the reasoning behind it:
 | [`language-choice.md`](language-choice.md) | Why Go, with the measurements. Verbatim from the analysis that started the project. |
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
-**Status: it scans, and nothing invokes it yet.** `spill-guard hook` reads a
-payload, scans what the call would have sent, and blocks — driven end to end
-against a live Claude Code on 2026-08-27, where a `Read` of a file carrying a
-Slack webhook came back denied with the rule, the path and the byte offset and
-no fragment of the value. What is missing is the wiring: `hooks.json` and the
-plugin manifests are deliberately absent until there is a hook that fires, and
-now there is one. `Bash` is scanned as a command string only; its file operands
-need a per-command table of which argument is a path, and that is its own item.
-Nothing under [open questions](#open-questions) blocks that any more; the last
-of them is settled under
+**Status: it scans, and it is wired.** `spill-guard hook` reads a payload,
+scans what the call would have sent, and blocks — driven end to end against a
+live Claude Code on 2026-08-27, where a `Read` of a file carrying a Slack
+webhook came back denied with the rule, the path and the byte offset and no
+fragment of the value. `hooks/hooks.json` and the plugin manifests now point
+Claude Code at that binary, at `PreToolUse` on `Read` and `Bash` and at
+`UserPromptSubmit`; they were held back until there was a hook to fire, because
+a repo installable as a security tool scanning nothing is the failure this
+document indicts the predecessor for. `Bash` is scanned as a command string
+**and** as the files its readers are pointed at, `internal/readers` being the
+per-command table of which argument is a path. Nothing under
+[open questions](#open-questions) blocks that any more; the last of them is
+settled under
 [what gets scanned](#what-gets-scanned-is-the-crossing-not-the-hop).
 
 ## The problem
@@ -878,8 +881,26 @@ not providing on half of what it is wired to, which is this project's own
 failure mode arriving in the verdict writer.
 
 `internal/hook` therefore encodes per event: the deny object at `PreToolUse`,
-matching this table and what the launcher already writes, and `decision`/
-`reason` at `UserPromptSubmit`. Nothing derives one from the other.
+matching this table, and `decision`/`reason` at `UserPromptSubmit`. Nothing
+derives one from the other.
+
+**The launcher cannot do that, and for a while it did not have to.** It never
+learns which event it was invoked for — `hooks.json` points it at both, and the
+payload naming the event goes past on stdin, which it passes through rather
+than reads. So it wrote the deny object, matching the `PreToolUse` row and
+nothing else, and until `hooks.json` existed nothing invoked it at all. The
+moment the prompt entry was wired, a fresh install with no binary yet denied
+`Read` and `Bash` loudly and let every prompt through — half loud, which is
+worse than silent, because the visible denials are evidence the guard is live.
+Driven end to end on 2.1.251 in both directions: with the deny object the
+prompt reached the model, and with `{"decision":"block","reason":…}` it came
+back `UserPromptSubmit operation blocked by hook` with the reason verbatim.
+
+A component blind to the event has to write the row that holds for every event,
+which is the second one. `scripts/check-launcher.py` refuses the `PreToolUse`
+shape by name rather than merely accepting the right one, because the wrong
+shape is valid JSON and a valid verdict and fails only on the surface nothing
+was testing.
 
 **Exit 2 is what is left when the event is unreadable.** A payload that is not
 JSON, or that names no event, gives nothing to write a decision object in — the
@@ -1057,8 +1078,9 @@ internal/validate/        Luhn, card placeholders, mod-11, entropy, reserved ran
 internal/bash/            Segment parsing, ported from workspace-guard.
 rules/spill-guard.json    The shipped ruleset. Authored and reviewed as JSON.
 rules/embed.go            The go:embed that compiles it in. Reaches only its own directory.
-hooks/hooks.json          Hook wiring.
+hooks/hooks.json          Hook wiring. The events and the matcher.
 hooks/run-spill-guard.cmd Launcher. Resolves the binary, denies when it cannot.
+.claude-plugin/           plugin.json and marketplace.json. The only version.
 scripts/install.sh        Install script, POSIX.
 scripts/install.ps1       Install script, Windows.
 testdata/corpus/          Precision fixtures — clean files that must not flag.

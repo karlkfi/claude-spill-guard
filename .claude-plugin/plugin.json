@@ -1,0 +1,26 @@
+{
+  "name": "spill-guard",
+  "version": "0.1.0",
+  "description": "Blocks secrets and PII before they reach the API: scans the prompt, a Read path, a Bash command, and the files each one would open, then denies the call rather than letting it cross.",
+  "author": {
+    "name": "Karl Isenberg",
+    "url": "https://github.com/karlkfi"
+  },
+  "homepage": "https://github.com/karlkfi/claude-spill-guard",
+  "repository": "https://github.com/karlkfi/claude-spill-guard",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "hooks",
+    "guardrail",
+    "security",
+    "secrets",
+    "credentials",
+    "pii",
+    "exfiltration",
+    "scanner",
+    "fail-closed",
+    "bash",
+    "prompt"
+  ]
+}
