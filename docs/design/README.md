@@ -700,10 +700,14 @@ The rates are not what settles it. What those 21 and 4 buffers *are*, is:
   are the same four fixtures: `heap.dump` twice and `logo.png` twice.
 
   The remainder is `.txt`, `.head`, `.md`, `.zshrc` and extensionless paths —
-  and five `.env` tokens, `deploy.env` four times and `secret.env` once, which
-  are fixtures too: `deploy.env` is this document's own worked example under
-  [`@path` is an operand](#path-is-an-operand-not-a-hop). So are the
-  `.txtzzz` and zero-width-suffixed tokens the grammar drives left behind.
+  and five `.env` tokens, which are two names in two prompts rather than five
+  occasions. Four of them are `deploy.env`, `deploy.env-`, `deploy.env#` and
+  `deploy.env%%`, typed in one prompt to the millisecond to drive the
+  punctuation trim; the fifth is `secret.env`. Both are fixtures, and by where
+  they came from rather than by what they are called: every prompt in the corpus
+  naming an `@…env` token sits in a `claude-spill-guard` worktree or its
+  scratchpad, on 2026-08-27 and 2026-08-28. So are the `.txtzzz` and
+  zero-width-suffixed tokens the grammar drives left behind.
 
   **None observed is not a rate of zero.** Nought events in 881 puts the 95%
   upper bound near 0.34%, so what the corpus supports is that nothing organic
