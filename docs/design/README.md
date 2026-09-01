@@ -706,8 +706,8 @@ The rates are not what settles it. What those 21 and 4 buffers *are*, is:
   punctuation trim; the fifth is `secret.env`. Both are fixtures, and by where
   they came from rather than by what they are called: every prompt in the corpus
   naming an `@…env` token sits in a `claude-spill-guard` worktree or its
-  scratchpad, on 2026-08-27 and 2026-08-28. So are the `.txtzzz` and
-  zero-width-suffixed tokens the grammar drives left behind.
+  scratchpad. So are the `.txtzzz` and zero-width-suffixed tokens the grammar
+  drives left behind.
 
   **None observed is not a rate of zero.** Nought events in 881 puts the 95%
   upper bound near 0.34%, so what the corpus supports is that nothing organic
@@ -729,6 +729,17 @@ The rates are not what settles it. What those 21 and 4 buffers *are*, is:
   that credential-shaped prompt traffic is rare, but that there is none of it
   here to measure, because the only sessions that produced any were the ones
   driving this scanner.
+
+  **Reviewing this section demonstrated it.** The counts above were taken at 881
+  `@` tokens and 5 `.env` names. Re-running the same census while the change was
+  under review returned 883 and 7, and the entire delta is one prompt — a
+  message between two sessions arguing about this paragraph, in which the phrase
+  `@…env` is itself taken as a file token. Two more security-shaped tokens
+  entered the corpus while the pull request adding this sentence was open, and
+  both came from the sessions reviewing it. That is not a caveat about the
+  numbers going stale. It is the finding: the count moves whenever this
+  repository is worked on and does not otherwise, which is what having no
+  organic traffic looks like from the inside.
 - The population the split exists to catch is absent. The table classifies
   files as they stand today, and 37,710 of the 83,141 resolvable operands point
   at something since deleted — which is exactly what a heap dump does, so the
