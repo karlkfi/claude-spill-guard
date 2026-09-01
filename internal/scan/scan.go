@@ -79,10 +79,23 @@ const (
 	// time a Result is returned, the mark is gone and both cases are a NUL in
 	// eight kilobytes. Two things turn on it, one of them a bug this closes.
 	//
-	// The verdict, which docs/design/README.md keys on declaration: a buffer
-	// that declared itself text can hold credential-shaped bytes whatever its
-	// decoded prefix looks like, and SkippedBinary's population -- an image, an
-	// executable, UTF-16 with no mark -- declared nothing at all.
+	// The verdict. A buffer this stage decoded is text it read, so it can hold
+	// credential-shaped bytes whatever its decoded prefix looks like, and
+	// internal/hook blocks on that where it allows the undecoded class.
+	//
+	// Declaration is the axis the design keys on, and decode reads two of the
+	// three marks: UTF-8's is a declaration it does not read. EF BB BF is a
+	// byte-order mark by the same registry as FF FE, so such a buffer falls to
+	// the default arm, its NUL is read raw, and it comes back SkippedBinary and
+	// is allowed. Driven end to end -- the same key after a NUL under a UTF-8
+	// mark exits 0 on empty stdout, while the no-NUL control denies at byte 29
+	// rather than 26, the three bytes of the mark scanned as ordinary content,
+	// which is what having no arm looks like from outside this package.
+	//
+	// So the gap is named rather than defined away. Saying the axis is whichever
+	// declaration this build happens to route on would make the law true by
+	// construction and unfalsifiable, which is how this one got through. Whether
+	// decode should grow that arm is its own row.
 	//
 	// And the ambiguity in FF FE 00 00, which is the half no frequency argument
 	// reaches. Those bytes are the UTF-32LE mark and equally a UTF-16LE mark

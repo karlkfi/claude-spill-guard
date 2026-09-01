@@ -419,11 +419,27 @@ not need to do.
    stated gap rather than a silent one, which is what step 6 is for.
 
    The check gives two reasons, not one, and which it gives is decided by
-   whether step 1 decoded. A buffer that declared a UTF-16 mark and whose
-   *decoded* window holds a NUL is still skipped, and by this same check — but
-   it declared an encoding first, and that is a fact about it the undeclared
-   class never has. Step 6 keys on the declaration, so the two cannot share a
-   reason without the verdict losing the thing it routes on.
+   whether step 1 decoded. A buffer whose UTF-16 mark this stage read, and
+   whose *decoded* window then holds a NUL, is still skipped and by this same
+   check — but its text was read before the NUL was found, where the other
+   class's was not. Step 6 keys on that, so the two cannot share a reason
+   without the verdict losing the thing it routes on.
+
+   **Declaration is the axis, and step 1 reads two of the three marks — UTF-8's
+   is a declaration it does not read.** That is a gap rather than a decision,
+   and it is a measured fail-open rather than a nicety.
+   `EF BB BF` is a byte-order mark by the same registry as `FF FE`, declares
+   UTF-8, and is what PowerShell 7's `Out-File -Encoding utf8BOM`, Notepad and
+   Visual Studio emit. Step 1 has no arm for it, so such a buffer reaches this
+   check undecoded, its NUL is read raw, and it is skipped and allowed exactly
+   as an image is. Driven end to end on a built binary: a UTF-8 mark, a NUL and
+   an AWS-shaped key exits 0 on empty stdout, while the same file without the
+   NUL denies and names the rule — at byte 29 against 26, the three bytes of the
+   mark, which is its own evidence that nothing decoded it. Whether step 1
+   should grow that arm is a separate question with a real cost: of 63
+   UTF-8-marked files on this machine, the 2 that carry a NUL are both `.wasm`
+   binaries, so an arm that blocked on the mark would block only true binaries
+   in the only population there is to check it against.
 
 3. **Literal prefilter.** Word-boundary search for each credential rule's
    keywords, 255–307 MiB/s against 1.0 MiB/s for the regex pass — roughly 280x.
@@ -678,18 +694,35 @@ verdict has always routed on.
 find out.** Measured 2026-08-31, twice. Over the same session corpus as the
 section below: 2 of 40,416 `Bash` operands carry a UTF-16 mark, neither of them
 decoding to binary, and the `Read` and prompt surfaces have none at all. Over
-this machine's filesystem — 6,585,005 files under `~/workspace`, `~/.claude`,
-`~/go` and the Go toolchain — 38 files carry a UTF-16 mark, **none** decodes to
-binary, and nothing carries a UTF-32 mark. Every one of the 38 is a copy of this
-repository's own planted fixture, spread across worktrees.
+`~/go/pkg/mod` and this repository's own tree — 245,397 files, every marked one
+listed rather than sampled — 43 carry a UTF-16 mark, **none** decodes to binary,
+and nothing carries a UTF-32 mark.
 
-Both numbers are close to worthless for the question, and step 1 says why: the
-file class the decode exists for is Windows PowerShell 5.1, and there is no
-`pwsh` on the runners or on a maintainer's Mac. A near-zero drawn from machines
-that cannot produce the population is not evidence the population is rare — it
-is a measurement of the platform. Nothing available here can put a number on how
-often a Windows-authored file lands in this class, so the case for the split had
-to be made on something other than frequency.
+**21 of those 43 are organic**, in seven unrelated modules: `subosito/gotenv`,
+`docker/cli`, `golang.org/x/net`'s `html/charset`, `gopkg.in/ini.v1`,
+`aws/smithy-go`, `BurntSushi/toml` and `Azure/go-autorest`. So a byte-order mark
+is not itself a Windows artifact, on a machine with no `pwsh` at all. The other
+22 are copies of this repository's planted fixture across worktrees, and that
+count moves as worktrees come and go.
+
+An earlier draft of this paragraph said every marked file was one of ours. That
+was read off the first 25 of a listing the walk had ordered by root, so the
+module cache never entered the sample — the fixtures were simply first. The
+correction is why the sentence now names a fully enumerated population.
+
+Both are close to worthless as a measure of how often the class turns up, and
+step 1 says why: the file class the decode exists for is Windows PowerShell 5.1,
+and there is no `pwsh` on the runners or on a maintainer's Mac. A near-zero
+drawn from machines that cannot produce the population is not evidence the
+population is rare — it is a measurement of the platform. So the case for the
+split had to be made on something other than frequency.
+
+What the 43 do establish is the **cost**, which is a different question and one
+this machine can answer. Every one of them is `Scanned` — they decode as UTF-16
+and their sniff windows hold no NUL — so not one changes verdict under this
+change. The flip costs nothing on the only marked-file population observable
+here. Note what that is not: it is not evidence about the newly-blocked class,
+which has zero organic observations, and the two must not be run together.
 
 **What settles it is `FF FE 00 00`.** Those bytes are the UTF-32LE mark and
 equally a UTF-16LE mark followed by `U+0000`, and step 1 resolves them

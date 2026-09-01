@@ -53,16 +53,28 @@ declared an encoding blocks, and one that declared nothing does not, because
 that second case the design chose against a measurement. So a UTF-32 mark
 blocks, a UTF-16 mark whose *decoded* text holds a NUL blocks, and a NUL in a
 buffer nothing declared — an image, an executable, UTF-16 written with no
-mark — is allowed. `blocks` in
+mark — is allowed.
+
+**That law has one measured exception and it is a gap rather than a decision.**
+`decode` reads two of the three byte-order marks. UTF-8's, `EF BB BF`, is a
+declaration it has no arm for, so such a buffer falls through undecoded, its NUL
+is read raw, and it is allowed exactly as an image is — driven end to end, a
+UTF-8 mark plus a NUL plus an AWS-shaped key exits 0 on empty stdout while the
+same file without the NUL denies. Do not repair the law by redefining the axis
+as whichever declaration this build routes on: that is true by construction,
+cannot be falsified by a fourth encoding, and is how this one got through. `blocks` in
 [`internal/hook/hook.go`](internal/hook/hook.go) carries the argument, and a
 skip reason it has not been taught blocks, which is how the middle case gets
 its verdict without a case of its own.
 
 **Two things about that middle case are settled and should not be re-derived.**
-It does not turn on frequency: 38 files in 6,585,005 on this machine carry a
-UTF-16 mark, none decodes to binary, and every one of the 38 is this repo's own
-fixture — but the decode exists for Windows PowerShell 5.1, and nothing here
-runs `pwsh`, so that zero measures the platform rather than the population. What
+It does not turn on frequency: over `~/go/pkg/mod` and this tree, 43 files in
+245,397 carry a UTF-16 mark and none decodes to binary — 21 of them organic,
+across seven unrelated Go modules, so a mark is not itself a Windows artifact.
+But the decode exists for Windows PowerShell 5.1 and nothing here runs `pwsh`,
+so that zero measures the platform rather than the population. What the 43 do
+settle is the cost: every one is `Scanned`, so none changes verdict, and the
+flip is free on the only population this machine can show. What
 settles it is that `FF FE 00 00` is both the UTF-32LE mark and a UTF-16LE mark
 followed by `U+0000`, so before the split the same UTF-16 buffer blocked or was
 allowed depending on where its NUL sat. And the surface a call arrived on is
