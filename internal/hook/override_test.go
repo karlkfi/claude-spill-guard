@@ -314,15 +314,48 @@ func TestTheOverrideDoesNotDowngradeWhereNobodyCanAnswer(t *testing.T) {
 // been a block, never an allow. Q92 carries the fix.
 func TestAQuotedAssignmentInCommandPositionArmsTheHatchToo(t *testing.T) {
 	dir, name := planted(t)
+	// Every way of quoting part of the NAME, rather than the two spellings
+	// somebody wrote down. Driven on bash 5.3.15: each of these is a command
+	// bash cannot find, not an assignment -- `'SG'_OVR=x env` and
+	// `SG_OVR''=x env` report `command not found` exactly as the fully quoted
+	// forms do. The hook arms on all four, so the divergence is four spellings
+	// wide and this pinned half of it.
 	for _, command := range []string{
 		`'SPILL_GUARD_OVERRIDE=x' cat ` + name,
 		`"SPILL_GUARD_OVERRIDE=x" cat ` + name,
+		`'SPILL'_GUARD_OVERRIDE=x cat ` + name,
+		`SPILL_GUARD_OVER''RIDE=x cat ` + name,
 	} {
 		t.Run(command, func(t *testing.T) {
 			_, stdout, _ := drive(t, bashCall(t, command, dir))
 			if got := verdictOf(t, stdout); got != "ask" {
 				t.Errorf("permissionDecision = %q, want ask -- this is the known "+
 					"divergence Q92 tracks, so a change here is a decision", got)
+			}
+		})
+	}
+}
+
+// The other side of the same boundary, and the one a fix for Q92 must not
+// break. Quoting inside the VALUE is an ordinary assignment to bash -- driven
+// on 5.3.15, `SG_OVR='x y' env` and `SG_OVR=x"y" env` both set the variable --
+// and the documented way to write a reason with spaces is exactly that. So a
+// change that recovered quote provenance and refused every quoted token would
+// pass the test above and take the hatch away from its own documented usage.
+//
+// This is a control rather than a divergence: it asserts what bash and the
+// hook already agree about, which is why it is here and not in Q92.
+func TestQuotingInsideTheValueIsAnOrdinaryAssignment(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		`SPILL_GUARD_OVERRIDE='a reason with spaces' cat ` + name,
+		`SPILL_GUARD_OVERRIDE=one"two" cat ` + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			_, stdout, _ := drive(t, bashCall(t, command, dir))
+			if got := verdictOf(t, stdout); got != "ask" {
+				t.Errorf("permissionDecision = %q, want ask -- a quoted VALUE is "+
+					"how a reason with spaces is written, and bash sets it", got)
 			}
 		})
 	}
