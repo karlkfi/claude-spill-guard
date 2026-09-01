@@ -151,9 +151,11 @@ before a reader gets to the second paragraph. Download, read, run.
 
 **This is built.** [`install/`](../../install/) holds both scripts and
 [`.goreleaser.yaml`](../../.goreleaser.yaml) uploads them as release assets, so
-the two-step form above has something to fetch — and the launcher's own deny
-message, which tells a user with no binary to download `install.sh` from the
-latest release, is true rather than aspirational.
+the two-step form above will have something to fetch — as will the launcher's
+own deny message, which tells a user with no binary to download `install.sh`
+from the latest release. Both become true with the first release and not
+before: there is none yet, so `releases/latest/download/install.sh` is a 404
+today. Q101 carries that.
 
 CI drives both on all three operating systems on every pull request rather than
 every release, which is stronger than this design asked for and was free once
@@ -291,12 +293,12 @@ free and a human is asking the question directly.
   **That last leg is not true yet, and the scripts say so rather than assuming
   it.** Neither channel exists — `.goreleaser.yaml` carries no `brews:` and no
   `scoops:` block, and Q13 and Q14 are both still open — so until they land, a
-  refused user has nowhere cheaper to go and refusing costs them everything.
-  `install/install.sh` names `go install` instead, which needs a Go toolchain
-  and gives a weaker guarantee than either verifier: the module checksum
-  database proves you got the same code as everyone else and does not tie it to
-  this repository's release workflow. The decision stands; the reach argument
-  for it becomes sound when the tap and the bucket ship.
+  refused user has nowhere cheaper to go. `install/install.sh` names `go
+  install` instead, which needs a Go toolchain and gives a weaker guarantee
+  than either verifier: the module checksum database proves you got the same
+  code as everyone else and does not tie it to this repository's release
+  workflow. The decision stands; the reach argument for it becomes sound when
+  the tap and the bucket ship.
 
   Install-time only, and structurally so — the shipped binary cannot reach
   either verifier, because `scripts/check-supply-chain.py` forbids `os/exec`
