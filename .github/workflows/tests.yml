@@ -108,11 +108,32 @@ jobs:
           fi
 
       # The other half of a fresh clone: Go is here, and nothing has been
-      # fetched. Anything reaching tools/ -- `go run`, `go build`, `go list` --
-      # fails with the proxy off over an empty module cache, so this stays
-      # green only while the probe is `command -v` and nothing else.
+      # fetched. Anything that loads an import out of tools/ -- `go run`, `go
+      # build`, `go list -deps` -- fails with the proxy off over an empty
+      # module cache, so this stays green only while the probe is `command -v`
+      # and nothing else.
+      #
+      # It is the one control here that demands green, and a green says nothing
+      # on its own: doctor not reaching tools/ and the environment never having
+      # made tools/ unreachable produce the same exit 0. So the environment is
+      # driven first against a command that must fail in it. `go list -deps`
+      # rather than `go list`, which resolves this module's own packages
+      # without loading an import's module and comes back 0 either way --
+      # measured 2026-09-01 over one empty cache, 0 for `list ./...` against 1
+      # for `list -deps ./...`, and 0 for `list -deps` again once the cache was
+      # warm, which is the direction that says the probe is about the cache.
       - name: With no module cache and no proxy it must still exit clean
         run: |
+          probe="$(mktemp -d)"
+          GOFLAGS=-mod=mod GOPROXY=off GOMODCACHE="$probe" \
+            go -C tools list -deps ./... > effect.log 2>&1 && erc=0 || erc=$?
+          echo "probe exit: $erc"
+          cat effect.log
+          rm -rf "$probe"
+          if [ "$erc" -eq 0 ]; then
+            echo "::error::the mutation changed nothing -- tools/ still resolves with the proxy off and an empty cache, so a green below would be about nothing" >&2
+            exit 1
+          fi
           cache="$(mktemp -d)"
           GOFLAGS=-mod=mod GOPROXY=off GOMODCACHE="$cache"             make doctor > mutant.log 2>&1 && rc=0 || rc=$?
           echo "doctor exit: $rc"
@@ -1685,11 +1706,37 @@ jobs:
             echo "::error::the gate failed, but not on gofmt" >&2
             exit 1
           fi
+
+      # `return 2` is written twice in main.go -- the no-args arm and the
+      # unknown-command arm -- so a diff says only that one of them moved, and
+      # the arm this step is named for is the second. The binary is what says
+      # which: built and driven, it exits 2 unmutated and 0 here. Measured
+      # 2026-09-01 both ways. Without it, an unknown-command arm refactored to
+      # a named constant leaves the sed landing on the other one, the diff
+      # passing, and a green `make test` reading as the suite having gone
+      # blind -- the gate audited, and it was the mutation that stopped biting.
       - name: Making the binary exit zero on a bad command must fail the gate
         run: |
           sed -i 's/return 2$/return 0/' cmd/spill-guard/main.go
-          if git diff --quiet; then
+          if git diff --quiet -- cmd/spill-guard/main.go; then
             echo "::error::the mutation changed nothing -- it no longer matches main.go" >&2
+            exit 1
+          fi
+          out="$(mktemp -d)"
+          go build -o "$out/spill-guard" ./cmd/spill-guard > effect.log 2>&1 && brc=0 || brc=$?
+          if [ "$brc" -ne 0 ]; then
+            cat effect.log
+            rm -rf "$out"
+            git checkout -- cmd/spill-guard/main.go
+            echo "::error::the mutated tree does not build, so nothing below is about the gate" >&2
+            exit 1
+          fi
+          "$out/spill-guard" no-such-command > effect.log 2>&1 && brc=0 || brc=$?
+          rm -rf "$out"
+          echo "mutated binary on an unknown command: $brc"
+          if [ "$brc" -ne 0 ]; then
+            git checkout -- cmd/spill-guard/main.go
+            echo "::error::the mutation did not bite -- the binary still exits $brc on an unknown command, so it is not failing open and nothing below is about the gate" >&2
             exit 1
           fi
           make test > mutant.log 2>&1 && rc=0 || rc=$?
@@ -2187,6 +2234,29 @@ jobs:
           go mod tidy
           if git diff --quiet go.mod; then
             echo "::error::the mutation changed nothing -- go.mod took no dependency" >&2
+            exit 1
+          fi
+          # The dependency landing is not the advisory being reported, and this
+          # is the one control here whose oracle lives off the machine: the
+          # database can reclassify GO-2021-0113, the vulnerable symbol can
+          # move, or reachability analysis can be revised, and then `make
+          # vulns` exits 0 with nothing in this tree having changed. The
+          # assertion below would read that as check-vulns.py having stopped
+          # telling exit 3 from exit 0 -- a working gate, audited. So
+          # govulncheck is asked directly first, and a database that has moved
+          # reports itself. Measured 2026-09-01: exit 3, naming GO-2021-0113
+          # with the trace `mutant.Tag calls language.Parse`.
+          out="$(mktemp -d)"
+          go -C tools build -o "$out/govulncheck" golang.org/x/vuln/cmd/govulncheck
+          "$out/govulncheck" -C "$PWD" ./... > effect.log 2>&1 && erc=0 || erc=$?
+          rm -rf "$out"
+          echo "govulncheck exit: $erc"
+          cat effect.log
+          if ! grep -q 'GO-2021-0113' effect.log; then
+            rm -rf internal/mutant
+            git checkout -- go.mod
+            rm -f go.sum
+            echo "::error::the mutation did not bite -- govulncheck does not report GO-2021-0113 against golang.org/x/text@v0.3.0 as called, so nothing below is about the gate" >&2
             exit 1
           fi
           make vulns > mutant.log 2>&1 && rc=0 || rc=$?

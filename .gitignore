@@ -35,3 +35,4 @@ tmp/
 mutant.log
 base.log
 restored.log
+effect.log
