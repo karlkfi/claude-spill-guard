@@ -737,9 +737,18 @@ The rates are not what settles it. What those 21 and 4 buffers *are*, is:
   `@…env` is itself taken as a file token. Two more security-shaped tokens
   entered the corpus while the pull request adding this sentence was open, and
   both came from the sessions reviewing it. That is not a caveat about the
-  numbers going stale. It is the finding: the count moves whenever this
-  repository is worked on and does not otherwise, which is what having no
-  organic traffic looks like from the inside.
+  numbers going stale. It is the finding, and it is about the numerator rather
+  than the denominator: **the security-shaped count moves whenever this
+  repository is worked on and does not otherwise.**
+
+  The token total is not that count and does not behave that way. Of the 883,
+  365 come from `claude-spill-guard` sessions and 518 from everything else,
+  `github-actions-gateway` alone contributing 356 — so ordinary work on other
+  projects moves the denominator, as it should. What it has never once moved is
+  the numerator: every `.env` name and every binary `@` target traces to a
+  `claude-spill-guard` worktree or its scratchpad. A corpus with organic `@`
+  traffic and no organic *credential-shaped* `@` traffic is exactly the shape
+  that makes a frequency argument unavailable here.
 - The population the split exists to catch is absent. The table classifies
   files as they stand today, and 37,710 of the 83,141 resolvable operands point
   at something since deleted — which is exactly what a heap dump does, so the
