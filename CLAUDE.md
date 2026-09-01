@@ -27,10 +27,11 @@ measured.
 | `internal/testvec/` | The loader for `testdata/corpus/vectors/`. Test-only, linked into no binary, and it takes a `TB` rather than `*testing.T` so nothing outside a test imports `testing`. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. The JSON is data; `embed.go` beside it is the `go:embed` that compiles it in, which has to live here because the directive reaches only its own directory. |
 | `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. `vectors/` is neither: it is the credential-shaped strings the unit tests read, kept where secret scanning is told not to look. |
-| `scripts/` | The gate scripts CI runs, plus the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
+| `scripts/` | The gate scripts CI runs, `check-install-scripts.py` which only the release workflow can run, and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
 | `hooks/` | Not those. The launcher Claude Code invokes, which resolves the binary and denies when it cannot find one. |
+| `install/` | `install.sh` and `install.ps1`, the fallback channel. Here so they are reviewable at a versioned URL, and uploaded as release assets so the documented two-step form has something to fetch. |
 | `.goreleaser.yaml` | What a tag publishes. Release-time only, and never in the shipped module. |
 
 `internal/hook/` now exists and the binary reaches the pipeline through it, so
@@ -56,6 +57,25 @@ invokes it and the plugin manifests beside it land together in a later item,
 because a repo that is installable as a security tool scanning nothing is the
 failure this project indicts the predecessor for. So the hook fires when it is
 driven and nothing drives it yet.
+
+`install/` is the fallback channel, and both scripts are driven rather than
+reviewed. `scripts/check-install-scripts.py` serves a GoReleaser dist directory
+over a loopback port and makes each script install from it, run the binary it
+installed, and refuse four things: a corrupted archive, a `checksums.txt` that
+does not list it, a machine with neither `cosign` nor `gh`, and a `--rehearse`
+aimed at github.com. The release workflow runs it on all three operating
+systems on every pull request. It cannot be a gate: it installs out of a
+directory only GoReleaser produces, and `make doctor` calls GoReleaser a
+release-tier tool, so a gate over it would fail on a fresh clone.
+
+What it cannot reach is the verification itself. `--rehearse` skips the
+signature, because artifacts served from a loopback port carry no release
+provenance to check, so the `cosign verify-blob` and `gh attestation verify`
+calls are driven by nothing here and cannot be until a signed release exists —
+and the first one is a permanent version number. What is driven is the step
+before them: which verifier the script picks, and that it refuses when there is
+none. [`docs/development/release-process.md`](docs/development/release-process.md)
+carries the manual check that closes the rest, after a draft is published.
 
 The `Bash` surface is now whole: the command string is scanned and so are the
 files its readers are pointed at, `internal/readers` being what decides which
@@ -334,10 +354,10 @@ Everything in there traces to `docs/design/`.
 ## Open questions
 
 None left. The last one — whether `install.sh` should refuse without `cosign` —
-is settled under **Settled** at the end of `distribution.md`: verify with
-whichever of `cosign` or `gh` is present, refuse only when neither is. The
-framing was the defect rather than the answer, since `cosign` was never the only
-verifier for what it checks. `docs/design/README.md` has none either — what
+is settled under **Settled** at the end of `distribution.md`, and `install/`
+now implements it: verify with whichever of `cosign` or `gh` is present, refuse
+only when neither is. The framing was the defect rather than the answer, since
+`cosign` was never the only verifier for what it checks. `docs/design/README.md` has none either — what
 counts as human-typed is settled there under
 [**What gets scanned is the crossing, not the hop**](docs/design/README.md#what-gets-scanned-is-the-crossing-not-the-hop),
 which answers it by dropping authorship for whether a payload field's bytes have

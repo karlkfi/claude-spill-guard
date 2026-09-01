@@ -6,7 +6,7 @@ tree records that.
 
 ## Modes, and what the executable bit means here
 
-Thirteen Python files here are this repo's own, and twelve of them are entry
+Sixteen Python files here are this repo's own, and fifteen of them are entry
 points: a `#!/usr/bin/env python3` line, a `main()`, an `if __name__ ==
 "__main__"` block, and mode `755`.
 [`workflow_model.py`](workflow_model.py) is the one that is not — nothing runs
@@ -19,11 +19,11 @@ The rule is that a file advertises exactly the way it can be run. A shebang on a
 file at `644` names an interpreter the mode refuses, and the bit on a file
 nothing executes invites a reading that does not hold.
 
-**No gate asserts any of this, on purpose.** None of the thirteen is invoked by
-path: the twelve entry points run as `$(PYTHON) scripts/x.py` from the Makefile
-and `python3 scripts/x.py` from the workflow, and the library is imported by an
-interpreter already running a different file. So a mode that drifts breaks
-nothing. That is the whole difference from [`.githooks/`](../.githooks), where
+**No gate asserts any of this, on purpose.** None of the sixteen is invoked by
+path: the fifteen entry points run as `$(PYTHON) scripts/x.py` from the
+Makefile and `python3 scripts/x.py` from the workflow, and the library is
+imported by an interpreter already running a different file. So a mode that
+drifts breaks nothing. That is the whole difference from [`.githooks/`](../.githooks), where
 `hooks-check` fails until every tracked hook is executable because git skips
 one that is not without saying so, and from
 [`run-spill-guard.cmd`](../hooks/run-spill-guard.cmd), whose index mode the
@@ -33,6 +33,13 @@ at `644` never fires once.
 Until Q56 the split tracked nothing but the order the files were added — eight
 at `755`, five at `644`, every one of them with a shebang. Its row is gone, so
 this names it rather than linking it.
+
+**The counts above are hand-kept and nothing re-reads them.** Measured
+2026-08-31 at `793abbe`, before Q12 added `check-install-scripts.py`, they said
+thirteen and twelve against a real fifteen and fourteen — two behind, for
+however long. [Q98](../docs/queue/Q98.md) is the row. The paragraph above
+argues that the *modes* are ungated on purpose, and that argument does not
+reach the counts.
 
 ## Vendored from the skills repo
 

@@ -132,9 +132,10 @@ later without changing anything above.
 
 `install.sh` and `install.ps1`, both living in this repo so they are reviewable
 at a versioned URL. Each detects OS and architecture, downloads the matching
-archive, **verifies the sha256 against `checksums.txt`**, verifies the Sigstore
-signature when `cosign` is present, and installs to `~/.local/bin` or
-`%LOCALAPPDATA%`.
+archive, **verifies the sha256 against `checksums.txt`**, verifies the
+signature with whichever of `cosign` and `gh` is installed, refuses when
+neither is, and installs to `~/.local/bin` or `%LOCALAPPDATA%`. **Settled**
+below has the argument for that last part.
 
 The documented form is two steps:
 
@@ -148,8 +149,31 @@ leads with. For a tool whose entire pitch is that nothing leaves your machine,
 opening with "pipe this remote script into your shell" undercuts the claim
 before a reader gets to the second paragraph. Download, read, run.
 
-CI runs both scripts on all three operating systems every release. An install
-script that broke is indistinguishable from a tool nobody installed.
+**This is built.** [`install/`](../../install/) holds both scripts and
+[`.goreleaser.yaml`](../../.goreleaser.yaml) uploads them as release assets, so
+the two-step form above will have something to fetch — as will the launcher's
+own deny message, which tells a user with no binary to download `install.sh`
+from the latest release. Both become true with the first release and not
+before: there is none yet, so `releases/latest/download/install.sh` is a 404
+today. Q101 carries that.
+
+CI drives both on all three operating systems on every pull request rather than
+every release, which is stronger than this design asked for and was free once
+the artifacts existed: `install-dry-run` in
+[`release.yml`](../../.github/workflows/release.yml) installs out of the same
+snapshot `dry-run` already builds. An install script that broke is
+indistinguishable from a tool nobody installed, because the people who would
+report it are the people who could not install it.
+
+Two things the implementation had to settle. The scripts fetch from a loopback
+HTTP server in CI, through a `--rehearse URL` flag that refuses a github.com
+URL — it skips signature verification, so it must not be aimable at the one
+place a signature exists. And that skip is the limit of what a pull request
+reaches: `cosign verify-blob` and `gh attestation verify` need a signed
+release, so what CI drives is which verifier the script picks and that it
+refuses when there is none. The rest is a manual step in
+[`release-process.md`](../development/release-process.md), taken once a draft
+is published.
 
 ### For anyone with a Go toolchain
 
@@ -265,6 +289,16 @@ free and a human is asking the question directly.
   when neither is present costs reach almost nothing either: the Homebrew
   formula and the Scoop manifest pin the sha256 themselves and ask the user for
   no tool at all.
+
+  **That last leg is not true yet, and the scripts say so rather than assuming
+  it.** Neither channel exists — `.goreleaser.yaml` carries no `brews:` and no
+  `scoops:` block, and Q13 and Q14 are both still open — so until they land, a
+  refused user has nowhere cheaper to go. `install/install.sh` names `go
+  install` instead, which needs a Go toolchain and gives a weaker guarantee
+  than either verifier: the module checksum database proves you got the same
+  code as everyone else and does not tie it to this repository's release
+  workflow. The decision stands; the reach argument for it becomes sound when
+  the tap and the bucket ship.
 
   Install-time only, and structurally so — the shipped binary cannot reach
   either verifier, because `scripts/check-supply-chain.py` forbids `os/exec`

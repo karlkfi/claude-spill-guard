@@ -110,3 +110,17 @@ changelog:
 release:
   draft: true
   prerelease: auto
+
+  # The install scripts are release assets as well as repository files. The
+  # documented install form fetches install.sh from
+  # releases/latest/download/install.sh, and the launcher's deny message
+  # already tells a user with no binary to do exactly that -- so a release
+  # that did not carry them would make that message false.
+  #
+  # They are uploaded rather than archived, so they are not in checksums.txt
+  # and nothing signs them. That is the reason the documented form is two
+  # steps: a script you fetch in order to read is verified by reading it.
+  # Q97 is whether that should change.
+  extra_files:
+    - glob: install/install.sh
+    - glob: install/install.ps1
