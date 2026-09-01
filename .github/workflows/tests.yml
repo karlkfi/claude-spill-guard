@@ -336,15 +336,35 @@ jobs:
       # binary reaches `internal/scan`, which was true before the mutation and
       # after it, so it asserted the mutation had happened rather than that it
       # had had an effect. Unwiring gives that assertion something to measure.
+      # Every route to internal/scan, not just the first one. The step cut the
+      # `hook` arm alone until `selftest` landed, and `internal/selftest`
+      # reaches `internal/hook` too -- so one route went and another stood, the
+      # binary still reached the scanner, and the precondition below said so
+      # instead of passing. That is this control landing on the right side of
+      # its own class: it asserts the mutation had its EFFECT rather than that
+      # it happened, which is why it caught a change nobody was thinking about
+      # when they made it. Q103 has the sibling that did not.
+      #
+      # So a new subcommand reaching the pipeline belongs in this list. The
+      # precondition is what says so, loudly, rather than this comment.
       - name: Unwiring the scanner must fail the check and flip the table
         run: |
           python3 - <<'PY'
           import pathlib
           p = pathlib.Path("cmd/spill-guard/main.go")
           s = p.read_text(encoding="utf-8")
-          s = s.replace('\t"github.com/karlkfi/claude-spill-guard/internal/hook"\n', "")
-          s = s.replace('\tcase "hook":\n\t\treturn hook.Run(stdin, stdout, stderr)\n', "")
-          s = s.replace("  hook      scan a Claude Code hook payload read from stdin\n", "")
+          for line in (
+              '\t"github.com/karlkfi/claude-spill-guard/internal/hook"\n',
+              '\t"github.com/karlkfi/claude-spill-guard/internal/selftest"\n',
+              '\tcase "hook":\n\t\treturn hook.Run(stdin, stdout, stderr)\n',
+              '\tcase "selftest":\n\t\treturn selftest.Run(version, stdout, stderr)\n',
+              "  hook      scan a Claude Code hook payload read from stdin\n",
+              "  selftest  drive the hook path over a canary and report what it did\n",
+          ):
+              if line not in s:
+                  raise SystemExit(f"main.go no longer carries {line!r}, so this "
+                                   f"mutation would only partly land")
+              s = s.replace(line, "")
           p.write_text(s, encoding="utf-8")
           PY
           gofmt -w cmd/spill-guard/main.go

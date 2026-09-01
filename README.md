@@ -33,9 +33,9 @@ authoritative and is not.
 | Run as a Claude Code hook | yes |
 | Ship a ruleset | yes |
 
-`spill-guard` builds, answers `hook`, `version`, and reaches `internal/bash`,
-`internal/hook`, `internal/readers`, `internal/rules`, `internal/scan`,
-`internal/validate`, `rules`.
+`spill-guard` builds, answers `hook`, `selftest`, `version`, and reaches
+`internal/bash`, `internal/hook`, `internal/readers`, `internal/rules`,
+`internal/scan`, `internal/selftest`, `internal/validate`, `rules`.
 <!-- status:end -->
 
 - [`docs/design/`](docs/design/) — the proposed design: threat model, hook
@@ -122,6 +122,64 @@ designed in
 [`docs/design/distribution.md`](docs/design/distribution.md) and none of them
 is shipped.
 
+### Check that it is actually running
+
+An installed scanner that enforces nothing and a session with no secrets in it
+produce the same silence, so *installed* is not something to take on trust.
+Two steps, and they answer different questions.
+
+**Does the binary scan?** `spill-guard selftest` builds hook payloads and runs
+the scanner over them in-process — a prompt, a `Read`, a `Bash` command, and a
+file a reader is pointed at — reporting what happened to each:
+
+```
+spill-guard dev selftest
+binary:  /Users/you/go/bin/spill-guard
+ruleset: compiled in
+
+  ok    a prompt carrying the canary                 blocked (aws-access-key-id)
+  ok    a prompt with nothing in it                  allowed
+  ok    a Read of a file holding the canary          blocked (aws-access-key-id)
+  ...
+```
+
+The allowing rows are not filler, and they are the half that catches the
+failure this tool is most likely to have. A scanner that blocks everything and
+one that works produce the same report if the report is only made of blocks —
+and a rule that matches too much is the ordinary shape of that. An allowing row
+goes `FAIL` if its call is blocked at all, by any rule, so one bad regex turns
+three rows red rather than leaving seven green.
+
+It also does not run the dispatch a session would. `selftest` calls the
+scanner directly, so it cannot tell you that `spill-guard hook` itself still
+answers — only that the scanning underneath it works. The suite covers the
+dispatch at build time; nothing at install time does.
+
+It reports `dev` unless it came from a release: `go install` does not stamp a
+version, and only the release build passes one in.
+
+Run it through the launcher rather than directly and the `binary:` line answers
+a second question — *which* spill-guard a session will find, resolved by the
+order the hook resolves one with. A plugin install puts the launcher at
+`~/.claude/plugins/cache/<marketplace>/spill-guard/<version>/hooks/run-spill-guard.cmd`,
+and running that with `selftest` reports the binary it picked. If it cannot
+find one it prints its refusal as a JSON block object at exit 0 — that is the
+hook contract rather than a shell one, so read the message and do not chain on
+the status.
+
+**Is Claude Code invoking it?** Nothing run outside a session can tell you, so
+this one is the sibling guards' answer: do the thing and watch it get refused.
+Paste this into a session:
+
+```
+the key is AKIA0123456789ABCDEF
+```
+
+The prompt should be blocked before it is sent. That string is a synthetic
+canary published in this repository, so if the hook is *not* live the only
+thing that reaches the API is text that is already public — which is the whole
+reason the check is safe to run.
+
 ## The shape of it
 
 A static Go binary, run as a Claude Code hook. Zero third-party dependencies —
@@ -134,8 +192,9 @@ It fails **closed**. Every sibling guard in this family fails silent, on the
 grounds that a hook running on every call must never be the reason ordinary work
 breaks. A secret scanner cannot afford that trade: one that fails quietly reports
 a safety it is not providing. So an internal error blocks, and
-`spill-guard selftest` exists to prove the hook is live rather than installed and
-inert.
+`spill-guard selftest` drives a canary through the real hook path so that
+*installed* is something you can check rather than something you assume — see
+[Install](#install) for what it does and does not settle.
 
 Findings carry a rule ID, a path, and a byte offset. Not the secret, and not a
 redacted window either — a hook's stderr reaches the API, so an 8-character
