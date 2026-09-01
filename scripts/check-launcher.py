@@ -248,20 +248,21 @@ def blocks_both_events(findings, what, out):
 def both_halves_block_the_same(findings):
     """Every block literal in the file, in both halves, is the flat shape.
 
-    The dynamic arms above drive one half: the POSIX one everywhere but
-    Windows, the batch one only on a Windows runner. So each half's payload is
-    unasserted on the other platform, and the two can drift apart silently --
-    a Windows user then gets the fail-open this file's `deny_reason` exists to
-    prevent, with nothing red anywhere.
+    This is not extra CI coverage and does not claim to be. The dynamic arms
+    above run whichever half the platform executes, and neither is
+    platform-gated, so the batch half's payload *is* asserted -- on a Windows
+    runner, where `launcher (windows-latest)` drives it through cmd.exe.
 
-    Found by a reviewer transplanting the broken object into the batch half on
-    darwin: the mutation landed, `git diff --quiet` returned 1, and the gate
-    stayed green at exit 0. The precondition was satisfied and the mutation did
-    not bite, which is the shape CLAUDE.md warns about.
+    What it buys is the reading a contributor gets locally. Break the batch
+    half on darwin and the drives cannot see it, because darwin cannot execute
+    that half: `make launcher` goes green and the answer arrives from a Windows
+    runner later. A reviewer did exactly that while reading this PR -- the
+    mutation landed, `git diff --quiet` returned 1, and the gate stayed at exit
+    0 -- and read the green as a coverage gap, which it is not.
 
-    This reads the literals rather than driving them, so it holds for both
-    halves from either platform, and it is a complement to the drives rather
-    than a replacement: a literal that parses correctly and never reaches
+    So this reads the literals instead of driving them, which holds for both
+    halves from either platform, and it complements the drives rather than
+    standing in for them: a literal that parses correctly and never reaches
     stdout is still a launcher that does not deny.
     """
     raw = LAUNCHER.read_bytes()
