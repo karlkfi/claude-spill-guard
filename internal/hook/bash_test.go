@@ -321,18 +321,32 @@ func TestADirectoryOperandSaysSoAndSaysWhatToDoInstead(t *testing.T) {
 // one crosses every lead with every body, which cannot reach this text at all:
 // the bodies it carries are fixed, and an operand refusal's is written by
 // bashTargets from the command in front of it. So this drives real payloads
-// instead of composing reasons -- the population comes from the code path
-// rather than from a list somebody keeps, which is the half of Q89 that a
-// driven test can supply.
+// instead of composing reasons.
+//
+// The payloads are still a list somebody keeps -- driving does not change
+// that, it only moves the hand-keeping from the reason to the call that
+// produces it. What the list has to cover is one payload per surface that
+// writes a refusal of its own, which is why the Read arm is here beside the
+// three Bash ones: appending the hatch name to hook.go's directory reason
+// left this whole package green until it was.
 func TestADrivenRefusalDoesNotNameTheOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"grep -rn pat sub", "cat $HOME/x.env", "cat *.env"} {
-		_, stdout, _ := drive(t, bashCall(t, command, dir))
-		if reason := reasonOf(t, stdout); strings.Contains(reason, overrideVar) {
-			t.Errorf("the reason for %q names the hatch: %q", command, reason)
-		}
+	payloads := map[string]string{
+		"a directory operand": bashCall(t, "grep -rn pat sub", dir),
+		"an unresolvable var": bashCall(t, "cat $HOME/x.env", dir),
+		"a glob":              bashCall(t, "cat *.env", dir),
+		"a Read of a directory": `{"hook_event_name":"PreToolUse","tool_name":"Read",` +
+			`"tool_input":{"file_path":` + quote(t, dir) + `}}`,
+	}
+	for name, payload := range payloads {
+		t.Run(name, func(t *testing.T) {
+			_, stdout, _ := drive(t, payload)
+			if reason := reasonOf(t, stdout); strings.Contains(reason, overrideVar) {
+				t.Errorf("the reason names the hatch: %q", reason)
+			}
+		})
 	}
 }
