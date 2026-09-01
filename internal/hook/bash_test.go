@@ -312,11 +312,19 @@ func TestADirectoryOperandSaysSoAndSaysWhatToDoInstead(t *testing.T) {
 	}
 }
 
-// The reason a deny carries is read by the model, and `verdict.go` argues that
+// The reason a deny carries is read by the model, and verdict.go argues that
 // naming SPILL_GUARD_OVERRIDE there hands it the bypass. The remedy above is
-// the other kind: it tells the model what to read, not how to skip reading.
-// Pinned so that making a refusal more helpful cannot quietly cross that line.
-func TestNoRefusalReasonNamesTheOverride(t *testing.T) {
+// the other kind: it says what to read, not how to skip reading. Pinned so
+// that making a refusal more helpful cannot quietly cross that line.
+//
+// TestNoReasonNamesTheOverride is the neighbour and not the same test. That
+// one crosses every lead with every body, which cannot reach this text at all:
+// the bodies it carries are fixed, and an operand refusal's is written by
+// bashTargets from the command in front of it. So this drives real payloads
+// instead of composing reasons -- the population comes from the code path
+// rather than from a list somebody keeps, which is the half of Q89 that a
+// driven test can supply.
+func TestADrivenRefusalDoesNotNameTheOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatal(err)
