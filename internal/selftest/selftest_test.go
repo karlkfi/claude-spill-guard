@@ -152,8 +152,10 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 // disagrees with `allows` and `anomalous` alike and fails either way, so only
 // an allowing arm can silently agree.
 //
-//   - the wrong-rule branch is that, and reachable the moment one rule matches
-//     too much. It is the defect this table was written for.
+//   - the wrong-rule branch is that. Two ways in, not one: a rule that matches
+//     too much, and -- with a perfectly correct ruleset -- any buffer the
+//     pipeline declines to read, whose block names the skip rather than a rule.
+//     It is the defect this table was written for.
 //   - the confirmation branch is not, for THIS arm list, because no arm here
 //     carries an override. That is a property of the list rather than of
 //     hook.Run: a zero-findings payload does reach a confirmation, through the
