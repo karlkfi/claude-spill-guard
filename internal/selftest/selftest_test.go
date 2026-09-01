@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/karlkfi/claude-spill-guard/internal/hook"
+	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 )
 
 // run drives the subcommand the way main.go does and hands back everything a
@@ -135,42 +138,97 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 	}
 }
 
+// Every anomaly `drive` can report, and the branch each one reaches.
+//
+// One payload per branch, because a test driving only the cheapest of them
+// pins only the cheapest of them. The first version of this pinned the refusal
+// alone, and reverting either of the other two branches to `allows` left the
+// whole repository's suite green -- including the wrong-rule branch, which is
+// the one the review was about. A test that cannot fail for the reason it was
+// written is worth what the branch it guards is worth.
+//
+// `payload could not be encoded` is deliberately absent. Every payload here is
+// a map of strings, which `json.Marshal` cannot fail on, so a case for it
+// would assert an unreachable line and read as coverage.
+func anomalies(t *testing.T) []struct {
+	name    string
+	payload map[string]any
+} {
+	t.Helper()
+	other := testvec.Load(t)["google-api-key"].Value
+	if other == "" {
+		t.Fatal("the vectors file has no google-api-key, so the wrong-rule case " +
+			"below would drive a clean payload and test nothing")
+	}
+	return []struct {
+		name    string
+		payload map[string]any
+	}{{
+		// Refused rather than scanned: hook.Run takes exit 2 on an event it
+		// cannot withhold content at.
+		name:    "a payload the hook refuses",
+		payload: map[string]any{"hook_event_name": "PostToolUse"},
+	}, {
+		// An override downgrades a block to a confirmation, whose reason opens
+		// with confirmLead. Reading that as a pass would report a call the user
+		// has not yet approved as one that was clean.
+		name: "a confirmation rather than a block",
+		payload: map[string]any{
+			"hook_event_name": "PreToolUse",
+			"tool_name":       hook.ToolBash,
+			"permission_mode": "default",
+			"tool_input": map[string]any{
+				"command": "SPILL_GUARD_OVERRIDE=driving-a-selftest-case echo " + canary,
+			},
+		},
+	}, {
+		// Blocked, by a rule that is not the canary's. This is what a ruleset
+		// that would not compile does to every call, and what one rule too many
+		// does to a clean one.
+		name: "a block by a rule that is not the canary's",
+		payload: map[string]any{
+			"hook_event_name": "UserPromptSubmit",
+			"prompt":          "key " + other + " here",
+		},
+	}}
+}
+
 // An outcome that is neither a clean allow nor a block by the canary rule
 // fails whatever the arm wanted.
 //
 // This is the hole the third state closed. With two states, `drive` reported
-// four situations as two, and the three anomalies collapsed onto `allows` --
-// so a *blocking* arm caught them and an *allowing* arm reported `ok`. A
-// scanner that blocks everything then produces "7 of 7 arms as expected" at
-// exit 0, which is the precision regression this repo calls the product.
+// four situations as two, and the anomalies collapsed onto `allows` -- so a
+// *blocking* arm caught them and an *allowing* arm reported `ok`. A scanner
+// that blocks everything then produces "7 of 7 arms as expected" at exit 0,
+// which is the precision regression this repo calls the product.
 //
-// The payload here is refused rather than scanned, which is the cheapest
-// anomaly to produce: `hook.Run` takes exit 2 on an event it cannot withhold
-// content at. Both arms below are the same payload and differ only in what
-// they ask for, so a fix that made one pass by loosening the comparison would
-// be caught by the other.
-func TestAnAnomalousOutcomeFailsWhicheverWayTheArmLeans(t *testing.T) {
-	refused := map[string]any{"hook_event_name": "PostToolUse"}
-	if got, _ := drive(arm{payload: refused}); got != anomalous {
-		t.Fatalf("the refused payload came back %s, not anomalous, so neither "+
-			"case below tests anything", got)
-	}
-
-	for _, want := range []expectation{blocks, allows} {
-		var out strings.Builder
-		failed := report(&out, []arm{{
-			name:    "an anomaly, wanted as " + want.String(),
-			want:    want,
-			payload: refused,
-		}})
-		if failed != 1 {
-			t.Errorf("an arm wanting %s got an anomaly and %d failure(s) were "+
-				"counted, want 1:\n%s", want, failed, out.String())
-		}
-		if !strings.Contains(out.String(), "FAIL") {
-			t.Errorf("an arm wanting %s got an anomaly and was not marked:\n%s",
-				want, out.String())
-		}
+// Each case runs both ways off one payload, so a later change that loosened
+// the comparison for one direction is caught by the other.
+func TestEveryAnomalyFailsWhicheverWayTheArmLeans(t *testing.T) {
+	for _, c := range anomalies(t) {
+		t.Run(c.name, func(t *testing.T) {
+			got, detail := drive(arm{payload: c.payload})
+			if got != anomalous {
+				t.Fatalf("came back %s (%s), not anomalous, so neither case "+
+					"below tests anything", got, detail)
+			}
+			for _, want := range []expectation{blocks, allows} {
+				var out strings.Builder
+				failed := report(&out, []arm{{
+					name:    "an anomaly, wanted as " + want.String(),
+					want:    want,
+					payload: c.payload,
+				}})
+				if failed != 1 {
+					t.Errorf("an arm wanting %s got an anomaly and %d failure(s) "+
+						"were counted, want 1:\n%s", want, failed, out.String())
+				}
+				if !strings.Contains(out.String(), "FAIL") {
+					t.Errorf("an arm wanting %s got an anomaly and was not "+
+						"marked:\n%s", want, out.String())
+				}
+			}
+		})
 	}
 }
 
