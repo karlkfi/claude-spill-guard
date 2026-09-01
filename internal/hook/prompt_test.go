@@ -3,9 +3,11 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -217,6 +219,67 @@ func TestADirectoryTokenScansTheNamesThatCross(t *testing.T) {
 	if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
 		t.Errorf("the verdict carries the value:\nstdout %q\nstderr %q", stdout, stderr)
 	}
+}
+
+// The two ways listing could stop agreeing with the harness, each pinned
+// against the drive of 2026-09-01 on 2.1.251.
+//
+// Neither is a property of os.ReadDir that would survive being replaced. A
+// walk and a 1000-entry cap are both edits somebody makes on purpose, the
+// second of them after reading the measurement in listing's own comment, so
+// what they need is a test that fails rather than a sentence asking them not
+// to.
+func TestListingMatchesWhatTheHarnessWasMeasuredToSend(t *testing.T) {
+	// One level. The harness names a subdirectory and does not descend, so a
+	// walk here would report names that never crossed.
+	t.Run("does not descend", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for path, name := range map[string]string{
+			filepath.Join(dir, "LVL1.txt"):           "LVL1.txt",
+			filepath.Join(dir, "a", "LVL2.txt"):      "LVL2.txt",
+			filepath.Join(dir, "a", "b", "LVL3.txt"): "LVL3.txt",
+		} {
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatalf("writing %s: %v", name, err)
+			}
+		}
+		got, err := listing(dir)
+		if err != nil {
+			t.Fatalf("listing: %v", err)
+		}
+		names := strings.Split(string(got), "\n")
+		sort.Strings(names)
+		if want := []string{"LVL1.txt", "a"}; !slices.Equal(names, want) {
+			t.Errorf("listing = %q, want %q -- one level, the subdirectory "+
+				"named and not opened", names, want)
+		}
+	})
+
+	// Past 1000 entries the harness sends 1000 and a `... and N more entries`
+	// marker. This reads the whole directory on purpose: the harness's list is
+	// then a subset of this one, and only the other direction can report a
+	// clean result for a name that crossed.
+	t.Run("does not stop where the harness stops", func(t *testing.T) {
+		const entries = 1001
+		dir := t.TempDir()
+		for i := range entries {
+			name := fmt.Sprintf("h%04d.txt", i)
+			if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+				t.Fatalf("writing %s: %v", name, err)
+			}
+		}
+		got, err := listing(dir)
+		if err != nil {
+			t.Fatalf("listing: %v", err)
+		}
+		if n := len(strings.Split(string(got), "\n")); n != entries {
+			t.Errorf("listing returned %d name(s) for %d entries -- a cap here "+
+				"would match the harness and miss whatever it dropped", n, entries)
+		}
+	})
 }
 
 // Every refusal above is a token this never resolved, so nothing of the prompt

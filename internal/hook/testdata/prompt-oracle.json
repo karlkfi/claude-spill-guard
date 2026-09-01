@@ -47,7 +47,8 @@
       "nested"
     ],
     "harness_also_splices": [],
-    "why": "the harness splices a directory as attachment.type \"directory\" carrying a one-level name listing, which a census of file attachments cannot see; the resolver scans those names, because they crossed"
+    "why": "the harness splices a directory as attachment.type \"directory\" carrying a one-level name listing, which a census of file attachments cannot see; the resolver scans those names, because they crossed",
+    "note": "one level is measured rather than assumed as of 2026-09-01 on 2.1.251: against a three-level tree the attachment carried the subdirectory's name and nothing inside it. The listing stops at 1000 entries -- 1000 crossed whole, 1001 came back as 1000 names plus a literal \"\u2026 and 1 more entries\", 3000 as 1000 plus \"\u2026 and 2000 more entries\" -- and the resolver reads the whole directory anyway, which is the same shape as truncated-large-file and the direction that cannot miss a crossing. Nothing is filtered: a dotfile and a dot-directory both crossed. This case's set is unchanged by all of it, because the oracle compares which paths were targeted and none of this is visible there"
   },
   {
     "name": "glob",

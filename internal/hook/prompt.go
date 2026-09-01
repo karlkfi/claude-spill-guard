@@ -295,10 +295,27 @@ func resolveAt(candidate, cwd string) (string, error) {
 // this package's oracle takes is of `file` attachments, so a directory token
 // is a case where this function and the harness are supposed to disagree.
 //
+// One level was the shape of the one directory measured, and is now measured
+// as the rule. Driven 2026-09-01 on 2.1.251 against a three-level tree,
+// `@deeper` carried `a\nLVL1.txt` and named neither LVL2.txt nor LVL3.txt: the
+// harness names a subdirectory and does not descend into it. So neither does
+// this.
+//
+// It does stop at 1000 entries, and this deliberately does not. Same run: 500
+// and 1000 crossed whole, 1001 crossed as 1000 names plus a literal `… and 1
+// more entries`, 3000 as 1000 plus `… and 2000 more entries`. That marker is
+// the only thing the harness sent that os.ReadDir does not return, and it
+// names no file. Capping this to match is the one edit the measurement invites
+// and must not get: past 1000 the harness sends a subset, so reading the whole
+// directory over-reads, and over-reading cannot report a clean result for a
+// name that crossed.
+//
 // os.ReadDir rather than anything that filters: where the harness leaves an
 // entry out this reports one the harness did not send, and where it added one
 // this would miss it. Only the second direction can report a clean result for
-// something that crossed.
+// something that crossed. Nothing is filtered either way -- a dotfile and a
+// dot-directory both crossed on the same run -- and the orders disagree, which
+// costs nothing because a name is scanned wherever it sits.
 func listing(dir string) ([]byte, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
