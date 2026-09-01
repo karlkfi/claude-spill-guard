@@ -295,7 +295,7 @@ func toolTargets(call payload) ([]target, error) {
 			return nil, errors.New("the Read call names a relative file_path, " +
 				"which this cannot resolve to the file the tool would open")
 		}
-		buf, err := os.ReadFile(*in.FilePath)
+		info, err := os.Stat(*in.FilePath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				// A file that is not there sends nothing, so allowing the call
@@ -304,6 +304,36 @@ func toolTargets(call payload) ([]target, error) {
 				// failure is a file that exists and went unchecked.
 				return nil, nil
 			}
+			return nil, fmt.Errorf("reading the file this call would send: %w", err)
+		}
+		// Only a regular file, for bash.go's reason: os.ReadFile on a fifo
+		// blocks until something writes it, which hangs the call instead of
+		// deciding it. os.Stat follows a symlink the way the tool does, so a
+		// link to a fifo is caught; os.Lstat would report the link and could
+		// not tell it from a link to a regular file.
+		//
+		// The decision that was close on the Bash surface is not close here.
+		// A `/dev/null` operand is a real idiom there and had to be weighed;
+		// a Read call carries one path, chosen because the model wants what
+		// is in it, and a device is not that. Counted rather than asserted:
+		// of 9,719 Read calls in this machine's transcripts, 0 name a path
+		// under /dev/. So the whole class is refused with no carve-out.
+		//
+		// A directory says so, for bash.go's reason: it is the case a user
+		// actually meets, and one reason for every mode would say less than
+		// the OS error this replaced.
+		if info.IsDir() {
+			return nil, errors.New("the Read call names a directory, and this " +
+				"reads files rather than listing them, so what it would send " +
+				"was not read")
+		}
+		if !info.Mode().IsRegular() {
+			return nil, errors.New("the Read call names something that is " +
+				"neither a file nor a directory, so what it would send cannot " +
+				"be read here")
+		}
+		buf, err := os.ReadFile(*in.FilePath)
+		if err != nil {
 			return nil, fmt.Errorf("reading the file this call would send: %w", err)
 		}
 		return []target{{*in.FilePath, buf}}, nil

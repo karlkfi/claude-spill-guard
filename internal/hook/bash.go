@@ -128,7 +128,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 					continue
 				}
 				seen[path] = true
-				buf, err := os.ReadFile(path)
+				info, err := os.Stat(path)
 				if err != nil {
 					if errors.Is(err, fs.ErrNotExist) {
 						// Nothing there sends nothing, and the command will
@@ -136,6 +136,53 @@ func bashTargets(command, cwd string) ([]target, error) {
 						// absent file.
 						continue
 					}
+					return nil, fmt.Errorf("reading a file this command would "+
+						"send: %w", err)
+				}
+				// Only a regular file. os.ReadFile on a fifo blocks until
+				// something writes, which hangs the call rather than deciding it --
+				// neither answer this project chooses between, and nothing in the
+				// transcript to say which was reached.
+				//
+				// A device is refused with it rather than skipped, against the way
+				// the row leaned, so the traffic was measured instead of guessed.
+				// Over 129,000 Bash calls in this machine's transcripts `/dev/*`
+				// reaches a reader's operand list 12 times, all of them `/dev/null`
+				// named as a filename by grep (11) or awk (1) -- the 18,509
+				// ordinary ones are redirect targets, which Segments keeps in
+				// Redirects and this loop never reads. Skipping instead would claim
+				// nothing crossed, and /dev/zero and /dev/random return bytes for
+				// as long as anything reads, with no bound on os.ReadFile.
+				//
+				// os.Stat, not os.Lstat: it is the reading `cat` takes, and Lstat
+				// reports a symlink to a fifo and one to a regular file
+				// identically -- driven, both Lrwxr-xr-x where Stat separates them.
+				// The path can be swapped between this and the open below. Closing
+				// that needs an fd and an fstat, which O_NONBLOCK makes portable
+				// only off Windows, and nothing in a session races its own hook.
+				// A directory gets its own reason, because it is the whole of
+				// the traffic this refuses in practice -- `grep -rn pat docs/`
+				// and `rg pat docs/`, 7.1% of the calls that carry an operand --
+				// and "not a regular file" leaves a user working out which kind
+				// they hit. Before this guard the OS error said `is a directory`,
+				// so one reason for every mode would be strictly less to go on
+				// than the tree already had. The path stays out of it, as it does
+				// in every reason resolve writes; the OS error named it only
+				// because %w carried it. Whether this should walk the tree
+				// instead is Q95 and is not decided here.
+				if info.IsDir() {
+					return nil, fmt.Errorf("in the %q here, a file operand names a "+
+						"directory, and this reads files rather than walking them, "+
+						"so what that operand would send was not read -- name the "+
+						"files instead", command)
+				}
+				if !info.Mode().IsRegular() {
+					return nil, fmt.Errorf("in the %q here, a file operand names "+
+						"something that is neither a file nor a directory, so what "+
+						"this command would send cannot be read here", command)
+				}
+				buf, err := os.ReadFile(path)
+				if err != nil {
 					return nil, fmt.Errorf("reading a file this command would "+
 						"send: %w", err)
 				}
