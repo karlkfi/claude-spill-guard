@@ -22,16 +22,6 @@ REM is the one spelling that fails closed on its own. Not exit 2: on exit 2
 REM stdout is discarded and the model is told the hook errored, so the reason
 REM never arrives. Exit 0 is deliberate and is the whole point of the file.
 REM
-REM The object is the flat {"decision":"block","reason":...} and not the
-REM PreToolUse permissionDecision shape. That is not cosmetic. This file never
-REM learns which event it was invoked for: hooks.json points it at PreToolUse
-REM AND at UserPromptSubmit, and the payload naming the event is on stdin,
-REM which is passed through untouched rather than read. internal/hook/verdict.go
-REM measures both encodings against 2.1.238 -- the PreToolUse deny object is
-REM accepted and IGNORED on UserPromptSubmit, so the prompt reaches the model
-REM with nothing anywhere saying so. This shape blocks both. A launcher blind
-REM to the event has to write the encoding that does not depend on it.
-REM
 REM Resolution order, from docs/design/distribution.md: SPILL_GUARD_BIN, then
 REM PATH, then the default install location, then deny.
 REM
@@ -97,11 +87,27 @@ set -eu
 
 deny() {
     # A block decision object on stdout blocks whatever this exits with, and
-    # the reason reaches the model byte-identical -- on either of the two
-    # events hooks.json wires, which is why this shape and not the PreToolUse
-    # one. Exit 0 rather than 2: exit 2 discards stdout, and 1, 9 and 127 are
-    # the codes a launcher that FAILED produces, which is the state this deny
-    # exists to be distinguishable from.
+    # the reason reaches the model byte-identical. Exit 0 rather than 2: exit
+    # 2 discards stdout, and 1, 9 and 127 are the codes a launcher that
+    # FAILED produces, which is the state this deny exists to be
+    # distinguishable from.
+    #
+    # The shape is the flat {"decision":"block","reason":...} and not the
+    # PreToolUse permissionDecision object, and that is not cosmetic. This
+    # file never learns which event it was invoked for: hooks.json points it
+    # at PreToolUse AND at UserPromptSubmit, and the payload naming the event
+    # goes past on stdin, which is passed through rather than read.
+    # internal/hook/verdict.go measures both encodings -- the PreToolUse deny
+    # object is accepted and IGNORED on UserPromptSubmit, so the prompt
+    # reaches the model with nothing anywhere saying so. This one blocks
+    # both. A component blind to the event has to write the encoding that
+    # does not depend on it.
+    #
+    # The argument lives here rather than in the batch half's header, against
+    # that half's own convention, because cmd.exe reads the batch half by
+    # byte position and tests.yml's LF mutation control reproduces a
+    # position-sensitive failure in it. Ten comment lines up there stopped it
+    # reproducing. Nothing down here is read by cmd.exe.
     printf '%s\n' "$1"
     exit 0
 }

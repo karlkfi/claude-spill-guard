@@ -726,7 +726,7 @@ jobs:
               raise SystemExit("the deny body is not in the launcher any more")
           p.write_bytes(data.replace(old, b"    exit 1\n", 1))
           MUTATE
-          if [ "$(python3 -c "import pathlib; print(pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().count(b'\r\n'))")" != "85" ]; then
+          if [ "$(python3 -c "import pathlib; print(pathlib.Path('hooks/run-spill-guard.cmd').read_bytes().count(b'\r\n'))")" != "75" ]; then
             echo "::error::the mutation moved the line endings, so this step is testing two things at once" >&2
             exit 1
           fi
