@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/karlkfi/claude-spill-guard/internal/hook"
+	"github.com/karlkfi/claude-spill-guard/internal/scan"
 )
 
 // The canary. A counting sequence and the first six hex letters, so a reader
@@ -100,8 +101,16 @@ func (e expectation) String() string {
 // blocks, and the failure mode that produces the first is the commonest one
 // there is: a ruleset that did not load. So every surface gets both.
 type arm struct {
-	name    string
-	want    expectation
+	name string
+	want expectation
+	// What a block for this arm has to name. Empty is the canary's rule,
+	// which is every arm whose payload carries the canary.
+	//
+	// Per arm rather than one constant, because "blocked by the wrong rule"
+	// and "blocked with no rule involved at all" are the same string to
+	// `drive`. Reading both as a pass would retire the branch that catches an
+	// over-matching rule; naming what each arm expects keeps it.
+	by      string
 	payload map[string]any
 }
 
@@ -127,6 +136,12 @@ func Run(version string, stdout, stderr io.Writer) int {
 			"file, so nothing below was driven: %v\n", err)
 		return 1
 	}
+	undecodable := filepath.Join(dir, "notes.utf32")
+	if err := os.WriteFile(undecodable, utf32LE("no credentials in this one\n"), 0o600); err != nil {
+		fmt.Fprintf(stderr, "spill-guard: selftest could not write its "+
+			"undecodable file, so nothing below was driven: %v\n", err)
+		return 1
+	}
 
 	fmt.Fprintf(stdout, "spill-guard %s selftest\n", version)
 	if self, err := os.Executable(); err == nil {
@@ -138,7 +153,7 @@ func Run(version string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "ruleset: compiled in\n\n")
 
-	list := arms(planted, quiet)
+	list := arms(planted, quiet, undecodable)
 	total := len(list)
 	failed := report(stdout, list)
 
@@ -189,7 +204,7 @@ func report(stdout io.Writer, list []arm) int {
 
 // arms is every payload driven, rebuilt per call so nothing is shared between
 // a caller's two runs.
-func arms(planted, quiet string) []arm {
+func arms(planted, quiet, undecodable string) []arm {
 	return []arm{
 		{
 			name: "a prompt carrying the canary",
@@ -256,6 +271,28 @@ func arms(planted, quiet string) []arm {
 				"tool_input":      map[string]any{"command": "cat " + quote(quiet)},
 			},
 		},
+		{
+			// A verdict with no finding behind it, which nothing else here
+			// reaches. A UTF-32 mark is a declaration this build cannot
+			// decode, so hook.Run takes the `len(skips) > 0` arm that sits
+			// ahead of the `len(findings) == 0` early return -- and until this
+			// arm existed that early return was reached only because the list
+			// happened to produce no skips either, which is a property of the
+			// list rather than of hook.Run.
+			//
+			// It is a blocking arm, and that bounds what it buys. Blocking
+			// arms already disagree with every value but the one they name, so
+			// this makes the branch cheaply reachable and gives no *allowing*
+			// arm anything it did not have.
+			name: "a Read of a file this build cannot decode",
+			want: blocks,
+			by:   string(scan.SkippedUTF32),
+			payload: map[string]any{
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "Read",
+				"tool_input":      map[string]any{"file_path": undecodable},
+			},
+		},
 	}
 }
 
@@ -280,17 +317,21 @@ func drive(a arm) (expectation, string) {
 	if out.Len() == 0 {
 		return allows, "allowed"
 	}
+	by := a.by
+	if by == "" {
+		by = canaryRule
+	}
 	reason := reasonOf(out.String())
 	if !strings.HasPrefix(reason, blockedLead) {
 		return anomalous, fmt.Sprintf("a verdict that is not a block: %q", clip(reason))
 	}
-	if !strings.Contains(reason, canaryRule) {
-		// Blocked, and not by the rule. A ruleset that would not compile does
-		// this to every call, and so does one rule too many -- which is the
-		// over-block this arm has to be able to see.
-		return anomalous, fmt.Sprintf("blocked, but not by %s: %q", canaryRule, clip(reason))
+	if !strings.Contains(reason, by) {
+		// Blocked, and not by what the arm named. A ruleset that would not
+		// compile does this to every call, and so does one rule too many --
+		// which is the over-block this arm has to be able to see.
+		return anomalous, fmt.Sprintf("blocked, but not by %s: %q", by, clip(reason))
 	}
-	return blocks, "blocked (" + canaryRule + ")"
+	return blocks, "blocked (" + by + ")"
 }
 
 // reasonOf pulls the text out of either block encoding, so an arm does not
@@ -309,6 +350,21 @@ func reasonOf(stdout string) string {
 		return got.Reason
 	}
 	return got.HookSpecificOutput.PermissionDecisionReason
+}
+
+// utf32LE is s behind a UTF-32LE byte-order mark.
+//
+// The mark is the whole fixture: internal/scan reads it and stops, so nothing
+// after it is ever decoded and it is there only so the file is one of the
+// class rather than four bare bytes. It carries no credential, for the reason
+// the control file carries none -- an arm that blocks has to block for the
+// reason it names.
+func utf32LE(s string) []byte {
+	out := []byte{0xFF, 0xFE, 0x00, 0x00}
+	for _, r := range s {
+		out = append(out, byte(r), byte(r>>8), byte(r>>16), byte(r>>24))
+	}
+	return out
 }
 
 // quote wraps a path for a shell command string, which is what a Bash payload
