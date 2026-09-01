@@ -314,17 +314,30 @@ func TestTheOverrideDoesNotDowngradeWhereNobodyCanAnswer(t *testing.T) {
 // been a block, never an allow. Q92 carries the fix.
 func TestAQuotedAssignmentInCommandPositionArmsTheHatchToo(t *testing.T) {
 	dir, name := planted(t)
-	// Every way of quoting part of the NAME, rather than the two spellings
-	// somebody wrote down. Driven on bash 5.3.15: each of these is a command
-	// bash cannot find, not an assignment -- `'SG'_OVR=x env` and
-	// `SG_OVR''=x env` report `command not found` exactly as the fully quoted
-	// forms do. The hook arms on all four, so the divergence is four spellings
-	// wide and this pinned half of it.
+	// The rule, driven on bash 5.3.15 rather than reasoned about: quoting OR
+	// ESCAPING any character up to and including the `=` makes the word a
+	// command bash cannot find. Quoting inside the value leaves it an
+	// assignment, which is the neighbouring test.
+	//
+	// Both halves of that were learned the hard way. The row named two
+	// spellings; widening it to the partial-quote forms found two more; and a
+	// review found five more still, because backslash is a third quoting
+	// mechanism neither of the first two passes exercised. The `\=` form is
+	// the one that broke the earlier statement of the rule outright -- the
+	// escaped character is the `=` itself, which is neither name nor value.
+	//
+	// So the list below is nine, and it is a floor rather than a census. Every
+	// one arms here and none is an assignment to bash.
 	for _, command := range []string{
 		`'SPILL_GUARD_OVERRIDE=x' cat ` + name,
 		`"SPILL_GUARD_OVERRIDE=x" cat ` + name,
 		`'SPILL'_GUARD_OVERRIDE=x cat ` + name,
+		`"SPILL"_GUARD_OVERRIDE=x cat ` + name,
 		`SPILL_GUARD_OVER''RIDE=x cat ` + name,
+		`SPILL_GUARD_OVERRIDE""=x cat ` + name,
+		`\SPILL_GUARD_OVERRIDE=x cat ` + name,
+		`S\PILL_GUARD_OVERRIDE=x cat ` + name,
+		`SPILL_GUARD_OVERRIDE\=x cat ` + name,
 	} {
 		t.Run(command, func(t *testing.T) {
 			_, stdout, _ := drive(t, bashCall(t, command, dir))
@@ -339,9 +352,22 @@ func TestAQuotedAssignmentInCommandPositionArmsTheHatchToo(t *testing.T) {
 // The other side of the same boundary, and the one a fix for Q92 must not
 // break. Quoting inside the VALUE is an ordinary assignment to bash -- driven
 // on 5.3.15, `SG_OVR='x y' env` and `SG_OVR=x"y" env` both set the variable --
-// and the documented way to write a reason with spaces is exactly that. So a
-// change that recovered quote provenance and refused every quoted token would
-// pass the test above and take the hatch away from its own documented usage.
+// and the documented way to write a reason with spaces is exactly that.
+//
+// This test is the only thing that tells a correct fix from an over-broad one,
+// and the test above cannot: that one asserts `ask`, so it pins the bug, and
+// EVERY fix reddens it. Driven -- a probe that gets all nine name-quoting
+// spellings right fails all nine subtests above and passes both here, while
+// one that refuses every quoted token fails both here too. Only this
+// difference separates them.
+//
+// What an over-broad fix costs is a fail-open, not an inconvenience. Stop
+// stripping `SPILL_GUARD_OVERRIDE='a reason'` and it becomes the command word;
+// internal/readers has no row for it, so the segment contributes no operands
+// and the file the command reads is never opened. Driven on a planted secret:
+// empty stdout, exit 0, no verdict object at all, where the same call on a
+// known reader denies. That is the property this project sells, lost to a fix
+// for a divergence whose worst case was a confirmation.
 //
 // This is a control rather than a divergence: it asserts what bash and the
 // hook already agree about, which is why it is here and not in Q92.
