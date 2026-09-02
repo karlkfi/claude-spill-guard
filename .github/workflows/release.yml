@@ -32,10 +32,6 @@ permissions:
 
 env:
   PYTHON_VERSION: '3.13'
-  # The CLI, not the action. Pinning `goreleaser/goreleaser-action` by SHA --
-  # which the `action-pins` gate requires -- pins the wrapper and leaves the
-  # binary it downloads to `~> v2`, whatever that resolves to on the day.
-  GORELEASER_VERSION: v2.18.0
 
 jobs:
   # Everything a release does except signing, publishing, and the tag.
@@ -59,11 +55,15 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: ${{ env.GORELEASER_VERSION }}
-          install-only: true
+      # Not `goreleaser/goreleaser-action`. That action is pinned by SHA, as
+      # `action-pins` requires of every `uses:`, and the CLI it downloaded was
+      # chosen by a version input -- a git tag on goreleaser/goreleaser,
+      # resolved on the day, on the job that holds this repository's token. A
+      # tool version passed as an action input is not a `uses:` value, so no
+      # gate can read it. scripts/install-goreleaser.py carries the argument
+      # and the digests, and refuses before anything is extracted or run.
+      - name: The pinned GoReleaser, verified against the digest committed here
+        run: python3 scripts/install-goreleaser.py
 
       # Against the schema of the pinned binary, so a config that drifted ahead
       # of the version that reads it fails here rather than on a tag.
@@ -96,9 +96,10 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Two mutations, for the two halves of the check that fail in opposite
-  # directions. Both assert the mutation landed before asking for red: a break
-  # that silently did not happen leaves the checker reading clean input, and a
+  # Three mutations. Two are the halves of check-release-artifacts.py that fail
+  # in opposite directions; the third is the GoReleaser pin, which no gate can
+  # read. Each asserts the mutation landed before asking for red: a break that
+  # silently did not happen leaves the checker reading clean input, and a
   # control that passes for that reason is indistinguishable from one that
   # worked.
   dry-run-mutation-control:
@@ -117,11 +118,48 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: ${{ env.GORELEASER_VERSION }}
-          install-only: true
+      # A pin is only a pin if a job fails when the bytes move, and nothing
+      # else here can assert that: `action-pins` reads `uses:` values, and the
+      # GoReleaser version is not one. The substitution is over any 64-character
+      # digest rather than a literal copied from the script, so re-pinning does
+      # not silently retire this control. The install step below is the other
+      # half -- it runs the unmutated script and every step after it needs the
+      # binary, so a refusal that fired on every archive would redden here too.
+      - name: An archive that does not match the pinned digest must not be installed
+        run: |
+          python3 - <<'MUTANT'
+          import pathlib
+          import re
+          import sys
+          p = pathlib.Path("scripts/install-goreleaser.py")
+          t = p.read_text(encoding="utf-8")
+          mutated, n = re.subn(r"\b[0-9a-f]{64}\b", "0" * 64, t)
+          if not n:
+              sys.exit(f"{p} carries no 64-character digest, so this control "
+                       f"has nothing to break and the assertion below would be "
+                       f"about an unmutated script")
+          p.write_text(mutated, encoding="utf-8")
+          print(f"replaced {n} pinned digest(s) with zeroes")
+          MUTANT
+          if git diff --quiet scripts/install-goreleaser.py; then
+            echo "::error::the mutation left scripts/install-goreleaser.py byte-identical, so the install below read the real digest" >&2
+            exit 1
+          fi
+          python3 scripts/install-goreleaser.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "install exit: $rc"
+          cat mutant.log
+          git checkout -- scripts/install-goreleaser.py
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the install accepted an archive that does not match the pinned digest" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not match the digest this repository pinned' mutant.log; then
+            echo "::error::the install refused, and not on the digest" >&2
+            exit 1
+          fi
+
+      - name: The pinned GoReleaser, verified against the digest committed here
+        run: python3 scripts/install-goreleaser.py
 
       # The failure this check exists for: the release config ships fewer
       # platforms than the cross-compile gate builds. Nothing else notices --
@@ -379,11 +417,8 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: ${{ env.GORELEASER_VERSION }}
-          install-only: true
+      - name: The pinned GoReleaser, verified against the digest committed here
+        run: python3 scripts/install-goreleaser.py
 
       # docs/releases/README.md states that the file there matches the
       # published body. Nothing enforced it, and the direction that goes wrong
