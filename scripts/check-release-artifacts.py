@@ -42,10 +42,16 @@ release workflow's provenance loop is that caller: a literal there would be a
 second copy of a list this file exists to keep single, and it would be wrong on
 the release that added a target rather than on a pull request.
 
-`--signed` additionally requires the cosign signature and certificate beside
-the checksums file. The pull-request run passes `--skip=sign` and omits this:
-cosign sign-blob writes a public Rekor entry, and minting one per pull request
-logs builds nobody published.
+`--signed` additionally requires the Sigstore bundle beside the checksums file.
+One bundle rather than a `.sig` and a `.pem`, because cosign v3 signs into the
+new bundle format by default and dropped the flags that wrote the other two.
+The name is read from .goreleaser.yaml's `signs` entry rather than written here,
+so a change to the signing config cannot leave this asserting the old asset --
+which is the defect this line replaces, and it cost a rehearsal to find.
+
+The pull-request run passes `--skip=sign` and omits this: cosign sign-blob
+writes a public Rekor entry, and minting one per pull request logs builds
+nobody published.
 """
 
 import hashlib
@@ -114,14 +120,19 @@ def artifacts(dist):
     return model
 
 
-def declared_extras():
-    """What a release carries besides the archives, from .goreleaser.yaml.
+_DECLARED = None
 
-    Read through the parser in tools/cmd/releaseconfig rather than matched out
-    of the file: `yaml` is not importable on a machine that satisfies `make
-    doctor`, and a pattern over raw lines reads a glob inside a `before.hooks`
-    shell line as a declaration. GoReleaser names each asset after the file's
-    basename, which is the name checksums.txt records."""
+
+def declared():
+    """.goreleaser.yaml as the parser in tools/cmd/releaseconfig reads it.
+
+    Run once and kept, because two callers need it and `go run` is the slow
+    part of this script. A parser that cannot run is fatal rather than an empty
+    model: every assertion below would pass over nothing.
+    """
+    global _DECLARED
+    if _DECLARED is not None:
+        return _DECLARED
     result = subprocess.run(("go", "run", "./cmd/releaseconfig", str(CONFIG)),
                             cwd=ROOT / "tools", capture_output=True, text=True,
                             check=False)
@@ -132,12 +143,67 @@ def declared_extras():
                  f"nothing. Go is a required tool -- see `make doctor`.\n"
                  f"{result.stderr.strip()}")
     try:
-        model = json.loads(result.stdout)
-        globs = (model["release_extra_files"], model["checksum_extra_files"])
-    except (json.JSONDecodeError, KeyError, TypeError) as err:
+        _DECLARED = json.loads(result.stdout)
+    except json.JSONDecodeError as err:
         sys.exit(f"release-artifacts: the parser wrote something this cannot "
                  f"read ({err}). Anything else on its stdout would be read as "
                  f"the model.\n{result.stdout[:400]}")
+    return _DECLARED
+
+
+def signed_assets():
+    """The asset names the signing config produces, beside CHECKSUMS.
+
+    Read from `signs:` rather than written down, because the last copy written
+    down here went stale the day cosign v3 replaced a `.sig` and a `.pem` with
+    one `.sigstore.json`, and it went stale in the direction that only a real
+    tag can show: `--skip=sign` on every pull request means nothing checks it
+    until the release is being cut.
+
+    A `signs:` section that declares no name at all is a finding rather than a
+    default filled in here. GoReleaser's own default is `${artifact}.sig`, and
+    a copy of it in this file is the same drift one level down.
+    """
+    names, findings = [], []
+    signs = declared().get("signs")
+    if not signs:
+        findings.append(f"{CONFIG.name} declares no `signs:` entry, so nothing "
+                        f"signs {CHECKSUMS} and --signed has no asset to "
+                        f"require")
+        return names, findings
+    for i, entry in enumerate(signs):
+        for key in ("signature", "certificate"):
+            template = entry.get(key) or ""
+            if not template:
+                continue
+            if "${artifact}" not in template:
+                findings.append(f"{CONFIG.name} `signs[{i}].{key}` is "
+                                f"{template!r}, which names no ${{artifact}} -- "
+                                f"this cannot say what asset it becomes")
+                continue
+            names.append(template.replace("${artifact}", CHECKSUMS))
+    if not names:
+        findings.append(f"{CONFIG.name} `signs[0]` declares neither a "
+                        f"`signature:` nor a `certificate:`, so the asset it "
+                        f"writes is GoReleaser's default and not stated here")
+    return names, findings
+
+
+def declared_extras():
+    """What a release carries besides the archives, from .goreleaser.yaml.
+
+    Read through the parser in tools/cmd/releaseconfig rather than matched out
+    of the file: `yaml` is not importable on a machine that satisfies `make
+    doctor`, and a pattern over raw lines reads a glob inside a `before.hooks`
+    shell line as a declaration. GoReleaser names each asset after the file's
+    basename, which is the name checksums.txt records."""
+    model = declared()
+    try:
+        globs = (model["release_extra_files"], model["checksum_extra_files"])
+    except (KeyError, TypeError) as err:
+        sys.exit(f"release-artifacts: the parser wrote something this cannot "
+                 f"read ({err}). Anything else on its stdout would be read as "
+                 f"the model.\n{json.dumps(model)[:400]}")
 
     resolved, unmatched = [], []
     for section in globs:
@@ -264,12 +330,14 @@ def check(dist, signed, shipped, extras):
                             f"{actual}. Signing that file signs a wrong answer")
 
     if signed:
-        for suffix, what in ((".sig", "cosign signature"),
-                             (".pem", "signing certificate")):
-            blob = dist / (CHECKSUMS + suffix)
+        names, complaints = signed_assets()
+        findings.extend(complaints)
+        for name in names:
+            blob = dist / name
             if not blob.is_file():
-                findings.append(f"no {blob.name}, so the release carries no "
-                                f"{what} over {CHECKSUMS}")
+                findings.append(f"no {blob.name}, so the release carries "
+                                f"nothing to verify {CHECKSUMS} with -- "
+                                f"{CONFIG.name} says signing writes it")
     return findings
 
 

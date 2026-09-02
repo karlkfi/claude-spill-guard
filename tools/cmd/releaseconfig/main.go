@@ -1,5 +1,6 @@
 // Command releaseconfig reads the GoReleaser config with a real YAML parser and
-// prints the extra-file globs it declares, as JSON.
+// prints what it declares -- the extra-file globs, and the asset names the
+// signing entries produce -- as JSON.
 //
 // An extra file is a release asset GoReleaser does not build: this repository
 // uploads install.sh and install.ps1 that way. Two independent lists decide
@@ -36,6 +37,19 @@ type model struct {
 	// has to become a finding.
 	Release  []string `json:"release_extra_files"`
 	Checksum []string `json:"checksum_extra_files"`
+	// One entry per `signs:` entry, carrying the asset-name templates it
+	// declares. Expanding `${artifact}` is the caller's, which is where a
+	// missing asset has to become a finding.
+	Signs []sign `json:"signs"`
+}
+
+// sign is the asset names one `signs:` entry produces. Both keys are optional
+// in GoReleaser and an absent one reads as empty rather than as its default:
+// this extracts and does not judge, and a default filled in here would be a
+// second copy of GoReleaser's own, wrong on the release where it changed.
+type sign struct {
+	Signature   string `json:"signature"`
+	Certificate string `json:"certificate"`
 }
 
 func main() {
@@ -86,7 +100,50 @@ func scan(path string, text []byte) (model, error) {
 	if err != nil {
 		return model{}, err
 	}
-	return model{Path: path, Release: release, Checksum: checksum}, nil
+	signs, err := signatures(root)
+	if err != nil {
+		return model{}, err
+	}
+	return model{Path: path, Release: release, Checksum: checksum, Signs: signs}, nil
+}
+
+// signatures is the `signature:` and `certificate:` of every `signs:` entry.
+//
+// A caller asserting that a release carries what it signed has to name those
+// assets, and naming them anywhere else is a copy that goes stale silently --
+// which is what happened when cosign v3 turned one `.sig` plus one `.pem` into
+// one `.sigstore.json` and the checker went on requiring the old two.
+func signatures(root *yaml.Node) ([]sign, error) {
+	found := []sign{}
+	list := value(root, "signs")
+	if list == nil {
+		return found, nil
+	}
+	if list.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("line %d: `signs:` is not a sequence", list.Line)
+	}
+	for _, item := range list.Content {
+		item = resolve(item)
+		if item == nil || item.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("line %d: `signs` entry is not a mapping", list.Line)
+		}
+		var s sign
+		for _, key := range []struct {
+			name string
+			into *string
+		}{{"signature", &s.Signature}, {"certificate", &s.Certificate}} {
+			n := value(item, key.name)
+			if n == nil {
+				continue
+			}
+			if n.Kind != yaml.ScalarNode {
+				return nil, fmt.Errorf("line %d: `signs.%s:` is not a scalar", n.Line, key.name)
+			}
+			*key.into = n.Value
+		}
+		found = append(found, s)
+	}
+	return found, nil
 }
 
 // extraFiles is the `glob:` of every entry under `<section>.extra_files`.
