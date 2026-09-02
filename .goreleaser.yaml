@@ -79,6 +79,16 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+  # The install scripts are release assets too, and an asset GoReleaser does
+  # not build is covered here or nowhere: the checksum stage runs before the
+  # publish stage that uploads them, so without this they ship outside the one
+  # file cosign signs (Q97). Every name here has to be in release.extra_files
+  # and every name there has to be here; check-release-artifacts.py reads both
+  # lists from this file and asserts the pairing both ways.
+  extra_files:
+    - glob: install/install.sh
+    - glob: install/install.ps1
+
 # Keyless, so there is no key to store, rotate, or lose. The identity is the
 # workflow's own OIDC token, which is why the verification step in
 # release.yml pins --certificate-identity to this repository's release.yml at
@@ -117,10 +127,9 @@ release:
   # already tells a user with no binary to do exactly that -- so a release
   # that did not carry them would make that message false.
   #
-  # They are uploaded rather than archived, so they are not in checksums.txt
-  # and nothing signs them. That is the reason the documented form is two
-  # steps: a script you fetch in order to read is verified by reading it.
-  # Q97 is whether that should change.
+  # This list uploads and nothing else. What puts them in checksums.txt --
+  # and so under the cosign signature over it -- is checksum.extra_files
+  # above, which has to carry the same two names.
   extra_files:
     - glob: install/install.sh
     - glob: install/install.ps1

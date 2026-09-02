@@ -96,12 +96,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Three mutations. Two are the halves of check-release-artifacts.py that fail
-  # in opposite directions; the third is the GoReleaser pin, which no gate can
-  # read. Each asserts the mutation landed before asking for red: a break that
-  # silently did not happen leaves the checker reading clean input, and a
-  # control that passes for that reason is indistinguishable from one that
-  # worked.
+  # Five mutations. Four are halves of check-release-artifacts.py -- a target
+  # the release config stopped building, an archive that stopped matching
+  # checksums.txt, an install script uploaded outside it, and a name inside it
+  # that nothing declares. The fifth is a GoReleaser archive that stopped
+  # matching the digest pinned in the tree, which is the install refusing
+  # rather than a check failing. Every one asserts its mutation landed before
+  # asking for red, and where landing and biting come apart -- an edit to
+  # .goreleaser.yaml that checksums.txt might not have followed -- the
+  # assertion is on the effect instead. A break that silently did not happen
+  # leaves the checker reading clean input, and a control that passes for that
+  # reason is indistinguishable from one that worked.
   dry-run-mutation-control:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -217,6 +222,91 @@ jobs:
           fi
           if ! grep -q 'Signing that file signs a wrong answer' mutant.log; then
             echo "::error::the check failed, but not on the digest mismatch" >&2
+            exit 1
+          fi
+
+      # A release also carries the two install scripts, which GoReleaser
+      # uploads rather than builds, and two separate lists decide what happens
+      # to one. A name on release.extra_files and not on checksum.extra_files
+      # is uploaded and left out of the file cosign signs -- so the release is
+      # complete, every archive verifies, and the script a user is told to
+      # fetch is the one asset with nothing to check it against. That was Q97.
+      - name: An install script uploaded and left out of checksums.txt must fail the check
+        run: |
+          python3 - <<'MUTANT'
+          import pathlib
+          import sys
+
+          # Both lists spell the same two globs, so the mutation is keyed on
+          # the section boundary rather than on the text: everything above
+          # `release:` holds checksum.extra_files, everything below it holds
+          # the copy that has to survive.
+          p = pathlib.Path(".goreleaser.yaml")
+          t = p.read_text(encoding="utf-8")
+          head, sep, tail = t.partition("\nrelease:\n")
+          glob = "    - glob: install/install.ps1\n"
+          if not sep or head.count(glob) != 1 or tail.count(glob) != 1:
+              sys.exit("the two extra-file lists are no longer one each side of "
+                       "`release:`, so this control does not know which one it "
+                       "would be editing")
+          p.write_text(head.replace(glob, "") + sep + tail, encoding="utf-8")
+          MUTANT
+          if git diff --quiet .goreleaser.yaml; then
+            echo "::error::the mutation changed nothing -- .goreleaser.yaml no longer matches" >&2
+            exit 1
+          fi
+          goreleaser release --snapshot --clean --skip=sign
+          # The edit landing is not the mutation biting. What the check reads
+          # is checksums.txt, so that is what has to have lost the name.
+          if grep -q ' install.ps1$' dist/checksums.txt; then
+            git checkout -- .goreleaser.yaml
+            echo "::error::checksums.txt still lists install.ps1, so the check below read a covered asset and this control proved nothing" >&2
+            exit 1
+          fi
+          python3 scripts/check-release-artifacts.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .goreleaser.yaml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the check passed with install.ps1 uploaded to the release and absent from checksums.txt" >&2
+            exit 1
+          fi
+          if ! grep -q 'is not named by checksum.extra_files' mutant.log; then
+            echo "::error::the check failed, but not on the unsigned install script" >&2
+            exit 1
+          fi
+
+      # The step above widened the assertion below it: a name in checksums.txt
+      # that this run did not archive used to be a stale file unconditionally,
+      # and now the extra files .goreleaser.yaml declares are exempt. An
+      # exemption set with no control is how a check quietly stops being able
+      # to fail, so this is that check on the other side of the widening.
+      - name: A checksums.txt entry nothing declares must still fail the check
+        run: |
+          goreleaser release --snapshot --clean --skip=sign
+          python3 - <<'MUTANT'
+          import pathlib
+          import sys
+
+          name = "smuggled.sh"
+          p = pathlib.Path("dist/checksums.txt")
+          before = p.read_text(encoding="utf-8")
+          if name in before:
+              sys.exit(f"{name} is already in checksums.txt, so adding it "
+                       f"would assert nothing this run did not already carry")
+          p.write_text(before + "%s  %s\n" % ("0" * 64, name), encoding="utf-8")
+          print(f"checksums.txt now carries {name}, which nothing archived and "
+                f"nothing declares")
+          MUTANT
+          python3 scripts/check-release-artifacts.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the check passed with a name in checksums.txt that nothing archived and nothing declares" >&2
+            exit 1
+          fi
+          if ! grep -q 'a stale file signed as though current' mutant.log; then
+            echo "::error::the check failed, and not on the stale entry" >&2
             exit 1
           fi
 
