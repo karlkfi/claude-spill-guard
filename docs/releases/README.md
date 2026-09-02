@@ -33,7 +33,16 @@ and diffs — is the expensive half of cutting a release. It also under-reports:
 commit subjects name what was changed, not what it does to someone on the
 previous version.
 
-## Nothing here yet
+## A file here can precede its tag
 
-There is no release. The first one ships when there is a binary and a hook that
-fires; see [`docs/design/`](../design/) for what that has to include.
+The workflow refuses to run without `docs/releases/<tag>.md`, so the notes are
+merged before the tag is pushed. A file in this directory therefore says the
+notes are written, not that the tag exists — `gh release list` is the only
+thing that answers the second question, and `release-claims` is the gate that
+reads it.
+
+The one exception is the digests, which cannot exist before the artifacts are
+built from the tag. Those land as an amendment after the publish goes green, so
+the tagged copy of a notes file stays one section behind the published body.
+The invariant is that this file matches the published body, not that it is
+frozen at the tag.
