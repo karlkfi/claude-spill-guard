@@ -440,18 +440,49 @@ jobs:
         run: goreleaser release --clean --release-notes "docs/releases/${GITHUB_REF_NAME}.md"
 
       - name: Which workflow, commit, and runner built each archive
+        id: provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
 
+      # The step above writes its attestation to GitHub's attestations API,
+      # which `gh attestation verify` reads and which nothing scanning the
+      # release page can. OpenSSF Scorecard's Signed-Releases check scores
+      # asset *names*: `*.sig` scores 8 and a SLSA provenance file
+      # (`*.intoto.jsonl`) scores 10, so a release carrying the evidence for 10
+      # was named for 8. Nothing is re-signed or re-minted here -- this is that
+      # step's own `bundle-path` output, under the name a scanner scores and a
+      # consumer without the API can read. It is not in checksums.txt, which
+      # was written and signed before this file existed; the bundle carries its
+      # own signature.
+      - name: The provenance travels with the release, not only in the API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          asset="dist/spill-guard_${GITHUB_REF_NAME#v}.intoto.jsonl"
+          cp "$BUNDLE" "$asset"
+          # One JSON-serialized Sigstore bundle per line: actions/attest opens
+          # the file in append mode, so the shape is JSON Lines whatever the
+          # subject count, which is what `gh attestation verify --bundle`
+          # reads. An empty one would upload and verify nothing.
+          if [ ! -s "$asset" ]; then
+            echo "::error::the attestation step produced an empty bundle, so the asset below would carry no provenance" >&2
+            exit 1
+          fi
+          printf 'attaching %s (%s bytes)\n' "$asset" "$(wc -c < "$asset")"
+          gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
+
       - name: One archive per shipped target, each signed
         run: python3 scripts/check-release-artifacts.py --signed
 
       # Everything above asserts what this run built. This asserts what the
       # release actually carries, which is a different question: an upload can
-      # drop an asset, and the check that reads dist/ cannot see it.
+      # drop an asset, and the check that reads dist/ cannot see it. That now
+      # covers the provenance bundle too, which is the one asset no channel
+      # would notice missing.
       #
       # The identity is pinned to this workflow at this tag. A signature minted
       # from a branch, from another workflow, or from a fork verifies as a
@@ -461,7 +492,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release download "$GITHUB_REF_NAME" --dir published
-          for f in checksums.txt checksums.txt.sig checksums.txt.pem; do
+          bundle="spill-guard_${GITHUB_REF_NAME#v}.intoto.jsonl"
+          for f in checksums.txt checksums.txt.sig checksums.txt.pem "$bundle"; do
             if ! cmp -s "dist/$f" "published/$f"; then
               echo "::error::the published $f is not the one this run built" >&2
               exit 1
@@ -493,6 +525,16 @@ jobs:
           verified=0
           for f in *.tar.gz *.zip; do
             gh attestation verify "$f" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+            # The same claim read out of the attached asset rather than out of
+            # the attestations API, because that is the only copy a consumer
+            # with no network path to the API has. A bundle uploaded truncated,
+            # or from the wrong run, passes the call above and fails this one.
+            # The Sigstore trust root is still fetched, so this is offline in
+            # the attestation rather than in every byte it needs.
+            gh attestation verify "$f" \
+              --bundle "$bundle" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
             verified=$((verified + 1))

@@ -64,6 +64,7 @@ signature of that file, and a GitHub build provenance attestation.
 | `checksums.txt` | The archive is the one the release published |
 | cosign keyless signature | `checksums.txt` came from this repo's release workflow |
 | `actions/attest-build-provenance` | Which workflow, commit, and runner built the archive — `gh attestation verify` checks it |
+| `spill-guard_<version>.intoto.jsonl` | The same provenance as a release asset, so `gh attestation verify --bundle` reads it from the file rather than from the attestations API |
 
 Keyless signing is the choice worth defending: it uses the workflow's OIDC
 identity, so there is no signing key to store, rotate, or lose. A GPG key held
