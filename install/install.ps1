@@ -11,10 +11,12 @@
 # in the same order: the archive's sha256 against checksums.txt always, then
 # the signature with cosign if it is installed, else `gh attestation verify`,
 # and a refusal when neither is -- which names no install channel, because
-# neither the Homebrew tap nor the Scoop bucket exists yet. The reasoning for
-# all of it is in install.sh's header and in docs/design/distribution.md under
-# "Settled". None of it is repeated here, because two copies of an argument are
-# two things to keep in step.
+# neither the Homebrew tap nor the Scoop bucket exists yet, and the
+# `channel-claims` gate fails if any string this script prints names one that
+# .goreleaser.yaml does not ship. The reasoning for all of it is in install.sh's
+# header and in docs/design/distribution.md under "Settled". None of it is
+# repeated here, because two copies of an argument are two things to keep in
+# step.
 #
 # One thing genuinely differs. install.sh resolves `latest` by reading the URL
 # curl's redirect landed on, because POSIX sh cannot parse JSON without a tool

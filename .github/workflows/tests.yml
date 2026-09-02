@@ -1381,6 +1381,172 @@ jobs:
             exit 1
           fi
 
+  channel-claims:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: No message names an install channel that does not exist
+        run: make channel-claims
+
+  # Six arms. The gate's passing answer is empty, so three of them are about
+  # whether it can produce any other answer, and three are the directions a
+  # red-only control cannot reach.
+  #
+  # The two reds are the real defects, verbatim from d790130, which removed them
+  # by hand after a reviewer found them: `brew install karlkfi/tap/spill-guard`
+  # in install.sh's refusal and the scoop pair in the launcher's Windows deny.
+  # They are appended as new emitting lines rather than patched into the
+  # existing strings -- what is under test is the command, and appending is what
+  # keeps this valid against a deny string somebody later rewords.
+  #
+  # The greens are the whole reason this is not a grep. The same command in a
+  # comment must pass, because install.sh's header names the tap deliberately as
+  # the thing not to do and has to keep saying so; and the same command must
+  # pass once .goreleaser.yaml ships the channel, or the gate is a ban on
+  # package managers rather than a check against the release config. The
+  # config arm uses `nfpms:` rather than `brews:` or `scoops:`, whose absence is
+  # the signal this gate reads and which nothing here should teach a reader to
+  # add.
+  channel-claims-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Every red below is attributable to its own mutation only if this is
+      # green.
+      - name: The tree is green before anything below mutates it
+        run: make channel-claims
+
+      - name: A refusal naming the Homebrew tap must fail the gate
+        run: |
+          printf '\ndie "Install it: brew install karlkfi/tap/spill-guard, or download install.sh from the latest release and run it."\n' >> install/install.sh
+          if git diff --quiet -- install/install.sh; then
+            echo "::error::the mutation changed nothing -- the refusal was not appended" >&2
+            exit 1
+          fi
+          make channel-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- install/install.sh
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed over a refusal naming a Homebrew tap that does not exist" >&2
+            exit 1
+          fi
+          if ! grep -q "^absent channel: install/install\.sh:[0-9]*: 'brew install karlkfi/tap/spill-guard'" mutant.log; then
+            echo "::error::the gate failed, but not on the brew command" >&2
+            exit 1
+          fi
+
+      - name: A launcher deny naming the Scoop bucket must fail the gate
+        run: |
+          printf '\nDENY_X='"'"'{"reason":"Install it and start a new session: scoop bucket add karlkfi https://github.com/karlkfi/scoop-bucket then scoop install spill-guard, or download install.ps1 from the latest release and run it."}'"'"'\n' >> hooks/run-spill-guard.cmd
+          if git diff --quiet -- hooks/run-spill-guard.cmd; then
+            echo "::error::the mutation changed nothing -- the deny was not appended" >&2
+            exit 1
+          fi
+          make channel-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/run-spill-guard.cmd
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed over a launcher deny naming a Scoop bucket that does not exist" >&2
+            exit 1
+          fi
+          if ! grep -q "^absent channel: hooks/run-spill-guard\.cmd:[0-9]*: 'scoop install spill-guard'" mutant.log; then
+            echo "::error::the gate failed, but not on the scoop command" >&2
+            exit 1
+          fi
+
+      # Precision, and the case the row calls the hard half. `-ne 0` here,
+      # between reds either side, is deliberate rather than a typo.
+      - name: The same command in a comment must not fail the gate
+        run: |
+          printf '\n# Sending them to `brew install karlkfi/tap/spill-guard` would be telling somebody who is already stuck to run a command that fails.\n' >> install/install.sh
+          if ! grep -q '^# Sending them to `brew install karlkfi/tap/spill-guard`' install/install.sh; then
+            echo "::error::the mutation changed nothing -- the comment is not at column 0, so it would be read as one for the wrong reason" >&2
+            exit 1
+          fi
+          make channel-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- install/install.sh
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the gate failed on a comment, which is where install.sh states the invariant this gate enforces" >&2
+            exit 1
+          fi
+
+      # Precision again, and the half that says this reads the release config
+      # rather than banning a word. One command, two verdicts, and the only
+      # difference is a block in .goreleaser.yaml.
+      - name: The same command passes once .goreleaser.yaml ships the channel
+        run: |
+          printf '\ndie "Install it: apt install spill-guard"\n' >> install/install.sh
+          make channel-claims > without.log 2>&1 && rc=0 || rc=$?
+          echo "without the block, check exit: $rc"
+          cat without.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the precondition failed -- apt install must be a finding while no nfpms: block exists, or the arm below tests nothing" >&2
+            git checkout -- install/install.sh
+            exit 1
+          fi
+          printf '\nnfpms:\n  - id: deb\n' >> .goreleaser.yaml
+          if ! grep -q '^nfpms:' .goreleaser.yaml; then
+            echo "::error::the mutation changed nothing -- no nfpms: key at column 0" >&2
+            git checkout -- install/install.sh .goreleaser.yaml
+            exit 1
+          fi
+          make channel-claims > with.log 2>&1 && rc=0 || rc=$?
+          echo "with the block, check exit: $rc"
+          cat with.log
+          git checkout -- install/install.sh .goreleaser.yaml
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the gate still failed with the channel shipped, so it is banning a package manager rather than reading .goreleaser.yaml" >&2
+            exit 1
+          fi
+
+      # The silent direction. This reads string literals out of three files by
+      # regular expression; a reader that stopped matching reports every file
+      # clean, which is the same output as a tree with nothing wrong in it.
+      - name: A reader that cannot see the refusal must refuse rather than pass
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path('install/install.sh')
+          t = p.read_text()
+          n = re.sub(r"^NO_VERIFIER='.*'$", "NO_VERIFIER='the verifier is missing'",
+                     t, count=1, flags=re.M)
+          assert n != t, "the mutation matched nothing -- NO_VERIFIER is not a single-quoted line"
+          p.write_text(n)
+          PY
+          # The substituted line, not the absence of the text: line 73 of that
+          # file is a comment carrying the same words, so a file-wide grep
+          # reports the mutation as having failed when it landed. Caught by
+          # running this block under `bash -e` before pushing, which is the one
+          # instrument a re-run of the gate cannot be.
+          if ! grep -q "^NO_VERIFIER='the verifier is missing'$" install/install.sh; then
+            echo "::error::the mutation changed nothing -- NO_VERIFIER still holds the refusal" >&2
+            git checkout -- install/install.sh
+            exit 1
+          fi
+          make channel-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- install/install.sh
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed while its own reader could not find the refusal it checks" >&2
+            exit 1
+          fi
+          if ! grep -q 'the reader is not seeing the strings this checks' mutant.log; then
+            echo "::error::the gate failed, but not by saying its reader had gone blind" >&2
+            exit 1
+          fi
+
   queue:
     runs-on: ubuntu-latest
     steps:

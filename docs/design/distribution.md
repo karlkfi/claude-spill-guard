@@ -300,7 +300,9 @@ free and a human is asking the question directly.
   **That last leg is not true yet, and the scripts say so rather than assuming
   it.** Neither channel exists — `.goreleaser.yaml` carries no `brews:` and no
   `scoops:` block, and Q13 and Q14 are both still open — so until they land, a
-  refused user has nowhere cheaper to go. `install/install.sh` names `go
+  refused user has nowhere cheaper to go. The `channel-claims` gate reads that
+  file rather than a list, so the day either block ships the scripts are free to
+  name the channel, and until then they cannot. `install/install.sh` names `go
   install` instead, which needs a Go toolchain and gives a weaker guarantee
   than either verifier: the module checksum database proves you got the same
   code as everyone else and does not tie it to this repository's release
