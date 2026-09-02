@@ -213,15 +213,16 @@ try {
     } else {
         $found = Get-Verifier
         if ($found -eq 'cosign') {
-            Fetch 'checksums.txt.sig'
-            Fetch 'checksums.txt.pem'
-            # The identity is pinned to this repository's release workflow at
-            # this tag. A signature minted from a branch, from another
-            # workflow, or from a fork is a valid Sigstore signature that this
-            # has to reject.
+            Fetch 'checksums.txt.sigstore.json'
+            # One bundle rather than a detached signature and certificate:
+            # cosign v3 signs into a Sigstore bundle by default, so --bundle
+            # and --new-bundle-format are what read it back. The identity is
+            # pinned to this repository's release workflow at this tag. A
+            # signature minted from a branch, from another workflow, or from a
+            # fork is a valid Sigstore signature that this has to reject.
             & cosign verify-blob `
-                --certificate (Join-Path $work 'checksums.txt.pem') `
-                --signature (Join-Path $work 'checksums.txt.sig') `
+                --bundle (Join-Path $work 'checksums.txt.sigstore.json') `
+                --new-bundle-format `
                 --certificate-identity "https://github.com/$Repo/$Workflow@refs/tags/$Version" `
                 --certificate-oidc-issuer $OidcIssuer `
                 (Join-Path $work 'checksums.txt')

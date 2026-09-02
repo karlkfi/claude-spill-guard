@@ -255,14 +255,16 @@ if [ -n "$rehearse" ]; then
 elif found="$(verifier)"; then
 	case "$found" in
 	cosign)
-		fetch checksums.txt.sig
-		fetch checksums.txt.pem
-		# The identity is pinned to this repository's release workflow at this
-		# tag. A signature minted from a branch, from another workflow, or from
-		# a fork is a valid Sigstore signature that this has to reject.
+		fetch checksums.txt.sigstore.json
+		# One bundle rather than a detached signature and certificate: cosign
+		# v3 signs into a Sigstore bundle by default, so `--bundle` and
+		# `--new-bundle-format` are what read it back. The identity is pinned
+		# to this repository's release workflow at this tag. A signature minted
+		# from a branch, from another workflow, or from a fork is a valid
+		# Sigstore signature that this has to reject.
 		cosign verify-blob \
-			--certificate "$work/checksums.txt.pem" \
-			--signature "$work/checksums.txt.sig" \
+			--bundle "$work/checksums.txt.sigstore.json" \
+			--new-bundle-format \
 			--certificate-identity "https://github.com/$REPO/$WORKFLOW@refs/tags/$version" \
 			--certificate-oidc-issuer "$OIDC_ISSUER" \
 			"$work/checksums.txt" ||
