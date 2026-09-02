@@ -4,7 +4,7 @@
 The release job runs on a `v*` tag and on nothing else, so no pull request
 exercises it and its first execution is a permanent version number. This is
 what a pull request runs instead: build a snapshot, then assert the result
-against the two things that have to hold.
+against the three things that have to hold.
 
   * **Coverage.** One archive per target in scripts/cross-compile.py, and no
     others. Two lists of platforms drift, and the direction that fails quietly
@@ -14,6 +14,11 @@ against the two things that have to hold.
     build an archive name from an OS and an architecture, so the name is an
     interface. Renaming it breaks every install channel at once, and the
     channels report it, not this repository.
+  * **Coverage of what is not an archive.** A release also carries the two
+    install scripts, which GoReleaser uploads rather than builds. Two separate
+    lists in .goreleaser.yaml decide what happens to one -- `release` uploads
+    it and `checksum` puts it in checksums.txt -- and a name on the first and
+    not the second ships outside the file cosign signs. That was Q97.
 
 The checksums are recomputed rather than trusted. `checksums.txt` is the file
 every channel verifies against and the one cosign signs, so a run that wrote a
@@ -22,8 +27,11 @@ a valid signature over it.
 
 Reads dist/artifacts.json for the model rather than globbing the directory: the
 glob cannot say which target an archive was built for, and a missing target is
-exactly what it would have to notice. Every way this can come back empty is an
-exit rather than a shorter list.
+exactly what it would have to notice. The extra files are not in there --
+GoReleaser records no artifact for one and does not copy it into dist -- so
+those come from .goreleaser.yaml, through the parser in tools/cmd/releaseconfig
+for the reason scripts/workflow_model.py gives. Every way any of this can come
+back empty is an exit rather than a shorter list.
 
 Usage: check-release-artifacts.py [--dist DIR] [--signed]
        check-release-artifacts.py --count-targets
@@ -44,7 +52,9 @@ import hashlib
 import importlib.util
 import json
 import re
+import subprocess
 import sys
+from collections import namedtuple
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +67,13 @@ ARCHIVE_RE = re.compile(
     r"\.(?P<ext>tar\.gz|zip)$")
 
 CHECKSUMS = "checksums.txt"
+
+CONFIG = ROOT / ".goreleaser.yaml"
+
+# Two {published name: the file on disk it is a copy of} maps, and every glob
+# that named nothing -- carried rather than dropped, because such a glob
+# contributes no name and the comparison between the two maps passes over it.
+Extras = namedtuple("Extras", "uploaded covered unmatched")
 
 # tar.gz everywhere but Windows, where every unarchiver handles zip and
 # tar.gz needs one installed.
@@ -97,6 +114,44 @@ def artifacts(dist):
     return model
 
 
+def declared_extras():
+    """What a release carries besides the archives, from .goreleaser.yaml.
+
+    Read through the parser in tools/cmd/releaseconfig rather than matched out
+    of the file: `yaml` is not importable on a machine that satisfies `make
+    doctor`, and a pattern over raw lines reads a glob inside a `before.hooks`
+    shell line as a declaration. GoReleaser names each asset after the file's
+    basename, which is the name checksums.txt records."""
+    result = subprocess.run(("go", "run", "./cmd/releaseconfig", str(CONFIG)),
+                            cwd=ROOT / "tools", capture_output=True, text=True,
+                            check=False)
+    if result.returncode != 0:
+        sys.exit(f"release-artifacts: the parser in tools/cmd/releaseconfig "
+                 f"exited {result.returncode}, so what {CONFIG.name} declares "
+                 f"is unknown and every assertion about it would pass over "
+                 f"nothing. Go is a required tool -- see `make doctor`.\n"
+                 f"{result.stderr.strip()}")
+    try:
+        model = json.loads(result.stdout)
+        globs = (model["release_extra_files"], model["checksum_extra_files"])
+    except (json.JSONDecodeError, KeyError, TypeError) as err:
+        sys.exit(f"release-artifacts: the parser wrote something this cannot "
+                 f"read ({err}). Anything else on its stdout would be read as "
+                 f"the model.\n{result.stdout[:400]}")
+
+    resolved, unmatched = [], []
+    for section in globs:
+        found = {}
+        for pattern in section:
+            matched = sorted(p for p in ROOT.glob(pattern) if p.is_file())
+            if not matched:
+                unmatched.append(pattern)
+            for path in matched:
+                found[path.name] = path
+        resolved.append(found)
+    return Extras(resolved[0], resolved[1], sorted(set(unmatched)))
+
+
 def digests(text):
     """{name: digest} from a checksums file, or an exit. The format is
     `<digest>  <name>` -- two spaces, as sha256sum writes it."""
@@ -112,10 +167,27 @@ def digests(text):
     return found
 
 
-def check(dist, signed, shipped):
+def check(dist, signed, shipped, extras):
     """Every disagreement, as a list of lines."""
     findings = []
     model = artifacts(dist)
+
+    for pattern in extras.unmatched:
+        findings.append(f"{CONFIG.name} declares the extra file {pattern} and "
+                        f"nothing in this tree matches it, so the release "
+                        f"carries no such asset")
+    for name in sorted(set(extras.uploaded) - set(extras.covered)):
+        findings.append(f"{name} is uploaded by release.extra_files and is not "
+                        f"named by checksum.extra_files, so it is absent from "
+                        f"{CHECKSUMS} and the signature over that file does "
+                        f"not reach it -- it ships as the one asset a user "
+                        f"cannot check")
+    for name in sorted(set(extras.covered) - set(extras.uploaded)):
+        findings.append(f"{name} is named by checksum.extra_files and is not "
+                        f"uploaded by release.extra_files, so {CHECKSUMS} "
+                        f"carries a digest for a file the release does not "
+                        f"publish -- `sha256sum -c` over it fails for whoever "
+                        f"downloaded everything there is")
 
     archives = {}
     for entry in model:
@@ -171,11 +243,18 @@ def check(dist, signed, shipped):
     for name in sorted(set(archives) - set(recorded)):
         findings.append(f"{name} was archived and is not in {CHECKSUMS}, so "
                         f"nothing a user runs can verify it")
-    for name in sorted(set(recorded) - set(archives)):
+    for name in sorted(set(extras.covered) - set(recorded)):
+        findings.append(f"checksum.extra_files names {name} and {CHECKSUMS} "
+                        f"does not carry it, so nothing a user runs can verify "
+                        f"it")
+    for name in sorted(set(recorded) - set(archives) - set(extras.covered)):
         findings.append(f"{CHECKSUMS} carries {name}, which this run did not "
-                        f"archive -- a stale file signed as though current")
+                        f"archive and {CONFIG.name} does not declare -- a "
+                        f"stale file signed as though current")
+    # An extra file is checksummed where it sits and is not copied into dist,
+    # so its digest is recomputed from the source the release uploads.
     for name, digest in sorted(recorded.items()):
-        blob = dist / name
+        blob = extras.covered.get(name, dist / name)
         if not blob.is_file():
             findings.append(f"{CHECKSUMS} carries {name} and {blob} is not there")
             continue
@@ -211,7 +290,8 @@ def main(argv):
                      f"--dist DIR, --signed, --count-targets, or nothing")
 
     shipped = targets()
-    findings = check(dist, signed, shipped)
+    extras = declared_extras()
+    findings = check(dist, signed, shipped, extras)
     for entry in findings:
         print(f"release-artifacts: {entry}", file=sys.stderr)
     if findings:
@@ -219,9 +299,9 @@ def main(argv):
               f"produced and what a release publishes.", file=sys.stderr)
         return 1
     print(f"release-artifacts: {len(shipped)} archives, one per shipped "
-          f"target, each named as the install channels expect and each matching "
-          f"its {CHECKSUMS} digest"
-          f"{', signed' if signed else ''}")
+          f"target, each named as the install channels expect, and "
+          f"{len(extras.covered)} extra file(s) beside them, each matching its "
+          f"{CHECKSUMS} digest{', signed' if signed else ''}")
     return 0
 
 
