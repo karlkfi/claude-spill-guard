@@ -39,6 +39,12 @@
 # karlkfi/tap/spill-guard` would be telling somebody who is already stuck to run
 # a command that fails.
 #
+# That used to be a claim in this comment and nothing else. The `channel-claims`
+# gate now reads it: scripts/check-channel-claims.py takes the shipped channels
+# from .goreleaser.yaml and fails if any string this script prints names one
+# that is not there. It reads literals on non-comment lines only, so the tap
+# named above stays sayable, which it has to be -- it is the argument.
+#
 # POSIX sh, because the documented invocation is `sh install.sh` and that is
 # dash on Debian and Ubuntu: no `local`, no arrays, no `pipefail`, no `[[`.
 #
