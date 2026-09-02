@@ -275,15 +275,16 @@ func failed(err error) string {
 // found the marker there, so those are absences rather than a probe that could
 // not fire. None of the six withheld anything.
 //
-// PreToolUse is not measured and this does not claim it. It cannot reach a hook
-// before the model has chosen a tool call, so an unauthenticated session cannot
-// drive it. Emitting the field there anyway is safe in the direction that
-// matters, and the table above the block encodings is what says so: stdout that
-// is not a decision object runs the call, so a dropped field costs the silence
-// that was already there rather than a call that should have stopped.
+// PreToolUse takes the same field, driven the same day on a Bash call once the
+// CLI could authenticate again. The notice arrives as `PreToolUse:Bash says:
+// <text>` on the stream and as a hook_system_message attachment stamped
+// PreToolUse, and the call still runs: the command's own marker comes back in a
+// tool_result on the emitting arm and the control alike. So systemMessage is
+// not per event the way the block encodings above are, and this package emits
+// one field for both.
 //
-// docs/design/README.md, "An allowed skip says so", carries the argument, the
-// corpus census behind it, and what would make it worth re-driving.
+// docs/design/README.md, "An allowed skip says so", carries both tables and the
+// controls under them.
 type noticeVerdict struct {
 	SystemMessage string `json:"systemMessage"`
 }

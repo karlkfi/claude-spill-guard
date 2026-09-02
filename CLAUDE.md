@@ -58,11 +58,12 @@ mark — is allowed.
 Allowed is not silent. It writes a `systemMessage` naming the buffer and the
 reason, and the call goes through carrying it. That field is the one measured
 to reach the *person* rather than the model — a hook's stderr on exit 0 reaches
-neither, and plain stdout and `additionalContext` reach only the model. The
-drive is on `UserPromptSubmit`, which is the event a hook can reach without an
-API call; `PreToolUse` is unmeasured and rests on the exit-code table instead,
-where stdout that is not a decision object runs the call. `verdict.go` has the
-table and Q111 has the branch this does not cover.
+neither, and plain stdout and `additionalContext` reach only the model. Driven
+on both events, and unlike the block encodings it is **not** per event: one
+field serves `UserPromptSubmit` and `PreToolUse` alike, arriving as a
+`hook_system_message` attachment and a `level: notice` stream event, with the
+call still running on both. `verdict.go` has the tables and Q111 has the branch
+this does not cover.
 
 **That law has one measured exception and it is a gap rather than a decision.**
 `decode` reads two of the three byte-order marks. UTF-8's, `EF BB BF`, is a

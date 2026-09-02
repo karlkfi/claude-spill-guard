@@ -726,25 +726,32 @@ screenshot's label. Naming them is what lets a reader who knows their file is
 text act on a notice that says *binary* — and it is why this closes both
 members without deciding anything about the UTF-8 decode arm, which is `Q102`.
 
-**The event driven is `UserPromptSubmit`, and `PreToolUse` is where most of
-this class lands.** That half is not measured and nothing above claims it.
-`PreToolUse` cannot reach a hook before the model has chosen a tool call, which
-is an API call, so it is unreachable from an unauthenticated session — the
-boundary `Q94` establishes independently. The corpus cannot stand in either:
-across 1,654 session transcripts here, all 407 `hook_system_message`
-attachments carry `UserPromptSubmit` or `Stop` and none carries `PreToolUse`,
-and that zero measures the population, because no installed hook emits the field
-on that event — the two that emit it at all are an `effort-router` notice on
-`UserPromptSubmit` and pr-sentinel's `Stop` hook. The one `PreToolUse` emitter
-anywhere under `~/.claude/plugins` is in a plugin that is not installed, on the
-branch it takes when it crashes.
+**`PreToolUse` takes the same field, and it is driven rather than inferred.**
+An earlier revision of this section reasoned that it was safe to emit there
+without a measurement, because `claude -p` could not authenticate on the machine
+at the time and the exit-code table already rules out the direction that
+matters. The measurement was taken once the CLI could log in again, on a `Bash`
+call, and it agrees:
 
-Emitting it there ahead of the measurement is safe in the direction that
-matters, and the exit-code table above is what says so: on `PreToolUse`, stdout
-that is not a decision object runs the call. So a dropped field costs the
-silence that was already there, never a call that should have been stopped.
-Re-drive it when a session can authenticate, the way the exit-code table itself
-gets re-taken against a new version.
+| the hook writes on `PreToolUse` | the stream | the transcript | the call |
+|---|---|---|---|
+| nothing — the control | — | — | runs |
+| `{"systemMessage": marker}` | `PreToolUse:Bash says: <marker>`, `level` `notice` | `hook_system_message`, `hookEvent` `PreToolUse` | runs |
+
+Both arms' `tool_result` carries the command's own marker, so the field informs
+without withholding on this event too. The control shows no marker of ours and
+does show an unrelated `UserPromptSubmit` notice, which is what says the reader
+was working on the run that found nothing.
+
+So `systemMessage` is **not** per event the way the block encodings are, and one
+field serves both. That is worth stating explicitly, because everything else
+about hook output in this document is per event, and the reasonable prior — the
+one this section held for a day — was that this would be too.
+
+It also explains the corpus zero rather than leaving it hanging: across 1,654
+session transcripts here, all 407 `hook_system_message` attachments carried
+`UserPromptSubmit` or `Stop`, and none carried `PreToolUse` because no installed
+hook had ever emitted one there. The population was empty, not the capability.
 
 A verdict that blocks still does not carry the notice, and `Q111` is that: the
 fix puts a `systemMessage` beside a deny object, which changes an encoding this
