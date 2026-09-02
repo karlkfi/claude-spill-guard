@@ -3,8 +3,10 @@
 A tag is the only thing that publishes. Pushing `vX.Y.Z` runs
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml), which
 builds the five archives, writes `checksums.txt`, signs it with cosign, mints a
-build provenance attestation, and uploads all of it to a **draft** release.
-Nothing reaches a user until a person publishes that draft.
+build provenance attestation, and uploads all of it to a **draft** release —
+including the attestation itself, as `spill-guard_<version>.intoto.jsonl`, so
+the provenance is an asset rather than only an API record. Nothing reaches a
+user until a person publishes that draft.
 
 Everything below is the part a person does.
 
@@ -85,7 +87,7 @@ spent rather than the release wrong:
 | `docs/releases/<tag>.md` is not in the tree | The body is authored in the repository. A generated changelog would then have to be corrected on the Release, off the record that invariant exists to keep. |
 | The archives are not one per shipped target, named as the install channels expect | `scripts/check-release-artifacts.py`. Every channel builds an archive name from an OS and an architecture. |
 | An archive does not match its `checksums.txt` line | Signing a stale checksums file signs a wrong answer, and the signature over it verifies perfectly. |
-| A published asset does not verify as an outside consumer would check it | It re-downloads the release, re-runs `sha256sum -c`, verifies the cosign signature against this workflow **at this tag**, and verifies provenance for all five archives. |
+| A published asset does not verify as an outside consumer would check it | It re-downloads the release, re-runs `sha256sum -c`, verifies the cosign signature against this workflow **at this tag**, and verifies provenance for all five archives — twice each, once through the attestations API and once against the attached bundle, which is the only copy a consumer without that API has. |
 
 The last row is the one worth reading twice. `--certificate-identity` is pinned
 to `.github/workflows/release.yml@refs/tags/<tag>`, so a signature minted from a
