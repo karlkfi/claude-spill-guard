@@ -55,12 +55,23 @@ blocks, a UTF-16 mark whose *decoded* text holds a NUL blocks, and a NUL in a
 buffer nothing declared — an image, an executable, UTF-16 written with no
 mark — is allowed.
 
+Allowed is not silent. It writes a `systemMessage` naming the buffer and the
+reason, and the call goes through carrying it. That field is the one measured
+to reach the *person* rather than the model — a hook's stderr on exit 0 reaches
+neither, and plain stdout and `additionalContext` reach only the model. Driven
+on both events, and unlike the block encodings it is **not** per event: one
+field serves `UserPromptSubmit` and `PreToolUse` alike, arriving as a
+`hook_system_message` attachment and a `level: notice` stream event, with the
+call still running on both. `verdict.go` has the tables and Q111 has the branch
+this does not cover.
+
 **That law has one measured exception and it is a gap rather than a decision.**
 `decode` reads two of the three byte-order marks. UTF-8's, `EF BB BF`, is a
 declaration it has no arm for, so such a buffer falls through undecoded, its NUL
 is read raw, and it is allowed exactly as an image is — driven end to end, a
-UTF-8 mark plus a NUL plus an AWS-shaped key exits 0 on empty stdout while the
-same file without the NUL denies. Do not repair the law by redefining the axis
+UTF-8 mark plus a NUL plus an AWS-shaped key exits 0 while the same file
+without the NUL denies. It now says so rather than saying nothing, which is a
+notice about an unread buffer and not a block on a secret. Do not repair the law by redefining the axis
 as whichever declaration this build routes on: that is true by construction,
 cannot be falsified by a fourth encoding, and is how this one got through. `blocks` in
 [`internal/hook/hook.go`](internal/hook/hook.go) carries the argument, and a
@@ -181,13 +192,16 @@ first bytes, arrives as `content.type` `text` carrying **the whole file**, NUL
 included, with a marker placed after that NUL intact. That second arm is the
 one with a consequence: the resolver opens it and hands it on, `internal/scan`
 skips a buffer with a NUL in the first 8 KiB, and a skipped buffer contributes
-no findings, so a credential inside one is allowed with nothing in the
-transcript. Driven on a built binary, with the control beside it: the same key
-without the NUL blocks and names the rule, and with it the hook exits 0 on
-empty stdout. It is not a regression — nothing scanned an `@` target before
-this — and it is the reason-versus-surface question the `Read` and `Bash`
-surfaces already carry, so it belongs to whoever settles what an unread buffer
-does rather than here.
+no findings, so a credential inside one is allowed. Driven on a built binary,
+with the control beside it: the same key without the NUL blocks and names the
+rule, and with it the hook exits 0. It is not a regression — nothing scanned an
+`@` target before this — and it is the reason-versus-surface question the
+`Read` and `Bash` surfaces already carry.
+
+**Q84 closed half of that and not the half that matters.** The allow now
+carries a notice naming the buffer, so the transcript is no longer empty and
+the user can act; the credential is still unscanned and still allowed. Do not
+read the notice as coverage. It reports that nothing looked.
 
 ## Rules that are not negotiable
 

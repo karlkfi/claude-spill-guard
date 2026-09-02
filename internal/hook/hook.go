@@ -9,8 +9,10 @@
 // is not providing. So every internal error blocks with a reason, and so does a
 // buffer the pipeline declined to read. The one exception is the binary skip,
 // which the design chose with a measurement rather than for want of a decoder;
-// blocks() is where that is argued, and it is the only silence here that is not
-// a scan which ran.
+// blocks() is where that is argued. It is allowed and it is no longer silent:
+// the call goes through carrying a systemMessage that names the buffer and why
+// nothing read it, so the one path here that neither blocks nor scanned still
+// tells the person it happened.
 //
 // Two events reach it. UserPromptSubmit and PreToolUse can withhold content;
 // PostToolUse cannot, measured, so nothing is catchable after the fact. The
@@ -93,13 +95,43 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	// downgraded to a confirmation, and one that cannot is a class of refusal
 	// with no way past it and nothing saying so. The design asks for it too --
 	// "the reason names a remedy: convert the file, or override".
-	if len(skips) > 0 {
-		return decide(stdout, stderr, call, event, overridden, unread(skips))
+	blocking, allowed := partition(skips)
+	if len(blocking) > 0 {
+		return decide(stdout, stderr, call, event, overridden, unread(blocking))
 	}
-	if len(findings) == 0 {
-		return 0
+	if len(findings) > 0 {
+		return decide(stdout, stderr, call, event, overridden, found(findings))
 	}
-	return decide(stdout, stderr, call, event, overridden, found(findings))
+	// An allowed skip, and nothing else to say. The design's step 6 has every
+	// path that declines to read name its reason and the caller carry that as
+	// far as the user; a block carries it in the deny, and this is the other
+	// half -- allowed meant exit 0 on empty stdout, so the one silence here
+	// that is not a scan which ran reached nobody at all.
+	//
+	// Only on this branch. A call that also blocks says so to the model and
+	// not to the person, and closing that needs a systemMessage riding along
+	// with a deny object -- a change to the one encoding this repo measured
+	// rather than reasoned about, on no measurement. Q111 carries it.
+	if len(allowed) > 0 {
+		if err := notify(stdout, noticeLead+unscanned(allowed)); err != nil {
+			return refuse(stderr, err)
+		}
+	}
+	return 0
+}
+
+// partition splits what the pipeline declined to read into the buffers that
+// stop this call and the buffers it is allowed to carry. The reason is the
+// whole rule, which is blocks() and is argued there.
+func partition(skips []skipped) (blocking, allowed []skipped) {
+	for _, s := range skips {
+		if blocks(s.why) {
+			blocking = append(blocking, s)
+			continue
+		}
+		allowed = append(allowed, s)
+	}
+	return blocking, allowed
 }
 
 // decide writes the verdict for a call that cannot simply be allowed: a block,
@@ -157,7 +189,7 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		if blocks(got.Skipped) {
+		if got.Skipped != scan.Scanned {
 			skips = append(skips, skipped{t.label, got.Skipped})
 			continue
 		}

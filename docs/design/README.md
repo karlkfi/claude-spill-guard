@@ -678,6 +678,86 @@ image read is not a convenience cost: a hook that does it gets uninstalled, and
 an uninstalled scanner enforces nothing, which lands on the same side of the
 ledger as failing open.
 
+#### An allowed skip says so, and the channel for saying it is measured
+
+Not blocking is not the same as not saying. Step 6 asks every path that
+declines to read to name its reason and have the caller carry that as far as
+the user, and an allow meant exit 0 on an empty stdout — the one silence the
+hook produces that is not a scan which ran. It now writes a `systemMessage`
+naming the buffer and the reason, and the call goes through carrying it.
+
+Which field does that is a measurement rather than a reading of the docs.
+Driven 2026-09-01 against Claude Code 2.1.251 on darwin/arm64: seven arms of a
+real `UserPromptSubmit` hook in a throwaway project, each emitting one marker
+one way, read back out of the `--output-format stream-json` stream and the
+session transcript both.
+
+| The hook writes (exit 0 unless noted) | The stream | The transcript |
+|---|---|---|
+| nothing — the control | — | — |
+| the marker on stderr | — | — |
+| the marker on stderr, exit 1 | — | `hook_non_blocking_error` |
+| the marker on stdout, as plain text | — | `hook_success`, injected as context |
+| `{"systemMessage": marker}` | `system`/`informational`, `level` `notice` | `hook_system_message` |
+| `{"…additionalContext": marker}` | — | `hook_additional_context` |
+
+**Of the six driven, `systemMessage` is the only one that reaches the
+person.** The two that carry
+text to the model — `additionalContext` and a hook's plain stdout — reach it
+while telling nobody, and a hook's stderr on exit 0 reaches neither: absent from
+the stream, absent from the transcript, absent from the session. The
+`systemMessage` rows are the control for the blanks, since the same instrument
+found the marker there. None of the seven withheld anything; the `systemMessage`
+arm's transcript carries the user message and reaches the same next step the
+control does.
+
+**Routing it to the person rather than the model is the decision, not a
+detail.** The remedies are a human's to take — convert the file, arm an
+override — and the model can take neither. The same text sent to the model
+would be spent on every image read: 59 of the 1,878 distinct `Read` targets in
+this machine's transcripts that still exist on disk are binary, 58 of them PNGs
+and one a PDF. Targets that did not survive are outside that denominator, so it
+is a rate over durable files rather than over all reads.
+
+**The notice names the two text populations, because the reason cannot.**
+`SkippedBinary` is one reason over a NUL in the sniff window, so UTF-16 written
+with no byte-order mark and a UTF-8 mark ahead of a NUL both arrive wearing a
+screenshot's label. Naming them is what lets a reader who knows their file is
+text act on a notice that says *binary* — and it is why this closes both
+members without deciding anything about the UTF-8 decode arm, which is `Q102`.
+
+**`PreToolUse` takes the same field, and it is driven rather than inferred.**
+An earlier revision of this section reasoned that it was safe to emit there
+without a measurement, because `claude -p` could not authenticate on the machine
+at the time and the exit-code table already rules out the direction that
+matters. The measurement was taken once the CLI could log in again, on a `Bash`
+call, and it agrees:
+
+| the hook writes on `PreToolUse` | the stream | the transcript | the call |
+|---|---|---|---|
+| nothing — the control | — | — | runs |
+| `{"systemMessage": marker}` | `PreToolUse:Bash says: <marker>`, `level` `notice` | `hook_system_message`, `hookEvent` `PreToolUse` | runs |
+
+Both arms' `tool_result` carries the command's own marker, so the field informs
+without withholding on this event too. The control shows no marker of ours and
+does show an unrelated `UserPromptSubmit` notice, which is what says the reader
+was working on the run that found nothing.
+
+So `systemMessage` is **not** per event the way the block encodings are, and one
+field serves both. That is worth stating explicitly, because everything else
+about hook output in this document is per event, and the reasonable prior — the
+one this section held for a day — was that this would be too.
+
+It also explains the corpus zero rather than leaving it hanging: across 1,654
+session transcripts here, all 407 `hook_system_message` attachments carried
+`UserPromptSubmit` or `Stop`, and none carried `PreToolUse` because no installed
+hook had ever emitted one there. The population was empty, not the capability.
+
+A verdict that blocks still does not carry the notice, and `Q111` is that: the
+fix puts a `systemMessage` beside a deny object, which changes an encoding this
+document measured rather than reasoned about, and doing that on inference is
+the move this section is written against.
+
 The residue was two populations rather than one, and one of them is now closed.
 UTF-16 written with no mark lands in the binary skip and is allowed with it —
 step 2's own stated gap, where nothing declares anything and separating it is

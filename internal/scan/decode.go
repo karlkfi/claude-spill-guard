@@ -86,9 +86,11 @@ func decode(buf []byte) (text []byte, source func(int) int, skip Skip) {
 		//
 		// Not only undeclared buffers. A UTF-8 byte-order mark, EF BB BF,
 		// declares an encoding and has no arm, so it lands here too and its NUL
-		// is read raw -- measured, and allowed in silence. That is a fail-open
-		// this stage owns and a row carries; it is named here so the comment
-		// does not read as a claim that everything below is undeclared.
+		// is read raw -- measured, and allowed. That is a fail-open this stage
+		// owns and a row carries; it is named here so the comment does not read
+		// as a claim that everything below is undeclared. internal/hook now
+		// notices an allowed skip rather than passing it in silence, which
+		// tells the user their file went unread and does not scan it.
 		if IsBinary(buf) {
 			return nil, source, SkippedBinary
 		}

@@ -88,7 +88,8 @@ const (
 	// byte-order mark by the same registry as FF FE, so such a buffer falls to
 	// the default arm, its NUL is read raw, and it comes back SkippedBinary and
 	// is allowed. Driven end to end -- the same key after a NUL under a UTF-8
-	// mark exits 0 on empty stdout, while the no-NUL control denies at byte 29
+	// mark exits 0, now with a notice naming the buffer rather than on an empty
+	// stdout, while the no-NUL control denies at byte 29
 	// rather than 26, the three bytes of the mark scanned as ordinary content,
 	// which is what having no arm looks like from outside this package.
 	//
