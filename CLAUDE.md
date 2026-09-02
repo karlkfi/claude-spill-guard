@@ -414,6 +414,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `launcher` | the hook launcher is executable in the index, resolves a binary, and denies when it cannot |
 | `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
 | `docs` | every relative link in the repo markdown resolves |
+| `release-claims` | the prose agrees with whether a release exists |
 | `queue` | the backlog store format holds, every filed id holds a claim, no index is committed |
 | `action-pins` | every `uses:` in every workflow names an immutable revision, not a tag |
 | `test` | gofmt, go vet and go test |
