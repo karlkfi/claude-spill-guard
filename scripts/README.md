@@ -6,7 +6,7 @@ tree records that.
 
 ## Modes, and what the executable bit means here
 
-Sixteen Python files here are this repo's own, and fifteen of them are entry
+Seventeen Python files here are this repo's own, and sixteen of them are entry
 points: a `#!/usr/bin/env python3` line, a `main()`, an `if __name__ ==
 "__main__"` block, and mode `755`.
 [`workflow_model.py`](workflow_model.py) is the one that is not — nothing runs
@@ -19,8 +19,8 @@ The rule is that a file advertises exactly the way it can be run. A shebang on a
 file at `644` names an interpreter the mode refuses, and the bit on a file
 nothing executes invites a reading that does not hold.
 
-**No gate asserts any of this, on purpose.** None of the sixteen is invoked by
-path: the fifteen entry points run as `$(PYTHON) scripts/x.py` from the
+**No gate asserts any of this, on purpose.** None of the seventeen is invoked by
+path: the sixteen entry points run as `$(PYTHON) scripts/x.py` from the
 Makefile and `python3 scripts/x.py` from the workflow, and the library is
 imported by an interpreter already running a different file. So a mode that
 drifts breaks nothing. That is the whole difference from [`.githooks/`](../.githooks), where

@@ -166,9 +166,15 @@ goreleaser release --snapshot --clean --skip=sign
 python3 scripts/check-release-artifacts.py
 ```
 
-Match the version the workflow pins — `GORELEASER_VERSION` in
-[`release.yml`](../../.github/workflows/release.yml) — or `goreleaser check` is
-validating the config against a schema that is not the one a release will read.
+Match the version the workflow pins — `VERSION` at the top of
+[`install-goreleaser.py`](../../scripts/install-goreleaser.py) — or `goreleaser
+check` is validating the config against a schema that is not the one a release
+will read. On Linux and on Apple silicon that script installs it, and refuses
+any archive that does not hash to the digest pinned beside the version:
+
+```bash
+python3 scripts/install-goreleaser.py
+```
 
 The same two commands run on every pull request, so a config that stopped
 producing five archives is caught there rather than on a tag.

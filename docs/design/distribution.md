@@ -78,13 +78,14 @@ zero-dependency property is about the shipped binary's import graph and an empty
 `require` block in `go.mod`; a build tool that never enters the binary does not
 touch it. The alternative is a hand-rolled `go build` matrix with
 `gh release upload`, which has fewer moving parts and then leaves the tap and
-bucket updates to be hand-rolled too. GoReleaser, pinned — and that is two pins
-rather than one. `goreleaser/goreleaser-action` is pinned by commit SHA, which
-the `action-pins` gate requires of every `uses:` in the tree, and the CLI it
-downloads is pinned separately to an exact release. The action's SHA says
-nothing about which binary it fetches: the default is `~> v2`, resolved on the
-day, so pinning the wrapper alone would leave the tool that builds the
-artifacts floating.
+bucket updates to be hand-rolled too. GoReleaser, pinned by digest.
+`goreleaser/goreleaser-action` would have pinned the wrapper and left the CLI
+it fetches to a version input — a git tag on `goreleaser/goreleaser`, resolved
+on the day, on the job holding `contents: write` and `id-token: write`. The
+`action-pins` gate cannot see that: it reads `uses:` values, and a tool version
+passed as an action input is not one. So there is no action, and
+[`install-goreleaser.py`](../../scripts/install-goreleaser.py) fetches the
+archive, hashes it, and refuses anything that is not the digest committed here.
 
 **This is built.** [`.goreleaser.yaml`](../../.goreleaser.yaml) and
 [`release.yml`](../../.github/workflows/release.yml), with the runbook in
