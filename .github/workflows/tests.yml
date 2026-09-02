@@ -1229,6 +1229,158 @@ jobs:
             exit 1
           fi
 
+  release-claims:
+    runs-on: ubuntu-latest
+    # `gh release list` is the instrument, and reading releases is the whole of
+    # what it needs. A tag alone is the wrong answer: GoReleaser creates the
+    # release as a draft, and a draft publishes no assets for the prose to be
+    # right about.
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The prose agrees with whether a release exists
+        run: make release-claims
+
+  # This gate's passing answer is an empty one -- no sentence disagrees -- which
+  # is the shape that reports green while reading nothing. So the first two
+  # steps below are about the instrument rather than the prose: that the release
+  # probe can come back non-empty at all, and that the tree is green before
+  # anything here mutates it. Without the second, every red below could be
+  # something else.
+  #
+  # Then four arms. Two are the directions the gate decides in, one is the
+  # precision case a red-only control cannot reach, and the last is the failure
+  # this design is most likely to hide -- a read that did not happen, reported
+  # as an answer about the prose. `vulns` carries the same split for the same
+  # reason.
+  release-claims-mutation-control:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # `gh release list` returns nothing here because there is no release, and
+      # a probe that could never return anything reads identically. cli/cli has
+      # releases, so an empty answer from it is the instrument failing.
+      - name: The release probe can come back non-empty
+        run: |
+          gh release list --repo cli/cli --limit 1 > probe.log 2>&1; rc=$?
+          echo "probe exit: $rc"
+          cat probe.log
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the release probe exited $rc against a repository that has releases, so an empty answer for this one says nothing" >&2
+            exit 1
+          fi
+          if [ ! -s probe.log ]; then
+            echo "::error::the release probe came back empty against a repository that has releases, so it cannot tell no release from no reading" >&2
+            exit 1
+          fi
+
+      # Every red below is attributable to its own mutation only if this is
+      # green.
+      - name: The tree is green before anything below mutates it
+        run: make release-claims
+
+      # The defect the gate exists for, verbatim from 793abbe, where it was live
+      # on main and every one of the gates was green over it. Appended rather
+      # than reconstructed in place: the sentence is the whole artifact, so
+      # there is nothing here that can drift from what was measured.
+      - name: A claim that a release published something must fail the gate
+        run: |
+          printf '\nBoth artifacts are already published by the release workflow, so this asks it for nothing new.\n' >> docs/design/distribution.md
+          if git diff --quiet -- docs/design/distribution.md; then
+            echo "::error::the mutation changed nothing -- the claim was not appended" >&2
+            exit 1
+          fi
+          make release-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- docs/design/distribution.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed over prose claiming a release published something, and there is no release" >&2
+            exit 1
+          fi
+          if ! grep -q '^unbuilt claim: docs/design/distribution\.md:[0-9]*: Both artifacts are already published' mutant.log; then
+            echo "::error::the gate failed, but not on the appended claim" >&2
+            exit 1
+          fi
+
+      # Precision, and the direction a red-only control cannot reach: the same
+      # sentence with the tense changed has to stay green, or the gate is a ban
+      # on the word "release" and the design section it protects cannot be
+      # written at all. `-ne 0` here, between two `-eq 0` neighbours, is
+      # deliberate rather than a typo.
+      - name: The same claim in the future tense must not fail the gate
+        run: |
+          printf '\nBoth artifacts will be published by the release workflow, so this asks it for nothing new.\n' >> docs/design/distribution.md
+          if git diff --quiet -- docs/design/distribution.md; then
+            echo "::error::the mutation changed nothing -- the hedged claim was not appended" >&2
+            exit 1
+          fi
+          make release-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- docs/design/distribution.md
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the gate failed on a claim written in the future tense, which is how every honest sentence about the first release has to be written" >&2
+            exit 1
+          fi
+
+      # The other direction, and the one nothing else will ever exercise: the
+      # day a release exists, the sentences saying there is none become false.
+      # It cannot be driven by cutting one, so the state is forced -- and the
+      # step above establishes that the same tree without the flag is green, so
+      # the flag is what moved the verdict.
+      - name: With a release, prose saying there is none must fail the gate
+        run: |
+          python3 scripts/check-release-claims.py --assume-release released > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed with a release existing and README.md still saying there is none" >&2
+            exit 1
+          fi
+          if ! grep -q '^stale claim: README\.md:[0-9]*: ' mutant.log; then
+            echo "::error::the gate failed, but not on the README's standing claim that there is no release" >&2
+            exit 1
+          fi
+
+      # The silent direction. A read that failed and was taken for "no release"
+      # would run the unbuilt-claim arm over prose it cannot judge and report
+      # green. Both readers are broken here: an unusable token for `gh`, and a
+      # remote that resolves to nothing for `git ls-remote`.
+      - name: A release state that cannot be read must not read as an answer
+        run: |
+          git remote set-url origin https://127.0.0.1:1/nothing.git
+          GH_TOKEN=not-a-token GH_CONFIG_DIR=/nonexistent \
+            python3 scripts/check-release-claims.py > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the check reported a verdict about the prose with neither reader able to say whether a release exists" >&2
+            exit 1
+          fi
+          if ! grep -q 'the release state could not be read' mutant.log; then
+            echo "::error::the check failed, but not by saying the state was unreadable -- an unreadable state must not read as no release" >&2
+            exit 1
+          fi
+          if grep -q '^unbuilt claim:\|^stale claim:' mutant.log; then
+            echo "::error::the check judged the prose anyway" >&2
+            exit 1
+          fi
+
   queue:
     runs-on: ubuntu-latest
     steps:

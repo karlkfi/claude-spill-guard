@@ -12,23 +12,24 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift status-drift hooks-check launcher vendor docs queue action-pins test precision no-deps no-network vulns cross-compile
+GATES := doctor gate-drift status-drift hooks-check launcher vendor docs release-claims queue action-pins test precision no-deps no-network vulns cross-compile
 
-doctor.desc        := scripts/check-tools.sh runs, and every required tool is present
-gate-drift.desc    := the gate list, the CI job list and the table in CLAUDE.md still agree
-status-drift.desc  := the README's status table still says what the tree can actually do
-hooks-check.desc   := every tracked git hook is executable, so none is silently inert
-launcher.desc      := the hook launcher is executable in the index, resolves a binary, and denies when it cannot
-vendor.desc        := every vendored copy still hashes to the digest scripts/README.md declares
-docs.desc          := every relative link in the repo markdown resolves
-queue.desc         := the backlog store format holds, every filed id holds a claim, no index is committed
-action-pins.desc   := every `uses:` in every workflow names an immutable revision, not a tag
-test.desc          := gofmt, go vet and go test
-precision.desc     := the shipped ruleset stays quiet on the clean corpus and finds every planted secret
-no-deps.desc       := go.mod requires nothing and the build graph is this module plus stdlib
-no-network.desc    := the build graph reaches no net, net/http or os/exec
-vulns.desc         := govulncheck finds no known vulnerability the build graph calls
-cross-compile.desc := all five shipped targets build from one runner
+doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
+gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
+status-drift.desc   := the README's status table still says what the tree can actually do
+hooks-check.desc    := every tracked git hook is executable, so none is silently inert
+launcher.desc       := the hook launcher is executable in the index, resolves a binary, and denies when it cannot
+vendor.desc         := every vendored copy still hashes to the digest scripts/README.md declares
+docs.desc           := every relative link in the repo markdown resolves
+release-claims.desc := the prose agrees with whether a release exists
+queue.desc          := the backlog store format holds, every filed id holds a claim, no index is committed
+action-pins.desc    := every `uses:` in every workflow names an immutable revision, not a tag
+test.desc           := gofmt, go vet and go test
+precision.desc      := the shipped ruleset stays quiet on the clean corpus and finds every planted secret
+no-deps.desc        := go.mod requires nothing and the build graph is this module plus stdlib
+no-network.desc     := the build graph reaches no net, net/http or os/exec
+vulns.desc          := govulncheck finds no known vulnerability the build graph calls
+cross-compile.desc  := all five shipped targets build from one runner
 
 # Single-quote a value for the shell, so a description carrying an apostrophe
 # does not close the quoting early.
@@ -156,6 +157,12 @@ vendor:
 
 docs:
 	$(PYTHON) scripts/check-doc-links.py
+
+# The second gate whose oracle is off this machine. `gh release list` is the
+# only reader that sees a draft, and a draft publishes no assets, so a tag
+# alone is the wrong answer for prose about what a user can download.
+release-claims:
+	$(PYTHON) scripts/check-release-claims.py
 
 queue:
 	@rc=0; \

@@ -281,8 +281,13 @@ free and a human is asking the question directly.
   against the build provenance. The question was framed as fail-closed against
   reach, and that was the wrong axis: `cosign` is one of two verifiers for the
   same property, and `gh` is the one a person installing from GitHub is likelier
-  to hold. Both artifacts are already published by the release workflow, so this
-  asks it for nothing new.
+  to hold. The release workflow is configured to mint both —
+  [`.goreleaser.yaml`](../../.goreleaser.yaml)'s `signs:` block and
+  `actions/attest-build-provenance` in
+  [`release.yml`](../../.github/workflows/release.yml) — so this asks it for
+  nothing new. It has minted neither, because there is no release yet. Q101
+  carries that, and the `release-claims` gate is what now reads it rather than
+  a reader.
 
   The sha256 is not the fallback it appears to be. A `checksums.txt` fetched
   from the same place as the archive answers corruption and not substitution, so
