@@ -94,19 +94,27 @@ checksum:
 # release.yml pins --certificate-identity to this repository's release.yml at
 # the tag being cut: a signature minted from any other ref must not verify.
 #
-# `.sig` and `.pem` are not arbitrary. OpenSSF Scorecard's Signed-Releases
-# check reads the release's asset names and scores a `*.sig` -- a correctly
-# signed release whose signature is named something else scores zero.
+# `.sigstore.json` is not arbitrary. OpenSSF Scorecard's Signed-Releases check
+# reads the release's asset names, and `releasesAreSigned` scores exactly
+# `.asc`, `.minisig`, `.sig`, `.sign`, `.sigstore` and `.sigstore.json` -- a
+# correctly signed release whose signature is named anything else scores zero.
+#
+# One bundle rather than a `.sig` and a `.pem`, because cosign v3 removed the
+# choice. `--new-bundle-format` defaults to true there, which makes
+# `--output-signature` and `--output-certificate` no-ops and `--bundle`
+# mandatory; passing neither is what made the v0.1.0-rc.1 rehearsal die with
+# `create bundle file: open : no such file or directory`. The verifier side
+# takes `--bundle` plus `--new-bundle-format`, which is what install.sh,
+# install.ps1 and release.yml's verification step now pass.
 signs:
   - id: checksums
     cmd: cosign
     artifacts: checksum
-    certificate: '${artifact}.pem'
+    signature: '${artifact}.sigstore.json'
     output: true
     args:
       - sign-blob
-      - '--output-certificate=${certificate}'
-      - '--output-signature=${signature}'
+      - '--bundle=${signature}'
       - '${artifact}'
       - '--yes'
 

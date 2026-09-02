@@ -583,15 +583,15 @@ jobs:
         run: |
           gh release download "$GITHUB_REF_NAME" --dir published
           bundle="spill-guard_${GITHUB_REF_NAME#v}.intoto.jsonl"
-          for f in checksums.txt checksums.txt.sig checksums.txt.pem "$bundle"; do
+          for f in checksums.txt checksums.txt.sigstore.json "$bundle"; do
             if ! cmp -s "dist/$f" "published/$f"; then
               echo "::error::the published $f is not the one this run built" >&2
               exit 1
             fi
           done
           cosign verify-blob \
-            --certificate published/checksums.txt.pem \
-            --signature published/checksums.txt.sig \
+            --bundle published/checksums.txt.sigstore.json \
+            --new-bundle-format \
             --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             published/checksums.txt
