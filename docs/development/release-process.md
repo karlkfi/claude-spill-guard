@@ -161,6 +161,20 @@ intended, and the sha256 line above it is not a substitute: `checksums.txt`
 comes from the same place the archive did. `sh install.sh --verifier` answers
 which tool the machine has without downloading anything.
 
+**Then retire the release-scope record, if the tag had one.**
+`docs/plan/<tag>.md` says what the release was for, and it is written to be
+read before the tag rather than after it — a plan doc naming a version that
+exists is the staleness the record is meant to avoid. Delete it, and drop the
+matching label from every row still carrying it, in one docs-only commit:
+
+```bash
+git rm docs/plan/vX.Y.Z.md
+```
+
+Nothing checks this. It is a step somebody performs by reading it back, which
+is the construction this repository has already paid for once — see *What the
+workflow asserts, and what it does not*.
+
 ## Rehearsing without spending a version number
 
 A prerelease tag runs the whole pipeline. `release.prerelease: auto` in
