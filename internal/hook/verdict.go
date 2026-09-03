@@ -75,7 +75,7 @@ type promptVerdict struct {
 // measured systemMessage alone and found one field serving both events, which
 // still holds; beside a decision the two diverge. Driven 2026-09-03 against
 // Claude Code 2.1.251 on darwin/arm64, reading `--output-format stream-json`
-// and the session transcript for a marker:
+// for a marker, and the session transcript on the arms that emitted the field:
 //
 //	the hook writes                     | the person is shown        | the call
 //	a deny object + systemMessage       | the notice, level notice   | blocked

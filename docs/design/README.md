@@ -774,7 +774,9 @@ Putting a `systemMessage` beside a decision object changes an encoding this
 document measured rather than reasoned about, so it was driven before it was
 written. Driven 2026-09-03 against Claude Code 2.1.251 on darwin/arm64, nine
 arms of a real hook in a throwaway project, read back out of
-`--output-format stream-json` and the session transcript both:
+`--output-format stream-json`. The four arms that emitted the field were read
+in the session transcript as well, where each arrives as the
+`hook_system_message` attachment Q84 measured, or does not:
 
 | The hook writes on `PreToolUse` (Bash) | The person is shown | The call |
 |---|---|---|
