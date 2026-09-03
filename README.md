@@ -50,14 +50,13 @@ authoritative and is not.
 
 ## Install
 
-**There is no release yet, so nothing here works today** — follow
-[releases](https://github.com/karlkfi/claude-spill-guard/releases) for the
-first one. The commands are written down now because the scripts in
-[`install/`](install/) already carry out exactly these steps, and because a
-script you are asked to run should be readable at a versioned URL before you
-run it.
+Two halves, and neither is any use alone. The plugin is the wiring — it tells
+Claude Code which calls to hand over. The binary is what reads them. A plugin
+installed without a binary blocks every call it sees, prompts included, and
+names the install command in the refusal: the launcher fails closed rather than
+waving anything through unscanned.
 
-macOS and Linux:
+**The binary.** macOS and Linux:
 
 ```bash
 curl -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/download/install.sh
@@ -72,7 +71,8 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 Either one installs a single binary — to `~/.local/bin`, or to
-`%LOCALAPPDATA%\spill-guard\bin` on Windows — and writes nothing else.
+`%LOCALAPPDATA%\spill-guard\bin` on Windows — and writes nothing else. Pass
+`--dir` to put it somewhere else.
 
 Two steps rather than one. The one-liner that pipes the script into a shell
 works, and it is not what this page leads with: for a tool whose whole pitch is
@@ -80,47 +80,63 @@ that nothing leaves your machine, opening with "pipe this remote script into
 your shell" undercuts the claim before you reach the second paragraph. Download
 it, read it, run it.
 
-Each script works out your OS and architecture, checks the archive's sha256
-against `checksums.txt`, and then checks the signature with whichever of
-`cosign` or `gh` you have — `cosign` against the keyless Sigstore signature,
-`gh` against the build provenance. With neither installed it **refuses**. The sha256
-is not the fallback it looks like: `checksums.txt` comes from the same place
-the archive did, so it answers corruption and not substitution, and
-authenticity needs a verifier. A machine with no verifier is what the planned
-Homebrew tap and Scoop bucket are for — both pin the sha256 themselves and ask
-you for no tool at all.
-[`docs/design/distribution.md`](docs/design/distribution.md) has the whole
-argument.
-
-CI installs through both scripts on Linux, macOS and Windows on every pull
-request, against the archives that same pull request built.
-
-## Install
-
-Two halves, and neither is any use alone. The plugin is the wiring — it tells
-Claude Code which calls to hand over. The binary is what reads them. A plugin
-installed without a binary blocks every call it sees, prompts included, and
-names the install command in the refusal: the launcher fails closed rather than
-waving anything through unscanned.
-
-There is no release yet, so the binary comes from source:
+**The plugin**, once the binary is there:
 
 ```bash
-go install github.com/karlkfi/claude-spill-guard/cmd/spill-guard@latest
 claude plugin marketplace add karlkfi/claude-spill-guard
 claude plugin install spill-guard@spill-guard
 ```
 
-`go install` writes to `$(go env GOPATH)/bin`. The launcher looks on `PATH`
-first, then at `~/.local/bin/spill-guard`; if that directory is on neither, set
-`SPILL_GUARD_BIN` to the binary's path. Hooks are read when a session starts,
-so start a new one.
+Hooks are read when a session starts, so start a new one.
 
-The channels that drop the Go toolchain from that list — a Homebrew tap, a
-Scoop bucket, and an install script that verifies a Sigstore signature — are
-designed in
-[`docs/design/distribution.md`](docs/design/distribution.md) and none of them
-is shipped.
+### What the install script checks, and what it refuses
+
+Each script works out your OS and architecture, checks the archive's sha256
+against `checksums.txt`, and then checks the signature with whichever of
+`cosign` or `gh` you have — `cosign` against the keyless Sigstore signature in
+`checksums.txt.sigstore.json`, `gh` against the build provenance. With neither
+installed it **refuses**. The sha256 is not the fallback it looks like:
+`checksums.txt` comes from the same place the archive did, so it answers
+corruption and not substitution, and authenticity needs a verifier. A machine
+with no verifier is what the planned Homebrew tap and Scoop bucket are for —
+both pin the sha256 themselves and ask you for no tool at all.
+[`docs/design/distribution.md`](docs/design/distribution.md) has the whole
+argument.
+
+`sh install.sh --verifier` answers which tool you have without downloading
+anything. A successful run names the one it used, and a run that names neither
+took a path nobody intended.
+
+The install scripts are themselves listed in `checksums.txt`, so the script you
+fetched in order to read it can also be checked:
+
+```bash
+curl -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/download/checksums.txt
+sha256sum --ignore-missing -c checksums.txt
+```
+
+`--ignore-missing` is load-bearing: without it `sha256sum -c` fails on every
+asset you did not download, which reads as a verification failure.
+
+CI installs through both scripts on Linux, macOS and Windows on every pull
+request, against the archives that same pull request built.
+
+### Without the install script
+
+`go install` needs a Go toolchain and no verifier, and the module checksum
+database does the verifying:
+
+```bash
+go install github.com/karlkfi/claude-spill-guard/cmd/spill-guard@latest
+```
+
+It writes to `$(go env GOPATH)/bin`. The launcher looks on `PATH` first, then
+at `~/.local/bin/spill-guard`; if that directory is on neither, set
+`SPILL_GUARD_BIN` to the binary's path.
+
+A Homebrew tap and a Scoop bucket are designed in
+[`docs/design/distribution.md`](docs/design/distribution.md) and neither is
+built yet.
 
 ### Check that it is actually running
 

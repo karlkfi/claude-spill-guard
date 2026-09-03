@@ -137,9 +137,23 @@ curl -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/downlo
 sh install.sh
 ```
 
-It has to name a verifier and say which — `cosign verified checksums.txt
-against karlkfi/claude-spill-guard at vX.Y.Z`, or `gh verified the build
-provenance of ...`. A run that installed and said neither took a path nobody
+`--dir` puts the binary somewhere other than `~/.local/bin`, which is how to
+run this check without disturbing an install you already have.
+
+The script is itself in `checksums.txt`, so the copy you just fetched can be
+checked against the same file everything else is checked against:
+
+```bash
+curl -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/download/checksums.txt
+sha256sum --ignore-missing -c checksums.txt
+```
+
+`--ignore-missing` is load-bearing: without it `sha256sum -c` fails on the five
+archives you did not download, which reads as a verification failure.
+
+The install has to name a verifier and say which — `cosign verified
+checksums.txt against karlkfi/claude-spill-guard at vX.Y.Z`, or `gh verified
+the build provenance of ...`. A run that installed and said neither took a path nobody
 intended, and the sha256 line above it is not a substitute: `checksums.txt`
 comes from the same place the archive did. `sh install.sh --verifier` answers
 which tool the machine has without downloading anything.

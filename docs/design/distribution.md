@@ -151,13 +151,12 @@ leads with. For a tool whose entire pitch is that nothing leaves your machine,
 opening with "pipe this remote script into your shell" undercuts the claim
 before a reader gets to the second paragraph. Download, read, run.
 
-**This is built.** [`install/`](../../install/) holds both scripts and
-[`.goreleaser.yaml`](../../.goreleaser.yaml) uploads them as release assets, so
-the two-step form above will have something to fetch — as will the launcher's
-own deny message, which tells a user with no binary to download `install.sh`
-from the latest release. Both become true with the first release and not
-before: there is none yet, so `releases/latest/download/install.sh` is a 404
-today. Q101 carries that.
+**This is built and shipped.** [`install/`](../../install/) holds both scripts
+and [`.goreleaser.yaml`](../../.goreleaser.yaml) uploads them as release
+assets, so the two-step form above has something to fetch — as does the
+launcher's own deny message, which tells a user with no binary to download
+`install.sh` from the latest release. v0.1.0 is what made both true;
+`releases/latest/download/install.sh` resolves.
 
 CI drives both on all three operating systems on every pull request rather than
 every release, which is stronger than this design asked for and was free once
@@ -286,9 +285,10 @@ free and a human is asking the question directly.
   [`.goreleaser.yaml`](../../.goreleaser.yaml)'s `signs:` block and
   `actions/attest-build-provenance` in
   [`release.yml`](../../.github/workflows/release.yml) — so this asks it for
-  nothing new. It has minted neither, because there is no release yet. Q101
-  carries that, and the `release-claims` gate is what now reads it rather than
-  a reader.
+  nothing new. v0.1.0 carries both: a `checksums.txt.sigstore.json` bundle and
+  a `spill-guard_0.1.0.intoto.jsonl` attestation, each verified in the release
+  job as an outside consumer would check it. The `release-claims` gate is what
+  reads that state now, rather than a reader.
 
   The sha256 is not the fallback it appears to be. A `checksums.txt` fetched
   from the same place as the archive answers corruption and not substitution, so
