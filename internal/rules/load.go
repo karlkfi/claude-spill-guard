@@ -291,10 +291,19 @@ func compile(e entry) (Rule, error) {
 		if err != nil {
 			return fail("%s", err)
 		}
-		if ceiling := entropyCeiling(reach); rule.Entropy > ceiling {
-			return fail("entropy floor %v over a group of at most %d byte(s), which "+
-				"cannot carry more than %.4g bits, so it reports nothing",
-				rule.Entropy, reach, ceiling)
+		symbols, err := captureSymbols(*e.Regex, group)
+		if err != nil {
+			return fail("%s", err)
+		}
+		// Length and alphabet each bound the distinct byte count, so the
+		// smaller is the one that binds: a 32-byte hex capture reaches log2(16)
+		// and not log2(32). The message names both, because which of the two
+		// refused the rule is what its author has to change.
+		if ceiling := entropyCeiling(min(reach, symbols)); rule.Entropy > ceiling {
+			return fail("entropy floor %v over a group of at most %d byte(s) drawn from "+
+				"%d distinct byte value(s), which cannot carry more than %.4g bits, "+
+				"so it reports nothing",
+				rule.Entropy, reach, symbols, ceiling)
 		}
 	}
 	return rule, nil

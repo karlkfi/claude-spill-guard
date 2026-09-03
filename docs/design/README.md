@@ -569,25 +569,31 @@ which is exactly what a clean scan looks like from outside. That is the argument
 that already fails a rule whose regex does not compile, so it gets the same
 answer.
 
-The entropy bound comes off the rule's own regex, at the **longest** string the
-group can capture rather than the shortest. A group matching 8 to 64 bytes
-reaches 3 bits at its shortest and 6 at its longest, so measuring the shortest
-would refuse a working rule at startup — the failure this check exists to
-prevent, pointed the other way.
+The bound has two terms and takes the smaller. Both come off the rule's own
+regex.
 
-The walk over-estimates rather than under-estimates, because the two errors are
+The length term is the **longest** string the group can capture rather than the
+shortest. A group matching 8 to 64 bytes allows 3 bits at its shortest and 6 at
+its longest, so measuring the shortest would refuse a working rule at startup —
+the failure this check exists to prevent, pointed the other way.
+
+The alphabet term is how many distinct byte values the group can draw on, since
+a capture holds at most that many however long it runs. `[a-f0-9]{32}` is capped
+at log2(16) = 4 bits rather than the log2(32) = 5 its length allows, so a floor
+of 4.5 on a hex key rule is refused rather than loaded dead. That floor is the
+base64 threshold carried over onto a hex charset, which is the ordinary way to
+write the mistake rather than a constructed one.
+
+Both terms over-estimate rather than under-estimate, because the two errors are
 not symmetric: missing a dead rule leaves this check half-done, while refusing a
-live one takes the scanner down. One of those over-estimates is systematic and
-worth knowing about. The ceiling counts distinct *byte values* at 256 rather
-than at what the group can actually produce, so `[a-f0-9]{32}` is capped at
-log2(32) = 5 bits where sixteen hex symbols cap it at 4 — a 32-character hex key
-rule with a floor of 4.5 is dead and still loads. Every restricted-charset rule
-carries that slack, exact length or not.
+live one takes the scanner down. An operator neither walk names widens — to 256
+bytes on the length, to every byte value on the alphabet.
 
-`(?:ab){1,3}` looks like a second, length-shaped kind of looseness and is not.
-Its six-byte bound is exact — `ababab` is six bytes and the group matches it —
-and every one of its 1.585 bits of slack is the two symbols it draws on. There
-is one mechanism here, not two.
+The slack left over is a union that knows which symbols the group can emit and
+not which of them co-occur in one match. `(a{6}|b{6})` unions to two symbols and
+caps at 1 bit, where every string it matches is one repeated symbol at Shannon
+0. `(?:ab){1,3}` is not that case: six bytes over two symbols caps it at 1 bit,
+which `ababab` reaches exactly.
 
 ## Loading the ruleset
 
