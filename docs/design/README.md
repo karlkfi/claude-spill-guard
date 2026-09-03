@@ -316,15 +316,18 @@ Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
 | `@logo.png` | A `file` attachment whose `content.type` is `image`, carrying no text |
 | `@heap.dump`, a NUL in its first bytes | A `file` attachment whose `content.type` is `text`, carrying the whole file — NUL included, and a marker placed after it crossed |
 
-That last row is the one with a consequence. The resolver opens such a file and
-hands it on, and [the pipeline](#pipeline) skips a buffer with a NUL in the
-first 8 KiB, so a credential inside one is allowed with nothing in the
-transcript to say so. Driven on a built binary: the same key without the NUL
-blocks and names the rule, and with it the hook exits 0 on empty stdout. That
-is the reason-versus-surface question the `Read` and `Bash` surfaces already
-carry, arriving on a third surface where the argument for the allow — that
-denying every image read gets the hook uninstalled — is weakest, because an
-`@` token is typed deliberately, one file at a time.
+That last row is the one with a consequence, and it is closed. The resolver
+opens such a file and hands it on; [the pipeline](#pipeline) skipped a buffer
+with a NUL in the first 8 KiB, so a credential inside one was allowed — first
+in silence, then with a notice reporting that nothing had looked. On this
+surface the pipeline now matches those bytes rather than declining them, which
+is [a buffer whose bytes cross anyway](#a-buffer-whose-bytes-cross-anyway-measured)
+below. Driven 2026-09-03 on a built binary: a NUL, then an AWS-shaped key,
+under `@` — exit 0 with a notice before, and after it a block naming
+`aws-access-key-id` at the offset the key sits at in the file.
+
+The `Read` and `Bash` surfaces still decline it, and that is a cost measurement
+rather than a second verdict axis. The section below has the table.
 
 Two of those set the resolver's shape where the measurement runs out, and they
 go opposite ways.
@@ -417,6 +420,14 @@ not need to do.
    alternating NULs across the sniff window as UTF-16 rather than as binary —
    is exactly the heuristic the NUL check was chosen instead of. It is a
    stated gap rather than a silent one, which is what step 6 is for.
+
+   A caller whose buffer crosses whatever this returns takes a second entry
+   point, which runs the match loop over the raw bytes and reports the skip
+   beside the findings rather than instead of them. The trade above is about
+   work, and there is none to save once the bytes are on their way. Only a
+   prompt does that today — [a buffer whose bytes cross
+   anyway](#a-buffer-whose-bytes-cross-anyway-measured) has the cost table that
+   keeps the other two surfaces on the skip.
 
    The check gives two reasons, not one, and which it gives is decided by
    whether step 1 decoded. A buffer whose UTF-16 mark this stage read, and
@@ -731,6 +742,9 @@ with no byte-order mark and a UTF-8 mark ahead of a NUL both arrive wearing a
 screenshot's label. Naming them is what lets a reader who knows their file is
 text act on a notice that says *binary* — and it is why this closes both
 members without deciding anything about the UTF-8 decode arm, which is `Q102`.
+A prompt now matches the raw bytes as well, which reaches the UTF-8 member's
+credential without a decode arm and does nothing for the UTF-16 one, whose key
+is a NUL to the byte. The notice is what both still get.
 
 **`PreToolUse` takes the same field, and it is driven rather than inferred.**
 An earlier revision of this section reasoned that it was safe to emit there
@@ -1015,13 +1029,111 @@ net for the accident rather than a wall against intent, and accidental frequency
 is what an ordinary-session corpus measures well.
 
 What the measurement does not retire is the crossing. A binary buffer carrying
-a credential is still allowed in silence on every surface, and the remedy the
-corpus supports is telling the user the buffer went unread — which needs no
-ruling on which surface it happened on, and is Q84 rather than this.
+a credential is still allowed on every surface, and the remedy the corpus
+supports is telling the user the buffer went unread — which needs no ruling on
+which surface it happened on, and is Q84 rather than this. It is no longer
+allowed in silence, and on a prompt it is no longer unread: the section below
+is the third answer this one did not weigh.
 
 A reason the hook has not been taught blocks. `internal/scan` can grow one
 without `internal/hook` being told, and of the two directions that mismatch can
 fail in, only one of them ships a scanner that waves a buffer through.
+
+#### A buffer whose bytes cross anyway, measured
+
+The section above settles the verdict and leaves the crossing open. It weighed
+two answers, block and allow, and there is a third: a scanner can **match**
+such a buffer, which costs no verdict at all — a raw pass over an image finds
+nothing and the call goes through.
+
+That option stayed out of view because the binary skip reads as a judgement
+about what the bytes are when it is a trade about work. One PNG was 55% of the
+benchmark corpus in [`language-choice.md`](language-choice.md) against a regex
+pass at 1.0 MiB/s, so the pipeline declines the buffer rather than spend the
+loop on it. Where the bytes are already on their way there is nothing to trade.
+A prompt `@` token is that case: the harness splices the file into the context
+whole, NUL included, so it has been read off disk and the crossing happens
+whatever the hook returns.
+
+**The trade is still real on the other two surfaces, which is why this is a
+second entry point rather than a change to the skip.** Measured 2026-09-03 on
+darwin/arm64 over 4,000 binary files under `/usr/bin`, `/usr/lib`,
+`~/go/pkg/mod` and `/System/Applications` — 1,414.7 MiB, matched raw against the
+shipped ruleset:
+
+| | |
+|---|---|
+| aggregate throughput | 17.4 MiB/s |
+| files where any rule passed the prefilter | 249 of 4,000 |
+| findings | 0 |
+| slowest file | a 75.3 MiB git pack, 8.2s, 4 rules ran |
+| the Claude Code binary, 2.1.238 | 306.4 MiB, **36.5s**, 9 rules ran |
+| the Claude Code binary, 2.1.251 | 188.0 MiB, 24.8s, 9 rules ran |
+
+The last two rows decide it. That binary is the commonest binary `Bash` operand
+in the corpus above — 13 of the 21 — and 36.5s of match loop against a
+60-second hook timeout is not a cost to take where the population is real. On
+the prompt surface the population is empty: of 881 `@` tokens, the only
+binary-shaped names are four fixtures this repository wrote.
+
+The 0 is a measurement rather than a silence. The same probe over a 54-byte
+binary fixture holding an AWS-shaped key returns one finding, so it can come
+back non-empty.
+
+**The crossing does not separate the surfaces, and the argument that said it
+did was wrong.** Q118 proposed that the harness had decided such a file is text
+on this surface and not elsewhere. Driven 2026-09-03 against Claude Code
+2.1.251, a `Read` of the same NUL-bearing file returned its content whole with
+a marker past the NUL intact — so `Read` crosses exactly as a splice does, and
+what separates the two is the cost table above and nothing else.
+
+**It is coverage and not a second verdict axis.** `blocks()` still takes a
+reason and never an event, `scan.ScannedRaw` allows for `scan.SkippedBinary`'s
+reason, and the notice still goes out. What moved is which entry point
+`scanCall` picks, chosen by whether the trade has anything left to trade rather
+than by what a call is allowed to do.
+
+**The notice survives the scan, because a raw pass is not a decode.** The sniff
+cannot tell an image from text this build does not read — UTF-16 with no
+byte-order mark, a UTF-8 mark ahead of a NUL — and a raw pass over the second
+finds nothing whatever is written in it. So a matched buffer is still reported
+as one nothing decoded, and the sentence moved from *nothing scanned this* to
+*nothing decoded this*: the property both populations share, and the one a
+reader has a remedy for.
+
+**It over-reads, on the precedent this document already set.** A text splice is
+bounded at 2,000 lines and a directory listing at 1,000 entries, and the
+resolver reads the whole file and the whole directory anyway: where the harness
+sends a subset, reading all of it reports bytes the harness did not send, and
+only the other direction can report a clean result for something that crossed.
+The binary row is where the bound is unmeasured — `heap.dump` crossed whole,
+and a file with few newlines has few lines to be capped at — so the resolver
+reads what is there.
+
+**The match is bounded even though the read is not, and that bound is what
+keeps this from being a regression.** Measured 2026-09-03 on a buffer carrying
+every keyword the shipped ruleset gates on, so nothing prefilters away: the raw
+pass runs at 6.8 MiB/s and crosses the 60-second hook timeout at about 410 MiB.
+Past that timeout the hook is killed and writes nothing at all, so an unbounded
+raw pass would take a buffer the skip reports in 44 ms and make it one nobody
+hears about — trading the notice for silence, which is the direction this
+design does not go. `scan.rawLimit` is 32 MiB, which the rate puts at 4.7 s of
+match loop and a driven hook puts at 4.3 s of wall clock — a buffer of exactly
+that size carrying every keyword, with the key in its last bytes so the loop
+cannot stop early. Fourteen times inside the timeout. Above it the answer is
+`SkippedBinary` and the notice goes out exactly as it does without this entry
+point, so coverage is added below the limit and nothing is taken away above it.
+
+A size limit rather than a deadline because a deadline is not available here:
+the match loop and `os.ReadFile` both take no context. A budget for the whole
+pipeline is Q120's; this is one entry point declining to add a new way to reach
+the case Q120 is about.
+
+What this closes is one surface. A credential in a binary-looking `@` target
+blocks, and so does one behind a UTF-8 byte-order mark ahead of a NUL, which is
+[Q102](../queue/Q102.md)'s member reached without a decode arm — on a prompt
+only. On `Read` and `Bash` both are still allowed with a notice, and
+`docs/releases/` says so.
 
 ## The exit-code contract, measured
 

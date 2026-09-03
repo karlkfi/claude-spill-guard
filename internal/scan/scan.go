@@ -49,7 +49,12 @@ type Finding struct {
 	Digest string
 }
 
-// A Skip is why a buffer was not read, and the empty value means it was.
+// A Skip is why a buffer's text was not read, and the empty value means it
+// was.
+//
+// Its text rather than its bytes, because one value here is a buffer this
+// package did match -- over the raw bytes, which is not the same as having read
+// what is written in them.
 //
 // Every value is a phrase meant to reach whoever is being told the file was not
 // covered, because that is the only form of this fact that is worth anything: a
@@ -108,6 +113,18 @@ const (
 	// TestAUTF16NULIsNamedAsDeclaredWhereverItSits here and
 	// TestADeclaredUTF16BufferWithANULBlocks in internal/hook.
 	SkippedUTF16Binary Skip = "UTF-16: declared by a byte-order mark, and a NUL byte in the first 8 KiB of the decoded text"
+	// ScannedRaw is SkippedBinary's buffer, matched anyway over its raw bytes
+	// because BufferIncludingBinary was the entry point. See there for when
+	// that is the right call and when it is not.
+	//
+	// It is a Skip and not Scanned, which is the half worth stating: the sniff
+	// is still right that nothing decoded this. A NUL in the window means
+	// either genuinely binary content or text in an encoding this build does
+	// not read, and a raw match over the second finds nothing whatever is
+	// written in it -- so the buffer is still one no caller may report as
+	// read. What the raw pass adds is the first population, where the bytes
+	// are the text and a credential in them is now found.
+	ScannedRaw Skip = "binary: a NUL byte in the first 8 KiB, so this was matched as raw bytes and nothing decoded it"
 )
 
 // A Result is what the pipeline made of one buffer.
@@ -133,7 +150,97 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 	if skip != Scanned {
 		return Result{Skipped: skip}, nil
 	}
+	findings, err := match(path, text, source, ruleset)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Findings: findings}, nil
+}
 
+// rawLimit is how much of a buffer BufferIncludingBinary will match raw, and
+// it is what stops that entry point being worse than the skip at any size. Past the timeout the hook
+// is killed and writes nothing (docs/design/README.md, the timeout section), so
+// an unbounded raw pass would turn a buffer the skip reports in 44ms into one
+// nobody hears about at all -- trading a notice for silence, which is the one
+// direction this package will not go. Above the limit the answer is
+// SkippedBinary and the notice goes out, exactly as it does without this entry
+// point, so coverage is added below the limit and nothing is taken away above
+// it.
+//
+// 32 MiB is derived from the worst measured rate and then driven, rather than
+// picked. A buffer carrying every keyword the shipped ruleset gates on
+// prefilters nothing away and matches at 6.8 MiB/s (measured 2026-09-03; the
+// 60-second crossing is around 410 MiB), which puts the limit at 4.7s of match
+// loop. Driven end to end on a built binary, a buffer of exactly this size
+// carrying every keyword and the key in its last bytes takes 4.3s of wall
+// clock -- a fourteenfold margin inside the timeout, which is what makes "this
+// cannot be what caused a kill" a reading rather than a likelihood.
+//
+// A size limit rather than a deadline because a deadline is not available: the
+// match loop and os.ReadFile both take no context, which internal/hook's
+// fifo_unix_test.go says for the file-mode question and Q120 says for the
+// clock. Q120 owns a budget for the whole pipeline; this is only this entry
+// point declining to add a new way to reach the case Q120 is about.
+const rawLimit = 32 << 20
+
+// BufferIncludingBinary is Buffer for a caller whose buffer reaches the model
+// whatever this returns.
+//
+// The binary skip is a cost trade and not a judgement about what the bytes are:
+// one PNG was 55% of the benchmark corpus, so the pipeline declines a buffer
+// whose sniff window holds a NUL rather than spend the match loop on it. That
+// trades work against coverage, and where the bytes are already on their way
+// there is no work to save -- the buffer has been read off disk, the harness is
+// going to send it, and declining buys a faster verdict on a call that is
+// letting the credential past. So this runs the match loop over the raw bytes
+// and returns the sniff's answer beside the findings rather than instead of
+// them.
+//
+// It is per reason and not per surface. Nothing here consults the event, no
+// Skip changes what it means to internal/hook's blocks(), and a buffer that
+// comes back ScannedRaw is allowed exactly as SkippedBinary is. What differs
+// between callers is whether the trade above has anything left to trade, which
+// is a fact about the caller's own population rather than a second verdict
+// axis -- docs/design/README.md, "The verdict is per reason and not per
+// surface", is the decision this must not reopen and the measurements are
+// under "A buffer whose bytes cross anyway".
+//
+// The cost it declines to save is real where the population is large: the
+// Claude Code binary, the commonest binary Bash operand in that corpus, is 306
+// MiB and takes 36.5s of match loop against a 60-second hook timeout. That is
+// why this is a second entry point rather than the only one.
+//
+// Only SkippedBinary. Every other Skip is a declaration the buffer made about
+// itself that this build could not act on, two of them block, and matching
+// their raw bytes would find nothing in any case -- a UTF-32 buffer's
+// credential is three NULs to the byte.
+//
+// And only up to rawLimit, which is what keeps this from being worse than the
+// skip it replaces. See there.
+func BufferIncludingBinary(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
+	text, source, skip := decode(buf)
+	switch {
+	case skip == Scanned:
+	case skip == SkippedBinary && len(buf) <= rawLimit:
+		// decode reaches SkippedBinary from its default arm alone -- the
+		// UTF-16 arm has SkippedUTF16Binary for its own NUL -- so nothing was
+		// decoded, buf is the text, and source is already the identity it
+		// returned.
+		text, skip = buf, ScannedRaw
+	default:
+		return Result{Skipped: skip}, nil
+	}
+	findings, err := match(path, text, source, ruleset)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Findings: findings, Skipped: skip}, nil
+}
+
+// match runs every enabled rule over text and returns what survived, in the
+// order the rules were given and by offset within each rule. source maps an
+// offset in text back to the offset in the file a finding has to report.
+func match(path string, text []byte, source func(int) int, ruleset []rules.Rule) ([]Finding, error) {
 	var findings []Finding
 	for _, rule := range ruleset {
 		if !rule.Enabled {
@@ -145,9 +252,9 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 		// block on -- the fail-open shape this whole tool is about.
 		switch {
 		case rule.Regex == nil:
-			return Result{}, fmt.Errorf("rule %q: no compiled regex", rule.ID)
+			return nil, fmt.Errorf("rule %q: no compiled regex", rule.ID)
 		case rule.Group < 0 || rule.Group > rule.Regex.NumSubexp():
-			return Result{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"rule %q: group %d, but the regex has %d capture group(s)",
 				rule.ID, rule.Group, rule.Regex.NumSubexp())
 		}
@@ -175,7 +282,7 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 			}
 			ok, err := passes(rule, text, lo, hi)
 			if err != nil {
-				return Result{}, err
+				return nil, err
 			}
 			if !ok {
 				continue
@@ -192,7 +299,7 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 			})
 		}
 	}
-	return Result{Findings: findings}, nil
+	return findings, nil
 }
 
 // gates reports whether a keyword list can gate anything, which is not the
