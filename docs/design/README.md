@@ -1117,8 +1117,10 @@ pass runs at 6.8 MiB/s and crosses the 60-second hook timeout at about 410 MiB.
 Past that timeout the hook is killed and writes nothing at all, so an unbounded
 raw pass would take a buffer the skip reports in 44 ms and make it one nobody
 hears about — trading the notice for silence, which is the direction this
-design does not go. `scan.rawLimit` is 32 MiB, which is 4.7 s of match loop at
-that rate and an order of magnitude inside the timeout. Above it the answer is
+design does not go. `scan.rawLimit` is 32 MiB, which the rate puts at 4.7 s of
+match loop and a driven hook puts at 4.3 s of wall clock — a buffer of exactly
+that size carrying every keyword, with the key in its last bytes so the loop
+cannot stop early. Fourteen times inside the timeout. Above it the answer is
 `SkippedBinary` and the notice goes out exactly as it does without this entry
 point, so coverage is added below the limit and nothing is taken away above it.
 

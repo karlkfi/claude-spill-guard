@@ -167,12 +167,14 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 // point, so coverage is added below the limit and nothing is taken away above
 // it.
 //
-// 32 MiB is derived from the worst measured rate rather than picked. A buffer
-// carrying every keyword the shipped ruleset gates on prefilters nothing away
-// and matches at 6.8 MiB/s (measured 2026-09-03; the 60-second crossing is
-// around 410 MiB), so the limit is 4.7s of match loop -- an order of magnitude
-// inside the timeout, which is the margin that makes "this cannot be what
-// caused a kill" true rather than likely.
+// 32 MiB is derived from the worst measured rate and then driven, rather than
+// picked. A buffer carrying every keyword the shipped ruleset gates on
+// prefilters nothing away and matches at 6.8 MiB/s (measured 2026-09-03; the
+// 60-second crossing is around 410 MiB), which puts the limit at 4.7s of match
+// loop. Driven end to end on a built binary, a buffer of exactly this size
+// carrying every keyword and the key in its last bytes takes 4.3s of wall
+// clock -- a fourteenfold margin inside the timeout, which is what makes "this
+// cannot be what caused a kill" a reading rather than a likelihood.
 //
 // A size limit rather than a deadline because a deadline is not available: the
 // match loop and os.ReadFile both take no context, which internal/hook's
