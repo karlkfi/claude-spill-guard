@@ -235,7 +235,7 @@ func TestAPrefixOnAnySegmentCoversTheCall(t *testing.T) {
 // rather than leaving that to its caller, mirroring block.
 func TestConfirmRefusesAnEventItHasNoEncodingFor(t *testing.T) {
 	var out bytes.Buffer
-	if err := confirm(&out, UserPromptSubmit, "because"); err == nil {
+	if err := confirm(&out, UserPromptSubmit, "because", ""); err == nil {
 		t.Errorf("confirm accepted an event it cannot encode, writing %q", out.String())
 	}
 	if out.Len() != 0 {
@@ -255,7 +255,7 @@ func TestConfirmRefusesAnEventItHasNoEncodingFor(t *testing.T) {
 // code because that is the part that must not become 0.
 func TestDecideInheritsConfirmsRefusalForAnEventThatIgnoresIt(t *testing.T) {
 	var out, errs bytes.Buffer
-	code := decide(&out, &errs, payload{}, UserPromptSubmit, true, found(nil))
+	code := decide(&out, &errs, payload{}, UserPromptSubmit, true, found(nil), "")
 	if code != 2 {
 		t.Errorf("exit code = %d with stdout %q; want the exit-2 refusal, which blocks",
 			code, out.String())

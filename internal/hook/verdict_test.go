@@ -3,6 +3,8 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -80,6 +82,13 @@ func TestNoReasonNamesTheOverride(t *testing.T) {
 			reasons = append(reasons, lead+body)
 		}
 	}
+	// The notices are not bodies of a lead -- they carry noticeLead and reach
+	// the person rather than the model -- so the crossing above cannot reach
+	// them and they are named here. The property is the same one: a text that
+	// tells its reader how to proceed without a scan is the bypass, whoever
+	// reads it.
+	reasons = append(reasons,
+		noticeLead+unscanned(skips), noticeLead+alsoUnread(skips))
 	// refuse writes to stderr rather than through a lead, so it is outside the
 	// crossing above and has to be named separately -- which is itself the
 	// argument for Q89.
@@ -102,7 +111,7 @@ func TestNoReasonNamesTheOverride(t *testing.T) {
 // because empty stdout blocks nothing.
 func TestBlockRefusesAnEventItHasNoEncodingFor(t *testing.T) {
 	var out bytes.Buffer
-	if err := block(&out, Event("PostToolUse"), "because"); err == nil {
+	if err := block(&out, Event("PostToolUse"), "because", ""); err == nil {
 		t.Errorf("block accepted an event it cannot encode, writing %q", out.String())
 	}
 	if out.Len() != 0 {
@@ -115,7 +124,7 @@ func TestBlockRefusesAnEventItHasNoEncodingFor(t *testing.T) {
 func TestEveryVerdictIsOneJSONObject(t *testing.T) {
 	for _, event := range []Event{PreToolUse, UserPromptSubmit} {
 		var out bytes.Buffer
-		if err := block(&out, event, "because"); err != nil {
+		if err := block(&out, event, "because", ""); err != nil {
 			t.Fatalf("%s: %v", event, err)
 		}
 		decoder := json.NewDecoder(&out)
@@ -127,4 +136,109 @@ func TestEveryVerdictIsOneJSONObject(t *testing.T) {
 			t.Errorf("%s: stdout carries more than one object", event)
 		}
 	}
+}
+
+// A call that blocks and also carried a buffer nothing read says both, and the
+// channel it says the second one on is per event.
+//
+// That split is measured rather than reasoned about: carry carries the table.
+// Q84's field served both events on its own, so the reasonable prior was that
+// it would here too -- and beside a decision object it does not. Each arm below
+// asserts the shape its own event was driven on, because asserting the other
+// one would pass on a build that had swapped them and shipped a notice nobody
+// is shown.
+func TestABlockingVerdictCarriesTheNoticeToo(t *testing.T) {
+	// planted() writes the file the rule matches; this is the buffer beside it
+	// that nothing opens. A leading NUL is what internal/scan sniffs for, and
+	// SkippedBinary is the one skip reason that does not stop the call.
+	unopened := func(t *testing.T, dir string) string {
+		t.Helper()
+		path := filepath.Join(dir, "core.dump")
+		if err := os.WriteFile(path, []byte{0x00, 'j', 'u', 'n', 'k'}, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	t.Run("PreToolUse writes it beside the deny", func(t *testing.T) {
+		dir, name := planted(t)
+		skipped := unopened(t, dir)
+		_, stdout, _ := drive(t, bashCall(t, "cat "+name+" core.dump", dir))
+
+		got := decision(t, stdout)
+		if verdictOf(t, stdout) != "deny" {
+			t.Fatalf("the call was not blocked: %q", stdout)
+		}
+		message, ok := got["systemMessage"].(string)
+		if !ok {
+			t.Fatalf("the block carries no notice, so the unread buffer told "+
+				"nobody: %q", stdout)
+		}
+		if !strings.Contains(message, skipped) ||
+			!strings.Contains(message, string(scan.SkippedBinary)) {
+			t.Errorf("the notice does not name the buffer and why: %q", message)
+		}
+		// The notice reports that nothing looked. A sentence of found()'s in it
+		// would make it a claim about coverage, which is the defect the notice
+		// exists to close rather than one to reproduce.
+		if strings.Contains(message, "rule match") {
+			t.Errorf("the notice claims coverage of the buffer nothing read: %q", message)
+		}
+		if !strings.Contains(message, "Nothing scanned those for secrets") {
+			t.Errorf("the notice does not say nothing looked: %q", message)
+		}
+	})
+
+	t.Run("UserPromptSubmit writes it into the reason", func(t *testing.T) {
+		dir, name := planted(t)
+		skipped := unopened(t, dir)
+		_, stdout, _ := drive(t, `{"hook_event_name":"UserPromptSubmit","cwd":`+
+			quote(t, dir)+`,"prompt":"read @`+name+` and @core.dump"}`)
+
+		if _, ok := decision(t, stdout)["systemMessage"]; ok {
+			t.Errorf("this event drops a systemMessage beside a block, so one "+
+				"written here reaches nobody: %q", stdout)
+		}
+		reason := reasonOf(t, stdout)
+		if !strings.Contains(reason, "aws-access-key-id") {
+			t.Errorf("the reason does not name the rule that blocked: %q", reason)
+		}
+		if !strings.Contains(reason, skipped) {
+			t.Errorf("the reason does not name the buffer nothing read: %q", reason)
+		}
+	})
+
+	t.Run("a confirmation carries it as well", func(t *testing.T) {
+		dir, name := planted(t)
+		skipped := unopened(t, dir)
+		_, stdout, _ := drive(t, bashCall(t,
+			`echo hi && SPILL_GUARD_OVERRIDE="reviewed" cat `+name+" core.dump", dir))
+
+		if got := verdictOf(t, stdout); got != "ask" {
+			t.Fatalf("permissionDecision = %q, want ask", got)
+		}
+		// Worse here than on a block, because approving is the whole of what
+		// this prompt is for: a human told what they are sending and not told
+		// what went unread is approving a coverage nobody has.
+		message, ok := decision(t, stdout)["systemMessage"].(string)
+		if !ok || !strings.Contains(message, skipped) {
+			t.Fatalf("the confirmation does not name the buffer nothing read: %q", stdout)
+		}
+	})
+
+	// The arm that says the three above assert something. Same command with the
+	// unread buffer taken out of it: still a block, and now no notice at all.
+	// Without this, a build writing a notice on every verdict passes all three.
+	t.Run("nothing unread, nothing said", func(t *testing.T) {
+		dir, name := planted(t)
+		_, stdout, _ := drive(t, bashCall(t, "cat "+name, dir))
+
+		if verdictOf(t, stdout) != "deny" {
+			t.Fatalf("the control did not block, so the arms above blocked for "+
+				"some other reason: %q", stdout)
+		}
+		if _, ok := decision(t, stdout)["systemMessage"]; ok {
+			t.Errorf("a call with nothing unread carries a notice: %q", stdout)
+		}
+	})
 }
