@@ -634,6 +634,41 @@ jobs:
             exit 1
           fi
 
+      # Every other assertion in this job is about assets, so a release whose
+      # body never arrived passes all of them. That is not hypothetical: the
+      # first v0.1.0 tag published ten correct, signed, verifiable assets and a
+      # body of two newlines, because `changelog.disable: true` makes
+      # GoReleaser ignore --release-notes. The step that reads the notes file
+      # cannot see it either -- it asserts the file is in the tree, which it
+      # was, at 12122 bytes.
+      #
+      # Byte-for-byte against the file rather than a length check, because
+      # docs/releases/README.md's invariant is that the two are the same text.
+      # A body that is merely non-empty satisfies a length check and can still
+      # be GoReleaser's generated changelog, which is the thing the invariant
+      # exists to keep out of the release.
+      - name: The published body is the notes file, byte for byte
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body > published-body.md
+          # Two normalisations, and both were measured rather than anticipated.
+          # `tr -d '\r'` because a body GitHub stores with CRLF would differ
+          # from the tree's LF and say nothing about the text. The command
+          # substitutions strip trailing newlines from both sides, because
+          # GitHub returns the body with one more than the file carries -- a
+          # correct v0.1.0 body came back 12123 bytes against 12122 in the
+          # tree, so a byte-exact compare fails on every release that is right.
+          published="$(tr -d '\r' < published-body.md)"
+          authored="$(tr -d '\r' < "$notes")"
+          if [ "$published" != "$authored" ]; then
+            echo "::error::the published body is not $notes -- $(wc -c < published-body.md) bytes published against $(wc -c < "$notes") in the tree. The release is still a draft, so delete it and the tag, fix what dropped the notes, and tag again." >&2
+            diff <(printf '%s\n' "$published") <(printf '%s\n' "$authored") | head -40 >&2
+            exit 1
+          fi
+          printf 'the published body is %s, %s bytes\n' "$notes" "$(wc -c < "$notes")"
+
       - name: What a maintainer does next
         run: |
           printf 'The release is a DRAFT. Nothing reaches a user until someone publishes it.\n\n'
