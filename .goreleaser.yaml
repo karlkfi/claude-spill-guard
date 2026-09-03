@@ -118,12 +118,23 @@ signs:
       - '${artifact}'
       - '--yes'
 
-# GoReleaser generates nothing here. The body comes from
-# docs/releases/<tag>.md, passed with --release-notes, and release.yml refuses
-# to run without that file -- the invariant docs/releases/README.md states and
-# nothing used to enforce.
-changelog:
-  disable: true
+# No `changelog:` block, and its absence is load-bearing.
+#
+# `--release-notes` already stops GoReleaser generating a body: it uses the
+# file instead. `changelog.disable: true` does something else and the
+# difference is not visible in a config review -- GoReleaser's own
+# documentation warns that disabling "will also ignore any changelog files
+# passed via --release-notes, and will render an empty changelog". So the two
+# together publish nothing at all.
+#
+# Measured on the first v0.1.0 tag: the workflow's gate printed `publishing
+# docs/releases/v0.1.0.md (12122 bytes)`, goreleaser was invoked with
+# --release-notes, and the draft's body came back as two newlines. Every
+# assertion the release job makes is about assets, so all of them passed over a
+# release with no notes. The tag was deleted unpublished and re-cut from this.
+#
+# The body comes from docs/releases/<tag>.md, and release.yml refuses to run
+# without that file -- the invariant docs/releases/README.md states.
 
 release:
   draft: true

@@ -79,12 +79,13 @@ gh run list --workflow=release.yml --limit 1
 
 ## What the workflow asserts, and what it does not
 
-The `release` job fails closed at four points, and each one leaves the tag
+The `release` job fails closed at five points, and each one leaves the tag
 spent rather than the release wrong:
 
 | It stops when | Because |
 |---|---|
 | `docs/releases/<tag>.md` is not in the tree | The body is authored in the repository. A generated changelog would then have to be corrected on the Release, off the record that invariant exists to keep. |
+| The published body is not that file | The row above asserts the file exists, which is not the same claim and was measured coming apart. The first `v0.1.0` tag published ten correct, signed, verifiable assets and a body of two newlines: `changelog.disable: true` makes GoReleaser ignore `--release-notes`, and every other assertion here is about assets, so all of them passed. The tag was deleted unpublished and re-cut. |
 | The archives are not one per shipped target, named as the install channels expect | `scripts/check-release-artifacts.py`. Every channel builds an archive name from an OS and an architecture. |
 | An archive does not match its `checksums.txt` line | Signing a stale checksums file signs a wrong answer, and the signature over it verifies perfectly. |
 | A published asset does not verify as an outside consumer would check it | It re-downloads the release, re-runs `sha256sum -c`, verifies the cosign signature against this workflow **at this tag**, and verifies provenance for all five archives — twice each, once through the attestations API and once against the attached bundle, which is the only copy a consumer without that API has. |
