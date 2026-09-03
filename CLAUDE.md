@@ -55,15 +55,36 @@ blocks, a UTF-16 mark whose *decoded* text holds a NUL blocks, and a NUL in a
 buffer nothing declared — an image, an executable, UTF-16 written with no
 mark — is allowed.
 
-Allowed is not silent. It writes a `systemMessage` naming the buffer and the
-reason, and the call goes through carrying it. That field is the one measured
-to reach the *person* rather than the model — a hook's stderr on exit 0 reaches
-neither, and plain stdout and `additionalContext` reach only the model. Driven
-on both events, and unlike the block encodings it is **not** per event: one
-field serves `UserPromptSubmit` and `PreToolUse` alike, arriving as a
-`hook_system_message` attachment and a `level: notice` stream event, with the
-call still running on both. `verdict.go` has the tables and Q111 has the branch
-this does not cover.
+Allowed is not silent, and neither is a block. Every verdict over a call
+carrying a buffer nothing read names that buffer and why, so the person who can
+convert the file or arm an override is told. `systemMessage` is the field
+measured to reach the *person* rather than the model — a hook's stderr on exit 0
+reaches neither, and plain stdout and `additionalContext` reach only the model.
+
+**Which channel carries it is per event once a decision object is beside it,
+and that is a measurement rather than a shape.** Alone, one field serves both
+events, which is what Q84 drove. Beside a block it splits: a `systemMessage`
+survives next to a `PreToolUse` deny or ask and is dropped without a word next
+to a `UserPromptSubmit` block — and that event needs no field, because its block
+reason is itself shown to the person at `level: warning`, which the `PreToolUse`
+deny reason is not. So the notice joins the reason there and rides its own field
+here. `carry` in `verdict.go` is the one place that is decided, and
+`docs/design/README.md` under *A blocking verdict carries the notice too* has
+the arms and the controls under them.
+
+**A notice reports what nothing decoded, and a block beside it makes the wrong
+reading easier rather than harder.** It says what went unread and nothing about
+what did not. Do not repair a verdict's coverage claim by pointing at the
+notice: the sentence *no verdict on this call is a report on its text* is the
+whole of what it establishes.
+
+**The verb is `decoded` and not `scanned`, which is a distinction that only
+exists once a buffer can be matched without being decoded.** Driven by Q118
+against a merge of both changes: the older wording produced one paragraph
+naming a finding *in* a file and then saying no verdict covered it, both halves
+green and neither false of the verb it was written for. Anything asserting on
+that text should assert the claim rather than the sentence, since the sentence
+is rewritten by every change to what the pipeline can read.
 
 **That law has one measured exception and it is a gap rather than a decision.**
 `decode` reads two of the three byte-order marks. UTF-8's, `EF BB BF`, is a

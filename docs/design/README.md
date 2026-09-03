@@ -759,10 +759,74 @@ session transcripts here, all 407 `hook_system_message` attachments carried
 `UserPromptSubmit` or `Stop`, and none carried `PreToolUse` because no installed
 hook had ever emitted one there. The population was empty, not the capability.
 
-A verdict that blocks still does not carry the notice, and `Q111` is that: the
-fix puts a `systemMessage` beside a deny object, which changes an encoding this
-document measured rather than reasoned about, and doing that on inference is
-the move this section is written against.
+#### A blocking verdict carries the notice too, on a channel that is per event
+
+The notice above fires on the one branch that neither blocked nor scanned. A
+call that *also* blocks — findings in one buffer, an allowed skip in another —
+said so to the model and nothing to the person, and `found()`'s own sentence,
+*N rule match(es) in what this call would have sent*, is a claim about coverage
+that only a call every buffer of which was read can make. Any multi-buffer call
+reaches it: a `Bash` segment naming a `.env` and a `.png`, or a prompt carrying
+`@deploy.env` and `@logo.png`, blocks on the first and was silent about the
+second.
+
+Putting a `systemMessage` beside a decision object changes an encoding this
+document measured rather than reasoned about, so it was driven before it was
+written. Driven 2026-09-03 against Claude Code 2.1.251 on darwin/arm64, nine
+arms of a real hook in a throwaway project, read back out of
+`--output-format stream-json`. The four arms that emitted the field were read
+in the session transcript as well, where each arrives as the
+`hook_system_message` attachment Q84 measured, or does not:
+
+| The hook writes on `PreToolUse` (Bash) | The person is shown | The call |
+|---|---|---|
+| nothing — the control | — | runs |
+| a deny object alone | — | blocked |
+| a deny object + `systemMessage` | the notice, `level` `notice` | blocked |
+| an ask object + `systemMessage` | the notice, `level` `notice` | withheld |
+| `systemMessage` alone — the control | the notice, `level` `notice` | runs |
+
+| The hook writes on `UserPromptSubmit` | The person is shown | The prompt |
+|---|---|---|
+| nothing — the control | — | runs |
+| `{"decision":"block","reason":…}` | the reason, `level` `warning` | blocked |
+| the same, plus `systemMessage` | the reason. **Nothing of the field** | blocked |
+| `systemMessage` alone — the control | the notice, `level` `notice` | runs |
+
+**So the field is per event once a decision object is beside it, and the
+section above is not wrong about the case it measured.** `systemMessage` alone
+serves both events; beside a block on `UserPromptSubmit` it is dropped without
+a word. The two `systemMessage`-alone rows are the control for that blank, and
+each event's block-alone row is the control that says the arm blocked at all.
+
+**That event needs no field, which is why this is a routing choice rather than
+a gap.** Its block reason is itself shown to the person, as `UserPromptSubmit
+operation blocked by hook: …` at `level` `warning` — something the `PreToolUse`
+deny reason does not do, where the reason reaches the model and the person sees
+it only if the model repeats it. So the notice joins the reason there and rides
+its own field here, and on both events it lands in front of the person who can
+act on it. `carry` in `internal/hook/verdict.go` is that one decision, and the
+verdicts on either side of it do not re-derive it.
+
+**The notice still reports that nothing looked.** It says what went unread and
+refuses to say anything about what did not: *no verdict on this call is a
+report on its text — a buffer nothing decoded is never reported as a clean
+one*. Reading it as coverage is the failure this whole section exists against,
+and a block beside it makes that reading easier rather than harder, because the
+block sounds like a verdict on the call.
+
+**The claim is about the buffer's text, not about whether anything looked at
+its bytes**, and the two come apart the moment a buffer can be matched without
+being decoded. Q118 drove the merge of that capability against the earlier
+wording and read back a block reason that named a finding *in* a file and then
+said no verdict covered it — one paragraph, both halves true of a different
+verb, and a green suite behind them. So the sentence is written against the
+distinction that survives, which is *decoded*.
+
+The confirmation takes it for a sharper reason than the block does. An override
+downgrades a block to an ask, and approving is the whole of what that prompt is
+for: a human told what they are about to send and not told what nothing opened
+is approving a coverage nobody has.
 
 The residue was two populations rather than one, and one of them is now closed.
 UTF-16 written with no mark lands in the binary skip and is allowed with it —

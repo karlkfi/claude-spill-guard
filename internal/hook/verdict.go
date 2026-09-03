@@ -50,6 +50,16 @@ type preToolUseOutput struct {
 
 type preToolUseVerdict struct {
 	HookSpecificOutput preToolUseOutput `json:"hookSpecificOutput"`
+	// A notice for the person, beside the decision rather than instead of it.
+	// It survives here and is dropped from the UserPromptSubmit object, which
+	// is why that one carries no such field -- carry is where that split is
+	// argued, and noticeVerdict's second table is where it was driven.
+	//
+	// omitempty because a verdict with nothing to say must write no field at
+	// all: a systemMessage carrying "" is an empty notice rather than the
+	// absence of one, and shows the person this hook's name and nothing after
+	// it.
+	SystemMessage string `json:"systemMessage,omitempty"`
 }
 
 type promptVerdict struct {
@@ -57,23 +67,60 @@ type promptVerdict struct {
 	Reason   string `json:"reason"`
 }
 
-// block writes the block encoding for event, carrying reason.
+// carry routes a notice for the person onto the channel that reaches one on
+// this event, and hands back the reason to write and the systemMessage to
+// write beside it.
+//
+// The routing is per event, and only once a decision object is beside it. Q84
+// measured systemMessage alone and found one field serving both events, which
+// still holds; beside a decision the two diverge. Driven 2026-09-03 against
+// Claude Code 2.1.251 on darwin/arm64, reading `--output-format stream-json`
+// for a marker, and the session transcript on the arms that emitted the field:
+//
+//	the hook writes                     | the person is shown        | the call
+//	a deny object + systemMessage       | the notice, level notice   | blocked
+//	an ask object + systemMessage       | the notice, level notice   | withheld
+//	{"decision":"block",…} + the field  | NOTHING of the field       | blocked
+//	{"decision":"block","reason":…}     | the reason, level warning  | blocked
+//
+// So the field survives beside a PreToolUse decision and is dropped beside a
+// UserPromptSubmit one. That event needs no field: its block reason is itself
+// shown to the person, as `UserPromptSubmit operation blocked by hook: …`,
+// which the PreToolUse rows do not do for theirs. So the notice joins the
+// reason there and rides its own field here, and on both events it lands in
+// front of the person who can act on it.
+//
+// docs/design/README.md, "A blocking verdict carries the notice too", has the
+// arms and the controls under them.
+func carry(event Event, reason, notice string) (shown, message string) {
+	if notice == "" {
+		return reason, ""
+	}
+	if event == PreToolUse {
+		return reason, noticeLead + notice
+	}
+	return reason + " " + notice, ""
+}
+
+// block writes the block encoding for event, carrying reason, and any notice
+// beside it on the channel carry picks for the event.
 //
 // It is stdout and exit 0, not exit 2: on exit 2 stdout is discarded and the
 // model is told the hook errored, so the reason never arrives. A decision
 // object blocks whatever the process then exits with, which is the one
 // spelling that fails closed on its own.
-func block(stdout io.Writer, event Event, reason string) error {
+func block(stdout io.Writer, event Event, reason, notice string) error {
+	shown, message := carry(event, reason, notice)
 	var verdict any
 	switch event {
 	case PreToolUse:
 		verdict = preToolUseVerdict{preToolUseOutput{
 			HookEventName:            string(PreToolUse),
 			PermissionDecision:       "deny",
-			PermissionDecisionReason: reason,
-		}}
+			PermissionDecisionReason: shown,
+		}, message}
 	case UserPromptSubmit:
-		verdict = promptVerdict{Decision: "block", Reason: reason}
+		verdict = promptVerdict{Decision: "block", Reason: shown}
 	default:
 		// decode returns errNoEvent rather than an unhandled event, and Run
 		// takes exit 2 on that. Reaching here means this switch and that one
@@ -115,15 +162,16 @@ func block(stdout io.Writer, event Event, reason string) error {
 // object on UserPromptSubmit, which the table above measures as accepted and
 // ignored. The prompt would run with the secret in it and nothing would turn
 // red.
-func confirm(stdout io.Writer, event Event, reason string) error {
+func confirm(stdout io.Writer, event Event, reason, notice string) error {
 	if event != PreToolUse {
 		return fmt.Errorf("no confirmation encoding for event %q", event)
 	}
+	shown, message := carry(PreToolUse, reason, notice)
 	return json.NewEncoder(stdout).Encode(preToolUseVerdict{preToolUseOutput{
 		HookEventName:            string(PreToolUse),
 		PermissionDecision:       "ask",
-		PermissionDecisionReason: reason,
-	}})
+		PermissionDecisionReason: shown,
+	}, message})
 }
 
 // The most findings a reason names. A file can match a rule hundreds of times
@@ -312,10 +360,40 @@ const noticeLead = "spill-guard: "
 // arrive here wearing a screenshot's label. Naming them is what lets a reader
 // who knows their file is text act on a notice that says "binary".
 func unscanned(skips []skipped) string {
-	return fmt.Sprintf("this call was allowed, and %d buffer(s) of it went "+
-		"unread: %s. Nothing scanned those for secrets. Text this build cannot "+
-		"read arrives here wearing the same label as an image -- UTF-16 written "+
-		"with no byte-order mark, or a UTF-8 mark ahead of a NUL -- so if one of "+
-		"them is text, converting it to UTF-8 gets it scanned.",
-		len(skips), listSkips(skips))
+	return fmt.Sprintf("this call was allowed, and %d buffer(s) of it hold "+
+		"bytes nothing here decoded: %s. Whatever text is in one of those went "+
+		"unread, so this call running is not a report on it. %s",
+		len(skips), listSkips(skips), convertHint)
+}
+
+// The remedy both notices end on. It is one sentence in two places rather than
+// two sentences, because a reader who acts on it in the allowed case and meets
+// different words in the blocked one has to work out whether the difference
+// means anything.
+const convertHint = "Text this build cannot read arrives here wearing the " +
+	"same label as an image -- UTF-16 written with no byte-order mark, or a " +
+	"UTF-8 mark ahead of a NUL -- so if one of them is text, converting it to " +
+	"UTF-8 gets it scanned."
+
+// alsoUnread is unscanned's counterpart for a call that is being blocked or
+// confirmed rather than allowed.
+//
+// It says what went unread and refuses to say anything about what did not. The
+// verdict beside it names findings, or names the buffers that stopped the call,
+// and either sentence is a claim about the buffers that were read -- so this
+// one closes the gap by saying the verdict does not reach these, rather than by
+// implying anything about them. Nothing decoded them. That is the whole report.
+//
+// "decoded" rather than "scanned", and the two come apart the moment a buffer
+// can be matched without being decoded. Q118 drove the merge of that change
+// against this text and read back a block reason naming a finding IN a file and
+// then saying no verdict covered it -- one paragraph, both halves true of a
+// different verb. So the claim here is about the buffer's text and not about
+// whether anything looked at its bytes, which holds under either reason.
+func alsoUnread(skips []skipped) string {
+	return fmt.Sprintf("%d buffer(s) of this call also hold bytes nothing here "+
+		"decoded: %s. Whatever text is in one of those went unread, so no verdict "+
+		"on this call is a report on its text -- a buffer nothing decoded is "+
+		"never reported as a clean one. %s",
+		len(skips), listSkips(skips), convertHint)
 }

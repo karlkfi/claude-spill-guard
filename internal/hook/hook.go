@@ -80,12 +80,15 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	// what is in it is the whole of what an approval is worth.
 	why, overridden := override(call, event)
 	if overridden && why == "" {
-		return deny(stdout, stderr, event, blockedLead+noReasonGiven)
+		return deny(stdout, stderr, event, blockedLead+noReasonGiven, "")
 	}
 
 	findings, skips, err := scanCall(call, event)
 	if err != nil {
-		return decide(stdout, stderr, call, event, overridden, failed(err))
+		// No notice: scanCall reports nothing it read when it errors, so there
+		// is no set of allowed skips to name and failed() already says that
+		// nothing scanned this call at all.
+		return decide(stdout, stderr, call, event, overridden, failed(err), "")
 	}
 	// Ahead of the findings, because found() says what the matches in this call
 	// are, and a buffer nothing opened makes that a claim about coverage rather
@@ -95,23 +98,27 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	// downgraded to a confirmation, and one that cannot is a class of refusal
 	// with no way past it and nothing saying so. The design asks for it too --
 	// "the reason names a remedy: convert the file, or override".
+	//
+	// A verdict that stops the call carries the notice too, on the channel
+	// carry picks for the event. A multi-buffer call is where that matters: a
+	// Bash segment naming a .env and a .png blocks on the first, and without
+	// this the person never learns nothing opened the second.
 	blocking, allowed := partition(skips)
+	notice := ""
+	if len(allowed) > 0 {
+		notice = alsoUnread(allowed)
+	}
 	if len(blocking) > 0 {
-		return decide(stdout, stderr, call, event, overridden, unread(blocking))
+		return decide(stdout, stderr, call, event, overridden, unread(blocking), notice)
 	}
 	if len(findings) > 0 {
-		return decide(stdout, stderr, call, event, overridden, found(findings))
+		return decide(stdout, stderr, call, event, overridden, found(findings), notice)
 	}
 	// An allowed skip, and nothing else to say. The design's step 6 has every
 	// path that declines to read name its reason and the caller carry that as
 	// far as the user; a block carries it in the deny, and this is the other
 	// half -- allowed meant exit 0 on empty stdout, so the one silence here
 	// that is not a scan which ran reached nobody at all.
-	//
-	// Only on this branch. A call that also blocks says so to the model and
-	// not to the person, and closing that needs a systemMessage riding along
-	// with a deny object -- a change to the one encoding this repo measured
-	// rather than reasoned about, on no measurement. Q111 carries it.
 	if len(allowed) > 0 {
 		if err := notify(stdout, noticeLead+unscanned(allowed)); err != nil {
 			return refuse(stderr, err)
@@ -141,20 +148,20 @@ func partition(skips []skipped) (blocking, allowed []skipped) {
 // blocked, so the override can turn a block into a prompt and can never turn
 // anything into an allow -- an overridden call that scans clean exits 0 above,
 // as it would have without one.
-func decide(stdout, stderr io.Writer, call payload, event Event, overridden bool, body string) int {
+func decide(stdout, stderr io.Writer, call payload, event Event, overridden bool, body, notice string) int {
 	if !overridden {
-		return deny(stdout, stderr, event, blockedLead+body)
+		return deny(stdout, stderr, event, blockedLead+body, notice)
 	}
 	// A confirmation that reaches nobody is not a confirmation. Blocking here
 	// takes nothing from the user -- an unanswerable ask stops the call too --
 	// and it sends the reason to the model rather than stalling the session.
 	if call.PermissionMode == bypassPermissions {
-		return deny(stdout, stderr, event, blockedLead+unattended+body)
+		return deny(stdout, stderr, event, blockedLead+unattended+body, notice)
 	}
 	// confirm refuses an event it has no encoding for, so this cannot emit the
 	// shape that is accepted and ignored on UserPromptSubmit. Its error lands
 	// on exit 2, which blocks.
-	if err := confirm(stdout, event, confirmLead+body); err != nil {
+	if err := confirm(stdout, event, confirmLead+body, notice); err != nil {
 		return refuse(stderr, err)
 	}
 	return 0
@@ -400,8 +407,8 @@ func toolTargets(call payload) ([]target, error) {
 // deny writes the event's block encoding, which blocks whatever this then
 // exits with. Exit 0 is deliberate: on exit 2 stdout is discarded and the
 // model is told the hook errored, so the reason never arrives.
-func deny(stdout, stderr io.Writer, event Event, reason string) int {
-	if err := block(stdout, event, reason); err != nil {
+func deny(stdout, stderr io.Writer, event Event, reason, notice string) int {
+	if err := block(stdout, event, reason, notice); err != nil {
 		// Nothing usable reached stdout, so nothing there blocks anything.
 		return refuse(stderr, err)
 	}
