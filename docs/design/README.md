@@ -1101,6 +1101,75 @@ in a workspace whose trust dialog has never been accepted. The untrusted
 workspace has its `permissions.allow` entries ignored with a warning on stderr,
 and its hooks run anyway.
 
+### The third shape is a timeout, and it is the one this repo configures
+
+`hooks/hooks.json` sets `"timeout": 60` on both entries. Driven 2026-09-03
+against Claude Code 2.1.251 on darwin/arm64: **a hook that runs past its
+timeout is killed, whatever it was going to say is discarded, and the call
+proceeds.** On both events.
+
+The hook logged its entry, slept, wrote a reason to stderr and exited a chosen
+code. `UserPromptSubmit` ran under a `HOME` of its own holding no credential,
+the route [Q94](../queue/Q94.md) established. `PreToolUse` needs one, a hook
+there firing only once the model has chosen a tool call, so it ran under
+`--settings` with `--setting-sources project` to keep this machine's own guards
+out of the arm.
+
+| Event | Timeout | The hook | The call |
+|---|---|---|---|
+| `UserPromptSubmit` | 30s | exits 2 after 1s | **blocked**, reason verbatim |
+| `UserPromptSubmit` | 2s | exits 2 after 10s | runs |
+| `UserPromptSubmit` | 60s | exits 2 after 70s | runs |
+| `PreToolUse` on `Bash` | 30s | exits 2 after 1s | **blocked**, reason reaches the model |
+| `PreToolUse` on `Bash` | 2s | exits 2 after 10s | runs |
+
+Every timed-out arm lands where the same hook lands when it exits 0 on purpose,
+and each event has its own tell. On `UserPromptSubmit` the prompt reaches a
+turn — `num_turns` 1, against 0 for the block control, whose transcript instead
+holds `UserPromptSubmit operation blocked by hook` with the reason. On
+`PreToolUse` the command runs and its marker comes back in the result, with
+`permission_denials` empty where the block control lists the call. So the exit
+code stops mattering, and a hook that would have blocked allows.
+
+The process was killed rather than ignored. Its log carries a line on entry and
+one after the sleep, and the timed-out arms hold only the first; wall clock
+tracked the timeout and not the sleep, 2.36s at `timeout: 2` and 60.38s at
+`timeout: 60`.
+
+**Unlike the other two, this one is written down.** The transcript of the
+60-second arm carries this, with the path elided:
+
+```json
+{"type":"hook_cancelled","hookName":"UserPromptSubmit","hookEvent":"UserPromptSubmit",
+ "toolUseID":"eb9d4d8c-…","command":"…","durationMs":60021,"timedOut":true,"timeoutMs":60000}
+```
+
+The `PreToolUse` record is the same shape, `hookName` reading `PreToolUse:Bash`
+and the pair reading 2020 against 2000. Who reads either is not established. It reached neither the `--output-format json`
+result nor stderr, and the model's own answer named no hook, so nothing here
+shows it arriving at either audience while the call is happening. Whether an
+interactive client renders it was not driven.
+
+**60 was a hedge and the hedge resolved the wrong way.** The argument was that a
+longer timeout cannot make an unmeasured behaviour worse — safer if expiry
+allows, a stall if it blocks. Expiry allows. The direction was right, and the
+value is load-bearing now rather than cautious: every second under the ceiling
+is a second in which a scan that did not finish is a scan that never happened.
+
+**No encoding in the tables above reaches this.** Both blocking shapes need the
+hook to write something or exit 2, and a killed process does neither. Nothing
+this repo ships can turn an expiry into a block.
+
+**So the budget has to be the scanner's own, and it has none.**
+[`internal/hook`](../../internal/hook/hook.go) reads an operand with
+`os.ReadFile`, under no size cap, and no stage of the pipeline carries a
+deadline. A buffer big enough to run past 60 seconds is allowed unscanned —
+the failure the launcher's deny exists to prevent, arriving through a door no
+exit code can close. [Q120](../queue/Q120.md) owns the fix, and it settles the
+budget half of [Q95](../queue/Q95.md): an unbounded directory walk is not
+merely slow, it converts into an allow at the deadline, where a refusal does
+not.
+
 ## Output discipline
 
 **The raw secret never enters a struct that outlives the match.** The

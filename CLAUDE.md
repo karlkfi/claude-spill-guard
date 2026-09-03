@@ -115,10 +115,14 @@ marketplace entry names a GitHub source, so the install cloned `main`, which
 had no manifests. That failing arm is what makes the `Hooks (2) PreToolUse,
 UserPromptSubmit` beside it worth anything.
 
-The timeout is 60 seconds, matching branch-guard. What Claude Code does with a
-hook that exceeds it is unmeasured, so the value is picked in the direction
-that cannot fail open: if expiry allows the call, a longer timeout is safer,
-and if it blocks, a longer timeout only ever costs a stall.
+The timeout is 60 seconds, matching branch-guard, and **expiry allows the
+call** — driven 2026-09-03 on 2.1.251, both events. The hook is killed, its
+verdict discarded, and the only trace is a `hook_cancelled` attachment in the
+transcript that nothing here showed reaching the model or the person. A killed
+process writes nothing, so no exit code reaches this and the budget has to be
+the scanner's own, which it has not got. The table is in
+[`docs/design/README.md`](docs/design/README.md#the-third-shape-is-a-timeout-and-it-is-the-one-this-repo-configures);
+the fix is Q120.
 
 `install/` is the fallback channel, and both scripts are driven rather than
 reviewed. `scripts/check-install-scripts.py` serves a GoReleaser dist directory
