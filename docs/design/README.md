@@ -1107,9 +1107,25 @@ resolver reads the whole file and the whole directory anyway: where the harness
 sends a subset, reading all of it reports bytes the harness did not send, and
 only the other direction can report a clean result for something that crossed.
 The binary row is where the bound is unmeasured — `heap.dump` crossed whole,
-and a file with few newlines has few lines to be capped at — so the raw pass
-reads what is there. A 306 MiB `@` target would cost the 36.5s above on this
-surface too. None has been observed.
+and a file with few newlines has few lines to be capped at — so the resolver
+reads what is there.
+
+**The match is bounded even though the read is not, and that bound is what
+keeps this from being a regression.** Measured 2026-09-03 on a buffer carrying
+every keyword the shipped ruleset gates on, so nothing prefilters away: the raw
+pass runs at 6.8 MiB/s and crosses the 60-second hook timeout at about 410 MiB.
+Past that timeout the hook is killed and writes nothing at all, so an unbounded
+raw pass would take a buffer the skip reports in 44 ms and make it one nobody
+hears about — trading the notice for silence, which is the direction this
+design does not go. `scan.rawLimit` is 32 MiB, which is 4.7 s of match loop at
+that rate and an order of magnitude inside the timeout. Above it the answer is
+`SkippedBinary` and the notice goes out exactly as it does without this entry
+point, so coverage is added below the limit and nothing is taken away above it.
+
+A size limit rather than a deadline because a deadline is not available here:
+the match loop and `os.ReadFile` both take no context. A budget for the whole
+pipeline is Q120's; this is one entry point declining to add a new way to reach
+the case Q120 is about.
 
 What this closes is one surface. A credential in a binary-looking `@` target
 blocks, and so does one behind a UTF-8 byte-order mark ahead of a NUL, which is

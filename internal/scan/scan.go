@@ -157,6 +157,30 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 	return Result{Findings: findings}, nil
 }
 
+// rawLimit is how much of a buffer BufferIncludingBinary will match raw, and
+// it is what stops that entry point being worse than the skip at any size. Past the timeout the hook
+// is killed and writes nothing (docs/design/README.md, the timeout section), so
+// an unbounded raw pass would turn a buffer the skip reports in 44ms into one
+// nobody hears about at all -- trading a notice for silence, which is the one
+// direction this package will not go. Above the limit the answer is
+// SkippedBinary and the notice goes out, exactly as it does without this entry
+// point, so coverage is added below the limit and nothing is taken away above
+// it.
+//
+// 32 MiB is derived from the worst measured rate rather than picked. A buffer
+// carrying every keyword the shipped ruleset gates on prefilters nothing away
+// and matches at 6.8 MiB/s (measured 2026-09-03; the 60-second crossing is
+// around 410 MiB), so the limit is 4.7s of match loop -- an order of magnitude
+// inside the timeout, which is the margin that makes "this cannot be what
+// caused a kill" true rather than likely.
+//
+// A size limit rather than a deadline because a deadline is not available: the
+// match loop and os.ReadFile both take no context, which internal/hook's
+// fifo_unix_test.go says for the file-mode question and Q120 says for the
+// clock. Q120 owns a budget for the whole pipeline; this is only this entry
+// point declining to add a new way to reach the case Q120 is about.
+const rawLimit = 32 << 20
+
 // BufferIncludingBinary is Buffer for a caller whose buffer reaches the model
 // whatever this returns.
 //
@@ -188,11 +212,14 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 // itself that this build could not act on, two of them block, and matching
 // their raw bytes would find nothing in any case -- a UTF-32 buffer's
 // credential is three NULs to the byte.
+//
+// And only up to rawLimit, which is what keeps this from being worse than the
+// skip it replaces. See there.
 func BufferIncludingBinary(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 	text, source, skip := decode(buf)
-	switch skip {
-	case Scanned:
-	case SkippedBinary:
+	switch {
+	case skip == Scanned:
+	case skip == SkippedBinary && len(buf) <= rawLimit:
 		// decode reaches SkippedBinary from its default arm alone -- the
 		// UTF-16 arm has SkippedUTF16Binary for its own NUL -- so nothing was
 		// decoded, buf is the text, and source is already the identity it

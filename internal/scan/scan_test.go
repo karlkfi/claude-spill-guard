@@ -504,3 +504,43 @@ func TestBufferIncludingBinaryLeavesADeclaredEncodingAlone(t *testing.T) {
 		})
 	}
 }
+
+// Past rawLimit the raw pass stands down and the buffer goes back to being a
+// plain skip, which is what keeps this entry point from being worse than the
+// one it wraps at any size.
+//
+// The two arms are the whole property. Below the limit a key in a binary
+// buffer is found, which is the coverage this exists for; above it the answer
+// is SkippedBinary, so internal/hook emits the notice it always did rather
+// than spending a match loop the hook's 60-second timeout may not survive --
+// and a killed hook writes no notice at all.
+func TestBufferIncludingBinaryStandsDownPastTheRawLimit(t *testing.T) {
+	ruleset := load(t, awsRule)
+	// The key sits in the sniff window either way, so what differs between the
+	// arms is the length and nothing else about where it can be found.
+	head := []byte("\x00" + key + " ")
+	for _, tc := range []struct {
+		name string
+		size int
+		want Skip
+		find int
+	}{
+		{"at the limit", rawLimit, ScannedRaw, 1},
+		{"one byte past it", rawLimit + 1, SkippedBinary, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := make([]byte, tc.size)
+			copy(buf, head)
+			got, err := BufferIncludingBinary("a.dump", buf, ruleset)
+			if err != nil {
+				t.Fatalf("BufferIncludingBinary: %v", err)
+			}
+			if got.Skipped != tc.want {
+				t.Errorf("Skipped is %q, want %q", got.Skipped, tc.want)
+			}
+			if len(got.Findings) != tc.find {
+				t.Errorf("%d finding(s), want %d", len(got.Findings), tc.find)
+			}
+		})
+	}
+}
