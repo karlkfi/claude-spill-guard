@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift status-drift hooks-check launcher vendor docs release-claims channel-claims queue action-pins test precision no-deps no-network vulns cross-compile
+GATES := doctor gate-drift status-drift hooks-check launcher vendor docs release-claims channel-claims plugin-version queue action-pins test precision no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -23,6 +23,7 @@ vendor.desc         := every vendored copy still hashes to the digest scripts/RE
 docs.desc           := every relative link in the repo markdown resolves
 release-claims.desc := the prose agrees with whether a release exists
 channel-claims.desc := no message names an install channel that does not exist
+plugin-version.desc := the two plugin manifests carry the same version, so a release can be delivered
 queue.desc          := the backlog store format holds, every filed id holds a claim, no index is committed
 action-pins.desc    := every `uses:` in every workflow names an immutable revision, not a tag
 test.desc           := gofmt, go vet and go test
@@ -170,6 +171,11 @@ release-claims:
 # wording -- so a pattern over the file flags the thing the file exists to say.
 channel-claims:
 	$(PYTHON) scripts/check-channel-claims.py
+
+# Without --version, which is the half a pull request can check: only a tag
+# knows the number, and the release job is what passes it.
+plugin-version:
+	$(PYTHON) scripts/check-plugin-version.py
 
 queue:
 	@rc=0; \

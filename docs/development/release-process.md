@@ -44,8 +44,11 @@ describes none.
 ## Before the tag
 
 1. **The plugin manifests say the version you are about to tag**, merged. The
-   section above has the read-back. Nothing checks this at tag time, and a
-   stale number costs the whole plugin channel rather than one asset.
+   section above has the read-back, and `scripts/check-plugin-version.py`
+   is what enforces it — the `plugin-version` gate runs the half that needs no
+   tag on every pull request, and the release job runs
+   `--version "${GITHUB_REF_NAME#v}"` before it builds anything, so a stale
+   number stops the run rather than costing the whole plugin channel.
 2. **`main` is green on the exact commit you are about to tag.** Not green this
    morning. Run `make check` over the same tree as well — every gate runs even
    when an earlier one fails, so one pass reports the whole thing.
@@ -171,6 +174,21 @@ request can reach, and a rehearsal is the difference between finding that out on
 `v1.0.0-rc.1` and finding it out on `v1.0.0`.
 
 Deleting a rehearsal tag and its draft is fine. Deleting a published one is not.
+
+**A rehearsal proves what it checks, and nothing else. Check the draft the way
+you would check the real one** — every step under **Publishing the draft**
+below, the rendered body included. That instruction is written down there
+because that is where a person does it, and reading this section alone is how a
+rehearsal turns into an assets-only check.
+
+Measured on v0.1.0: three rehearsals went green and each verified archives,
+`checksums.txt`, the cosign bundle, the attestation and the binary. None of them
+opened the release body, because nothing here said to and the release job
+asserted only about assets. `changelog.disable: true` had been discarding
+`--release-notes` the whole time, so all three published a body of two
+newlines, and so did the real tag. The gate that now compares the published
+body to the notes file closes that instance; this paragraph is here for the
+next thing the pipeline does not assert.
 
 ## Running the pipeline locally
 
