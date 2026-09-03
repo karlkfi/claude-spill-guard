@@ -224,7 +224,11 @@ func TestLoadRejects(t *testing.T) {
 		{"an entropy floor above what any byte string can carry",
 			replace(set(`"entropy": 3.0`, `"entropy": 9`),
 				`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
-				`"regex": "([A-Za-z0-9]+)"`), "cannot carry more than 8 bits"},
+				`"regex": "(.+)"`), "cannot carry more than 8 bits"},
+		{"an entropy floor above what the group's alphabet can carry",
+			replace(set(`"entropy": 3.0`, `"entropy": 4.5`),
+				`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
+				`"regex": "([a-f0-9]{32})"`), "16 distinct byte value(s)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := load(t, one(tc.body))
@@ -254,7 +258,8 @@ func TestAnEntropyFloorIsBoundedByTheLongestCapture(t *testing.T) {
 		{"a range whose top clears the floor and whose bottom does not",
 			`([A-Za-z0-9]{8,64})`, "4.0", false},
 		{"a range whose top does not clear it either", `([A-Za-z0-9]{8,64})`, "6.5", true},
-		{"an unbounded group, which reaches the 8-bit ceiling", `([A-Za-z0-9]+)`, "7.9", false},
+		{"an unbounded group over every byte, which reaches the 8-bit ceiling",
+			`(.+)`, "7.9", false},
 
 		// The comparison is >, so a floor sitting exactly on the ceiling is a
 		// rule that fires: eight distinct bytes carry exactly 3 bits.
@@ -262,6 +267,48 @@ func TestAnEntropyFloorIsBoundedByTheLongestCapture(t *testing.T) {
 		{"a floor one notch above it", `([A-Za-z0-9]{8})`, "3.01", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			body := replace(set(`"entropy": 3.0`, `"entropy": `+tc.entropy),
+				`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
+				`"regex": `+quote(tc.regex))
+			_, err := load(t, one(body))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Load() = %v, want an error: %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// Length is one bound on the distinct byte count and the alphabet is the other,
+// so a group drawing on sixteen hex symbols carries 4 bits at any length. The
+// first four cases are the shapes measured dead under a ceiling that read only
+// the length: each loaded, compiled, ran on every file and reported nothing,
+// which is what a clean scan looks like from outside.
+func TestAnEntropyFloorIsBoundedByTheGroupsAlphabet(t *testing.T) {
+	for _, tc := range []struct {
+		regex   string
+		entropy string
+		wantErr bool
+	}{
+		{`([a-f0-9]{32})`, "4.5", true},
+		{`([a-f0-9]{40})`, "4.5", true},
+		{`(\d{16})`, "3.9", true},
+		{`([A-Za-z0-9]{8,64})`, "5.98", true},
+
+		// log2(16) exactly, which the comparison lets through.
+		{`([a-f0-9]{32})`, "4.0", false},
+
+		// A repeat and a star draw on the alphabet of what they repeat, so
+		// length says 256 bytes and the group still carries one symbol.
+		{`(x*)`, "0.1", true},
+		{`((?:ab){1,3})`, "1.1", true},
+
+		// The residual over-estimate, and the reason it is not a defect: the
+		// union knows which symbols the group can emit, not which of them
+		// co-occur in one match. Every string this matches is one repeated
+		// symbol at Shannon 0, and it loads at a floor of 1.
+		{`(a{6}|b{6})`, "1.0", false},
+	} {
+		t.Run(tc.regex+" at "+tc.entropy, func(t *testing.T) {
 			body := replace(set(`"entropy": 3.0`, `"entropy": `+tc.entropy),
 				`"regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\\b"`,
 				`"regex": `+quote(tc.regex))

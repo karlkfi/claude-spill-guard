@@ -166,3 +166,119 @@ func TestMaxCaptureBytesNeverUnderEstimatesARealCapture(t *testing.T) {
 		})
 	}
 }
+
+func TestCaptureSymbols(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pattern string
+		group   int
+		want    int
+	}{
+		{"a class of one range", `([a-f0-9]{32})`, 1, 16},
+		{"digits", `(\d{16})`, 1, 10},
+		{"the base62 class", `([A-Za-z0-9]{8,64})`, 1, 62},
+		{"a literal, byte by byte", `(abc)`, 1, 3},
+		{"a repeated literal, which adds no symbols", `(a{200})`, 1, 1},
+
+		// Length and alphabet part company here: maxBytes reports the clamp for
+		// all three and the alphabet is what the group repeats.
+		{"a star", `(x*)`, 1, 1},
+		{"an unbounded repeat", `([a-f]+)`, 1, 6},
+		{"a bounded repeat over a group", `((?:ab){1,3})`, 1, 2},
+
+		// A prefix contributes its own bytes: the AWS arms add A, 3, T, K, I,
+		// S, B, C to the sixteen the class already offers.
+		{"an alternation, unioning every arm",
+			`\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16})\b`, 1, 36},
+
+		// Multi-byte runes count their bytes rather than themselves. e-acute is
+		// 0xC3 0xA9, which is two values a capture can hold.
+		{"a non-ASCII literal", `(\x{00e9})`, 1, 2},
+
+		// Folding is walked on a literal and pre-expanded on a class, so both
+		// spellings of case-insensitive k reach the Kelvin sign's three bytes
+		// on top of K and k.
+		{"a folded literal", `(?i)(k)`, 1, 5},
+		{"a folded class", `(?i)([k])`, 1, 5},
+
+		// Anything the walk cannot settle widens to every byte.
+		{"a dot", `(.)`, 1, byteValues},
+		{"a class wider than the budget", `([^a]{2})`, 1, byteValues},
+		{"a unicode class", `(\p{L}{4})`, 1, byteValues},
+
+		// Distinct values rather than length, so the repeated A counts once.
+		{"the whole match when no group is named", `\bAKIA\b`, 0, 3},
+		{"a group that matches only the empty string", `()`, 1, 0},
+		{"a group holding nothing but a zero-width assertion", `(\b)`, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := captureSymbols(tc.pattern, tc.group)
+			if err != nil {
+				t.Fatalf("captureSymbols(%q, %d) = %v", tc.pattern, tc.group, err)
+			}
+			if got != tc.want {
+				t.Errorf("captureSymbols(%q, %d) = %d, want %d",
+					tc.pattern, tc.group, got, tc.want)
+			}
+		})
+	}
+}
+
+// The same asymmetry maxCaptureBytes carries, on the other term: an alphabet
+// counted too small refuses a rule that works. So the count is compared against
+// the bytes a real capture is made of, rather than against a second reading of
+// the pattern by hand.
+func TestCaptureSymbolsNeverUnderEstimatesARealCapture(t *testing.T) {
+	for _, tc := range []struct {
+		pattern string
+		in      string
+	}{
+		{`([a-f0-9]{32})`, "0123456789abcdef0123456789abcdef"},
+		{`([A-Za-z0-9]{8,64})`, strings.Repeat("abcXYZ09", 8)},
+		{`(\d{16})`, "1234567890123456"},
+		{`((?:ab){1,3})`, "ababab"},
+		{`(?i)(k)`, "K"},
+		{`(a{6}|b{6})`, "bbbbbb"},
+		{`(\p{L}{4})`, "éßſΩ"},
+		{`([^a]{2})`, "\U0001D400\U0001D401"},
+	} {
+		t.Run(tc.pattern, func(t *testing.T) {
+			re := regexp.MustCompile(tc.pattern)
+			m := re.FindStringSubmatch(tc.in)
+			if m == nil {
+				t.Fatalf("%q does not match %q, so this case proves nothing", tc.pattern, tc.in)
+			}
+			got, err := captureSymbols(tc.pattern, 1)
+			if err != nil {
+				t.Fatalf("captureSymbols(%q, 1) = %v", tc.pattern, err)
+			}
+			distinct := map[byte]bool{}
+			for i := 0; i < len(m[1]); i++ {
+				distinct[m[1][i]] = true
+			}
+			if got < len(distinct) {
+				t.Errorf("captureSymbols(%q, 1) = %d, but it captured %q, which holds %d distinct bytes",
+					tc.pattern, got, m[1], len(distinct))
+			}
+		})
+	}
+}
+
+// captureSymbols shares captureExpr with maxCaptureBytes, so both fail closed
+// on a group that is not there.
+func TestCaptureSymbolsFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pattern string
+		group   int
+	}{
+		{"a group the regex does not have", `(a)`, 2},
+		{"a pattern that does not parse", `(unclosed`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := captureSymbols(tc.pattern, tc.group); err == nil {
+				t.Errorf("captureSymbols(%q, %d) = nil error, want one", tc.pattern, tc.group)
+			}
+		})
+	}
+}
