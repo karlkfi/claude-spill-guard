@@ -360,8 +360,9 @@ const noticeLead = "spill-guard: "
 // arrive here wearing a screenshot's label. Naming them is what lets a reader
 // who knows their file is text act on a notice that says "binary".
 func unscanned(skips []skipped) string {
-	return fmt.Sprintf("this call was allowed, and %d buffer(s) of it went "+
-		"unread: %s. Nothing scanned those for secrets. %s",
+	return fmt.Sprintf("this call was allowed, and %d buffer(s) of it hold "+
+		"bytes nothing here decoded: %s. Whatever text is in one of those went "+
+		"unread, so this call running is not a report on it. %s",
 		len(skips), listSkips(skips), convertHint)
 }
 
@@ -381,10 +382,18 @@ const convertHint = "Text this build cannot read arrives here wearing the " +
 // verdict beside it names findings, or names the buffers that stopped the call,
 // and either sentence is a claim about the buffers that were read -- so this
 // one closes the gap by saying the verdict does not reach these, rather than by
-// implying anything about them. Nothing looked. That is the whole report.
+// implying anything about them. Nothing decoded them. That is the whole report.
+//
+// "decoded" rather than "scanned", and the two come apart the moment a buffer
+// can be matched without being decoded. Q118 drove the merge of that change
+// against this text and read back a block reason naming a finding IN a file and
+// then saying no verdict covered it -- one paragraph, both halves true of a
+// different verb. So the claim here is about the buffer's text and not about
+// whether anything looked at its bytes, which holds under either reason.
 func alsoUnread(skips []skipped) string {
-	return fmt.Sprintf("%d buffer(s) of this call also went unread: %s. Nothing "+
-		"scanned those for secrets, so no verdict on this call covers them -- an "+
-		"unread buffer is never reported as a clean one. %s",
+	return fmt.Sprintf("%d buffer(s) of this call also hold bytes nothing here "+
+		"decoded: %s. Whatever text is in one of those went unread, so no verdict "+
+		"on this call is a report on its text -- a buffer nothing decoded is "+
+		"never reported as a clean one. %s",
 		len(skips), listSkips(skips), convertHint)
 }

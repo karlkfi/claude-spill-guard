@@ -184,7 +184,11 @@ func TestABlockingVerdictCarriesTheNoticeToo(t *testing.T) {
 		if strings.Contains(message, "rule match") {
 			t.Errorf("the notice claims coverage of the buffer nothing read: %q", message)
 		}
-		if !strings.Contains(message, "Nothing scanned those for secrets") {
+		// "went unread" rather than the sentence around it: a notice's wording
+		// is rewritten by any change to what the pipeline can do, and this has
+		// to keep asserting the claim across that. Weaker than a literal
+		// phrase, so verdict.go's own inversion is what says it can still fail.
+		if !strings.Contains(message, "went unread") {
 			t.Errorf("the notice does not say nothing looked: %q", message)
 		}
 	})

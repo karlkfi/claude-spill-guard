@@ -809,11 +809,19 @@ act on it. `carry` in `internal/hook/verdict.go` is that one decision, and the
 verdicts on either side of it do not re-derive it.
 
 **The notice still reports that nothing looked.** It says what went unread and
-refuses to say anything about what did not: *no verdict on this call covers
-them — an unread buffer is never reported as a clean one*. Reading it as
-coverage is the failure this whole section exists against, and a block beside
-it makes that reading easier rather than harder, because the block sounds like
-a verdict on the call.
+refuses to say anything about what did not: *no verdict on this call is a
+report on its text — a buffer nothing decoded is never reported as a clean
+one*. Reading it as coverage is the failure this whole section exists against,
+and a block beside it makes that reading easier rather than harder, because the
+block sounds like a verdict on the call.
+
+**The claim is about the buffer's text, not about whether anything looked at
+its bytes**, and the two come apart the moment a buffer can be matched without
+being decoded. Q118 drove the merge of that capability against the earlier
+wording and read back a block reason that named a finding *in* a file and then
+said no verdict covered it — one paragraph, both halves true of a different
+verb, and a green suite behind them. So the sentence is written against the
+distinction that survives, which is *decoded*.
 
 The confirmation takes it for a sharper reason than the block does. An override
 downgrades a block to an ask, and approving is the whole of what that prompt is

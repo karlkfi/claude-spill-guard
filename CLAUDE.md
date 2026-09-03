@@ -72,11 +72,19 @@ here. `carry` in `verdict.go` is the one place that is decided, and
 `docs/design/README.md` under *A blocking verdict carries the notice too* has
 the arms and the controls under them.
 
-**A notice reports that nothing looked, and a block beside it makes the wrong
+**A notice reports what nothing decoded, and a block beside it makes the wrong
 reading easier rather than harder.** It says what went unread and nothing about
 what did not. Do not repair a verdict's coverage claim by pointing at the
-notice: the sentence *no verdict on this call covers them* is the whole of what
-it establishes.
+notice: the sentence *no verdict on this call is a report on its text* is the
+whole of what it establishes.
+
+**The verb is `decoded` and not `scanned`, which is a distinction that only
+exists once a buffer can be matched without being decoded.** Driven by Q118
+against a merge of both changes: the older wording produced one paragraph
+naming a finding *in* a file and then saying no verdict covered it, both halves
+green and neither false of the verb it was written for. Anything asserting on
+that text should assert the claim rather than the sentence, since the sentence
+is rewritten by every change to what the pipeline can read.
 
 **That law has one measured exception and it is a gap rather than a decision.**
 `decode` reads two of the three byte-order marks. UTF-8's, `EF BB BF`, is a
