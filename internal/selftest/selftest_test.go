@@ -37,7 +37,7 @@ func TestSelftestPassesOnTheShippedRuleset(t *testing.T) {
 	if strings.Contains(stdout, "FAIL") {
 		t.Errorf("an arm failed on the shipped ruleset:\n%s", stdout)
 	}
-	for _, a := range arms("a", "b", "c") {
+	for _, a := range arms("a", "b", "c", "d") {
 		if !strings.Contains(stdout, a.name) {
 			t.Errorf("the report does not name the %q arm, so it either did "+
 				"not run or ran without saying so:\n%s", a.name, stdout)
@@ -55,8 +55,8 @@ func TestSelftestPassesOnTheShippedRuleset(t *testing.T) {
 // the arms are not independent, and no fewer, because a flip nothing notices
 // is an arm asserting nothing.
 func TestEveryArmDiscriminates(t *testing.T) {
-	planted, quiet, undecodable := fixtures(t)
-	list := arms(planted, quiet, undecodable)
+	planted, quiet, undecodable, binary := fixtures(t)
+	list := arms(planted, quiet, undecodable, binary)
 	if len(list) < 4 {
 		t.Fatalf("only %d arms, which is too few for the report to mean "+
 			"anything -- every surface needs a blocking arm and a control", len(list))
@@ -69,7 +69,7 @@ func TestEveryArmDiscriminates(t *testing.T) {
 	}
 
 	for i := range list {
-		flipped := arms(planted, quiet, undecodable)
+		flipped := arms(planted, quiet, undecodable, binary)
 		was := flipped[i].want
 		if was == blocks {
 			flipped[i].want = allows
@@ -91,8 +91,8 @@ func TestEveryArmDiscriminates(t *testing.T) {
 
 // A failing arm has to reach the exit code and the report, not just a counter.
 func TestAFailingArmIsVisibleAndNonZero(t *testing.T) {
-	planted, quiet, undecodable := fixtures(t)
-	broken := arms(planted, quiet, undecodable)
+	planted, quiet, undecodable, binary := fixtures(t)
+	broken := arms(planted, quiet, undecodable, binary)
 	broken[0].want = allows
 	if broken[0].want == blocks {
 		t.Fatal("the first arm was already an allowing one, so this case " +
@@ -128,9 +128,9 @@ func TestTheReportStatesWhatItCannotEstablish(t *testing.T) {
 // this says so out loud, because the constant is what a rule rename breaks and
 // the failure would otherwise read as "selftest is broken".
 func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
-	planted, quiet, undecodable := fixtures(t)
+	planted, quiet, undecodable, binary := fixtures(t)
 	var out strings.Builder
-	if failed := report(&out, arms(planted, quiet, undecodable)); failed != 0 {
+	if failed := report(&out, arms(planted, quiet, undecodable, binary)); failed != 0 {
 		t.Fatalf("%d arm(s) failed:\n%s", failed, out.String())
 	}
 	if !strings.Contains(out.String(), "blocked ("+canaryRule+")") {
@@ -153,9 +153,9 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 // a blocking one, so it disagrees with every wrong value the way the blocking
 // arms already did; the asymmetry Q107 named is untouched.
 func TestTheUnreadArmNamesTheSkipAndTheCanaryArmsStillDoNot(t *testing.T) {
-	planted, quiet, undecodable := fixtures(t)
+	planted, quiet, undecodable, binary := fixtures(t)
 	var unread arm
-	for _, a := range arms(planted, quiet, undecodable) {
+	for _, a := range arms(planted, quiet, undecodable, binary) {
 		if a.by == string(scan.SkippedUTF32) {
 			unread = a
 		}
@@ -304,7 +304,7 @@ func TestEveryAnomalyFailsWhicheverWayTheArmLeans(t *testing.T) {
 // permanently red report rather than a silent hole -- but the shipped set
 // asking for it at all would mean somebody had misread what the state is for.
 func TestNoArmWantsTheAnomalousOutcome(t *testing.T) {
-	for i, a := range arms("a", "b", "c") {
+	for i, a := range arms("a", "b", "c", "d") {
 		if a.want == anomalous {
 			t.Errorf("arm %d (%q) wants the outcome no arm may want", i, a.name)
 		}
@@ -312,7 +312,7 @@ func TestNoArmWantsTheAnomalousOutcome(t *testing.T) {
 }
 
 // fixtures writes the three files the payloads point at.
-func fixtures(t *testing.T) (planted, quiet, undecodable string) {
+func fixtures(t *testing.T) (planted, quiet, undecodable, binary string) {
 	t.Helper()
 	dir := t.TempDir()
 	planted = filepath.Join(dir, "deploy.env")
@@ -327,5 +327,9 @@ func fixtures(t *testing.T) (planted, quiet, undecodable string) {
 	if err := os.WriteFile(undecodable, utf32LE("no credentials in this one\n"), 0o600); err != nil {
 		t.Fatalf("writing the undecodable file: %v", err)
 	}
-	return planted, quiet, undecodable
+	binary = filepath.Join(dir, "heap.dump")
+	if err := os.WriteFile(binary, append([]byte{0x00}, "AWS_ACCESS_KEY_ID="+canary+"\n"...), 0o600); err != nil {
+		t.Fatalf("writing the binary canary file: %v", err)
+	}
+	return planted, quiet, undecodable, binary
 }

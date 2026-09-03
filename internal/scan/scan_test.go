@@ -401,3 +401,106 @@ func TestBufferIgnoresAnUnusableRuleThatIsDisabled(t *testing.T) {
 		t.Errorf("a disabled rule with no regex errored: %v", err)
 	}
 }
+
+// The pair to TestBufferSkipsBinariesAndSaysSo: the same bytes, the other
+// entry point. The skip is a cost trade, so a caller whose buffer is already
+// on its way gets the match loop over the raw bytes -- and still gets told
+// nothing decoded them, because the sniff cannot tell an image from text this
+// build does not read.
+func TestBufferIncludingBinaryMatchesRawBytesAndKeepsTheReason(t *testing.T) {
+	ruleset := load(t, awsRule)
+	buf := []byte("\x00" + key)
+
+	got, err := BufferIncludingBinary("a.dump", buf, ruleset)
+	if err != nil {
+		t.Fatalf("BufferIncludingBinary: %v", err)
+	}
+	if len(got.Findings) != 1 {
+		t.Fatalf("%d finding(s) in a binary buffer holding the key, want 1: %+v",
+			len(got.Findings), got.Findings)
+	}
+	// Into the file, not into anything decoded: decode took no arm, so the NUL
+	// this buffer opens with is byte 0 and the key starts at byte 1.
+	if got.Findings[0].Offset != 1 {
+		t.Errorf("offset is %d, want 1", got.Findings[0].Offset)
+	}
+	if got.Skipped != ScannedRaw {
+		t.Errorf("Skipped is %q, want %q", got.Skipped, ScannedRaw)
+	}
+	// The half that keeps a caller honest. Reading this as Scanned would let a
+	// verdict report the buffer as one it read, which is what the notice in
+	// internal/hook exists to refuse.
+	if got.Skipped == Scanned {
+		t.Error("a buffer nothing decoded reports itself as read")
+	}
+
+	// The control on all of it: Buffer over the identical bytes finds nothing
+	// and names the skip, so what differs above is the entry point rather than
+	// the fixture.
+	got, err = Buffer("a.dump", buf, ruleset)
+	if err != nil {
+		t.Fatalf("Buffer: %v", err)
+	}
+	if got.Skipped != SkippedBinary || len(got.Findings) != 0 {
+		t.Errorf("the control reports Skipped %q and %d finding(s), want %q and 0",
+			got.Skipped, len(got.Findings), SkippedBinary)
+	}
+}
+
+// A raw match is not a decode, and the reason is what says so. UTF-16 written
+// with no byte-order mark is the population that makes the difference legible:
+// every ASCII character in it carries a NUL, so the raw pass finds nothing
+// whatever is written there, and a caller reading ScannedRaw as coverage would
+// report such a file clean.
+func TestBufferIncludingBinaryFindsNothingInUndecodedText(t *testing.T) {
+	ruleset := load(t, awsRule)
+	got, err := BufferIncludingBinary("a.env", encodeUTF16(key, false)[2:], ruleset)
+	if err != nil {
+		t.Fatalf("BufferIncludingBinary: %v", err)
+	}
+	if len(got.Findings) != 0 {
+		t.Errorf("the raw pass matched %+v in UTF-16 text", got.Findings)
+	}
+	if got.Skipped != ScannedRaw {
+		t.Errorf("Skipped is %q, want %q", got.Skipped, ScannedRaw)
+	}
+
+	// The control, so the zero above is this encoding rather than this key:
+	// the same characters behind their mark decode and the key is found.
+	got, err = Buffer("a.env", encodeUTF16(key, false), ruleset)
+	if err != nil {
+		t.Fatalf("Buffer: %v", err)
+	}
+	if got.Skipped != Scanned || len(got.Findings) != 1 {
+		t.Errorf("the control reports Skipped %q and %d finding(s), want Scanned and 1",
+			got.Skipped, len(got.Findings))
+	}
+}
+
+// Only the undeclared class gets the raw pass. A buffer that declared an
+// encoding this build does not read is a different answer and internal/hook
+// blocks on it, so turning one into a scan here would take the block away.
+func TestBufferIncludingBinaryLeavesADeclaredEncodingAlone(t *testing.T) {
+	ruleset := load(t, awsRule)
+	for _, tc := range []struct {
+		name string
+		buf  []byte
+		want Skip
+	}{
+		{"a UTF-32 mark", append([]byte{0xFF, 0xFE, 0x00, 0x00}, key...), SkippedUTF32},
+		{"a UTF-16 mark over a NUL", append(encodeUTF16("a", false), 0x00, 0x00), SkippedUTF16Binary},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := BufferIncludingBinary("a.bin", tc.buf, ruleset)
+			if err != nil {
+				t.Fatalf("BufferIncludingBinary: %v", err)
+			}
+			if got.Skipped != tc.want {
+				t.Errorf("Skipped is %q, want %q", got.Skipped, tc.want)
+			}
+			if len(got.Findings) != 0 {
+				t.Errorf("a declared buffer produced %+v", got.Findings)
+			}
+		})
+	}
+}

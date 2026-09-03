@@ -659,3 +659,93 @@ func TestABlockingSkipOutranksAnAllowedOneOnTheSameCall(t *testing.T) {
 		t.Errorf("the block names a buffer that does not block: %q", reason)
 	}
 }
+
+// The binary skip is a cost trade, and on a prompt there is nothing left to
+// trade: the harness splices an `@` target into the model's context carrying
+// the whole file, NUL and all, so declining to match it buys a faster verdict
+// on a call that is letting the credential past.
+//
+// The three arms are one measurement. The prompt blocks; a Read of the same
+// bytes is still allowed, which is what says the change is coverage on one
+// surface rather than the binary verdict moving; and a binary target with
+// nothing in it is still allowed, which is what would catch the raw pass
+// blocking on ordinary content.
+func TestABinaryPromptTargetIsMatchedWhereAReadOfItIsNot(t *testing.T) {
+	dir := t.TempDir()
+	planted := filepath.Join(dir, "heap.dump")
+	body := "AWS_ACCESS_KEY_ID=" + secret + "\n"
+	if err := os.WriteFile(planted, append([]byte{0x00}, body...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	quiet := filepath.Join(dir, "quiet.dump")
+	if err := os.WriteFile(quiet, append([]byte{0x00}, "no credentials here\n"...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prompt := func(t *testing.T, path string) (int, string, string) {
+		t.Helper()
+		return drive(t, `{"hook_event_name":"UserPromptSubmit","prompt":`+
+			quote(t, "look at @"+path)+`}`)
+	}
+
+	t.Run("the prompt blocks and names the rule", func(t *testing.T) {
+		code, stdout, stderr := prompt(t, planted)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout == "" {
+			t.Fatal("the prompt was allowed in silence, so a file whose bytes " +
+				"cross whole went unmatched")
+		}
+		reason := reasonOf(t, stdout)
+		if !strings.Contains(reason, "aws-access-key-id") {
+			t.Errorf("the block does not name the rule that fired: %q", reason)
+		}
+		if !strings.Contains(reason, planted) {
+			t.Errorf("the block does not name the file it read: %q", reason)
+		}
+	})
+
+	t.Run("a Read of the same file is still allowed", func(t *testing.T) {
+		code, stdout, stderr := drive(t, `{"hook_event_name":"PreToolUse",`+
+			`"tool_name":"Read","tool_input":{"file_path":`+quote(t, planted)+`}}`)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		got := decision(t, stdout)
+		if _, ok := got["hookSpecificOutput"]; ok {
+			t.Fatalf("the Read surface now blocks a binary file, which is the "+
+				"verdict moving rather than the coverage: %q", stdout)
+		}
+		message, ok := got["systemMessage"].(string)
+		if !ok {
+			t.Fatalf("stdout carries no systemMessage: %q", stdout)
+		}
+		if !strings.Contains(message, string(scan.SkippedBinary)) {
+			t.Errorf("the notice does not carry the reason the Read surface "+
+				"still declines: %q", message)
+		}
+	})
+
+	t.Run("a binary target with nothing in it is still allowed", func(t *testing.T) {
+		code, stdout, stderr := prompt(t, quiet)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		got := decision(t, stdout)
+		if _, ok := got["decision"]; ok {
+			t.Fatalf("the raw pass blocked a buffer holding nothing this "+
+				"ruleset names: %q", stdout)
+		}
+		message, ok := got["systemMessage"].(string)
+		if !ok {
+			t.Fatalf("stdout carries no systemMessage, so a buffer nothing "+
+				"decoded was reported as read: %q", stdout)
+		}
+		// The reason has to be the one that says a raw pass happened. Reading
+		// SkippedBinary here would mean the prompt took the Read surface's
+		// entry point and the arm above passed for some other reason.
+		if !strings.Contains(message, string(scan.ScannedRaw)) {
+			t.Errorf("the notice does not say the buffer was matched raw: %q", message)
+		}
+	})
+}

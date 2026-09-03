@@ -7,12 +7,18 @@
 // every call must never be the reason ordinary work breaks; a secret scanner
 // cannot afford that trade, because one that fails quietly reports a safety it
 // is not providing. So every internal error blocks with a reason, and so does a
-// buffer the pipeline declined to read. The one exception is the binary skip,
-// which the design chose with a measurement rather than for want of a decoder;
-// blocks() is where that is argued. It is allowed and it is no longer silent:
-// the call goes through carrying a systemMessage that names the buffer and why
-// nothing read it, so the one path here that neither blocks nor scanned still
-// tells the person it happened.
+// buffer whose text the pipeline could not read. The one exception is the
+// binary skip, which the design chose with a measurement rather than for want
+// of a decoder; blocks() is where that is argued. It is allowed and it is no
+// longer silent: the call goes through carrying a systemMessage that names the
+// buffer and says nothing decoded it, so the one path here that does not block
+// still tells the person it happened.
+//
+// On a prompt the match loop runs over those raw bytes anyway, because the
+// harness splices such a file into the context whole and the skip's cost trade
+// has nothing to trade against a buffer already on its way. That is coverage
+// and not a verdict: the reason still allows, the notice still goes out, and
+// scanCall is the only thing here that knows which event it is.
 //
 // Two events reach it. UserPromptSubmit and PreToolUse can withhold content;
 // PostToolUse cannot, measured, so nothing is catchable after the fact. The
@@ -127,7 +133,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// partition splits what the pipeline declined to read into the buffers that
+// partition splits the buffers whose text went unread into the ones that
 // stop this call and the buffers it is allowed to carry. The reason is the
 // whole rule, which is blocks() and is argued there.
 func partition(skips []skipped) (blocking, allowed []skipped) {
@@ -189,24 +195,47 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading the compiled-in ruleset: %w", err)
 	}
+	// A prompt is the one payload whose buffers are already on their way: the
+	// harness splices a binary-looking `@` target into the model's context
+	// carrying the whole file, so the binary skip's cost trade has nothing
+	// left to trade here and the raw bytes get the match loop. Driven
+	// 2026-09-03 on a built binary: `@` at a file whose first bytes hold a NUL
+	// and whose body holds an AWS key exited 0 with a notice, and now blocks
+	// naming the rule.
+	//
+	// The other two surfaces keep Buffer, and the reason is the population
+	// rather than the event: the commonest binary Bash operand in the
+	// transcript corpus is the Claude Code binary at 306 MiB, which is 36.5s
+	// of match loop against a 60-second timeout, where no organic binary `@`
+	// target has been observed in 881 tokens. scan.BufferIncludingBinary
+	// carries that argument and why it is not a second verdict axis.
+	read := scan.Buffer
+	if event == UserPromptSubmit {
+		read = scan.BufferIncludingBinary
+	}
 	var findings []scan.Finding
 	var skips []skipped
 	for _, t := range buffers {
-		got, err := scan.Buffer(t.label, t.buf, set)
+		got, err := read(t.label, t.buf, set)
 		if err != nil {
 			return nil, nil, err
 		}
+		// Both, not one or the other. A raw match reports findings and still
+		// reports that nothing decoded the buffer, because the two answer
+		// different questions and only the second is about coverage.
 		if got.Skipped != scan.Scanned {
 			skips = append(skips, skipped{t.label, got.Skipped})
-			continue
 		}
 		findings = append(findings, got.Findings...)
 	}
 	return findings, skips, nil
 }
 
-// A skipped is one buffer the pipeline declined to read, carried with the label
-// a finding in it would have been reported against so a verdict can name it.
+// A skipped is one buffer the pipeline could not read the text of, carried
+// with the label a finding in it would have been reported against so a verdict
+// can name it. Its text and not its bytes: one reason here is a buffer that did
+// go through the match loop, raw, and a clean result on those bytes is still
+// not a claim about what is written in them.
 type skipped struct {
 	label string
 	why   scan.Skip
@@ -265,13 +294,23 @@ type skipped struct {
 // Unicode standard leaves open, and now it does not: both readings block, and
 // they differ only over which encoding to name.
 //
+// scan.ScannedRaw is SkippedBinary's buffer after the match loop has run over
+// its raw bytes, so it allows for SkippedBinary's reason and no other. It is a
+// case here rather than a use of the default arm because the two verdicts are
+// the same one: the sniff still says nothing decoded this, and the design's
+// measurement says a hook that denies on that gets uninstalled. Reading the
+// pair as evidence that the surface has crept into this switch inverts what
+// happened -- scanCall picks the entry point and this function still never
+// learns which event it was, so the extra coverage arrives with no second axis
+// under it.
+//
 // Anything else blocks. A Skip this switch does not know is internal/scan having
 // grown a reason internal/hook was not taught, and allowing it would be the
 // fail-open direction -- the reading passes() already takes in the pipeline for
 // a validator name it does not run.
 func blocks(why scan.Skip) bool {
 	switch why {
-	case scan.Scanned, scan.SkippedBinary:
+	case scan.Scanned, scan.SkippedBinary, scan.ScannedRaw:
 		return false
 	default:
 		return true

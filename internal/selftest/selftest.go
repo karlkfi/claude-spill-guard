@@ -136,6 +136,16 @@ func Run(version string, stdout, stderr io.Writer) int {
 			"file, so nothing below was driven: %v\n", err)
 		return 1
 	}
+	// A binary-looking file holding the canary. The prompt surface reads one of
+	// these where Read declines it, because an `@` token splices the whole file
+	// into the context whatever the sniff thinks -- so this arm is the only one
+	// here that fails if internal/hook goes back to declining it.
+	binary := filepath.Join(dir, "heap.dump")
+	if err := os.WriteFile(binary, append([]byte{0x00}, "AWS_ACCESS_KEY_ID="+canary+"\n"...), 0o600); err != nil {
+		fmt.Fprintf(stderr, "spill-guard: selftest could not plant its binary "+
+			"canary file, so nothing below was driven: %v\n", err)
+		return 1
+	}
 	undecodable := filepath.Join(dir, "notes.utf32")
 	if err := os.WriteFile(undecodable, utf32LE("no credentials in this one\n"), 0o600); err != nil {
 		fmt.Fprintf(stderr, "spill-guard: selftest could not write its "+
@@ -153,7 +163,7 @@ func Run(version string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "ruleset: compiled in\n\n")
 
-	list := arms(planted, quiet, undecodable)
+	list := arms(planted, quiet, undecodable, binary)
 	total := len(list)
 	failed := report(stdout, list)
 
@@ -204,7 +214,7 @@ func report(stdout io.Writer, list []arm) int {
 
 // arms is every payload driven, rebuilt per call so nothing is shared between
 // a caller's two runs.
-func arms(planted, quiet, undecodable string) []arm {
+func arms(planted, quiet, undecodable, binary string) []arm {
 	return []arm{
 		{
 			name: "a prompt carrying the canary",
@@ -269,6 +279,18 @@ func arms(planted, quiet, undecodable string) []arm {
 				"hook_event_name": "PreToolUse",
 				"tool_name":       "Bash",
 				"tool_input":      map[string]any{"command": "cat " + quote(quiet)},
+			},
+		},
+		{
+			// The prompt surface reads a buffer the binary sniff would decline,
+			// because the harness splices an `@` target whole and the skip's
+			// cost trade has nothing to trade against bytes already on their
+			// way. Every other arm here would pass with that reverted.
+			name: "a prompt at a binary file with the canary",
+			want: blocks,
+			payload: map[string]any{
+				"hook_event_name": "UserPromptSubmit",
+				"prompt":          "what is in @" + binary + "?",
 			},
 		},
 		{

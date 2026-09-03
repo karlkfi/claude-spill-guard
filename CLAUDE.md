@@ -21,7 +21,7 @@ measured.
 | `internal/validate/` | The eight validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
 | `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. Where fail-closed holds or does not. |
-| `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it read nothing. |
+| `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it could not read the text. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
 | `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. |
 | `internal/selftest/` | The `selftest` subcommand. Canary payloads through `hook.Run` in-process, an allowing arm per surface, and a report that says what it cannot establish. |
@@ -92,7 +92,10 @@ declaration it has no arm for, so such a buffer falls through undecoded, its NUL
 is read raw, and it is allowed exactly as an image is — driven end to end, a
 UTF-8 mark plus a NUL plus an AWS-shaped key exits 0 while the same file
 without the NUL denies. It now says so rather than saying nothing, which is a
-notice about an unread buffer and not a block on a secret. Do not repair the law by redefining the axis
+notice about an unread buffer and not a block on a secret. On a prompt the raw
+pass reaches that key and blocks, which closes the consequence on one surface
+and none of the law: the verdict on the reason is untouched, and a `Read` of
+the same file still exits 0. Do not repair the law by redefining the axis
 as whichever declaration this build routes on: that is true by construction,
 cannot be falsified by a fourth encoding, and is how this one got through. `blocks` in
 [`internal/hook/hook.go`](internal/hook/hook.go) carries the argument, and a
@@ -208,25 +211,36 @@ library forecloses it, which makes the idiomatic call the more dangerous of the
 two. Any assumption that Go's notion of a character class matches somebody
 else's parser is settled by driving it and by nothing else.
 
-**The hole is a binary `@` target, and it is the scan pipeline's rather than the
-resolver's.** Read which arm is which before reasoning about it, because the
-harmless one is the one that comes to mind. Measured 2026-08-28: `@logo.png`
-arrives as a `file` attachment whose `content.type` is `image`, carrying no
-text — nothing crosses that a rule could match. `@heap.dump`, a NUL in its
-first bytes, arrives as `content.type` `text` carrying **the whole file**, NUL
-included, with a marker placed after that NUL intact. That second arm is the
-one with a consequence: the resolver opens it and hands it on, `internal/scan`
-skips a buffer with a NUL in the first 8 KiB, and a skipped buffer contributes
-no findings, so a credential inside one is allowed. Driven on a built binary,
-with the control beside it: the same key without the NUL blocks and names the
-rule, and with it the hook exits 0. It is not a regression — nothing scanned an
-`@` target before this — and it is the reason-versus-surface question the
-`Read` and `Bash` surfaces already carry.
+**A binary `@` target is matched, and on that surface alone.** Read which arm is
+which before reasoning about it, because the harmless one is the one that comes
+to mind. Measured 2026-08-28: `@logo.png` arrives as a `file` attachment whose
+`content.type` is `image`, carrying no text — nothing crosses that a rule could
+match. `@heap.dump`, a NUL in its first bytes, arrives as `content.type` `text`
+carrying **the whole file**, NUL included, with a marker placed after that NUL
+intact. The second arm went unscanned until `scan.BufferIncludingBinary`, which
+runs the match loop over the raw bytes and returns the skip reason beside the
+findings rather than instead of them. Driven 2026-09-03 on a built binary: the
+NUL-bearing file moved from exit 0 to a block naming `aws-access-key-id`, and
+the same key without the NUL blocked before and after.
 
-**Q84 closed half of that and not the half that matters.** The allow now
-carries a notice naming the buffer, so the transcript is no longer empty and
-the user can act; the credential is still unscanned and still allowed. Do not
-read the notice as coverage. It reports that nothing looked.
+**The entry point is chosen by cost, not by a surface policy.** `blocks()` still
+takes a reason and never an event, `scan.ScannedRaw` allows for
+`scan.SkippedBinary`'s reason, and only `scanCall` knows which event it is. What
+keeps `Read` and `Bash` on the skip is the Claude Code binary — 13 of the 21
+binary `Bash` operands in the design's corpus, 306 MiB, 36.5s of match loop
+against a 60-second timeout — where no organic binary `@` target has been
+observed in 881 tokens. Over 4,000 real binaries, 1,414.7 MiB, the raw pass
+returned 0 findings at 17.4 MiB/s and a 54-byte fixture holding a key returned
+1, so that zero is a measurement. `docs/design/README.md`, *A buffer whose bytes
+cross anyway*, has the table.
+
+**Two things not to restate.** The row's own argument — that the harness has
+decided such a file is text on this surface and not elsewhere — is wrong:
+driven 2026-09-03 against 2.1.251, a `Read` of the same file returns its content
+whole, so `Read` crosses exactly as a splice does. And a raw pass is not a
+decode, so the notice stays: a matched buffer is still reported as one nothing
+decoded, and on `Read` and `Bash` the notice still reports that nothing looked
+at all. Do not read it as coverage there.
 
 ## Rules that are not negotiable
 
@@ -281,14 +295,14 @@ the shipped set turned all three allowing arms into blocks, and the report read
 `7 of 7 arms as expected. This binary scans and blocks.` at exit 0. That is a
 precision regression -- the thing this repo calls the product -- invisible to
 the check a user runs. `anomalous` is a want no arm may hold, so it disagrees
-with every arm, and the same mutation on today's eight reads `3 of 8 arms did
-not do what they must` at exit 1. It cannot spawn the launcher: `os/exec` is
-forbidden across the build graph, so the launcher is covered by *how* it is
-invoked, and running `run-spill-guard.cmd selftest` puts the resolution order
-in the path and
-reports the binary it found. Whether Claude Code is invoking the hook at all is
-not reachable from outside a session, and the report says so rather than
-letting a green run imply it.
+with every arm, and the same mutation on today's nine reads `3 of 9 arms did
+not do what they must` at exit 1 — re-taken 2026-09-03, where the probe rule
+needs keywords or the loader refuses it before any arm runs. It cannot spawn
+the launcher: `os/exec` is forbidden across the build graph, so the launcher is
+covered by *how* it is invoked, and running `run-spill-guard.cmd selftest` puts
+the resolution order in the path and reports the binary it found. Whether
+Claude Code is invoking the hook at all is not reachable from outside a
+session, and the report says so rather than letting a green run imply it.
 
 **Never put a raw secret in a struct that outlives the match.** The
 predecessor's `Finding` carried `secretValue` beside `matchRedacted`; it was
