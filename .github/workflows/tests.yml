@@ -1289,9 +1289,21 @@ jobs:
           fi
 
       # Every red below is attributable to its own mutation only if this is
-      # green.
+      # green -- and in the state that arm forces, not merely in whichever one
+      # the repository happens to be in today. Before v0.1.0 every arm below
+      # ran against a tree with no release, and two of them were reading the
+      # real state rather than forcing it: the unbuilt arm needed the gate to
+      # be looking for unbuilt claims, and the stale arm needed the README to
+      # still say there was no release. Publishing broke both, which is a
+      # control that measured the calendar rather than the property.
+      #
+      # The prose is now written to be true in either state, so all three
+      # baselines are green and each arm's red is its own mutation's.
       - name: The tree is green before anything below mutates it
-        run: make release-claims
+        run: |
+          make release-claims
+          python3 scripts/check-release-claims.py --assume-release none
+          python3 scripts/check-release-claims.py --assume-release released
 
       # The defect the gate exists for, verbatim from 793abbe, where it was live
       # on main and every one of the gates was green over it. Appended rather
@@ -1304,12 +1316,12 @@ jobs:
             echo "::error::the mutation changed nothing -- the claim was not appended" >&2
             exit 1
           fi
-          make release-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          python3 scripts/check-release-claims.py --assume-release none > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           git checkout -- docs/design/distribution.md
           if [ "$rc" -eq 0 ]; then
-            echo "::error::the gate passed over prose claiming a release published something, and there is no release" >&2
+            echo "::error::the gate passed over prose claiming a release published something, in the state where none has" >&2
             exit 1
           fi
           if ! grep -q '^unbuilt claim: docs/design/distribution\.md:[0-9]*: Both artifacts are already published' mutant.log; then
@@ -1329,31 +1341,38 @@ jobs:
             echo "::error::the mutation changed nothing -- the hedged claim was not appended" >&2
             exit 1
           fi
-          make release-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          python3 scripts/check-release-claims.py --assume-release none > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
           git checkout -- docs/design/distribution.md
           if [ "$rc" -ne 0 ]; then
-            echo "::error::the gate failed on a claim written in the future tense, which is how every honest sentence about the first release has to be written" >&2
+            echo "::error::the gate failed on a claim written in the future tense, which is how every honest sentence about an unbuilt release has to be written" >&2
             exit 1
           fi
 
-      # The other direction, and the one nothing else will ever exercise: the
-      # day a release exists, the sentences saying there is none become false.
-      # It cannot be driven by cutting one, so the state is forced -- and the
-      # step above establishes that the same tree without the flag is green, so
-      # the flag is what moved the verdict.
+      # The other direction: the day a release exists, the sentences saying
+      # there is none become false. This arm used to read the README's own
+      # standing "there is no release yet" rather than appending anything, so
+      # it stopped biting the moment that sentence was corrected -- a mutation
+      # control resting on a defect it did not create and could not keep. It
+      # now supplies its own, the same way the two arms above do.
       - name: With a release, prose saying there is none must fail the gate
         run: |
+          printf '\nThere is no release yet, so the two-step form above has nothing to fetch.\n' >> docs/design/distribution.md
+          if git diff --quiet -- docs/design/distribution.md; then
+            echo "::error::the mutation changed nothing -- the denial was not appended" >&2
+            exit 1
+          fi
           python3 scripts/check-release-claims.py --assume-release released > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
+          git checkout -- docs/design/distribution.md
           if [ "$rc" -eq 0 ]; then
-            echo "::error::the gate passed with a release existing and README.md still saying there is none" >&2
+            echo "::error::the gate passed with a release existing and prose still saying there is none" >&2
             exit 1
           fi
-          if ! grep -q '^stale claim: README\.md:[0-9]*: ' mutant.log; then
-            echo "::error::the gate failed, but not on the README's standing claim that there is no release" >&2
+          if ! grep -q '^stale claim: docs/design/distribution\.md:[0-9]*: There is no release yet' mutant.log; then
+            echo "::error::the gate failed, but not on the appended denial" >&2
             exit 1
           fi
 
