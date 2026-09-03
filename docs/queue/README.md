@@ -93,9 +93,14 @@ The body, as prose. No length cap — the index summarises it and this page
 carries the whole thing.
 ```
 
-Labels in use: `security` `tests` `docs` `infra` `bug` `hook` `rules`
-`release`. Add `open-question` to an item that ends in a decision rather than a
-next step, and drop it in the same edit that writes the answer in.
+Labels in use: `security` `tests` `docs` `infra` `bug` `hook` `rules` `scan`
+`release`. Two more are process rather than topic: `open-question` on an item
+that ends in a decision rather than a next step, dropped in the same edit that
+writes the answer in, and `accruing` on one whose cost grows while it waits.
+
+**A version string is a release gate**, not a topic: `v0.2.0` marks an item the
+next tag waits for, and `docs/plan/v0.2.0.md` is what says why those items and
+not others. Cutting the tag deletes the plan doc and the labels with the rows.
 
 A blocked item's body opens with what it waits on — a link to the blocking item
 where the blocker is one, prose where it is not:
