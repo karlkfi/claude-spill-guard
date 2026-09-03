@@ -1410,6 +1410,93 @@ jobs:
       - name: No message names an install channel that does not exist
         run: make channel-claims
 
+  plugin-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The plugin manifests carry the same version
+        run: make plugin-version
+
+  # Four arms. Two reds for the two claims the script makes, and two greens
+  # because a check whose passing answer is "they agree" has to be shown
+  # capable of saying anything else -- and shown not to say it about a tree
+  # that is fine.
+  plugin-version-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Every red below is attributable to its own mutation only if this is
+      # green.
+      - name: The tree is green before anything below mutates it
+        run: |
+          make plugin-version
+          python3 scripts/check-plugin-version.py --version "$(python3 -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
+
+      # The common defect: bump one manifest, forget the other. This is the
+      # half a pull request can reach, since it needs no tag.
+      - name: Manifests that disagree with each other must fail the gate
+        run: |
+          python3 - <<'MUTANT'
+          import json, pathlib
+          p = pathlib.Path(".claude-plugin/marketplace.json")
+          d = json.loads(p.read_text())
+          d["plugins"][0]["version"] = "0.0.9-mutant"
+          p.write_text(json.dumps(d, indent=2) + "\n")
+          MUTANT
+          if git diff --quiet -- .claude-plugin/marketplace.json; then
+            echo "::error::the mutation changed nothing -- the marketplace version was not moved" >&2
+            exit 1
+          fi
+          make plugin-version > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .claude-plugin/marketplace.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed with the two manifests carrying different versions" >&2
+            exit 1
+          fi
+          if ! grep -q 'the manifests disagree' mutant.log; then
+            echo "::error::the gate failed, but not on the disagreement" >&2
+            exit 1
+          fi
+
+      # The tag half, which no pull request runs for real: the release job is
+      # the only caller that knows the number. Driving it with a literal here
+      # is what makes the release job's call something other than its own first
+      # execution -- the shape that cost v0.1.0 four tag cycles.
+      - name: Manifests that disagree with the tag must fail the gate
+        run: |
+          python3 scripts/check-plugin-version.py --version 9.9.9 > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed with the manifests carrying a version the tag does not" >&2
+            exit 1
+          fi
+          if ! grep -q 'and the tag says 9\.9\.9' mutant.log; then
+            echo "::error::the gate failed, but not on the version mismatch" >&2
+            exit 1
+          fi
+
+      # Precision, and the direction a red-only control cannot reach: the
+      # matching tag has to stay green with and without a leading `v`, or the
+      # release job fails on every correct release. That failure mode is not
+      # hypothetical -- a byte-exact body check written the same week failed on
+      # every *correct* release body, and only an arm like this one found it.
+      - name: The matching tag must not fail the gate, with or without a leading v
+        run: |
+          want="$(python3 -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
+          echo "manifest version: $want"
+          python3 scripts/check-plugin-version.py --version "$want"
+          python3 scripts/check-plugin-version.py --version "v$want"
+
   # Six arms. The gate's passing answer is empty, so three of them are about
   # whether it can produce any other answer, and three are the directions a
   # red-only control cannot reach.

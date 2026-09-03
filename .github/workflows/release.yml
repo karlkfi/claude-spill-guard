@@ -524,6 +524,19 @@ jobs:
           fi
           printf 'publishing %s (%s bytes)\n' "$notes" "$(wc -c < "$notes")"
 
+      # A marketplace entry compares this string and nothing else, so manifests
+      # still carrying the previous number publish archives that `claude plugin
+      # update` can never deliver -- the release is complete and correct and
+      # every existing install stays where it is. release-process.md made this
+      # step 1 of the pre-tag list and said "nothing checks this at tag time",
+      # which was true until v0.1.0 demonstrated what a prose invariant with a
+      # human read-back behind it is worth.
+      #
+      # Before the build, because the tag is spent either way and a run that
+      # stops here has published nothing.
+      - name: The plugin manifests carry this tag's version
+        run: python3 scripts/check-plugin-version.py --version "${GITHUB_REF_NAME#v}"
+
       - name: Build, sign, and upload to a draft release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
