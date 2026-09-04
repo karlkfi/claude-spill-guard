@@ -98,12 +98,17 @@ func TestTheRefusalNamesTheFilteredForm(t *testing.T) {
 			t.Errorf("the reason does not name %q: %q", want, reason)
 		}
 	}
-	// One opener, not two. decide() is what prepends it, so a body that
-	// carries its own arrives doubled -- and every assertion above passes
-	// either way, because HasPrefix and Contains are both satisfied by the
-	// broken string. This was the shipped state until the binary was driven.
-	if n := strings.Count(reason, blockedLead); n != 1 {
-		t.Errorf("the reason carries %d copies of %q: %q", n, blockedLead, reason)
+	// The whole reason, not a prefix and not a substring. decide() is what
+	// prepends the opener, so a body carrying its own arrives doubled -- and
+	// every assertion around this one passes either way, because HasPrefix and
+	// Contains are both satisfied by `spill-guard: blocked. spill-guard:
+	// blocked. a "env" here ...`, which is what shipped until the binary was
+	// driven. Equality is what has nowhere for a second copy to hide, and it
+	// is not brittle here because both sides are this package's own code: the
+	// assertions above are what pin the text, and this pins the composition.
+	if want := blockedLead + dumped("env"); reason != want {
+		t.Errorf("the reason is not the body with one opener on it:\n got %q\nwant %q",
+			reason, want)
 	}
 	// Not failed()'s sentence. That one says nothing scanned this call, which
 	// is true here and is not why the call was refused; a reader who meets it
