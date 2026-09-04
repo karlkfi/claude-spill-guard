@@ -432,16 +432,19 @@ func TestAnchoringARuleTheLoaderRefusesLosesFindings(t *testing.T) {
 
 // Past the budget the hit list is not worth an attempt each, and the answer is
 // the whole-buffer pass rather than a slower spelling of it.
-// Every anchored rule, not one of them, because the budget is arithmetic over
-// Reach and the loader never looks at it. A rule whose Reach grew would keep a
-// non-nil Anchor -- so the table above stays green -- while its budget shrank
-// toward zero and it fell back on every buffer, losing the whole change for
-// that rule with nothing failing. Driven 2026-09-04: giving one rule the
-// whole-buffer arm costs 36% of the ruleset's throughput and no test notices.
 //
-// The arm is asserted rather than the time it takes, which is what makes this
-// a gate rather than a benchmark: keywordPositions reports which arm matchRule
-// will take, and it reports it without timing anything.
+// What this asserts is the budget arithmetic over Reach: a dense hit list is
+// refused and a sparse one is kept, for every anchored rule rather than for
+// one. Every rule, because Reach is what the budget divides by and the loader
+// never looks at it -- a rule whose Reach grew would keep a non-nil Anchor, so
+// the table above stays green, while its budget shrank toward zero and it fell
+// back on every buffer.
+//
+// It does not observe which arm matchRule takes, and nothing here can. This
+// recomputes the eligibility condition rather than reading matchRule's, so a
+// change to matchRule's own gate leaves this green -- driven, and filed as
+// docs/queue/Q140.md, which is also where the duplication on the line below is
+// recorded. Do not read this test as a gate on the arm.
 func TestEveryAnchoredRuleRefusesADenseHitListAndKeepsASparseOne(t *testing.T) {
 	anchored := 0
 	for _, rule := range loadShipped(t) {
