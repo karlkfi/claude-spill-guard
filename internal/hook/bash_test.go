@@ -293,24 +293,45 @@ func TestAnIndirectlyNamedFileBlocks(t *testing.T) {
 // different file set from the one the command would send. bashTargets carries
 // the argument. A change that made the reason generic again would close
 // nothing and would read as tidying.
+//
+// The arms are the recursion spellings, and they are here because the subject
+// of the clause used to be implicit and got read as the command. Nothing
+// parses a recursion flag, so all four reach one return -- which makes "this
+// reads files rather than walking them" false of the three that do walk, and
+// that reading cost a friction report. Containment on "this scanner" is what
+// holds the subject named; the four arms are what stop a future flag parser
+// from making one spelling say something the others do not.
 func TestADirectoryOperandSaysSoAndSaysWhatToDoInstead(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	code, stdout, stderr := drive(t, bashCall(t, "grep -rn pat sub", dir))
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a deny object (stderr %q)", code, stderr)
-	}
-	reason := reasonOf(t, stdout)
-	if !strings.Contains(reason, "names a directory") {
-		t.Errorf("reason = %q, want it to name the directory case", reason)
-	}
-	if !strings.Contains(reason, "name the files instead") {
-		t.Errorf("reason = %q, want it to carry the remedy", reason)
-	}
-	if strings.Contains(reason, "neither a file nor a directory") {
-		t.Errorf("reason = %q, want the directory case told apart from a fifo", reason)
+	for _, command := range []string{
+		"grep -rn pat sub",         // recursion inside a cluster
+		"grep -r -n pat sub",       // recursion as its own flag
+		"grep --recursive pat sub", // the long form
+		"grep -n pat sub",          // no recursion at all
+	} {
+		t.Run(command, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 with a deny object (stderr %q)", code, stderr)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, "names a directory") {
+				t.Errorf("reason = %q, want it to name the directory case", reason)
+			}
+			if !strings.Contains(reason, "name the files instead") {
+				t.Errorf("reason = %q, want it to carry the remedy", reason)
+			}
+			if !strings.Contains(reason, "this scanner") {
+				t.Errorf("reason = %q, want the subject named, so the clause is not "+
+					"read as a claim that the command does not walk", reason)
+			}
+			if strings.Contains(reason, "neither a file nor a directory") {
+				t.Errorf("reason = %q, want the directory case told apart from a fifo", reason)
+			}
+		})
 	}
 }
 
