@@ -258,7 +258,7 @@ the rest of the file is most of it. Driven 2026-09-04 on a binary built from
 The shipped set is fourteen high-precision shapes, and not one of them matches
 an AWS secret access key, a netrc password, a base64 registry auth or a
 kubeconfig's `client-key-data`. That is what this class holds. So a clean scan
-of one of these files is a report on the fourteen rules that could have fired
+of one of these files is a report on the ten of those shapes enabled by default
 and not a report on the file, and allowing the read on the strength of it is
 the shape of claim this whole document exists to refuse.
 
@@ -294,9 +294,15 @@ write.
 
 The last row is the control, and it is 11 rather than 12 on purpose. The
 twelfth planted call is `tail -5 ~/.aws/config`, and `~/.aws/config` is out of
-the class — it holds a region and a profile name where `credentials` holds the
-key. So the sweep fires on every member it should and declines the one it
-should, which is more than a uniform 12 would have said.
+the class — by convention it holds a region and a profile name where
+`credentials` holds the key. Convention is all that is, and it is worth saying
+plainly: the AWS CLI will read `aws_access_key_id` and `aws_secret_access_key`
+out of `config` under a `[profile …]` heading, so this exclusion rests on where
+credentials are conventionally written rather than on a property of the file.
+It is deliberately the narrow reading, because membership here is read off a
+name and a name that usually holds settings is not a name that means
+credentials. So the sweep fires on every member it should and declines the one
+it should, which is more than a uniform 12 would have said.
 
 **The careful form is a pipeline position, the same reading `env` gets.** `cat
 .env | cut -d= -f1` sends the names alone, so refusing it would fire on the
@@ -316,6 +322,19 @@ to grow into the hole. A reader who takes the deny for path protection will
 trust it further than it goes, so the reason calls itself a net for the
 accident rather than a claim that the path is guarded, exactly as the
 environment one does.
+
+**An input redirect walks past it, and that one is a bypass rather than a cap.**
+`cat < .env` is allowed where `cat .env` is refused, and `cat < ~/.aws/credentials`
+where `cat ~/.aws/credentials` is refused. Driven 2026-09-04 on a binary built
+from this branch, against fixtures holding a password and an AWS secret access
+key — deliberately nothing a shipped rule matches, so no content verdict can
+account for either arm, and an unguarded path in the same run stays silent as
+the negative control. The cause is upstream: `internal/bash` strips a redirect
+out of a segment's tokens into `Segment.Redirects`, `readers.Files` reads
+tokens, so the target is never an operand and never reaches this check. It
+defeats content matching and this refusal alike, which is what makes it a
+bypass and not one more thing the class declines to cover. Filed as Q131, and
+this row was deliberately not widened to close it.
 
 **Reads only.** A *write* to one of these changes what some other tool then
 does — an environment variable injected, a registry credential replaced — which

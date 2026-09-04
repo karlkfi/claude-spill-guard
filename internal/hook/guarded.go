@@ -30,8 +30,8 @@ import (
 // The shipped set is 14 high-precision shapes and none of them matches an AWS
 // *secret* access key, a netrc password, a base64 registry auth or a
 // kubeconfig's client-key-data. Those are the contents of this class, so a
-// clean scan of one of these files is a report about the four rules that could
-// have fired and not about the file.
+// clean scan of one of these files is a report about the ten of those shapes
+// enabled by default and not about the file.
 //
 // # What is in the class, and what is deliberately out
 //
@@ -70,7 +70,8 @@ import (
 // The rest of the class went the other way. Over the same sweep, 0 calls
 // resolve to a `.env`, an `~/.aws/credentials`, a `.netrc`, a
 // `.git-credentials`, a `~/.docker/config.json` or a kubeconfig. Twelve
-// planted calls appended to the same corpus fire 12 times, so the zero is a
+// planted calls appended to the same corpus fire 11 times -- the twelfth is
+// `tail -5 ~/.aws/config`, deliberately out of the class -- so the zero is a
 // measurement and not a sweep that cannot come back non-empty.
 //
 // # It refuses the readers it knows, and that is the whole of its reach
