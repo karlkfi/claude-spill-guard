@@ -82,8 +82,28 @@ func TestNoReasonNamesTheOverride(t *testing.T) {
 	// overridden call.
 	reasons := []string{blockedLead + unattended + found(finding)}
 	for _, lead := range []string{blockedLead, confirmLead} {
-		for _, body := range []string{found(finding), unread(skips),
-			failed(errNoEvent), noReasonGiven, overran(budget), dumped("env")} {
+		// One entry per line, and that is for the merge rather than for the
+		// eye. Every branch that adds a reason body adds it here, so the list
+		// is contended by construction, and losing an entry to a merge is
+		// silent: the tree compiles and this test passes for a smaller set
+		// than its name claims, which is the defect Q89 is filed on.
+		//
+		// That merge has now happened. Q120 added overran() and Q108 added
+		// dumped() on branches that never saw each other's diff, both onto the
+		// same line, where `git merge-tree` put them in one mid-statement hunk
+		// -- the shape where taking either side drops a body and nothing goes
+		// red. Both are below because the resolution was checked by making
+		// each one name the hatch and watching this test fail, not by reading
+		// the merged diff, which reads correctly either way.
+		bodies := []string{
+			found(finding),
+			unread(skips),
+			failed(errNoEvent),
+			noReasonGiven,
+			overran(budget),
+			dumped("env"),
+		}
+		for _, body := range bodies {
 			reasons = append(reasons, lead+body)
 		}
 	}
