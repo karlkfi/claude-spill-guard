@@ -79,6 +79,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 				"it would send is unknown: %w", err)
 		}
 
+		// Ahead of the operands, because this refusal is not about them. A
+		// command that writes the whole environment opens no file, so there is
+		// nothing here for the loop below to find and nothing on disk for a
+		// rule to match -- shape.go argues why that is a deny rather than a
+		// gap. It runs on substitution bodies too, which is what this being
+		// inside the queue loop buys: `echo $(env)` dumps as surely as `env`.
+		if name := envDumped(segments); name != "" {
+			return nil, &shapeRefusal{name}
+		}
+
 		// Anything that moves the working directory changes what a later
 		// relative operand means, and this port does not carry the tracker the
 		// guards upstream key on. So a relative operand after one is a path

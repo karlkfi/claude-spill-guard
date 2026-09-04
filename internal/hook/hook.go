@@ -112,6 +112,16 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 	}
 	findings, skips, err := got.findings, got.skips, got.err
 	if err != nil {
+		// A shape refusal is not a scan that failed, and failed() would say it
+		// was: its sentence is that nothing scanned this call, which is true
+		// here and is not the reason. The call was refused for what it would
+		// do, so the body has to say so and name the filtered form -- shape.go
+		// carries that argument.
+		var shape *shapeRefusal
+		if errors.As(err, &shape) {
+			return decide(stdout, stderr, call, event, overridden,
+				dumped(shape.command), "")
+		}
 		// No notice: scanCall reports nothing it read when it errors, so there
 		// is no set of allowed skips to name and failed() already says that
 		// nothing scanned this call at all.

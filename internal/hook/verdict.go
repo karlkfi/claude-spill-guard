@@ -317,6 +317,32 @@ func overran(budget time.Duration) string {
 		"can. Name fewer or smaller files and try again.", budget, hookTimeout)
 }
 
+// dumped is the body for a call refused on its shape rather than on anything a
+// rule matched.
+//
+// It has to do three things the other bodies do not. It says why no scan
+// happened, because the reader who meets it will look for the finding and
+// there is none. It names the filtered form, because the model applies that
+// and the alternative is spending a human on a prompt (the deny/ask split this
+// repo takes from prod-guard's own reasoning). And it says the control is a
+// net for the accident, because a reader who takes it for a wall will trust
+// it further than it goes -- `printenv AWS_SECRET_ACCESS_KEY` walks straight
+// past it, deliberately.
+//
+// %q on the command for found()'s reason, though this one is already one of
+// shape.go's own literals rather than anything out of the call.
+func dumped(command string) string {
+	return fmt.Sprintf("a %q here would write the whole environment into what "+
+		"this call sends back, and no rule can look first: those values exist "+
+		"only in the tool process, so there is no buffer anywhere to open. "+
+		"Nothing was sent. Ask for what you need instead -- `printenv PATH "+
+		"HOME` for the variables you want, `${FOO:+set}` to check one is set "+
+		"without printing it, or `env | cut -d= -f1` for the names alone. This "+
+		"is a net for the accident and not a wall: a session that means to "+
+		"read one value still can, and what crosses is kept in a transcript.",
+		command)
+}
+
 // failed is the body for a scan that could not be completed.
 //
 // Every internal error blocks. That is the inversion this project makes
