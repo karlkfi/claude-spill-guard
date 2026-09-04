@@ -168,8 +168,19 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// so one reason for every mode would be strictly less to go on
 				// than the tree already had. The path stays out of it, as it does
 				// in every reason resolve writes; the OS error named it only
-				// because %w carried it. Whether this should walk the tree
-				// instead is Q95 and is not decided here.
+				// because %w carried it.
+				//
+				// Walking instead was measured and refused. The argument that
+				// used to decide it -- an overrunning walk allows the call --
+				// is gone now that the scan has a budget, so what decides it is
+				// that a walk reads a different file set from the one the
+				// command would send: ripgrep honours .gitignore and skips
+				// hidden files, and over one checkout `rg --files` reports 211
+				// where a walk finds 11,815 and 1,132 findings in them. Making
+				// the walk agree means re-implementing each reader's traversal,
+				// which is the class this repo refuses by name for shell
+				// parsing. docs/design/README.md, "A directory operand is
+				// refused rather than walked", has the tables.
 				if info.IsDir() {
 					return nil, fmt.Errorf("in the %q here, a file operand names a "+
 						"directory, and this reads files rather than walking them, "+

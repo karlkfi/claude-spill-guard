@@ -1365,8 +1365,8 @@ MiB/s as text carrying every keyword, so a cap tight enough to bound the third
 refuses the other two for nothing. A call adds up rather than arriving one file
 at a time — the same row has `cat` over four 128 MiB files at 78.1 seconds,
 with no file in it near any plausible cap. And a directory operand has no size
-to cap at all, which is what makes this the section
-[Q95](../queue/Q95.md) was waiting on.
+to cap at all, which is what made this the section the directory-operand
+question was waiting on — [answered below](#a-directory-operand-is-refused-rather-than-walked-and-that-is-a-decision-now).
 
 **A deadline is available even though nothing here takes a `context`.**
 `os.ReadFile` takes none and neither does the match loop, which is why a fifo
@@ -1442,6 +1442,92 @@ would be 16s on a machine three times slower, which a 10-second budget refuses
 and this one does not. The stall is the objection on the other side, and it is
 weaker than it looks: the alternative to waiting 45 seconds was never a quick
 answer, it was waiting 60 and getting no answer at all.
+
+### A directory operand is refused rather than walked, and that is a decision now
+
+`grep -rn pat docs/` and `rg pat docs/` name a directory. `internal/readers`
+returns it as a read operand because it is one, and `bashTargets` refuses the
+call, because a directory is not a regular file; a `Read` whose `file_path` is
+one takes the same branch. It costs **7.1%** of the `Bash` calls that carry a
+reader operand — 5,036 of 70,480, measured over this machine's transcripts by
+driving the real segmenter, and a floor rather than a rate, since `grep -rn pat
+docs` with no trailing separator is a directory operand too and is not in the
+count.
+
+Three answers were open. Scanning the directory listing is a fail-open over
+every file in the tree and was never in contention. What decides between the
+other two is below, and neither argument is the one the question started with:
+that one was *an unbounded walk that overruns allows the call*, and
+[the budget](#the-scanners-own-budget-and-overrunning-it-blocks) has taken it
+away — an overrunning walk blocks now, like anything else.
+
+**Nothing in the operand says what a walk would cost.** Measured 2026-09-04 by
+walking each root with `filepath.WalkDir` and putting every regular file through
+`scan.Buffer` with the shipped ruleset, symlinks not followed, on an M5 Max
+already carrying other work:
+
+| Root | Files | Read | Walk and scan |
+|---|---|---|---|
+| `docs/` in this repo | 76 | 0.4 MiB | 13 ms |
+| this worktree | 227 | 1.6 MiB | 40 ms |
+| the `claude-spill-guard` checkout, its worktrees included | 11,815 | 970.5 MiB | 3.119 s |
+| `~/go/pkg/mod` | 239,648 | 5,167.5 MiB | 94.245 s |
+| a `github-actions-gateway` checkout | 568,883+ | 10,342.9+ MiB | **unfinished at 120 s** |
+
+Four orders of magnitude, and the operand is one token either way. Two of the
+five are past the 45-second budget, so on those a walk buys a stall and then the
+same block a refusal gives in microseconds. The three that fit are the honest
+cost of refusing, and the top row is the one the row was filed about.
+
+**A walk reads a different file set from the one the command would send, and by
+how much depends on which reader named the directory.** `grep -r` reads
+everything under the root; ripgrep honours `.gitignore` and `.ignore` and skips
+hidden files unless told otherwise. Driven on ripgrep 14.1.1 over a five-file
+fixture — `.env`, `.ignore`, the `ignored.txt` that `.ignore` names,
+`visible.txt`, and `sub/deep.txt`:
+
+| | Files it would read |
+|---|---|
+| a plain walk, and `grep -rl '' .` | 5 |
+| `rg --files`, defaults | **2** — `visible.txt`, `sub/deep.txt` |
+| `rg --files --hidden --no-ignore` | 5 |
+
+The `.env` is in the first set and not the second. At repository scale the gap
+is wider: in the `claude-spill-guard` checkout `rg --files` reports **211** files
+where the walk above found 11,815 and 1,132 findings in them, because
+`.gitignore` excludes `.claude/worktrees/`. So a walk under an `rg` operand
+would block that call on content ripgrep was never going to open, which is a
+false positive by this design's own definition — and **precision is the
+product**. The inherited ruleset flagged 27.6% of real files with zero true
+positives, and this is the same failure arriving through the operand resolver
+instead of through a regex.
+
+**Closing that gap means re-implementing the readers' traversal, one reader at a
+time.** `--glob`, `--type`, `--max-depth`, `--max-filesize`, `--hidden`,
+`--no-ignore` and the ignore-file stack all change ripgrep's set; `--include`,
+`--exclude`, `--exclude-dir` and `-r` against `-R` change `grep`'s. That is the
+class of work this repo refuses by name for shell parsing — it fails silently in
+both directions — and there is no shortcut past it, because the only way to
+learn which files a command reads is to run it, and `os/exec` is forbidden
+across this build graph.
+
+**The narrower version does not survive either**, and it is named here because
+it is the obvious next proposal: walk only for `grep`, whose plain `-r` really
+does read everything under the root, and keep refusing `rg`. That is correct for
+a `grep -r` carrying no filter flags and silently wrong for one that does, so
+what it buys is the flagless form and what it costs is a traversal rule that is
+right or wrong depending on a flag nobody looked at. It also does nothing about
+the bottom of the table: `grep -r pat ~/go/pkg/mod` is 94 seconds, so the
+carve-out converts an instant refusal into a 45-second one.
+
+**So the refusal stands, and it is a decision rather than a side effect.** The
+reason names the case and the remedy — *name the files instead* — rather than
+reporting the mode class, and
+`TestADirectoryOperandSaysSoAndSaysWhatToDoInstead` pins that wording. What it
+costs is the top rows of the table: a `grep -rn pat docs/` that a walk would
+have covered in 13 ms is refused, and the user retypes it against files. The
+alternative on the bottom rows is a scanner reporting on a file set the command
+would not have sent.
 
 ## Output discipline
 
