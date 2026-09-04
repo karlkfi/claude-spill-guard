@@ -27,6 +27,7 @@ tmp/
 !.claude/agents/
 !.claude/skills/
 !.claude/hooks/
+!.claude/merge-posture.md
 # Credentials stay untracked even nested inside an allowlisted directory, since
 # the last matching pattern wins.
 .claude/**/.credentials.json
