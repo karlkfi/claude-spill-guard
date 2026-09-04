@@ -323,6 +323,12 @@ never reaches `PreToolUse` in any form. That closes the route the exception was
 imagined for and leaves the exception standing, because nothing has enumerated
 the routes.
 
+None of that reopens the axis. Crossing decides what is worth scanning and
+authorship is not a second test — this one field is a fail-closed carve-out
+named as such, and correcting the evidence under it changes what the carve-out
+rests on rather than what the rule is. A measurement about who typed something
+is about the size of this exception and about nothing else in the table above.
+
 **Dedup on the content hash is not the mechanism, and would cost more than the
 repetition it removes.** The repetition it targets is real — the same secret at
 four hops — but the rule above deletes three of those hops structurally, without
