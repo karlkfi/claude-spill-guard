@@ -234,10 +234,21 @@ reasoned about, and the harness publishes its own answer: a splice arrives in
 the transcript as an attachment whose `attachment.type` is `file` and whose
 `filename` is the path it resolved. That census is
 `internal/hook/testdata/prompt-oracle.json`, compared against on every run
-rather than read once and agreed with. The rest of the class the design names —
-an MCP file reader, a search tool that returns lines, a skill load — is out of
-v1 and stated in *What it is not*, because the tool set is not a list anyone
-can enumerate once.
+rather than read once and agreed with. The rest of the class is driven now, and
+three of its four members are settled. A **subagent** load is covered and needs
+nothing: the subagent's own tool calls fire the same hooks the parent's do. A
+**search** tool stays out, because nothing a `PreToolUse` hook opens can bound
+a walk over a tree. A **skill** load stays out for a different reason — the
+payload is `{"skill": "<name>"}` and names no file, though a deny on it does
+stop the body crossing, so it is a member this cannot resolve rather than one
+that is not there. An **MCP** file reader is the one still undriven.
+
+**Do not close what is left with a list of tool names, and do not close it with
+a payload-shape test either.** The shape test is what missed `Skill`, and it
+was this repo's own proposed replacement for the name list. Membership is an
+argument about what the call returns, which is per tool; the census and the
+three readings a candidate has to pass are in `docs/design/README.md` under
+*The rest of the class, driven*.
 
 **Do not write that the token grammar matches the harness.** Six boundary
 codepoints and the ASCII punctuation set have been driven, and that is the
