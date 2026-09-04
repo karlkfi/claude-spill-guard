@@ -1124,10 +1124,17 @@ cannot stop early. Fourteen times inside the timeout. Above it the answer is
 `SkippedBinary` and the notice goes out exactly as it does without this entry
 point, so coverage is added below the limit and nothing is taken away above it.
 
-A size limit rather than a deadline because a deadline is not available here:
-the match loop and `os.ReadFile` both take no context. A budget for the whole
-pipeline is Q120's; this is one entry point declining to add a new way to reach
-the case Q120 is about.
+A size limit rather than a deadline, and the two turned out not to be
+alternatives. Nothing inside the pipeline can be interrupted — the match loop
+and `os.ReadFile` both take no context — so a deadline written here could only
+be a check between rules, and one pass over a 306 MiB buffer is the granularity
+that defeats that.
+[The budget](#the-scanners-own-budget-and-overrunning-it-blocks) sits a layer up
+and works by outrunning the scan rather than by stopping it. It does not retire
+this limit, because the two answer differently above their thresholds: past the
+budget the verdict is a block, and past this limit it is the allow the skip
+already gives, with the notice out in 39ms. For a 306 MiB executable that is the
+right answer and a block is not.
 
 What this closes is one surface. A credential in a binary-looking `@` target
 blocks, and so does one behind a UTF-8 byte-order mark ahead of a NUL, which is
@@ -1336,15 +1343,105 @@ is a second in which a scan that did not finish is a scan that never happened.
 hook to write something or exit 2, and a killed process does neither. Nothing
 this repo ships can turn an expiry into a block.
 
-**So the budget has to be the scanner's own, and it has none.**
-[`internal/hook`](../../internal/hook/hook.go) reads an operand with
-`os.ReadFile`, under no size cap, and no stage of the pipeline carries a
-deadline. A buffer big enough to run past 60 seconds is allowed unscanned —
-the failure the launcher's deny exists to prevent, arriving through a door no
-exit code can close. [Q120](../queue/Q120.md) owns the fix, and it settles the
-budget half of [Q95](../queue/Q95.md): an unbounded directory walk is not
-merely slow, it converts into an allow at the deadline, where a refusal does
-not.
+**So the budget has to be the scanner's own**, which is the section below.
+
+### The scanner's own budget, and overrunning it blocks
+
+`internal/hook` gives the scan **45 seconds** and keeps 15 of the 60 for
+itself. A scan still running at the end of the 45 stops and writes the verdict
+this design gives a buffer it could not read: a block, on the same branch, with
+a reason naming the budget, and downgraded to a confirmation by an override
+exactly as every other block here is.
+
+There is no third answer to weigh. Fifteen seconds later the process is killed
+and the call proceeds, so the choice at the deadline is between blocking and
+allowing silently, and the allow is what this whole file is about.
+
+**A size cap is the cheaper half and is not the fix.** A cap answers before
+reading and a deadline answers during, and three things walk past the first.
+Cost is not a function of size: [Q122](../queue/Q122.md) measured the same 64
+MiB at 9,746 MiB/s as binary, 1,055 MiB/s as text no rule gates on, and 6.5
+MiB/s as text carrying every keyword, so a cap tight enough to bound the third
+refuses the other two for nothing. A call adds up rather than arriving one file
+at a time — the same row has `cat` over four 128 MiB files at 78.1 seconds,
+with no file in it near any plausible cap. And a directory operand has no size
+to cap at all, which is what makes this the section
+[Q95](../queue/Q95.md) was waiting on.
+
+**A deadline is available even though nothing here takes a `context`.**
+`os.ReadFile` takes none and neither does the match loop, which is why a fifo
+had to be refused up front rather than read with a limit — `fifo_unix_test.go`
+says so, against that question. That argument is about *interrupting* the work,
+and a deadline does not have to: the scan runs on its own goroutine, the verdict
+is written by the one waiting on it, and the process exit collects whatever was
+still running. Go preempts a goroutine in a tight match loop asynchronously, so
+the timer is scheduled without the scan yielding. That is the load-bearing
+mechanism claim and it is driven rather than read —
+`TestTheDeadlineFiresWhileTheMatchLoopIsRunning` blocks on the clock over a
+buffer whose next arm, given time, blocks on a key planted in it.
+
+#### Driven end to end, on built binaries
+
+The fixture is ordinary text carrying one occurrence of each keyword the shipped
+ruleset gates on, with the planted key from
+[`testdata/corpus/planted/aws-access-key-id.env`](../../testdata/corpus/planted/aws-access-key-id.env)
+in its last bytes — so a run that reaches the end has to emit a real deny, and a
+scan that never started is not mistaken for one that finished. `Read` surface,
+warm page cache, Apple M5 Max, Go 1.26.5, 2026-09-04. Wall clock is the whole
+process, which is the quantity the harness's 60 is charged against.
+
+| Fixture | `v0.1.0`..`main` | with the budget |
+|---|---|---|
+| 128 MiB | 18.051s, denies `aws-access-key-id` | 17.716s, denies `aws-access-key-id` |
+| 400 MiB | 54.448s, denies | **45.010s, blocks on the budget** |
+| 500 MiB | **68.130s**, denies — 8s past the ceiling | **45.011s, blocks on the budget** |
+
+The 128 MiB row is the control, and it is the one that says the deadline has not
+replaced the scanner: same verdict, same rule, either side. The 500 MiB row is
+the case the row was filed for.
+
+**What happens to that 68.130s under Claude Code is composed rather than
+observed, and the composition is the same one Q122 declined to make.** These are
+hook-process wall times; that the harness kills a hook at its timeout and lets
+the call through is the measurement above, taken separately. Nothing here has
+driven a real session at the crossing — [Q122](../queue/Q122.md) carries that as
+owed work, and it is owed after this change as much as before it.
+
+Two numbers fall out of the pair. The deadline lands within **11ms** of the
+budget measured from process spawn, so the launcher, this binary's startup, the
+timer's lateness and the write together are 11ms of the 15,000 the margin holds.
+And this fixture runs at 7.34 MiB/s where [Q122](../queue/Q122.md) measured 6.5
+and [#92](https://github.com/karlkfi/claude-spill-guard/pull/92)'s session
+measured 6.8 — three fixtures, three rates, a 60-second crossing anywhere from
+390 to 440 MiB. That spread is not noise to average away. It is the reason the
+bound is a clock and not a byte count.
+
+#### What 45 costs, and why it is not smaller
+
+The margin was measured twice more, from inside. A hook invocation over a
+payload naming no file, driven through the shell and the launcher: 7.02ms at
+best over 30 runs, 7.49ms median, one 350ms outlier on a machine already
+carrying other work. The verdict written after the deadline fires, timed over a
+64 MiB buffer at four budgets: under 10ms idle and under 37ms with twice as many
+CPU-bound goroutines running as the machine has cores. Fifteen seconds is nearly
+forty times the worst two of those added together, and it is not sized to them —
+it is sized so that being wrong about scheduling on somebody else's machine
+costs nothing.
+
+What the budget costs is the calls that would have finished between 45 and 60
+seconds, which at the worst measured rate is a call adding up to between 293 and
+390 MiB. Nothing in the two populations this repo has counted comes near either
+end: nothing outside `.git` in this worktree exceeds 5 MiB, and the largest
+session transcript on the author's machine is 35.4 MiB, which is 5.4 seconds.
+
+A smaller budget is the change to argue for rather than against, and the
+argument that stops it is the slower machine. 45 seconds is a wall clock, so it
+needs no per-machine tuning to stay under the ceiling — but the *population* it
+blocks does scale with single-core speed. A 35.4 MiB transcript is 5.4s here and
+would be 16s on a machine three times slower, which a 10-second budget refuses
+and this one does not. The stall is the objection on the other side, and it is
+weaker than it looks: the alternative to waiting 45 seconds was never a quick
+answer, it was waiting 60 and getting no answer at all.
 
 ## Output discipline
 

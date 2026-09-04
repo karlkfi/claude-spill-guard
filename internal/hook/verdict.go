@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/karlkfi/claude-spill-guard/internal/scan"
 )
@@ -288,6 +289,32 @@ func unread(skips []skipped) string {
 		"one that was read and held none, so an unread buffer is never reported "+
 		"as a clean one.",
 		len(skips), listSkips(skips))
+}
+
+// overran is the body for a scan that did not reach a verdict inside its
+// budget.
+//
+// It blocks, and everything else here is downstream of that. Past the hook's
+// own timeout this process is killed, whatever it was going to say is
+// discarded, and the call proceeds -- measured on both events, and neither
+// blocking encoding reaches it, because a killed process writes none. So a
+// scan that cannot finish has to stop itself while it can still speak, and the
+// verdict it speaks is the one the rest of this package takes on a buffer it
+// could not read.
+//
+// The reason claims nothing about what was read. A call carrying several
+// buffers may have been through some of them when the clock ran out, and which
+// ones is not a set this side of the deadline can name -- the scan is still
+// running. Under-claiming is the safe direction here for the reason
+// alsoUnread() gives: a buffer nothing opened produces no findings, exactly
+// like one that was read and held none.
+func overran(budget time.Duration) string {
+	return fmt.Sprintf("the scan did not finish inside its %s budget, so what "+
+		"this call would have sent went unread. The budget stops short of this "+
+		"hook's %s timeout on purpose: past that this process is killed, "+
+		"whatever it was going to say is discarded, and the call runs with "+
+		"nothing scanned -- so a scan that cannot finish blocks while it still "+
+		"can. Name fewer or smaller files and try again.", budget, hookTimeout)
 }
 
 // failed is the body for a scan that could not be completed.

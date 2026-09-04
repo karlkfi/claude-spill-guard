@@ -144,9 +144,32 @@ call** — driven 2026-09-03 on 2.1.251, both events. The hook is killed, its
 verdict discarded, and the only trace is a `hook_cancelled` attachment in the
 transcript that nothing here showed reaching the model or the person. A killed
 process writes nothing, so no exit code reaches this and the budget has to be
-the scanner's own, which it has not got. The table is in
-[`docs/design/README.md`](docs/design/README.md#the-third-shape-is-a-timeout-and-it-is-the-one-this-repo-configures);
-the fix is Q120.
+the scanner's own. The table is in
+[`docs/design/README.md`](docs/design/README.md#the-third-shape-is-a-timeout-and-it-is-the-one-this-repo-configures).
+
+**It has one now: 45 seconds, and a scan still running at the end of it
+blocks.** The verdict is the one a buffer nothing could read already gets, on
+the same branch, and an override downgrades it like any other. Two things about
+it are settled and should not be re-derived. A size cap is not the cheaper
+version of this — cost is not a function of size (the same 64 MiB is 9,746
+MiB/s binary, 1,055 MiB/s inert text and 6.5 MiB/s keyword-bearing text), a
+call adds up rather than arriving one file at a time, and a directory operand
+has no size to cap. And "`os.ReadFile` takes no context" is true and is an
+argument about *interrupting* a read, not about timing one: the scan runs on
+its own goroutine and the verdict is written by the one waiting on it, so the
+deadline outruns the work rather than cancelling it. Driven on built binaries
+— a 500 MiB fixture that took 68.130s on `main`, 8s past the ceiling, blocks
+at 45.011s now, while a 128 MiB one denies on the same rule either side. What
+the harness does with that 68.130s is still composed from two measurements
+rather than observed in one, which is Q122's first residual and is unchanged.
+`internal/hook/deadline.go` carries the argument and `docs/design/README.md`
+under *The scanner's own budget* carries the table.
+
+`hooks.json`'s `timeout` and the Go constant are two numbers in two files that
+cannot read each other, and a budget at or above the timeout is the original
+fail-open wearing a smaller number.
+`TestTheBudgetFitsInsideTheTimeoutTheManifestGives` is what holds them
+together, in both directions.
 
 `install/` is the fallback channel, and both scripts are driven rather than
 reviewed. `scripts/check-install-scripts.py` serves a GoReleaser dist directory

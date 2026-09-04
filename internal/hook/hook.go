@@ -44,6 +44,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
 	"github.com/karlkfi/claude-spill-guard/internal/scan"
@@ -71,6 +72,19 @@ const (
 
 // Run is the `hook` subcommand. It returns the process exit code.
 func Run(stdin io.Reader, stdout, stderr io.Writer) int {
+	return run(time.Now(), budget, stdin, stdout, stderr)
+}
+
+// run is Run with the clock and the budget handed in, so that a test can drive
+// the deadline in milliseconds rather than in the forty-five seconds the hook
+// ships with.
+//
+// start is taken before anything is read, so the budget covers the whole
+// invocation and not just the scan. Everything ahead of the scan is bounded by
+// the payload -- reading stdin, decoding it, looking for an override -- and
+// charging it here costs nothing when it is fast and is the honest answer when
+// it is not.
+func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		return refuse(stderr, fmt.Errorf("%w: stdin could not be read: %v", errNoEvent, err))
@@ -89,7 +103,14 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 		return deny(stdout, stderr, event, blockedLead+noReasonGiven, "")
 	}
 
-	findings, skips, err := scanCall(call, event)
+	got, finished := within(call, event, budget-time.Since(start))
+	if !finished {
+		// No notice, for failed()'s reason and one of its own: the scan was
+		// still running when this was written, so what it had read by then is
+		// not a set anything here can name.
+		return decide(stdout, stderr, call, event, overridden, overran(budget), "")
+	}
+	findings, skips, err := got.findings, got.skips, got.err
 	if err != nil {
 		// No notice: scanCall reports nothing it read when it errors, so there
 		// is no set of allowed skips to name and failed() already says that

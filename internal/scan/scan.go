@@ -176,11 +176,19 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 // clock -- a fourteenfold margin inside the timeout, which is what makes "this
 // cannot be what caused a kill" a reading rather than a likelihood.
 //
-// A size limit rather than a deadline because a deadline is not available: the
-// match loop and os.ReadFile both take no context, which internal/hook's
-// fifo_unix_test.go says for the file-mode question and Q120 says for the
-// clock. Q120 owns a budget for the whole pipeline; this is only this entry
-// point declining to add a new way to reach the case Q120 is about.
+// A size limit rather than a deadline, and the two turned out not to be
+// alternatives. Nothing in this package can be interrupted -- the match loop
+// and os.ReadFile both take no context, which internal/hook's
+// fifo_unix_test.go says for the file-mode question -- so a deadline written
+// here could only be a check between rules, and one pass over a 306 MiB buffer
+// is the granularity that would defeat it. internal/hook carries the real one
+// now, and it works by outrunning the scan rather than by stopping it.
+//
+// That does not retire this limit, because the two answer differently above
+// their thresholds. Past the deadline the verdict is a block. Past this limit
+// it is the allow the skip already gives, with the notice going out in 39ms --
+// which is the right answer for the 306 MiB executable that is the commonest
+// binary operand in the corpus, and a block is not.
 const rawLimit = 32 << 20
 
 // BufferIncludingBinary is Buffer for a caller whose buffer reaches the model
