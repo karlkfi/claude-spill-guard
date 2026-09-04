@@ -152,16 +152,19 @@ blocks.** The verdict is the one a buffer nothing could read already gets, on
 the same branch, and an override downgrades it like any other. Two things about
 it are settled and should not be re-derived. A size cap is not the cheaper
 version of this — cost is not a function of size (the same 64 MiB is 9,746
-MiB/s binary, 1,055 MiB/s inert text and 6.5 MiB/s keyword-bearing text), a
+MiB/s binary, 1,055 MiB/s inert text and 6.5 MiB/s keyword-bearing text, the
+third since re-measured at 32.84), a
 call adds up rather than arriving one file at a time, and a directory operand
 has no size to cap. And "`os.ReadFile` takes no context" is true and is an
 argument about *interrupting* a read, not about timing one: the scan runs on
 its own goroutine and the verdict is written by the one waiting on it, so the
 deadline outruns the work rather than cancelling it. Driven on built binaries
-— a 500 MiB fixture that took 68.130s on `main`, 8s past the ceiling, blocks
-at 45.011s now, while a 128 MiB one denies on the same rule either side. What
-the harness does with that 68.130s is still composed from two measurements
-rather than observed in one, which is Q122's first residual and is unchanged.
+— a 500 MiB fixture that took 68.130s on `main`, 8s past the ceiling, blocked
+at 45.011s, while a 128 MiB one denies on the same rule either side. That
+fixture no longer reaches the budget at all: since rules run at their keyword
+positions it denies at 14.9–17.7s, and Q132 owes one that does. What the
+harness does with that 68.130s is still composed from two measurements rather
+than observed in one, which is Q122's first residual and is unchanged.
 `internal/hook/deadline.go` carries the argument and `docs/design/README.md`
 under *The scanner's own budget* carries the table.
 
@@ -409,6 +412,16 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
 - **The prefilter needs word boundaries.** `strings.Contains` finds `sk-` inside
   `disk-containerd-…`, and one bad keyword (`AC`) took the file hit rate from
   1.2% to 18.9%.
+- **Its positions are the match loop's input, not a yes-or-no.** Eight of the
+  ten enabled rules open on `\b`, which is an empty-width op at the head of the
+  compiled program, so `regexp` derives no literal prefix and runs the NFA over
+  every byte to find positions the prefilter already had. Running them there
+  instead is 4.5x over the shipped set on this repo's own text. Deleting the
+  `\b` is not the alternative — it is what keeps `ghp_` out of `xghp_`. The
+  five conditions that make the two paths identical are in
+  [`internal/rules/anchor.go`](internal/rules/anchor.go), four in the loader
+  and one beside the boundary in `internal/scan/prefilter.go`; `jwt` fails the
+  last of them, an unbounded repeat, at a measured 2,451x.
 - **RE2 has no lookaround and caps bounded repetition at 1000.** Nine inherited
   rules need rewriting; `{1,1024}` becomes `{1,1000}`.
 - **Skip binaries.** NUL in the first 8 KiB. One PNG was 55% of the benchmark

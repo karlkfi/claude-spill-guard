@@ -651,6 +651,45 @@ not need to do.
    explodes and the lazy-DFA cache thrashes on heterogeneous input. Two engines,
    same result.
 
+   **Where every match a rule can produce begins at one of its keywords, it
+   runs at the positions step 3 found rather than over the buffer.** Eight of
+   the ten enabled rules open on `\b`, which is an empty-width op at the head
+   of the compiled program: `regexp` derives no literal prefix from it, so it
+   has nothing to skip towards and runs the NFA over every byte to arrive back
+   at positions the prefilter had already found and thrown away. Deleting the
+   `\b` is not the repair — it is what keeps `ghp_` from matching inside
+   `xghp_`, and precision is the product. Keeping the positions is.
+
+   Measured 2026-09-04 over this repository's own text, 1,355,099 bytes in 172
+   files, which names every keyword the ruleset gates on and so clears every
+   prefilter: the shipped set goes from 7.12 MB/s to 32.09 MB/s, and per rule
+   from 49.8–62.7 MB/s to 181–4,790 MB/s. Both arms are in
+   `internal/scan/bench_test.go`, one binary over one buffer, and it refuses to
+   time them until they report the same findings.
+
+   Five conditions decide it and none is about speed. Four belong to the loader
+   (`internal/rules/anchor.go`): the pattern opens on `\b`, nothing in it asks
+   where the text begins, every string it can match begins with one of the
+   keywords, and its longest match is bounded. The fifth is
+   `internal/scan/prefilter.go`'s, because it is about the boundary that file
+   checks — every keyword opens on a word byte, without which a hit and the
+   pattern's own `\b` are different predicates in both directions.
+
+   The bound is what excludes `jwt`, and it is a cost condition rather than a
+   correctness one. `eyJ[A-Za-z0-9_-]{8,}` keeps the engine's threads alive for
+   as long as the class matches, so one attempt reads to the end of the buffer:
+   on 64 KiB of `-eyJ` repeated — a hit every four bytes, and every byte in the
+   class — running it at each hit took 29.8 s against 12.2 ms for one
+   whole-buffer pass.
+
+   A bounded rule can still be handed more hits than they are worth, so the
+   loop counts them first. One attempt reads at most the rule's reach and the
+   pass reads the buffer once, so past `len(buf) / (reach + 8)` hits the pass is
+   the cheaper arm and it runs. That charges every attempt its worst case, which
+   most do not spend, and the direction is deliberate: over-charging costs
+   throughput on a buffer nobody has, and under-charging costs it on every
+   buffer, in the arm nothing measures.
+
 5. **Validate.** This is where precision comes from, and regex is not where it
    lives:
 
@@ -714,7 +753,7 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `description` | What the rule matches, in a few words. It reaches a terminal, so it is escaped like a path. |
 | `regex` | RE2. Compiled at startup; a rule that does not compile is a startup failure, not a skipped rule. |
 | `group` | Which capture group holds the candidate. Lets a rule capture a wider window than it reports. |
-| `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. |
+| `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. A keyword at the head of every match the rule can produce is what lets [the pipeline](#pipeline) run the rule at those positions instead of over the buffer; one further in still gates, and pays a full pass. |
 | `labels` | Word-boundary literals the candidate has to sit near, for the context-proximity check. Read after the match, so unlike `keywords` it gates nothing. |
 | `entropy` | Minimum Shannon bits per character over the captured group. Omitted means no floor. A floor above what the group can reach is a startup failure, not a quiet rule. |
 | `validators` | Names from the validator table above, all of which must pass. |
@@ -1291,7 +1330,10 @@ reads what is there.
 **The match is bounded even though the read is not, and that bound is what
 keeps this from being a regression.** Measured 2026-09-03 on a buffer carrying
 every keyword the shipped ruleset gates on, so nothing prefilters away: the raw
-pass runs at 6.8 MiB/s and crosses the 60-second hook timeout at about 410 MiB.
+pass ran at 6.8 MiB/s and crossed the 60-second hook timeout at about 410 MiB.
+[Pipeline step 4](#pipeline) has since moved that rate by 5.8x, which moves the
+crossing with it and leaves every figure below a larger margin than the one it
+was chosen against.
 Past that timeout the hook is killed and writes nothing at all, so an unbounded
 raw pass would take a buffer the skip reports in 44 ms and make it one nobody
 hears about — trading the notice for silence, which is the direction this
@@ -1539,8 +1581,10 @@ allowing silently, and the allow is what this whole file is about.
 reading and a deadline answers during, and three things walk past the first.
 Cost is not a function of size: [Q122](../queue/Q122.md) measured the same 64
 MiB at 9,746 MiB/s as binary, 1,055 MiB/s as text no rule gates on, and 6.5
-MiB/s as text carrying every keyword, so a cap tight enough to bound the third
-refuses the other two for nothing. A call adds up rather than arriving one file
+MiB/s as text carrying every keyword — the third now 32.84, which narrows the
+spread from 1,500x to 300x and leaves the argument where it was — so a cap
+tight enough to bound the third refuses the other two for nothing. A call adds
+up rather than arriving one file
 at a time — the same row has `cat` over four 128 MiB files at 78.1 seconds,
 with no file in it near any plausible cap. And a directory operand has no size
 to cap at all, which is what made this the section the directory-operand
@@ -1577,6 +1621,23 @@ process, which is the quantity the harness's 60 is charged against.
 The 128 MiB row is the control, and it is the one that says the deadline has not
 replaced the scanner: same verdict, same rule, either side. The 500 MiB row is
 the case the row was filed for.
+
+**Those sizes moved when the match loop stopped scanning the whole buffer for a
+rule whose keywords say where to look** ([step 4](#pipeline)). The same 500 MiB
+fixture, built the same way and driven on a built binary, now denies
+`aws-access-key-id` in 14.9–17.7s over four consecutive runs rather than
+blocking on the budget, and the in-process pair behind that is 32.84 MiB/s
+against 5.68 for the arm with no rule anchored, min of three in one process.
+The rows above are not re-taken here and cannot honestly be: they were taken on
+a quiet machine, and this one carried a load average of 72 while these runs
+were made — one such run did block at 45.046s on the same fixture, which is the
+measurement failing rather than a second answer.
+
+What the change moves is which fixture reaches the budget, not whether the
+budget fires. That half is driven by `TestAScanThatOverrunsItsBudgetBlocks`
+against a budget already spent, on all three surfaces, and is untouched here.
+A fixture that does reach the budget, and the table re-taken beside it, is
+[Q132](../queue/Q132.md).
 
 **What happens to that 68.130s under Claude Code is composed rather than
 observed, and the composition is the same one Q122 declined to make.** These are

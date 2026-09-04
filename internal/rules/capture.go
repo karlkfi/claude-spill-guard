@@ -70,7 +70,7 @@ func maxCaptureBytes(pattern string, group int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return maxBytes(sub), nil
+	return maxBytes(sub, byteValues), nil
 }
 
 // captureSymbols is how many distinct byte values group can draw on out of
@@ -134,7 +134,13 @@ func capture(re *syntax.Regexp, n int) *syntax.Regexp {
 // maxBytes walks one subexpression. An operator this does not name returns the
 // clamp, so a future RE2 operator over-estimates rather than silently reporting
 // a rule dead.
-func maxBytes(re *syntax.Regexp) int {
+//
+// limit is where the answer stops saying anything, and the two callers stop at
+// different places. The entropy check clamps at byteValues, past which a length
+// cannot raise the ceiling; the anchored path clamps at anchorReach, and reads
+// the clamp as "unbounded, or bounded past anywhere worth anchoring" -- so the
+// value it passes has to be one no bounded pattern it would accept can reach.
+func maxBytes(re *syntax.Regexp, limit int) int {
 	switch re.Op {
 	case syntax.OpNoMatch, syntax.OpEmptyMatch,
 		syntax.OpBeginLine, syntax.OpEndLine, syntax.OpBeginText, syntax.OpEndText,
@@ -144,7 +150,7 @@ func maxBytes(re *syntax.Regexp) int {
 		fold := re.Flags&syntax.FoldCase != 0
 		n := 0
 		for _, r := range re.Rune {
-			if n = clamp(n + runeBytes(r, fold)); n == byteValues {
+			if n = clamp(n+runeBytes(r, fold), limit); n == limit {
 				break
 			}
 		}
@@ -162,20 +168,20 @@ func maxBytes(re *syntax.Regexp) int {
 	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
 		return utf8.UTFMax
 	case syntax.OpCapture:
-		return maxBytes(re.Sub[0])
+		return maxBytes(re.Sub[0], limit)
 	case syntax.OpQuest:
-		return maxBytes(re.Sub[0])
+		return maxBytes(re.Sub[0], limit)
 	case syntax.OpStar, syntax.OpPlus:
-		return byteValues
+		return limit
 	case syntax.OpRepeat:
 		if re.Max < 0 {
-			return byteValues
+			return limit
 		}
-		return clamp(re.Max * maxBytes(re.Sub[0]))
+		return clamp(re.Max*maxBytes(re.Sub[0], limit), limit)
 	case syntax.OpConcat:
 		n := 0
 		for _, s := range re.Sub {
-			if n = clamp(n + maxBytes(s)); n == byteValues {
+			if n = clamp(n+maxBytes(s, limit), limit); n == limit {
 				break
 			}
 		}
@@ -183,13 +189,13 @@ func maxBytes(re *syntax.Regexp) int {
 	case syntax.OpAlternate:
 		n := 0
 		for _, s := range re.Sub {
-			if b := maxBytes(s); b > n {
+			if b := maxBytes(s, limit); b > n {
 				n = b
 			}
 		}
 		return n
 	}
-	return byteValues
+	return limit
 }
 
 // byteSet is the set of byte values a subexpression can emit, with left as what
@@ -313,9 +319,9 @@ func runeBytes(r rune, fold bool) int {
 	return n
 }
 
-func clamp(n int) int {
-	if n > byteValues {
-		return byteValues
+func clamp(n, limit int) int {
+	if n > limit {
+		return limit
 	}
 	return n
 }
