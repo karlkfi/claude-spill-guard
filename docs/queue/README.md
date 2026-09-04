@@ -98,9 +98,10 @@ Labels in use: `security` `tests` `docs` `infra` `bug` `hook` `rules` `scan`
 that ends in a decision rather than a next step, dropped in the same edit that
 writes the answer in, and `accruing` on one whose cost grows while it waits.
 
-**A version string is a release gate**, not a topic: `v0.2.0` marks an item the
-next tag waits for, and `docs/plan/v0.2.0.md` is what says why those items and
-not others. Cutting the tag deletes the plan doc and the labels with the rows.
+**A version string is a release gate**, not a topic: `vX.Y.Z` marks an item the
+next tag waits for, and `docs/plan/vX.Y.Z.md` is what says why those items and
+not others. Cutting the tag deletes the plan doc and the labels with the rows,
+which is why no such label is in use between releases.
 
 A blocked item's body opens with what it waits on — a link to the blocking item
 where the blocker is one, prose where it is not:
