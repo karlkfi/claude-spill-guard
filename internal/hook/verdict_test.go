@@ -65,9 +65,12 @@ func TestAReasonCapsTheFindingsItNamesAndStillCountsThemAll(t *testing.T) {
 // still must not spell what to type.
 //
 // The list is hand-kept, so a new verdict helper joins it by somebody
-// remembering. unread() has now been missed twice -- once when Q74 added it,
-// and again when this crossing was written against a trunk that did not yet
-// carry it -- and no gate said so either time.
+// remembering, and it has now been missed three times. unread() twice -- once
+// when Q74 added it, and again when this crossing was written against a trunk
+// that did not yet carry it -- and overran() once, added with the scan's
+// budget and caught in review rather than by anything here. No gate said so on
+// any of the three, which is the whole of Q89's argument and now has an
+// instance behind it.
 func TestNoReasonNamesTheOverride(t *testing.T) {
 	finding := []scan.Finding{{RuleID: "some-rule", Path: "f.env"}}
 	skips := []skipped{{"f.bin", scan.SkippedUTF32}}
@@ -78,7 +81,8 @@ func TestNoReasonNamesTheOverride(t *testing.T) {
 	// overridden call.
 	reasons := []string{blockedLead + unattended + found(finding)}
 	for _, lead := range []string{blockedLead, confirmLead} {
-		for _, body := range []string{found(finding), unread(skips), failed(errNoEvent), noReasonGiven} {
+		for _, body := range []string{found(finding), unread(skips),
+			failed(errNoEvent), noReasonGiven, overran(budget)} {
 			reasons = append(reasons, lead+body)
 		}
 	}

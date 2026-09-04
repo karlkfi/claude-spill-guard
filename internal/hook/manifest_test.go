@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The wiring Claude Code reads, in the fields a matcher is decided by.
@@ -131,6 +132,51 @@ func TestEveryEntryRunsTheLauncherWithTheHookSubcommand(t *testing.T) {
 	}
 	if seen == 0 {
 		t.Fatal("no hook commands were examined, so every assertion above was vacuous")
+	}
+}
+
+// The budget the scan runs under has to fit inside the timeout the manifest
+// gives this process, and nothing but this says so.
+//
+// The two numbers live in different files and neither reads the other: this
+// binary never opens hooks.json, and hooks.json cannot see a Go constant. What
+// happens when they disagree is silent in the direction the whole row was about
+// -- a budget at or above the timeout means the harness kills the process while
+// the scan is still running, whatever it was going to say is discarded, and the
+// call proceeds unscanned. So this asserts the manifest against the constant
+// rather than the other way round: hookTimeout is a copy, and a copy that has
+// stopped matching is what this catches.
+func TestTheBudgetFitsInsideTheTimeoutTheManifestGives(t *testing.T) {
+	wiring := loadWiring(t)
+
+	seen := 0
+	for event, entries := range wiring.Hooks {
+		for i, entry := range entries {
+			for _, h := range entry.Hooks {
+				seen++
+				if got := time.Duration(h.Timeout) * time.Second; got != hookTimeout {
+					t.Errorf("%s %s entry %d gives this process %s, and the budget "+
+						"is picked against %s", manifestPath, event, i, got, hookTimeout)
+				}
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no hook entries were examined, so every assertion above was vacuous")
+	}
+
+	if budget >= hookTimeout {
+		t.Fatalf("the budget is %s against a %s timeout, so a scan that uses all "+
+			"of it is killed before it can block", budget, hookTimeout)
+	}
+	// A margin the verdict cannot be written inside is the same defect wearing
+	// a smaller number. Measured: the launcher, this binary and a trivial
+	// payload are milliseconds, and the write after the deadline fires is less
+	// than one. A second is orders of magnitude past both and is here so that
+	// the assertion is about the shape rather than about the measurement.
+	if hookTimeout-budget < time.Second {
+		t.Errorf("the budget leaves %s of the timeout, which is not long enough "+
+			"to be sure of writing a verdict in", hookTimeout-budget)
 	}
 }
 
