@@ -1,6 +1,6 @@
 {
   "name": "spill-guard",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.1",
   "description": "Blocks secrets and PII before they reach the API: scans the prompt, a Read path, a Bash command, and the files each one would open, then denies the call rather than letting it cross.",
   "author": {
     "name": "Karl Isenberg",
