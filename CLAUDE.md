@@ -206,6 +206,22 @@ the tools do; `os.Lstat` cannot tell a link to a fifo from a link to a file. A
 command with no row contributes no operands, which is the design's stated
 limitation rather than a gap.
 
+**A directory operand is refused rather than walked, and that is settled.** Do
+not re-derive it from the walk time: that is the reading the question started
+with and it is not what decided it. A walk of `docs/` here is 13 ms, of a real
+checkout 3.1 s, of `~/go/pkg/mod` 94 s, and of one large repo unfinished at
+120 s — a spread that says the cost and not the answer. What decides it is that
+**a walk reads a different file set from the one the command would send**:
+ripgrep honours `.gitignore` and `.ignore` and skips hidden files, `grep -r`
+does none of that, so over one checkout `rg --files` reports 211 where a walk
+finds 11,815 and 1,132 findings in them. Blocking a call over content that was
+never going to cross is a false positive, and precision is the product. Making
+a walk agree means re-implementing each reader's traversal — `--glob`,
+`--type`, `--max-depth`, `--include`, `--exclude-dir`, `-r` against `-R` —
+which is the class this repo refuses by name for shell parsing, and there is no
+shortcut: learning which files a command reads means running it, and `os/exec`
+is forbidden across this build graph.
+
 The prompt surface is read the same way and by the same shape, and what it does
 not cover is named below rather than counted — a count here has already gone
 stale twice in a day, because every drive of a new token shape can add one. A

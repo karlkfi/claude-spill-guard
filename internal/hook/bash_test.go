@@ -288,9 +288,11 @@ func TestAnIndirectlyNamedFileBlocks(t *testing.T) {
 // error said `is a directory`; one reason for every mode would have been less
 // to go on than the tree already had.
 //
-// Pinned because the wording is the decision. Whether this should walk the
-// tree rather than refuse is Q95 and is open; a change that made the reason
-// generic again would close nothing and would read as tidying.
+// Pinned because the wording is the decision, and the decision is taken:
+// walking the tree instead was measured and refused, because a walk reads a
+// different file set from the one the command would send. bashTargets carries
+// the argument. A change that made the reason generic again would close
+// nothing and would read as tidying.
 func TestADirectoryOperandSaysSoAndSaysWhatToDoInstead(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
