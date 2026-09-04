@@ -75,6 +75,42 @@ func TestTheGenericStepReportsWhatTheNamedPairDoesNot(t *testing.T) {
 	}
 }
 
+// indentedOnly is the shipped rule with the leading whitespace made mandatory,
+// so it matches what the widening newly admits and nothing the rule reported
+// before it. Compiled here and shipped nowhere, for the reason genericStep
+// above is compiled: the corpus is where the claim "the ruleset stays quiet"
+// is settled, and a corpus holding no instance of a shape returns the same
+// zero for a candidate that is right about it and one that is arbitrarily
+// wrong. Read over both halves when Q76 was filed, this pattern gave 0 and 0 --
+// which is what made three deliberately varied candidates agree.
+var indentedOnly = regexp.MustCompile(
+	`(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)` +
+		`[\r\n]+(?:[ \t]*(?:Proc-Type|DEK-Info):[^\r\n]*[\r\n]+)*[ \t]+[A-Za-z0-9+/=]{32,}`)
+
+func TestTheCorpusHoldsTheIndentedShape(t *testing.T) {
+	control := []rules.Rule{{
+		ID:          "private-key-block-indented-only",
+		Family:      rules.Credential,
+		Description: "what the indentation widening newly admits, as a control",
+		Regex:       indentedOnly,
+		Enabled:     true,
+	}}
+	clean := walk(t, "clean", control)
+	planted := walk(t, "planted", control)
+	t.Logf("indented bodies only: %d on the clean corpus, %d on the planted one",
+		len(clean.findings), len(planted.findings))
+
+	if len(planted.findings) == 0 {
+		t.Error("no planted file carries an indented body, so the clean corpus's " +
+			"zero says nothing about the indentation axis -- which is the reading " +
+			"that let the axis go unexercised in the first place")
+	}
+	if len(clean.findings) != 0 {
+		t.Errorf("an indented body is reportable in %d clean file(s):\n%s",
+			len(clean.findings), report(clean.findings))
+	}
+}
+
 // pemCase is one layout and whether the shipped rule reports it.
 type pemCase struct {
 	name string
@@ -100,6 +136,22 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 		{"Proc-Type alone, with no DEK-Info after it",
 			"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n\n" + pemBody + "\n", true},
 
+		// The body's own indentation is what decides these, not the
+		// header's: a key pasted into a YAML block scalar or an indented
+		// Markdown fence carries whitespace in front of every line, and the
+		// encryption headers of an encrypted one carry it too.
+		{"indented, as a Kubernetes secret's block scalar puts it",
+			"tls.key: |\n  -----BEGIN RSA PRIVATE KEY-----\n  " + pemBody + "\n", true},
+		{"indented RFC 1421, so the encryption headers are indented as well",
+			"tls.key: |\n  -----BEGIN RSA PRIVATE KEY-----\n  Proc-Type: 4,ENCRYPTED\n" +
+				"  DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n\n  " + pemBody + "\n", true},
+		{"the header indented and the body not",
+			"    -----BEGIN RSA PRIVATE KEY-----\n" + pemBody + "\n", true},
+		{"the body indented and the header not",
+			"-----BEGIN RSA PRIVATE KEY-----\n    " + pemBody + "\n", true},
+		{"indented with tabs rather than spaces",
+			"\t-----BEGIN RSA PRIVATE KEY-----\n\t" + pemBody + "\n", true},
+
 		{"prose quoting a header inline",
 			"An unencrypted PKCS#1 key opens with `-----BEGIN RSA PRIVATE KEY-----`\n" +
 				"and a PKCS#8 key with `-----BEGIN PRIVATE KEY-----`.\n", false},
@@ -108,6 +160,16 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 				"blank line, then lines of\n\n" + pemBody + "\n", false},
 		{"a footer with no header",
 			pemBody + "\n-----END RSA PRIVATE KEY-----\n", false},
+		// testdata/corpus/clean/tls-runbook.md, verbatim, which displays both
+		// the header and a body line indented by four with prose between them.
+		// It is what stops the leading-whitespace arms above being written as
+		// a window over anything printable, so it is the negative that has to
+		// hold once those arms exist.
+		{"a displayed header, prose under it, and an indented body line",
+			"Laid out, with the body cut to a single line:\n\n" +
+				"    -----BEGIN RSA PRIVATE KEY-----\n\n" +
+				"then the encryption headers if the key has any, then a blank line, then lines\n" +
+				"of\n\n    " + pemBody + "\n\nuntil the footer.\n", false},
 	}
 
 	// Appended rather than listed. Every shape that separates the two steps has

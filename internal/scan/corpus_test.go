@@ -27,7 +27,7 @@ const cleanFindings = 0
 const (
 	minCleanFiles   = 13
 	minCleanBytes   = 12 << 10
-	minPlantedFiles = 12
+	minPlantedFiles = 13
 )
 
 // loadShipped is the ruleset as the binary will load it, no project overrides.
@@ -196,7 +196,13 @@ var planted = map[string]string{
 	// the body -- the shape the body-line clause missed until it learned to
 	// step over them.
 	"private-key-block-rfc1421.pem": "private-key-block",
-	"jwt.txt":                       "jwt",
+	// And a third, for the axis neither of the two above varies: the body
+	// indented, as a block scalar in a Kubernetes secret indents it. This one
+	// is the encrypted layout as well, because the encryption headers carry
+	// the same leading whitespace the body does -- so a widening that admits
+	// only an indented body leaves this file unreported.
+	"private-key-block-indented.yaml": "private-key-block",
+	"jwt.txt":                         "jwt",
 }
 
 func TestEveryPlantedSecretIsFoundExactlyOnce(t *testing.T) {

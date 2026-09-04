@@ -39,7 +39,7 @@ carried by a planted fixture in
 | `stripe-live-secret-key` | `sk_live_` `rk_live_` | live keys only — see below |
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
-| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them |
+| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not |
 | `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, floor 3.5, and no published sample signature |
 
 **The entropy floors are what make a *padded* placeholder quiet.** A repository
@@ -69,21 +69,23 @@ in every match. Capturing the secret tail lets the floor drop
 `private-key-block` matches a PEM header, which is a fixed string, and a floor
 over a constant is not a check — so the rule requires one base64 body line
 after the header, stepping over `Proc-Type:` and `DEK-Info:` if the key is an
-RFC 1421 encrypted one. Prose quoting `-----BEGIN RSA PRIVATE KEY-----` to
-explain what one looks like carries no such line and is not reported. That was
+RFC 1421 encrypted one, and over leading whitespace in front of either. Prose
+quoting `-----BEGIN RSA PRIVATE KEY-----` to explain what one looks like carries
+no such line and is not reported. That was
 not hypothetical: the paragraph you are reading, and the row that filed the
 problem, were both findings until the clause landed. Scanned over every tracked
 file, the rule went from 3 hits to 1, the one being its own planted fixture.
 
 Do not quote that pair, and do not trust the number in this paragraph either.
-With the clause removed the same scan read 8 on 2026-08-27 and reads 21 at the
-commit you are looking at — twelve of those twenty-one are `pemblock_test.go`,
-which exists to exercise this rule. The clause-free count measures how much
-prose about PEM headers the repository holds, not how noisy the rule is, and it
-climbs every time somebody documents it: 19 while this branch was being
-reviewed, 21 after review asked for two more cases. The shipped count stays at
-its planted fixtures, 2 of them. The reading that holds is the gated one
-below.
+With the clause removed the same scan read 8 on 2026-08-27 and reads 27 at the
+commit you are looking at — eighteen of those twenty-seven are
+`pemblock_test.go`, which exists to exercise this rule. The clause-free count
+measures how much prose about PEM headers the repository holds, not how noisy
+the rule is, and it climbs every time somebody documents it: 19 while that
+branch was being reviewed, 21 after review asked for two more cases, 27 once
+the indentation arms below brought six more and a third fixture. The shipped
+count stays at its planted fixtures, 3 of them. The reading that holds is the
+gated one below.
 
 [`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
 is what holds that down. It quotes four private-key headers inline and displays
@@ -102,7 +104,8 @@ window between header and body, and the corpus refuses it: at 200 bytes it
 fires on the runbook above, which lays out a header, explains the format in
 prose, and shows a body line. Naming the two fields admits every encrypted key
 those two toolchains emit and readmits no prose, because a prose line is not
-`Proc-Type:` or `DEK-Info:` and the body still has to begin a line.
+`Proc-Type:` or `DEK-Info:` and the body still has to be the first thing on its
+line.
 
 Widening to any `Name: value` line was measured too and is quiet over the whole
 corpus, which is why this originally shipped as a judgement call. It is not one.
@@ -137,6 +140,40 @@ The clause's other cost is not live: a key whose header and body reach the
 scanner in different buffers reports nothing, and nothing chunks a file today —
 `scan.Buffer` takes the whole thing — so it is a constraint on whatever calls
 it rather than a gap.
+
+**Leading whitespace is allowed in front of the body and in front of those two
+fields, which is a second widening with the same cost.** A key pasted into a
+YAML block scalar or an indented Markdown fence carries whitespace on every
+line, and `kubectl create secret tls` writes exactly that — so the commonest
+way a key reaches a file somebody then `cat`s was the one shape the clause
+missed. It is the *body's* indentation that decides it and never the header's:
+the header may already sit anywhere on a line, so an indented header over an
+un-indented body was reported before this and an un-indented header over an
+indented body was not.
+
+Both places need it, not one. Putting `[ \t]*` only in front of the body leaves
+an indented encrypted key missed, because that key's `Proc-Type:` and
+`DEK-Info:` lines are indented too and the step over them never engages. Driven
+against the shipped tree: the half-fix leaves
+[`private-key-block-indented.yaml`](../testdata/corpus/planted/private-key-block-indented.yaml)
+reporting nothing, which is why that fixture is the encrypted layout rather
+than the plain one.
+
+What holds the widening down is the same runbook and the same reason. Its "What
+the parts look like" section displays an indented header and an indented body
+line with prose between them, and prose is not whitespace — so `[ \t]*` cannot
+cross it where a bounded window over printable bytes would. The narrow form and
+the 200-byte window agree on every key and disagree there, which is the whole
+of why one shipped.
+
+`TestTheCorpusHoldsTheIndentedShape` in
+[`pemblock_test.go`](../internal/scan/pemblock_test.go) is the guard on the
+*corpus* rather than on the rule. It compiles the clause with the whitespace
+made mandatory, so it matches only what this widening newly admits, and demands
+a planted file it can find and no clean one. When Q76 was filed that reading
+was 0 and 0 — three deliberately varied candidates agreeing because the corpus
+held no instance of the shape at all, which is a finding about the corpus and
+not about the candidates.
 
 **Two rules carry a second check, because their vendor publishes a realistic
 example.** An entropy floor drops a padded placeholder and admits a plausible

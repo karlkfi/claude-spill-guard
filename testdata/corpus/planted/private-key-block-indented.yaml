@@ -1,0 +1,20 @@
+# Support ticket 5108 again, this time as the manifest the reporter had already
+# applied. The key is the encrypted one from private-key-block-rfc1421.pem --
+# same fabricated body, base64 of ordinary ASCII -- indented by four inside a
+# block scalar, which is where `kubectl create secret tls` and every helm chart
+# that templates one put it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gateway-tls
+  namespace: edge
+type: kubernetes.io/tls
+stringData:
+  tls.key: |
+    -----BEGIN RSA PRIVATE KEY-----
+    Proc-Type: 4,ENCRYPTED
+    DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9
+
+    QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
+    bW5vcHFyc3R1dnd4eXpBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWjAxMjM0NTY3
+    -----END RSA PRIVATE KEY-----
