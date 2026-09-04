@@ -222,6 +222,23 @@ which is the class this repo refuses by name for shell parsing, and there is no
 shortcut: learning which files a command reads means running it, and `os/exec`
 is forbidden across this build graph.
 
+**And there is a third answer on that surface that matches nothing.** `env`
+writes values that exist only in the tool process, so at `PreToolUse` there is
+no buffer to open and no rule can help; the call is refused on its shape
+instead, and the reason carries the filtered form so the model applies it and
+nobody is prompted. The bar it had to clear is that it must not fire on the
+careful form, because that is what sessions already write — driven through the
+shipped `envDumped`, 0 refusals over 21,252 real `Bash` calls in the week to
+2026-09-04, against 15 of 15 on planted dumps, with 5,380 real segments whose
+command name the rule knows. What decides it is position in the pipeline rather
+than the command name: `env | cut -d= -f1` has a stage after it and `env` does
+not. Only the bare form of each command, and `env -0` is a stated under-fire
+rather than a hole to widen into — firing on the careful form would be the
+defect. Do not reach for `updatedInput`: rewriting the command into a safe one
+would put a command nobody issued into the transcript, which is the record every
+measurement here rests on. `docs/design/README.md`, *A shape refused, where
+there is nothing to match*, has the sweep and its positive control.
+
 The prompt surface is read the same way and by the same shape, and what it does
 not cover is named below rather than counted — a count here has already gone
 stale twice in a day, because every drive of a new token shape can add one. A
@@ -345,9 +362,11 @@ the shipped set turned all three allowing arms into blocks, and the report read
 `7 of 7 arms as expected. This binary scans and blocks.` at exit 0. That is a
 precision regression -- the thing this repo calls the product -- invisible to
 the check a user runs. `anomalous` is a want no arm may hold, so it disagrees
-with every arm, and the same mutation on today's nine reads `3 of 9 arms did
-not do what they must` at exit 1 — re-taken 2026-09-03, where the probe rule
-needs keywords or the loader refuses it before any arm runs. It cannot spawn
+with every arm, and the same mutation on today's eleven reads `4 of 11 arms did
+not do what they must` at exit 1 — re-taken 2026-09-04, where the probe rule
+needs keywords or the loader refuses it before any arm runs, and its keywords
+have to reach every allowing arm at a word boundary or the report under-counts
+and reads as a partial pass. It cannot spawn
 the launcher: `os/exec` is forbidden across the build graph, so the launcher is
 covered by *how* it is invoked, and running `run-spill-guard.cmd selftest` puts
 the resolution order in the path and reports the binary it found. Whether

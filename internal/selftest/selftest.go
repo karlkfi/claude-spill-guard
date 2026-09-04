@@ -294,6 +294,37 @@ func arms(planted, quiet, undecodable, binary string) []arm {
 			},
 		},
 		{
+			// The shape deny, which is the one refusal here with no buffer
+			// behind it at all: `env` opens no file and names no secret, and
+			// the values it would write exist only in the tool process. So
+			// this arm blocks on what the call would do rather than on
+			// anything scanned, and it is the only arm that can say that path
+			// is wired.
+			name: "a Bash command that dumps the environment",
+			want: blocks,
+			by:   "whole environment",
+			payload: map[string]any{
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "Bash",
+				"tool_input":      map[string]any{"command": "env"},
+			},
+		},
+		{
+			// And the arm that decides whether that rule is worth having. The
+			// filtered form is what sessions already write -- 21,252 Bash
+			// calls in a week of this machine's transcripts, none of them a
+			// bare dump -- so a build that denies here is one that teaches the
+			// session to stop filtering. An allowing arm is the only kind that
+			// can see it.
+			name: "a Bash command that filters the environment",
+			want: allows,
+			payload: map[string]any{
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "Bash",
+				"tool_input":      map[string]any{"command": "env | cut -d= -f1"},
+			},
+		},
+		{
 			// A verdict with no finding behind it, which nothing else here
 			// reaches. A UTF-32 mark is a declaration this build cannot
 			// decode, so hook.Run takes the `len(skips) > 0` arm that sits

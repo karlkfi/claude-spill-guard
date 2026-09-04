@@ -107,9 +107,13 @@ worth having and neither complete:
    and this asks what is about to leave the machine, which is the reads.
 
 Neither catches a command that synthesizes a secret at runtime. That is a
-stated limitation, not a gap to close later, and `PostToolUse` does not close it
-either: the measurement below rules out catching `Bash` after the fact. These
-two are the whole answer for `Bash`, not a fast path in front of one.
+stated limitation of content matching rather than a gap to close later, and
+`PostToolUse` does not close it either: the measurement below rules out catching
+`Bash` after the fact. What closes part of it is a third answer that matches
+nothing at all — [refusing the call on its shape](#a-shape-refused-where-there-is-nothing-to-match),
+for the case where the bytes exist only in the tool process and there is no
+buffer anywhere to open. The three are the whole answer for `Bash`, and none of
+them is a fast path in front of another.
 
 ### `PostToolUse` cannot withhold a result
 
@@ -141,9 +145,95 @@ append a warning about content the model already has. It cannot unsend it.
 warning**, which is close to worthless for this tool's purpose and must not be
 counted as a control. Everything spill-guard actually prevents has to be
 prevented at `UserPromptSubmit` or `PreToolUse`. For `Bash` that means the
-command string and its resolved file operands are the entire surface, so the
-segmentation layer this design ports from workspace-guard is load-bearing rather
-than an optimisation.
+command string, its resolved file operands and the shapes refused below are the
+entire surface, so the segmentation layer this design ports from workspace-guard
+is load-bearing rather than an optimisation — all three answers are read off it.
+
+### A shape refused, where there is nothing to match
+
+Both answers above look for a secret's bytes. `env` has none to look at. The
+values live in the tool process's own environment, so at `PreToolUse` there is
+no buffer on disk for a rule to open, and `PostToolUse` cannot withhold the
+result once the command has run. A scanner that only matches values is
+structurally blind to it, and no rule added to `rules/spill-guard.json` changes
+that.
+
+So the third answer refuses the call on what it would do. `env` blocks, and the
+reason carries the filtered form — `printenv PATH HOME` for the variables you
+want, `${FOO:+set}` to check one is set without printing it, `env | cut -d= -f1`
+for the names alone. A deny rather than an ask, because the model applies what
+the reason names and a human is not interrupted.
+
+**The threat model is accident, not an adversary.** Say it in the reason and
+say it here, because it is what makes the deny proportionate rather than
+theatre. A session that wants a value writes `printenv AWS_SECRET_ACCESS_KEY`
+and gets it; nothing here stops that, and this repo has already settled that a
+control the scanned content can talk its way past is worthless — the
+[no-in-band-bypass rule](#output-discipline) is the same argument one level
+down. What a shape deny stops is the ordinary case: a session reaching for
+`env` while debugging a `PATH` problem, and writing every variable into a
+transcript that keeps them. Measured 2026-08-31 on one machine, a `Bash` tool
+process carries 58 environment variables, and `CLAUDE_CODE_MESSAGING_TOKEN` is
+one of them — put there by the harness rather than by any config, so nothing a
+user edits removes it.
+
+**It may not fire on the careful form, and that is the bar it had to clear.**
+The careful form is what sessions already write, so a rule keyed on the command
+name would deny the very thing its own reason recommends and teach the session
+to stop filtering. Measured over 21,252 `Bash` calls in 303 transcript files on
+this machine, the seven days to 2026-09-04, driven through the shipped
+`envDumped` rather than through a probe written to describe it:
+
+| | |
+|---|---|
+| Calls swept | 21,252, of which 2 could not be segmented |
+| Segments whose command this rule knows | 5,380 — `python3` 5,266, `export` 40, `env` 35, `set` 17, `python` 17, `node` 2, `printenv` 1, `declare` 1, `typeset` 1 |
+| Refused | **0** |
+| The same sweep with 15 synthetic dumps appended | 15 |
+
+The last row is the control. A zero over a sweep that has never been seen to
+fire says nothing, and this one fires on every planted case while declining
+5,380 real ones.
+
+**What decides it is position in the pipeline, not the command name.** `env |
+cut -d= -f1` segments into a bare `env` and a `cut`, so nothing in the `env`
+segment's own tokens tells it apart from a dump. What does is whether anything
+consumes its output: a stage after it is being written to, and nothing after it
+means the tool result is. That is what `Segment.Pipe` is read for. Redirects are
+not consulted, because `Segment.Redirects` records the target and not the
+descriptor — reading any redirect as a filter would wave through `env
+2>/dev/null`, and `env > vars.txt` is refused instead.
+
+**Only the bare form of each command**: `env`, `printenv`, `set`, `export`,
+`export -p`, `declare -p`, `typeset -p`, and an inline `python`/`node` script
+naming `os.environ` or `process.env` without subscripting it. `env -0` still
+dumps and is not refused, and neither is `os.environ.items()`. Widening to
+catch them costs the precision above — every option this learns to see is
+another way to be wrong about a form somebody wrote deliberately — and
+`.keys()` sits on the other side of that line and is genuinely careful. The
+accident is the bare one. Under-firing on a deliberate spelling is a stated
+limitation; firing on `env | cut -d= -f1` would be a defect.
+
+**Not `updatedInput`.** `PreToolUse` accepts it alongside the decision, so the
+hook could rewrite `env` into `env | cut -d= -f1` and allow it silently. Refuse
+that. Every measurement in this document was taken by driving a real hook and
+reading what reached a transcript, so the record saying what ran is what the
+whole verification posture rests on. A deny that names the fix costs one turn
+and leaves it honest.
+
+**The override reaches it like any other block.** `SPILL_GUARD_OVERRIDE=<why>
+env` is a confirmation rather than an allow, which is the right shape for a
+control whose threat model is accident: the session that means it says why, and
+a person is told before the environment leaves the machine.
+
+**What this does not do is guard a path.** The row that filed it carried a
+second half — refusing a read of `~/.claude/settings.json`, `.env`,
+`~/.aws/credentials` and the rest of that class — and that half is not here. It
+is reachable by content matching where this one is not, it is capped by
+`internal/readers` so an interpreter read of the same path is invisible to it,
+and its own negative corpus is unmeasured: 15 guarded-reader calls at
+`~/.claude/settings.json` in the week the row measured, and nothing saying
+whether the rule would have denied all 15. It has its own row.
 
 ### What gets scanned is the crossing, not the hop
 
