@@ -54,21 +54,26 @@ and the model's context.
 - **Not every reader in the class it defends.** v1 covers the three that are
   measured — a `Read` path, a `Bash` reader's resolved operands, and an
   `@path` in a prompt. The class is
-  [wider than those](#what-gets-scanned-is-the-crossing-not-the-hop): an MCP
-  server's file reader, a search tool that returns matching lines, and a skill
-  or subagent load are each a hook input naming a path whose result comes back
-  as content, and none of them has been driven. Two things have to be measured
-  per member before it can be covered, and neither is guessable — whether a
-  hook sees the call at all, and whether the hook can bound what the call
-  would return. A search over a tree cannot be bounded by opening one file.
+  [wider than those](#what-gets-scanned-is-the-crossing-not-the-hop), and
+  [driving the rest of it](#the-rest-of-the-class-driven) leaves two members
+  out for two different reasons. A search tool returns lines from files it
+  chooses, so nothing a `PreToolUse` hook opens can bound it. A skill load
+  carries a name rather than a path, so nothing here can resolve what it would
+  read. An MCP server's file reader is the shape most likely to be a third and
+  has not been driven.
 
-  **Do not close that gap with a list of tool names.** The tool set is not
-  fixed: a `claude -p` session driven on 2026-08-28 announced nineteen
-  deferred tools in one `deferred_tools_delta`, and a run asked to use `Grep`
-  reached `ToolSearch` twice and never issued a `Grep` call. A matcher of `*`
-  on `PreToolUse` sees every tool including ones installed later, so the
-  member test is a payload shape — a field naming a path — rather than a name
-  somebody has to remember to add.
+  **A subagent load is not one of them.** It was named here as an uncovered
+  member and it is covered: a subagent's own tool calls fire the same hooks
+  the parent's do, measured.
+
+  **Do not close what is left with a list of tool names, and do not close it
+  with a payload shape either.** The tool set is not fixed — nineteen deferred
+  tools announced in one `deferred_tools_delta` on 2026-08-28, fifteen on
+  2026-09-04 — and a `PreToolUse` matcher of `*` does see every tool including
+  ones installed later. What fails is the field test that matcher was to
+  carry: it misses the one member the drive found, because `Skill` names no
+  path at all. Membership is an argument about what the call returns, and that
+  argument is per tool.
 
 ## The hook surface
 
@@ -370,6 +375,89 @@ than hiding it.
 **None of this is a claim that the boundary class is settled.** Six codepoints
 have been driven. The rest of the class is not, and the way to extend it is to
 drive more rather than to reason from whichever standard looks authoritative.
+
+### The rest of the class, driven
+
+The three surfaces above are instances. The class is *any hook input naming a
+filesystem path whose result comes back as content*, and closing it with a list
+of tool names goes stale in silence: a tool installed after the list was
+written is waved through, and nothing reports that a call went unscanned. The
+tool set moves. One bare `claude -p` session announced nineteen deferred tools
+in a single `deferred_tools_delta` on 2026-08-28 and another announced fifteen
+on 2026-09-04.
+
+The replacement this repo proposed was a payload test — a `tool_input` field
+whose value is a filesystem path, under a `PreToolUse` matcher of `*`. Driving
+it says the test is wrong in both directions, and the expensive error is not
+the one the proposal expected.
+
+Measured 2026-09-04 against Claude Code 2.1.251 on darwin/arm64. A hook logging
+raw stdin was wired to `PreToolUse` with a matcher of `*` and to
+`UserPromptSubmit`, in a throwaway project holding one skill and two files, and
+every verdict below is read from the session transcript the payload's own
+`transcript_path` names rather than from what the run printed. Ten arms were
+driven and seven tools reached the hook:
+
+| Tool | `tool_input` keys | In the class |
+|---|---|---|
+| `Read` | `file_path` | **Yes**, and covered |
+| `Bash` | `command`, `description` | **Yes**, and covered |
+| `Skill` | `skill` | **Yes**, and the payload names no path |
+| `Agent` | `subagent_type`, `description`, `prompt`, `run_in_background` | No — the hook fires on the subagent's own calls |
+| `ToolSearch` | `query`, `max_results` | No — it searches tool schemas |
+| `WebFetch` | `url`, `prompt` | No — not the filesystem |
+| `Write` | `file_path`, `content` | No — model-composed, and [already crossed](#what-gets-scanned-is-the-crossing-not-the-hop) |
+
+**A skill load is a member, and it names no path.** `Skill`'s whole
+`tool_input` is `{"skill": "probe-skill"}`. The file's text then arrives as an
+injected `user` turn opening `Base directory for this skill:`, and no
+`UserPromptSubmit` fires for that turn — the arm logged two records, the
+prompt and the `Skill` call, and nothing else. So that call is the only hop
+where anything can decide, and it is an uncrossed one: with the same prompt in
+the same directory and only the hook's verdict differing, a marker planted in
+the skill body crossed once where the hook allowed and zero times where it
+denied.
+
+The payload test cannot see any of that. What the payload carries is a name
+the harness resolves, and resolving it back is not a field-level operation:
+`probe-skill` resolved under the project's own `.claude/skills/`, and `brevity`
+in the same session resolved to `/Users/karl/.claude/skills/brevity`, outside
+the project root. A resolver here would have to reproduce a search order this
+repo has not driven — and getting it wrong reports clean on a file nothing
+opened, which is the failure this project indicts its predecessor for, while
+failing closed on it blocks every skill invocation in every session. **So the
+member stays out, and the reason is resolution rather than bounding.**
+
+**A subagent load is not a member and needs nothing.** `Agent` carries a prompt
+the model composed, so its own payload has already crossed. What the subagent
+reads afterwards is covered, because its tool calls fire the same hooks: one
+`Explore` agent issued five `Bash` calls and all five reached the hook, under
+the parent's `session_id` and carrying an `agent_id` the parent's own calls do
+not have. [What this is not](#what-it-is-not) named a skill or subagent load as
+one uncovered member. It is two, and only one of them was ever uncovered.
+
+**The search tool is the member that cannot be bounded, and this machine has
+none.** A search takes a pattern and a root and returns matching lines from
+files it chooses, so bounding it means scanning the tree, which is not
+something a `PreToolUse` hook can do per call. The drive does not touch that
+argument. What it adds is that neither `Grep` nor `Glob` was in the tool set at
+all: a session asked to search file contents reached `ToolSearch` for
+`select:Grep,Glob`, got nothing back, and reported it had neither. The search
+affordance that is present is the `Explore` subagent, which is the paragraph
+above.
+
+**What a fourth member has to establish.** An MCP server's file reader is
+undriven and is the shape most likely to be one. Three readings settle a
+candidate, in this order, because each is cheap only where the one before it
+came back yes:
+
+1. **Does the hook see the call at all?** A matcher of `*` and a stdin log.
+2. **Has the content crossed already?** Only what the hook can open for itself
+   is stoppable, and a deny that leaves the marker in the transcript says it
+   was not.
+3. **Can the hook bound what the call would return?** One file is bounded. A
+   tree walk is not, and neither is a name the harness resolves by a rule
+   nobody here has driven.
 
 ## Pipeline
 
