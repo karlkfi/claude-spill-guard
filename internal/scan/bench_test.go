@@ -39,8 +39,9 @@ const (
 	minBenchFiles = 100
 )
 
-// benchCorpus is every text file under benchDirs, concatenated.
-func benchCorpus(tb testing.TB) []byte {
+// benchCorpus is every text file under benchDirs, concatenated, and how many
+// of them there were.
+func benchCorpus(tb testing.TB) ([]byte, int) {
 	tb.Helper()
 	var buf bytes.Buffer
 	files := 0
@@ -68,27 +69,24 @@ func benchCorpus(tb testing.TB) []byte {
 		tb.Fatalf("the corpus is %d bytes in %d files, under the floor of %d in %d",
 			buf.Len(), files, minBenchBytes, minBenchFiles)
 	}
-	return buf.Bytes()
+	return buf.Bytes(), files
 }
 
 // The benchmark's corpus is a fixture like any other, and one nobody checks
-// drifts. This is what pins the floors, and it logs what the design doc quotes.
+// drifts. This is what pins the floors, and it logs the size the design doc
+// describes.
+//
+// The count comes back from benchCorpus rather than from a second walk, so that
+// both halves of the line describe the same population. A walk counting every
+// file counts what the corpus filtered out, and that set is not a property of
+// the commit: an ignored build artifact such as scripts/__pycache__ adds a file
+// and no bytes, so two machines at the same commit report different counts.
+// Measured 2026-09-04: two runs of the old line at one commit reported 175 and
+// 174 files on identical bytes, which is what a `.pyc` under scripts/ does to
+// it. The filtered count is 174, and it matches `git ls-files` over benchDirs.
 func TestTheBenchmarkCorpusIsRealAndBigEnough(t *testing.T) {
-	buf := benchCorpus(t)
-	files := 0
-	for _, dir := range benchDirs {
-		err := filepath.WalkDir(filepath.Join("../..", dir),
-			func(path string, entry os.DirEntry, err error) error {
-				if err == nil && !entry.IsDir() {
-					files++
-				}
-				return err
-			})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Logf("benchmark corpus: %d bytes (%.2f MB) over %d files under %v",
+	buf, files := benchCorpus(t)
+	t.Logf("benchmark corpus: %d bytes (%.2f MB) over %d text files under %v",
 		len(buf), float64(len(buf))/1e6, files, benchDirs)
 }
 
@@ -157,7 +155,7 @@ func benchArms(b *testing.B, rule rules.Rule, buf []byte) {
 // `sk-` or one `eyJ` clears the prefilter and pays a whole pass for it.
 func BenchmarkRule(b *testing.B) {
 	ruleset := loadShipped(b)
-	corpus := benchCorpus(b)
+	corpus, _ := benchCorpus(b)
 	planted := append(append([]byte(nil), corpus...),
 		"\nAKIA ghp_ github_pat_ xoxb- sk_live_ sk- AIza\n"...)
 
@@ -199,7 +197,7 @@ func BenchmarkRuleset(b *testing.B) {
 		b.Fatal("no shipped rule has an Anchor, so both arms here are the same one")
 	}
 
-	corpus := benchCorpus(b)
+	corpus, _ := benchCorpus(b)
 	planted := append(append([]byte(nil), corpus...),
 		"\nAKIA ghp_ github_pat_ xoxb- sk_live_ sk- AIza eyJ\n"...)
 
