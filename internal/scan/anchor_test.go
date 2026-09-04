@@ -316,31 +316,38 @@ func TestTheDifferentialCatchesAWrongCandidateLoop(t *testing.T) {
 // because a rule that quietly stops getting it loses the whole change with
 // nothing failing.
 func TestWhichShippedRulesRunFromTheirKeywordPositions(t *testing.T) {
-	want := map[string]bool{
-		"aws-access-key-id":       true,
-		"github-token":            true,
-		"github-fine-grained-pat": true,
-		"slack-token":             true,
-		"stripe-live-secret-key":  true,
-		"openai-api-key":          true,
-		"google-api-key":          true,
+	// Reach is pinned beside the boolean because the two fail differently. A
+	// rule losing its Anchor is loud -- the boolean flips. A rule whose Reach
+	// moves keeps the boolean and changes the budget under it, which costs
+	// throughput silently, so an unpinned Reach is a regression nothing sees.
+	want := map[string]struct {
+		anchored bool
+		reach    int
+	}{
+		"aws-access-key-id":       {true, 20},
+		"github-token":            {true, 40},
+		"github-fine-grained-pat": {true, 101},
+		"slack-token":             {true, 95},
+		"stripe-live-secret-key":  {true, 107},
+		"openai-api-key":          {true, 171},
+		"google-api-key":          {true, 39},
 
 		// The two the whole-buffer pass already costs nothing for: regexp
 		// derives a literal prefix from each, so there is nothing to win.
-		"slack-webhook-url": false,
-		"private-key-block": false,
+		"slack-webhook-url": {false, 0},
+		"private-key-block": {false, 0},
 		// Unbounded: `eyJ[A-Za-z0-9_-]{8,}` keeps the engine's threads alive
 		// for as long as the class matches, so one attempt reads to the end of
 		// the buffer. Measured on a 64 KiB buffer of `-eyJ` repeated -- every
 		// four bytes a hit, and every byte in the class -- the anchored path
 		// took 29.8s against 12.2ms for one whole-buffer pass.
-		"jwt": false,
+		"jwt": {false, 0},
 
 		// The pii family is not gated on keywords at all.
-		"payment-card":   false,
-		"us-ssn":         false,
-		"cn-resident-id": false,
-		"ipv4-public":    false,
+		"payment-card":   {false, 0},
+		"us-ssn":         {false, 0},
+		"cn-resident-id": {false, 0},
+		"ipv4-public":    {false, 0},
 	}
 	for _, rule := range loadShipped(t) {
 		got := rule.Anchor != nil && boundedKeywords(rule.Keywords)
@@ -349,8 +356,13 @@ func TestWhichShippedRulesRunFromTheirKeywordPositions(t *testing.T) {
 			t.Errorf("rule %s is not in this table; say which arm it takes and why", rule.ID)
 			continue
 		}
-		if got != expected {
-			t.Errorf("rule %s runs from its keyword positions = %v, want %v", rule.ID, got, expected)
+		if got != expected.anchored {
+			t.Errorf("rule %s runs from its keyword positions = %v, want %v",
+				rule.ID, got, expected.anchored)
+		}
+		if rule.Reach != expected.reach {
+			t.Errorf("rule %s has reach %d, want %d -- a moved reach moves the budget",
+				rule.ID, rule.Reach, expected.reach)
 		}
 	}
 }
@@ -420,25 +432,38 @@ func TestAnchoringARuleTheLoaderRefusesLosesFindings(t *testing.T) {
 
 // Past the budget the hit list is not worth an attempt each, and the answer is
 // the whole-buffer pass rather than a slower spelling of it.
-func TestPastTheBudgetTheHitListIsRefused(t *testing.T) {
-	ruleset := loadShipped(t)
-	var rule rules.Rule
-	for _, r := range ruleset {
-		if r.ID == "google-api-key" {
-			rule = r
+// Every anchored rule, not one of them, because the budget is arithmetic over
+// Reach and the loader never looks at it. A rule whose Reach grew would keep a
+// non-nil Anchor -- so the table above stays green -- while its budget shrank
+// toward zero and it fell back on every buffer, losing the whole change for
+// that rule with nothing failing. Driven 2026-09-04: giving one rule the
+// whole-buffer arm costs 36% of the ruleset's throughput and no test notices.
+//
+// The arm is asserted rather than the time it takes, which is what makes this
+// a gate rather than a benchmark: keywordPositions reports which arm matchRule
+// will take, and it reports it without timing anything.
+func TestEveryAnchoredRuleRefusesADenseHitListAndKeepsASparseOne(t *testing.T) {
+	anchored := 0
+	for _, rule := range loadShipped(t) {
+		if rule.Anchor == nil || !boundedKeywords(rule.Keywords) {
+			continue
+		}
+		anchored++
+		// The space is what gives the keyword its word boundary, so every
+		// repeat is a hit the prefilter reports.
+		keyword := rule.Keywords[0]
+		dense := []byte(strings.Repeat(" "+keyword, 4096))
+		if _, ok := keywordPositions(dense, rule.Keywords, budget(len(dense), rule.Reach)); ok {
+			t.Errorf("%s: a hit every %d bytes stayed inside a budget of one per %d",
+				rule.ID, len(keyword)+1, rule.Reach+attemptCost)
+		}
+		sparse := []byte(strings.Repeat("x", 1<<16) + " " + keyword)
+		if _, ok := keywordPositions(sparse, rule.Keywords, budget(len(sparse), rule.Reach)); !ok {
+			t.Errorf("%s: one hit in 64 KiB went over a budget of one per %d",
+				rule.ID, rule.Reach+attemptCost)
 		}
 	}
-	if rule.Anchor == nil {
-		t.Fatal("google-api-key has no Anchor, so this tests nothing")
-	}
-
-	dense := []byte(strings.Repeat(" AIza", 4096))
-	if _, ok := keywordPositions(dense, rule.Keywords, budget(len(dense), rule.Reach)); ok {
-		t.Errorf("a hit every 5 bytes stayed inside a budget of one per %d",
-			rule.Reach+attemptCost)
-	}
-	sparse := []byte(strings.Repeat("x", 1<<16) + " AIza")
-	if _, ok := keywordPositions(sparse, rule.Keywords, budget(len(sparse), rule.Reach)); !ok {
-		t.Error("one hit in 64 KiB went over the budget")
+	if anchored == 0 {
+		t.Fatal("no shipped rule is anchored, so this asserted nothing")
 	}
 }
