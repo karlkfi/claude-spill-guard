@@ -1584,8 +1584,8 @@ MiB at 9,746 MiB/s as binary, 1,055 MiB/s as text no rule gates on, and 6.5
 MiB/s as text carrying every keyword — the third now 32.84, which narrows the
 spread from 1,500x to 300x and leaves the argument where it was — so a cap
 tight enough to bound the third refuses the other two for nothing. A call adds
-up rather than arriving one file
-at a time — the same row has `cat` over four 128 MiB files at 78.1 seconds,
+up rather than arriving one file at a time — the same row has `cat` over four
+128 MiB files at 78.1 seconds,
 with no file in it near any plausible cap. And a directory operand has no size
 to cap at all, which is what made this the section the directory-operand
 question was waiting on — [answered below](#a-directory-operand-is-refused-rather-than-walked-and-that-is-a-decision-now).

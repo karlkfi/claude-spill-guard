@@ -153,9 +153,8 @@ the same branch, and an override downgrades it like any other. Two things about
 it are settled and should not be re-derived. A size cap is not the cheaper
 version of this — cost is not a function of size (the same 64 MiB is 9,746
 MiB/s binary, 1,055 MiB/s inert text and 6.5 MiB/s keyword-bearing text, the
-third since re-measured at 32.84), a
-call adds up rather than arriving one file at a time, and a directory operand
-has no size to cap. And "`os.ReadFile` takes no context" is true and is an
+third since re-measured at 32.84), a call adds up rather than arriving one file
+at a time, and a directory operand has no size to cap. And "`os.ReadFile` takes no context" is true and is an
 argument about *interrupting* a read, not about timing one: the scan runs on
 its own goroutine and the verdict is written by the one waiting on it, so the
 deadline outruns the work rather than cancelling it. Driven on built binaries
