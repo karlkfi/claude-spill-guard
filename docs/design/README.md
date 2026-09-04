@@ -660,12 +660,15 @@ not need to do.
    `\b` is not the repair — it is what keeps `ghp_` from matching inside
    `xghp_`, and precision is the product. Keeping the positions is.
 
-   Measured 2026-09-04 over this repository's own text, 1,355,099 bytes in 172
-   files, which names every keyword the ruleset gates on and so clears every
-   prefilter: the shipped set goes from 7.12 MB/s to 32.09 MB/s, and per rule
-   from 49.8–62.7 MB/s to 181–4,790 MB/s. Both arms are in
+   Measured 2026-09-04 over this repository's own text, about 1.36 MB in 174
+   text files, which names every keyword the ruleset gates on and so clears
+   every prefilter: the shipped set goes from 7.12 MB/s to 32.09 MB/s, and per
+   rule from 49.8–62.7 MB/s to 181–4,790 MB/s. Both arms are in
    `internal/scan/bench_test.go`, one binary over one buffer, and it refuses to
-   time them until they report the same findings.
+   time them until they report the same findings. The size is approximate
+   because `docs/` is in the corpus, so this paragraph is one of the files it
+   measures and an exact figure falsifies itself on the commit that writes it.
+   The test's floors are what pin the corpus; the rates are what to read.
 
    Five conditions decide it and none is about speed. Four belong to the loader
    (`internal/rules/anchor.go`): the pattern opens on `\b`, nothing in it asks
@@ -1628,6 +1631,9 @@ fixture, built the same way and driven on a built binary, now denies
 `aws-access-key-id` in 14.9–17.7s over four consecutive runs rather than
 blocking on the budget, and the in-process pair behind that is 32.84 MiB/s
 against 5.68 for the arm with no rule anchored, min of three in one process.
+That 5.68 is the 6.5 MiB/s arm above re-measured — the same fixture on a
+different day, 14% apart — so the 5.05x there and the 5.78x here are one change
+measured twice rather than two changes.
 The rows above are not re-taken here and cannot honestly be: they were taken on
 a quiet machine, and this one carried a load average of 72 while these runs
 were made — one such run did block at 45.046s on the same fixture, which is the

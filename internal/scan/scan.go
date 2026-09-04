@@ -309,7 +309,7 @@ const attemptCost = 8
 //
 // It charges every attempt the rule's worst case, which most of them do not
 // spend: an attempt dies where the pattern stops matching, usually within a few
-// bytes. Over the corpus bench_test.go assembles -- 1,355,099 bytes of this
+// bytes. Over the corpus bench_test.go assembles -- about 1.36 MB of this
 // repository's own text -- with `AKIA` planted every 16 bytes, the two arms met
 // at 85,086 hits, where this stops at 48,579. So it gives up about 1.75x before
 // it has to, and that direction is deliberate: an over-estimate costs
