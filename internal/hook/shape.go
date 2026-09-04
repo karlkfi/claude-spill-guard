@@ -74,15 +74,28 @@ import (
 // what the whole verification posture rests on. A deny that names the fix
 // costs one turn and leaves it honest.
 
-// A shapeRefusal is a call refused for what it would do rather than for
-// anything a rule matched in it.
+// A refusal is a call stopped for what it would do rather than for anything a
+// rule matched in it.
+//
+// One interface for two arguments that share only their verdict shape: this
+// one, where the bytes exist nowhere a scanner could look, and guarded.go's,
+// where they exist in a file whose contents no shipped rule would recognise.
+// Run reads it in place of failed(), whose sentence -- nothing scanned this
+// call -- is true of both and is the reason for neither.
+type refusal interface {
+	error
+	// body is what the model is told, in verdict.go's voice.
+	body() string
+}
+
+// A shapeRefusal is a call refused because the bytes it would send exist only
+// in the tool process.
 //
 // It travels as an error because that is the channel bashTargets already has
-// for "do not allow this", and Run separates it from the others by type: a
-// scan that could not be completed is failed(), whose sentence says nothing
-// scanned this call, and that sentence is false here. The scan was possible
-// and beside the point.
+// for "do not allow this".
 type shapeRefusal struct{ command string }
+
+func (r *shapeRefusal) body() string { return dumped(r.command) }
 
 func (r *shapeRefusal) Error() string {
 	return fmt.Sprintf("a %q here would send the whole environment, which is "+

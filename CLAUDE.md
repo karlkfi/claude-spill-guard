@@ -239,6 +239,26 @@ would put a command nobody issued into the transcript, which is the record every
 measurement here rests on. `docs/design/README.md`, *A shape refused, where
 there is nothing to match*, has the sweep and its positive control.
 
+**A fourth answer refuses a path, and it is a smaller claim than that one
+rather than the same one applied to files.** A read of `.env`,
+`~/.aws/credentials`, `.netrc`, `.git-credentials`, `~/.docker/config.json` or
+a kubeconfig is refused before the file is opened, because the shipped set is
+fourteen high-precision shapes and none of them matches an AWS *secret* access
+key, a netrc password or a base64 registry auth — driven, `cat .aws/credentials`
+over such a file exits 0 silent today. So the deny covers the values no rule
+knows, and nothing else. Three things about it are settled. It refuses reads and
+not writes, because a write to one of these changes what another tool does,
+which is not a spill. It stops where `internal/readers` stops, so an interpreter
+opening the same path walks past it and the reason says so rather than reading
+as path protection. And `~/.claude/settings.json` is **not** in the class: a
+sweep of 24,381 `Bash` calls and 521 `Read` calls in the week to 2026-09-04
+found 29 reads of a `.claude/settings*.json`, none of them a credential and 26
+of them the read-back of the effort file a worker session had just written, and
+0 reads of every other member. Do not put it back on the grounds that it can
+hold a secret — it can, and the traffic is the argument. `internal/hook/guarded.go`
+carries it and `docs/design/README.md`, *A path refused, where no rule would
+recognise what is in it*, has both tables.
+
 The prompt surface is read the same way and by the same shape, and what it does
 not cover is named below rather than counted — a count here has already gone
 stale twice in a day, because every drive of a new token shape can add one. A

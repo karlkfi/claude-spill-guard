@@ -146,8 +146,8 @@ Two steps, and they answer different questions.
 
 **Does the binary scan?** `spill-guard selftest` builds hook payloads and runs
 the scanner over them in-process — a prompt, a `Read`, a `Bash` command, a file
-a reader is pointed at, and a `Bash` command refused for its shape — reporting
-what happened to each:
+a reader is pointed at, and the two `Bash` calls refused for their shape —
+reporting what happened to each:
 
 ```
 spill-guard dev selftest
@@ -164,8 +164,8 @@ The allowing rows are not filler, and they are the half that catches the
 failure this tool is most likely to have. A scanner that blocks everything and
 one that works produce the same report if the report is only made of blocks —
 and a rule that matches too much is the ordinary shape of that. An allowing row
-goes `FAIL` if its call is blocked at all, by any rule, so one bad regex turns
-four rows red rather than leaving eleven green.
+goes `FAIL` if its call is blocked at all, by any rule, so one bad regex
+reddens allowing rows rather than leaving thirteen green.
 
 One row is neither an allowing row nor a block by a rule: a `Read` of a file
 behind a UTF-32 byte-order mark, which this build does not decode and therefore

@@ -228,12 +228,111 @@ a person is told before the environment leaves the machine.
 
 **What this does not do is guard a path.** The row that filed it carried a
 second half — refusing a read of `~/.claude/settings.json`, `.env`,
-`~/.aws/credentials` and the rest of that class — and that half is not here. It
-is reachable by content matching where this one is not, it is capped by
-`internal/readers` so an interpreter read of the same path is invisible to it,
-and its own negative corpus is unmeasured: 15 guarded-reader calls at
-`~/.claude/settings.json` in the week the row measured, and nothing saying
-whether the rule would have denied all 15. It has its own row.
+`~/.aws/credentials` and the rest of that class — and that half is
+[below](#a-path-refused-where-no-rule-would-recognise-what-is-in-it), on a
+different argument and with one member fewer. It is reachable by content
+matching where this one is not, and its negative corpus was the thing that had
+to be measured before anything shipped: the measurement threw
+`~/.claude/settings.json` out of the class outright.
+
+### A path refused, where no rule would recognise what is in it
+
+The section above refuses a call because there is nothing anywhere to open.
+This one refuses a read of a file that is very much there, so it is a smaller
+claim and the whole job is stating it exactly.
+
+These paths are scannable. `internal/readers` resolves them, the pipeline opens
+them, and a value in one that matches a shipped rule blocks today with no help
+from here. What a path refusal adds is the rest of the file, and on this class
+the rest of the file is most of it. Driven 2026-09-04 on a binary built from
+`21f15a6`, against a fixture holding the `aws-secret-access-key` vector from
+`testdata/corpus/vectors/`:
+
+| the call | what the shipped binary does |
+|---|---|
+| `cat matches.env` — an AWS access key **ID** | blocks, naming `aws-access-key-id` |
+| `cat unmatched.env` — a password | exit 0, silent |
+| `cat .aws/credentials` — an AWS **secret** access key | exit 0, silent |
+| a `Read` of that same file | exit 0, silent |
+
+The shipped set is fourteen high-precision shapes, and not one of them matches
+an AWS secret access key, a netrc password, a base64 registry auth or a
+kubeconfig's `client-key-data`. That is what this class holds. So a clean scan
+of one of these files is a report on the fourteen rules that could have fired
+and not a report on the file, and allowing the read on the strength of it is
+the shape of claim this whole document exists to refuse.
+
+**Membership is read off the name, because that is what "credentials by
+convention" means.** `.env` and `.env.<anything>`, `~/.aws/credentials`,
+`.netrc` and `_netrc`, `.git-credentials`, `~/.docker/config.json`, and a
+kubeconfig — `~/.kube/config`, a file named `kubeconfig`, and `*.kubeconfig`.
+
+**`~/.claude/settings.json` is not in it, and the measurement is the reason.**
+It was the class's first-named member. Swept over 24,381 `Bash` calls and 521
+`Read` calls in 238 transcript files on this machine, the seven days to
+2026-09-04, by driving `internal/bash`, `internal/readers` and the shipped
+resolver over the real command strings:
+
+| | |
+|---|---|
+| Calls swept | 24,381 `Bash` (3 could not be segmented), 521 `Read` |
+| Segments whose command the reader table knows | 29,398 |
+| Reader operands resolved | 19,214, with 7,283 unresolvable — those block today |
+| Reads of a `.claude/settings*.json` | **29**, none of them a credential |
+| Reads of every other member of the class | **0** |
+| The same sweep with 12 planted class reads appended | 11 |
+
+The 29 are one habit. Twenty-six are the read-back half of the effort-setting
+step a dispatched worker session runs before anything else — a `printf` of one
+JSON line redirected into `.claude/settings.local.json`, followed by a `cat` of
+the file to confirm the write landed. So a rule denying this class fires 29
+times a week on somebody checking their own config, and mostly on the half of a
+write-then-verify that does the verifying. That is what the environment half
+calls worse than no rule: a guard that fires on the careful form teaches the
+session to stop being careful, and here the careful form *is* verifying a
+write.
+
+The last row is the control, and it is 11 rather than 12 on purpose. The
+twelfth planted call is `tail -5 ~/.aws/config`, and `~/.aws/config` is out of
+the class — it holds a region and a profile name where `credentials` holds the
+key. So the sweep fires on every member it should and declines the one it
+should, which is more than a uniform 12 would have said.
+
+**The careful form is a pipeline position, the same reading `env` gets.** `cat
+.env | cut -d= -f1` sends the names alone, so refusing it would fire on the
+careful form; a segment with a stage after it is writing to that stage, and one
+with nothing after it is writing to the tool result. Here that test buys
+something the environment case has nothing to buy with: the file is a buffer,
+so the filtered form is still opened and still matched against every rule.
+Driven — `cat matches.env | cut -d= -f1` blocks naming `aws-access-key-id`. The
+careful form keeps its content coverage instead of trading it for the deny,
+which is why the reason recommends it.
+
+**It reaches the readers `internal/readers` knows and no others, and the reason
+says so.** `python3 -c "print(open('~/.aws/credentials').read())"` names no
+operand this package can see and is not refused — driven, and pinned by a test.
+Q87 drove the reader class and no new member landed, so the table is not about
+to grow into the hole. A reader who takes the deny for path protection will
+trust it further than it goes, so the reason calls itself a net for the
+accident rather than a claim that the path is guarded, exactly as the
+environment one does.
+
+**Reads only.** A *write* to one of these changes what some other tool then
+does — an environment variable injected, a registry credential replaced — which
+is not a spill and is not this tool's goal. `echo … > .env` is not refused, and
+picking the write control up on the way past is how a scanner turns into a
+permissions system nobody asked it to be.
+
+**What is deliberately out, beyond `settings.json`.** `.env.example`,
+`.env.sample`, `.env.template` and `.env.dist`, which exist to be committed and
+to hold placeholders — that one is reasoned from the convention rather than
+measured, because the sweep found no `.env` read of any spelling to measure.
+And the whole `*.env` family: `deploy.env` is a name somebody chose where
+`.env` is a convention. This repo is its own example — `testdata/corpus/` holds
+`aws-access-key-id.env` and `stripe-live-secret-key.env`, and the selftest
+plants `deploy.env`, so the suffix would refuse three of the fixtures the tool
+is tested with. Under-firing on a spelling is the trade the environment half
+already takes for `env -0`.
 
 ### What gets scanned is the crossing, not the hop
 

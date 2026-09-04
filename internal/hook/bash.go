@@ -100,7 +100,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// payload's cwd, scanned a file the command never reads, and allowed
 		// the call with `cd` blocking the same shape in the same run.
 		movedCwd := false
-		for _, segment := range segments {
+		for i, segment := range segments {
 			tokens := bash.StripEnvPrefix(bash.StripShKeywords(segment.Tokens))
 			if len(tokens) == 0 {
 				continue
@@ -201,6 +201,20 @@ func bashTargets(command, cwd string) ([]target, error) {
 					return nil, fmt.Errorf("in the %q here, a file operand names "+
 						"something that is neither a file nor a directory, so what "+
 						"this command would send cannot be read here", command)
+				}
+				// Ahead of the read, because not opening the file is the whole
+				// of this refusal -- guarded.go carries why a path whose
+				// contents the ruleset would not recognise is refused rather
+				// than scanned and cleared.
+				//
+				// lastInPipeline for shape.go's reason, and it buys more here.
+				// `cat .env | cut -d= -f1` sends the names alone, so refusing
+				// it would fire on the careful form; and unlike `env`, the file
+				// is a buffer, so the piped form is still read into targets
+				// below and still matched against every rule. The careful form
+				// keeps its content coverage rather than trading it away.
+				if class := guardedClass(path); class != "" && lastInPipeline(segments, i) {
+					return nil, &pathRefusal{path, class}
 				}
 				buf, err := os.ReadFile(path)
 				if err != nil {
