@@ -518,9 +518,15 @@ so there was no call for a `PreToolUse` hook to stop. The 143,678 in the last
 row are the control: the same walk over the same files finds tool calls in
 quantity, so the zeros are a reading and not a walk that could not fire.
 
-**The text reaches the model.** All 62 are `isMeta` false, and the same corpus
-carries 3,022 typed entries that are `isMeta` true, so the field does
-discriminate. Their bodies run to 8,909 bytes at the largest, median 195. A
+**The text reaches the model, and where the bytes sit is what establishes it.**
+The command and its output are in the entry's own `message.content` — the
+conversation payload, not a sidecar field — and 58 of the 62 carry their
+`<bash-stdout>` there. That is an argument about location and needs no
+assumption about what any field is for. `isMeta` corroborates and does not
+carry it: all 62 are `isMeta` false where the same corpus has 3,022 typed
+entries that are `isMeta` true, which establishes that the field varies rather
+than what it means. Their bodies run to 8,909 bytes at the largest, median 195.
+A
 `!cat ~/.aws/credentials` puts the file in the context with **no hook of any
 kind established to have run for it**, which is the same shape as `@path` above
 and without that one's remedy: `@path` leaves an operand in the prompt to
