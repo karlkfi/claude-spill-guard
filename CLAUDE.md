@@ -260,6 +260,21 @@ payload is `{"skill": "<name>"}` and names no file, though a deny on it does
 stop the body crossing, so it is a member this cannot resolve rather than one
 that is not there. An **MCP** file reader is the one still undriven.
 
+**And one route into the context is not a reader at all: `!` bash mode.** Typing
+`!cat ~/.aws/credentials` runs the command locally and puts the output in front
+of the model, and it is **not a tool call** — measured over 1,661 transcripts,
+62 such entries, 0 with a `toolUseID` and 0 preceded by an assistant `tool_use`,
+against 143,678 model-issued `Bash` calls found by the same walk. So
+`PreToolUse` never sees it and there is no operand left to resolve: the command
+had already run when the entry was written, 58 of the 62 carrying their own
+`<bash-stdout>`. Whether `UserPromptSubmit` fires, and whether its payload would
+carry that output, is unmeasured and needs a pty the harness classifier has now
+refused three times; Q15 holds the residual. **Do not use a `toolu_` id as an
+authorship test** — 6 of 185,227 `tool_use` ids in that corpus begin `call_` and
+all six are ordinary model work, so the prefix names a code path rather than a
+composer. `docs/design/README.md`, *`!` bash mode is not a tool call*, has the
+tables.
+
 **Do not close what is left with a list of tool names, and do not close it with
 a payload-shape test either.** The shape test is what missed `Skill`, and it
 was this repo's own proposed replacement for the name list. Membership is an
