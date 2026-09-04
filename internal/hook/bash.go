@@ -191,11 +191,21 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// which is the class this repo refuses by name for shell
 				// parsing. docs/design/README.md, "A directory operand is
 				// refused rather than walked", has the tables.
+				//
+				// The subject of that clause is this scanner and it is named,
+				// because the shorter form was read as a claim about the
+				// command. Nothing here parses a recursion flag -- `-rn`,
+				// `-r`, `--recursive` and no flag at all reach this same
+				// return, driven -- so a reason saying the command reads
+				// rather than walks is false of every recursive form, which is
+				// most of the traffic. It cost a friction report the day it
+				// was read that way, spent hunting a flag parser that does not
+				// exist.
 				if info.IsDir() {
 					return nil, fmt.Errorf("in the %q here, a file operand names a "+
-						"directory, and this reads files rather than walking them, "+
-						"so what that operand would send was not read -- name the "+
-						"files instead", command)
+						"directory, and this scanner reads files rather than walking "+
+						"a tree, so what that operand would send was not read -- name "+
+						"the files instead", command)
 				}
 				if !info.Mode().IsRegular() {
 					return nil, fmt.Errorf("in the %q here, a file operand names "+
