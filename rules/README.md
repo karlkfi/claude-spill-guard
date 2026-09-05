@@ -173,10 +173,16 @@ GiB — the widening adds **3 matches in 1 file**, and all three are indented
 `client-key: |` block scalars in
 `gitlab.com/gitlab-org/api/client-go@v1.46.0/config/config_test.go`, at header
 indents of 8, 10 and 10 columns. Three true positives of exactly the shape this
-section is about, and no new false positive anywhere in the population. Found
-by the review of the pull request that landed the widening and re-taken here;
-it is a reading over one machine's module cache, not a gate, so nothing
-re-runs it.
+section is about, and no new false positive anywhere in the population.
+
+Two things make that zero a measurement rather than a silent filter. 738 of
+those files carry `PRIVATE KEY`, so the sweep reaches the rule it is about; and
+files are read whole and matched in every encoding the keyword appears in — none
+of them a UTF-16 one here, checked rather than assumed. Both arms read the same
+buffer either way, so any narrowing hides a match from both and cannot
+manufacture a difference between them. Found by the review of the pull request
+that landed the widening and re-taken here; it is a reading over one machine's
+module cache, not a gate, so nothing re-runs it.
 
 `TestTheCorpusHoldsTheIndentedShape` in
 [`pemblock_test.go`](../internal/scan/pemblock_test.go) is the guard on the
