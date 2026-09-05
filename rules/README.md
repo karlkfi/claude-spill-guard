@@ -219,15 +219,34 @@ ruleset was inherited, so which prefixes AWS actually issues is a question this
 repository has never asked, and it still cannot: answering it means reading
 AWS's IAM identifiers reference, which this build graph is forbidden to fetch.
 What can be measured is the cost of being wrong in each direction, and it is
-lopsided. Compiling the four non-`AKIA` arms alone over
-`~/go/pkg/mod` — 220,674 files, 3,540 MiB of third-party Go source — gives 5
-regex matches and **2** surviving the entropy floor and the placeholder check,
-both `ASIA`, both the same `golang.org/x/oauth2` test file in two versions.
-`A3T`, `ABIA` and `ACCA` produce nothing at all over that population. So an arm
-this repository cannot justify costs no measurable precision, and cutting one
-AWS does issue costs a missed credential, which is the failure the tool exists
-to prevent. `private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on
-the same reasoning one section up.
+lopsided. Each arm compiled alone over `~/go/pkg/mod`, 239,671 files and 5.05
+GiB of third-party Go source, with every arm first driven against a value built
+for it so a zero below is a property of the population rather than of the
+pattern:
+
+| Arm | regex matches | surviving entropy 3.0 and `aws-placeholder` |
+|---|---|---|
+| `A3T` | 0 | 0 |
+| `AKIA` | 56 | **0** |
+| `ASIA` | 5 | 2 |
+| `ABIA` | 0 | 0 |
+| `ACCA` | 0 | 0 |
+
+**Read the `AKIA` row before drawing anything from the zeros.** It is the arm
+nobody disputes, and on this population it too survives nothing: 56 matches, all
+of them dropped. So *zero surviving matches is not evidence an arm is dead* —
+it is what the arm everybody keeps also does here. What separates the rows is
+the raw count, and even that measures the wrong thing for the question: a module
+cache is published source, so it holds placeholders and test fixtures rather
+than issued credentials. It says which prefixes people *write down*, never which
+AWS hands out.
+
+What it does settle is the cost. Keeping an arm nobody here can justify adds no
+surviving match to a 5 GiB population, and cutting one AWS does issue costs a
+missed credential, which is the failure the tool exists to prevent. That
+asymmetry decides it on its own, without needing the zeros to mean more than
+they do. `private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on the
+same reasoning one section up.
 
 What the arms did lack was evidence they could fire.
 `TestEveryAWSPrefixArmIsReachable` in
