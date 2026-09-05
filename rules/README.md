@@ -166,6 +166,24 @@ cross it where a bounded window over printable bytes would. The narrow form and
 the 200-byte window agree on every key and disagree there, which is the whole
 of why one shipped.
 
+**The clean corpus is 13 kB, so it cannot settle whether precision moved. The
+differential can.** Compiling both clauses and counting the files the new one
+matches and the old one does not, over `~/go/pkg/mod` — 239,670 files, 5.05
+GiB — the widening adds **3 matches in 1 file**, and all three are indented
+`client-key: |` block scalars in
+`gitlab.com/gitlab-org/api/client-go@v1.46.0/config/config_test.go`, at header
+indents of 8, 10 and 10 columns. Three true positives of exactly the shape this
+section is about, and no new false positive anywhere in the population.
+
+Two things make that zero a measurement rather than a silent filter. 738 of
+those files carry `PRIVATE KEY`, so the sweep reaches the rule it is about; and
+files are read whole and matched in every encoding the keyword appears in — none
+of them a UTF-16 one here, checked rather than assumed. Both arms read the same
+buffer either way, so any narrowing hides a match from both and cannot
+manufacture a difference between them. Found by the review of the pull request
+that landed the widening and re-taken here; it is a reading over one machine's
+module cache, not a gate, so nothing re-runs it.
+
 `TestTheCorpusHoldsTheIndentedShape` in
 [`pemblock_test.go`](../internal/scan/pemblock_test.go) is the guard on the
 *corpus* rather than on the rule. It compiles the clause with the whitespace
@@ -195,6 +213,55 @@ one of the 11 it dropped was that pair. A twelfth was the planted fixture, which
 carried the same key and was rewritten rather than dropped. What it costs is a
 real key whose last seven characters are `EXAMPLE`, which is one in 3.4e10 at
 the smallest alphabet that tail can be drawn from.
+
+**All five prefixes stay, and each one is now reachable by a test.** The
+ruleset was inherited, so which prefixes AWS actually issues is a question this
+repository has never asked, and it still cannot: answering it means reading
+AWS's IAM identifiers reference, which this build graph is forbidden to fetch.
+What can be measured is the cost of being wrong in each direction, and it is
+lopsided. Each arm compiled alone over `~/go/pkg/mod`, 239,671 files and 5.05
+GiB of third-party Go source, with every arm first driven against a value built
+for it so a zero below is a property of the population rather than of the
+pattern:
+
+| Arm | regex matches | surviving entropy 3.0 and `aws-placeholder` |
+|---|---|---|
+| `A3T` | 0 | 0 |
+| `AKIA` | 56 | **0** |
+| `ASIA` | 5 | 2 |
+| `ABIA` | 0 | 0 |
+| `ACCA` | 0 | 0 |
+
+**Read the `AKIA` row before drawing anything from the zeros.** It is the arm
+nobody disputes, and on this population it too survives nothing: 56 matches, all
+of them dropped. So *zero surviving matches is not evidence an arm is dead* —
+it is what the arm everybody keeps also does here. What separates the rows is
+the raw count, and even that measures the wrong thing for the question: a module
+cache is published source, so it holds placeholders and test fixtures rather
+than issued credentials. It says which prefixes people *write down*, never which
+AWS hands out.
+
+What it does settle is the cost. Keeping an arm nobody here can justify adds no
+surviving match to a 5 GiB population, and cutting one AWS does issue costs a
+missed credential, which is the failure the tool exists to prevent. That
+asymmetry decides it on its own, without needing the zeros to mean more than
+they do. `private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on the
+same reasoning one section up.
+
+What the arms did lack was evidence they could fire.
+`TestEveryAWSPrefixArmIsReachable` in
+[`internal/scan`](../internal/scan/awsprefix_test.go) drives one value per arm
+through the shipped rule, and
+[`testdata/corpus/planted/aws-access-key-id-asia.env`](../testdata/corpus/planted/aws-access-key-id-asia.env)
+plants the `ASIA` one end to end. Before both, deleting `ASIA` — or all four
+non-`AKIA` arms together — left `go test ./...` green; each of the five
+deletions is red now, driven one at a time. An arm no test can distinguish from
+absent is surface with no evidence behind it, and that was the defect rather
+than the arms.
+
+What would reverse this is the reading nobody here has taken: AWS's own list of
+the prefixes it issues. A prefix absent from it is an arm to cut, and this
+paragraph is what to delete when somebody checks.
 
 `jwt` names `jwt-sample-key`, which recomputes the HMAC and drops a token that
 verifies under a published sample secret. A debugger that wants its own example

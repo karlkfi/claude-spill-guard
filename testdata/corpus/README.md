@@ -24,13 +24,26 @@ That is deliberate: it makes "fabricated" something a reader can grep for
 rather than something this file asserts. The exceptions are
 `github-fine-grained-pat.txt`, which carries the stem with an underscore
 through the middle because its rule admits one; the PEM blocks, whose bodies
-are base64 of ordinary ASCII; and `slack-webhook-url.yaml`, which predates the
-convention.
+are base64 of ordinary ASCII; `slack-webhook-url.yaml`, which predates the
+convention; and the two AWS files that carry `0SPILLGUARD` instead —
+`aws-access-key-id-utf16le.env` and `aws-access-key-id-asia.env` — for the
+reason **Adding to it** gives below, which is the mark to reach for now.
 
-`aws-access-key-id.env` is the newest of them. It used to carry
-`AKIAIOSFODNN7EXAMPLE`, the key AWS publishes in its own documentation, and the
-rule now drops that key on the `EXAMPLE` suffix. A fixture proving a rule can
-fire cannot be a value the rule is supposed to stay quiet on.
+`aws-access-key-id.env` used to carry `AKIAIOSFODNN7EXAMPLE`, the key AWS
+publishes in its own documentation, and the rule now drops that key on the
+`EXAMPLE` suffix. A fixture proving a rule can fire cannot be a value the rule
+is supposed to stay quiet on.
+
+Three files carry `aws-access-key-id`, and the third is about the rule rather
+than the encoding. The rule matches five prefixes — `A3T[A-Z0-9]`, `AKIA`,
+`ASIA`, `ABIA` and `ACCA` — and the two files above are both `AKIA`, so a walk
+over this corpus could not tell `ASIA` from absent. `aws-access-key-id-asia.env`
+is the STS session key that closes it. The other three arms are covered by
+`TestEveryAWSPrefixArmIsReachable` in `internal/scan` off the vectors below,
+rather than by a file each: what a corpus file buys over a vector is the walk
+and the validators, and `ASIA` is the arm where that matters, because
+`iam-policy-notes.md` already holds an `ASIA` the rule has to **drop** and
+nothing held one it has to find.
 
 They are here as literals rather than assembled at scan time because the thing
 under test is a buffer, and a fixture that only exists inside a test is a
@@ -47,9 +60,12 @@ The third is the encrypted layout deliberately. Indentation and encryption are
 one fixture rather than two because a widening that admits an indented body and
 not indented `Proc-Type:` and `DEK-Info:` lines leaves this file reporting
 nothing — driven, and the reason it is not a plain indented key. Its body is
-`private-key-block-rfc1421.pem`'s, which is the one place two fixtures here
-share a literal on purpose: what varies between them is the layout around the
-body, so a body that varied too would be noise.
+the other two's: all three carry the same two lines, which is the one place
+fixtures here share a literal on purpose. What varies across them is the layout
+around the body, so a body that varied too would be noise. That is the reverse
+of the rule two paragraphs down, where `aws-access-key-id-utf16le.env` has a key
+of its own — those two differ in *encoding*, and an identical literal would make
+an edit to one a silent break in the other.
 
 Two further layouts cannot be files at all — a CRLF fixture depends on what git
 does to it on checkout — so `TestPrivateKeyBlockAcrossThePEMLayouts` in
