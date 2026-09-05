@@ -27,7 +27,7 @@ const cleanFindings = 0
 const (
 	minCleanFiles   = 13
 	minCleanBytes   = 12 << 10
-	minPlantedFiles = 13
+	minPlantedFiles = 14
 )
 
 // loadShipped is the ruleset as the binary will load it, no project overrides.
@@ -186,14 +186,19 @@ var planted = map[string]string{
 	// rather than in a unit fixture so the shipped ruleset and the gate's own
 	// walk are what read it. Its key is its own; see utf16FixtureKey.
 	"aws-access-key-id-utf16le.env": "aws-access-key-id",
-	"github-token.sh":               "github-token",
-	"github-fine-grained-pat.txt":   "github-fine-grained-pat",
-	"slack-token.json":              "slack-token",
-	"slack-webhook-url.yaml":        "slack-webhook-url",
-	"stripe-live-secret-key.env":    "stripe-live-secret-key",
-	"openai-api-key.py":             "openai-api-key",
-	"google-api-key.js":             "google-api-key",
-	"private-key-block.pem":         "private-key-block",
+	// A third, and this one is about the rule rather than the encoding. The
+	// rule matches five prefixes and the two files above are both AKIA, so
+	// until this one landed a walk over the corpus could not tell ASIA from
+	// absent -- and neither could anything else in the tree.
+	"aws-access-key-id-asia.env":  "aws-access-key-id",
+	"github-token.sh":             "github-token",
+	"github-fine-grained-pat.txt": "github-fine-grained-pat",
+	"slack-token.json":            "slack-token",
+	"slack-webhook-url.yaml":      "slack-webhook-url",
+	"stripe-live-secret-key.env":  "stripe-live-secret-key",
+	"openai-api-key.py":           "openai-api-key",
+	"google-api-key.js":           "google-api-key",
+	"private-key-block.pem":       "private-key-block",
 	// And again, for the same reason one file down: this one is an RFC 1421
 	// encrypted key, which puts Proc-Type and DEK-Info between the header and
 	// the body -- the shape the body-line clause missed until it learned to

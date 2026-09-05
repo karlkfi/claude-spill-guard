@@ -196,6 +196,36 @@ carried the same key and was rewritten rather than dropped. What it costs is a
 real key whose last seven characters are `EXAMPLE`, which is one in 3.4e10 at
 the smallest alphabet that tail can be drawn from.
 
+**All five prefixes stay, and each one is now reachable by a test.** The
+ruleset was inherited, so which prefixes AWS actually issues is a question this
+repository has never asked, and it still cannot: answering it means reading
+AWS's IAM identifiers reference, which this build graph is forbidden to fetch.
+What can be measured is the cost of being wrong in each direction, and it is
+lopsided. Compiling the four non-`AKIA` arms alone over
+`~/go/pkg/mod` — 220,674 files, 3,540 MiB of third-party Go source — gives 5
+regex matches and **2** surviving the entropy floor and the placeholder check,
+both `ASIA`, both the same `golang.org/x/oauth2` test file in two versions.
+`A3T`, `ABIA` and `ACCA` produce nothing at all over that population. So an arm
+this repository cannot justify costs no measurable precision, and cutting one
+AWS does issue costs a missed credential, which is the failure the tool exists
+to prevent. `private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on
+the same reasoning one section up.
+
+What the arms did lack was evidence they could fire.
+`TestEveryAWSPrefixArmIsReachable` in
+[`internal/scan`](../internal/scan/awsprefix_test.go) drives one value per arm
+through the shipped rule, and
+[`testdata/corpus/planted/aws-access-key-id-asia.env`](../testdata/corpus/planted/aws-access-key-id-asia.env)
+plants the `ASIA` one end to end. Before both, deleting `ASIA` — or all four
+non-`AKIA` arms together — left `go test ./...` green; each of the five
+deletions is red now, driven one at a time. An arm no test can distinguish from
+absent is surface with no evidence behind it, and that was the defect rather
+than the arms.
+
+What would reverse this is the reading nobody here has taken: AWS's own list of
+the prefixes it issues. A prefix absent from it is an arm to cut, and this
+paragraph is what to delete when somebody checks.
+
 `jwt` names `jwt-sample-key`, which recomputes the HMAC and drops a token that
 verifies under a published sample secret. A debugger that wants its own example
 reproducible has to publish the key, so what separates that sample from a live

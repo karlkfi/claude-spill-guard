@@ -44,7 +44,7 @@ const relPath = "testdata/corpus/vectors/credentials.json"
 // minVectors is a floor. A decode returning an empty map fails no assertion by
 // itself: every table reading it reports zero cases, and a table test with no
 // cases reports the same green as one with all of them.
-const minVectors = 8
+const minVectors = 11
 
 // Load reads the vectors file, failing the test rather than returning an
 // error, since every caller is a table that has nothing to assert without it.
