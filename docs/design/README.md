@@ -1998,6 +1998,34 @@ have covered in 13 ms is refused, and the user retypes it against files. The
 alternative on the bottom rows is a scanner reporting on a file set the command
 would not have sent.
 
+### A refusal is whole-call, and the reason names one segment of it
+
+A `PreToolUse` deny refuses the tool call. It does not refuse the segment the
+reason names, and there is no partial form -- the command string never reaches
+a shell, so every segment in it is equally unrun.
+
+That is the safe direction and it is not obvious from the reason, which names a
+single command because that is the only caller-derived token it can safely
+carry. A call bundling a mutation with a verification reads as though the
+verification alone was at issue.
+
+**Driven 2026-09-04**, with the marker file confirmed absent first:
+
+```
+echo "the mutation ran" > <scratchpad>/marker.txt && grep -ln 'anything' docs/queue/*.md
+```
+
+The refusal named the `grep`'s glob operand. `marker.txt` was still absent
+afterwards, so the `echo` ahead of the `&&` never ran either.
+
+So a session that bundles an edit with the grep that checks it loses the edit,
+and the only thing in the transcript is a scanner error about the grep. Split a
+mutation into its own call -- which is what
+[`CLAUDE.md`](../../CLAUDE.md) already asks for on a different ground, that a
+file change is confirmed by reading the file rather than by the exit status of
+the call that wrote it. The two rules meet here: the call that bundles the
+write with its own check is the one whose refusal is silent in both directions.
+
 ## Output discipline
 
 **The raw secret never enters a struct that outlives the match.** The
