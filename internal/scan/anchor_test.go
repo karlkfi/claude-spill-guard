@@ -440,11 +440,16 @@ func TestAnchoringARuleTheLoaderRefusesLosesFindings(t *testing.T) {
 // the table above stays green, while its budget shrank toward zero and it fell
 // back on every buffer.
 //
-// It does not observe which arm matchRule takes, and nothing here can. This
-// recomputes the eligibility condition rather than reading matchRule's, so a
-// change to matchRule's own gate leaves this green -- driven, and filed as
+// It does not observe which arm matchRule takes. This recomputes the
+// eligibility condition rather than reading matchRule's, so a change to
+// matchRule's own gate leaves this green -- driven, and filed as
 // docs/queue/Q140.md, which is also where the duplication on the line below is
 // recorded. Do not read this test as a gate on the arm.
+//
+// Not that the arm is unobservable: testing.AllocsPerRun separates the two at
+// 16 against 3 on one sparse buffer, because the anchored arm builds a hit
+// list and the whole-buffer pass does not. Q140 carries that measurement and
+// what it would take to make a gate of it.
 func TestEveryAnchoredRuleRefusesADenseHitListAndKeepsASparseOne(t *testing.T) {
 	anchored := 0
 	for _, rule := range loadShipped(t) {
