@@ -66,6 +66,15 @@ and the model's context.
   member and it is covered: a subagent's own tool calls fire the same hooks
   the parent's do, measured.
 
+  **`!` bash mode is a member and it has no remedy here.** Typing `!cat
+  ~/.aws/credentials` runs the command locally and puts its output in the
+  model's context, and it is
+  [not a tool call](#-bash-mode-is-not-a-tool-call-so-pretooluse-never-sees-it),
+  so `PreToolUse` never sees it. Whether `UserPromptSubmit` does, and whether
+  the payload would carry the output if it did, is unmeasured. Unlike the
+  others this one is not a reader to be resolved: the bytes have already
+  crossed by the time anything is recorded.
+
   **Do not close what is left with a list of tool names, and do not close it
   with a payload shape either.** The tool set is not fixed — nineteen deferred
   tools announced in one `deferred_tools_delta` on 2026-08-28, fifteen on
@@ -425,12 +434,27 @@ crossing.** By the rule above a model-composed command has already crossed and a
 finding on it would be a warning, which
 [the `PostToolUse` verdict](#posttooluse-cannot-withhold-a-result) says not to
 count as a control. It is scanned anyway because it is the one payload field
-whose authorship the measurement above did not settle: every `PreToolUse` seen
-there carried a `toolu_` id, so every one was model-issued, and no probe has yet
-established what a command the human runs directly looks like from inside a
-hook. Failing closed on an unmeasured case is this project's rule, and the cost
-is one short string per `Bash` call with no file to open. The backlog holds the
-measurement that would retire the exception.
+whose authorship is not settled, and failing closed on an unsettled case is this
+project's rule — the cost is one short string per `Bash` call with no file to
+open.
+
+The argument for that exception used to be that every `PreToolUse` in the
+2026-08-27 drive carried a `toolu_` id, so every one was model-issued. That
+reasoning does not hold and the exception outlives it. A prefix says which code
+path issued a call rather than who composed it — over every `tool_use` in this
+machine's transcripts, [6 of 185,227 begin
+`call_`](#-bash-mode-is-not-a-tool-call-so-pretooluse-never-sees-it) and all six
+are ordinary model work. And the one route by which a human runs a command
+directly, `!` bash mode, is now measured: it is not a tool call at all, so it
+never reaches `PreToolUse` in any form. That closes the route the exception was
+imagined for and leaves the exception standing, because nothing has enumerated
+the routes.
+
+None of that reopens the axis. Crossing decides what is worth scanning and
+authorship is not a second test — this one field is a fail-closed carve-out
+named as such, and correcting the evidence under it changes what the carve-out
+rests on rather than what the rule is. A measurement about who typed something
+is about the size of this exception and about nothing else in the table above.
 
 **Dedup on the content hash is not the mechanism, and would cost more than the
 repetition it removes.** The repetition it targets is real — the same secret at
@@ -592,6 +616,79 @@ than hiding it.
 **None of this is a claim that the boundary class is settled.** Six codepoints
 have been driven. The rest of the class is not, and the way to extend it is to
 drive more rather than to reason from whichever standard looks authoritative.
+
+### `!` bash mode is not a tool call, so `PreToolUse` never sees it
+
+Typing `!git status` in an interactive session runs the command locally and puts
+its output in front of the model. The question this settles is whether that
+crossing arrives as a `Bash` tool call, because if it did, the command string
+would be a genuinely human-typed `PreToolUse` payload and scanning it would be a
+control rather than a hedge.
+
+It does not. Measured 2026-09-04 over 1,661 session transcripts on this machine,
+2026-07-26 to 2026-09-04, by walking every entry rather than by driving a hook:
+
+| | |
+|---|---|
+| Entries whose own content opens with `<bash-input>` | 62 |
+| …carrying a `toolUseID` or `toolUseResult` | **0** |
+| …preceded by an assistant `tool_use` | **0** |
+| …with `userType` `external` | 62 |
+| …carrying their own `<bash-stdout>` | 58 |
+| Model-issued `Bash` tool calls in the same corpus | 143,678 |
+
+A tool call has one shape here: an assistant entry carrying a `tool_use`, then a
+user entry carrying the matching `tool_result`. A bash-mode entry is neither
+half of one. It is a user entry whose text already holds the command *and its
+output*, which is the tell — the command had run before anything was recorded,
+so there was no call for a `PreToolUse` hook to stop. The 143,678 in the last
+row are the control: the same walk over the same files finds tool calls in
+quantity, so the zeros are a reading and not a walk that could not fire.
+
+**The text reaches the model, and where the bytes sit is what establishes it.**
+The command and its output are in the entry's own `message.content` — the
+conversation payload, not a sidecar field — and 58 of the 62 carry their
+`<bash-stdout>` there. That is an argument about location and needs no
+assumption about what any field is for. `isMeta` corroborates and does not
+carry it: all 62 are `isMeta` false where the same corpus has 3,022 typed
+entries that are `isMeta` true, which establishes that the field varies rather
+than what it means. Their bodies run to 8,909 bytes at the largest, median 195.
+A
+`!cat ~/.aws/credentials` puts the file in the context with **no hook of any
+kind established to have run for it**, which is the same shape as `@path` above
+and without that one's remedy: `@path` leaves an operand in the prompt to
+resolve, and this leaves nothing — the command has run by the time anything is
+recorded.
+
+**Whether `UserPromptSubmit` fires for one is not settled, and this instrument
+cannot settle it.** The chronos hook on this machine has fired on every
+`UserPromptSubmit` since 2026-08-19T04:11Z and Claude Code records each firing
+as an attachment, so a transcript says per turn whether the hook ran. Over the
+22 bash-mode turns inside that window it ran for 7 and not for 11, with a
+further 4 that are followed by a typed prompt rather than by the assistant, none
+of which fired — and the per-session controls disagree with each other:
+one session has an ordinary-prompt control of 2 of 2 with 0 of 2 bash-mode
+turns firing, and two sessions have a control of 1 of 1 with the bash-mode turn
+firing. The obvious mechanism, that the output rides on the next submission, is
+refuted by the same data: 18 of the 22 are followed directly by an assistant
+turn, and the split there is 7 fired to 11 not.
+
+**And a firing would still not answer the question this repo has.** What matters
+is whether the payload's `prompt` field carries the `<bash-stdout>`, because
+that is the only thing a scanner could match. Nothing short of capturing the
+payload answers that, which needs an interactive session, which needs a pty. The
+attempt was refused by the harness classifier on 2026-09-04, the third such
+refusal on record for this measurement.
+
+**The `toolu_` prefix is not an authorship marker, so do not build the residual
+on it.** *What gets scanned is the crossing, not the hop* used to scan the
+`Bash` command string on the grounds that every `PreToolUse` in the 2026-08-27
+drive carried a `toolu_` id. Over every
+`tool_use` in this corpus, 185,221 ids begin `toolu_` and **6 begin `call_`** —
+and those six are ordinary model work (`ls ~/.cargo/bin`, `queue.py render`, a
+`gh pr list`), not anything a human typed. So the prefix says which code path
+issued the call and not who composed it, and a probe that reads its absence as
+*not model-composed* would misread all six.
 
 ### The rest of the class, driven
 
