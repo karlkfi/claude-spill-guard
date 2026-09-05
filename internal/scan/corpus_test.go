@@ -31,7 +31,10 @@ const (
 )
 
 // loadShipped is the ruleset as the binary will load it, no project overrides.
-func loadShipped(t *testing.T) []rules.Rule {
+//
+// testing.TB rather than *testing.T because the benchmarks load it too, which
+// is the same reason internal/testvec takes one.
+func loadShipped(t testing.TB) []rules.Rule {
 	t.Helper()
 	set, err := rules.LoadFiles(shipped, filepath.Join(t.TempDir(), "absent.json"))
 	if err != nil {

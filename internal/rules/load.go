@@ -265,6 +265,7 @@ func compile(e entry) (Rule, error) {
 		Validators:  checks,
 		Enabled:     *e.Enabled,
 	}
+	rule.Anchor, rule.Reach = anchor(*e.Regex, keywords)
 
 	// Configuration with no check to read it is a setting that does nothing,
 	// and both of these settings only ever make a rule stricter -- so the rule

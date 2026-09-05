@@ -4,8 +4,11 @@
 //
 // The order is the point. Each stage exists to keep the next one off work it
 // does not need to do, and the obvious way to write two of them inverts a
-// measurement -- see IsBinary, hasKeyword, and the comment on the match loop
-// in Buffer. docs/design/README.md, "Pipeline", is the specification.
+// measurement -- see IsBinary, hasKeyword, and matchRule. The prefilter is also
+// the last stage that knows *where* it found a keyword, and for most rules that
+// is the whole list of places a match can start, so matchRule runs them there
+// rather than asking the engine to find the same places again.
+// docs/design/README.md, "Pipeline", is the specification.
 //
 // Declining to read a buffer is a thing this package says rather than a thing
 // it does quietly. A Result carries the reason beside the findings, because a
@@ -169,12 +172,18 @@ func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
 //
 // 32 MiB is derived from the worst measured rate and then driven, rather than
 // picked. A buffer carrying every keyword the shipped ruleset gates on
-// prefilters nothing away and matches at 6.8 MiB/s (measured 2026-09-03; the
-// 60-second crossing is around 410 MiB), which puts the limit at 4.7s of match
+// prefilters nothing away and matched at 6.8 MiB/s (measured 2026-09-03; the
+// 60-second crossing was around 410 MiB), which put the limit at 4.7s of match
 // loop. Driven end to end on a built binary, a buffer of exactly this size
-// carrying every keyword and the key in its last bytes takes 4.3s of wall
+// carrying every keyword and the key in its last bytes took 4.3s of wall
 // clock -- a fourteenfold margin inside the timeout, which is what makes "this
 // cannot be what caused a kill" a reading rather than a likelihood.
+//
+// Past tense, because matchRule moved that rate: the same 64 MiB fixture runs
+// at 32.84 MiB/s against 5.68 for the arm with no Anchor on any rule, both in
+// one process, min of three, 2026-09-04. The limit is not re-derived from it.
+// Every one of those figures is a margin, and 5.8x more of one changes nothing
+// about which side of it 32 MiB is on.
 //
 // A size limit rather than a deadline, and the two turned out not to be
 // alternatives. Nothing in this package can be interrupted -- the match loop
@@ -267,47 +276,162 @@ func match(path string, text []byte, source func(int) int, ruleset []rules.Rule)
 				rule.ID, rule.Group, rule.Regex.NumSubexp())
 		}
 
-		// The prefilter gates the credential family and nothing else. A pii
-		// rule is pure-numeric with no literal to anchor on, which is one of
-		// the reasons that family ships disabled.
-		if rule.Family == rules.Credential && gates(rule.Keywords) &&
-			!hasKeyword(text, rule.Keywords) {
-			continue
+		found, err := matchRule(path, text, source, rule)
+		if err != nil {
+			return nil, err
 		}
+		findings = append(findings, found...)
+	}
+	return findings, nil
+}
 
-		// One rule at a time. Folding the patterns into a single alternation
-		// is the obvious optimization and it runs at 0.5x in Go and 0.7x with
-		// Rust's RegexSet: the DFA state space explodes and the lazy cache
-		// thrashes on heterogeneous input. Two engines, same result, so it is
-		// a property of the approach rather than of either implementation.
-		// docs/design/language-choice.md section 2.
-		for _, m := range rule.Regex.FindAllSubmatchIndex(text, -1) {
-			lo, hi := m[2*rule.Group], m[2*rule.Group+1]
-			if lo < 0 {
-				// The group is in the pattern but took part in no match, which
-				// an alternation makes ordinary.
-				continue
-			}
-			ok, err := passes(rule, text, lo, hi)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				continue
-			}
-			findings = append(findings, Finding{
-				RuleID: rule.ID,
-				Path:   path,
-				// The digest is over the decoded bytes, so one secret written
-				// in two encodings dedups to one key -- which is what a dedup
-				// key is for. The offset is the field that has to name a place
-				// in the file, and source is what maps it back.
-				Offset: source(lo),
-				Digest: digest(rule.ID, text[lo:hi]),
-			})
+// attemptCost is what one anchored attempt costs beyond the bytes it reads,
+// counted in bytes of the whole-buffer pass it is weighed against, so that
+// budget below can add the two together.
+//
+// Measured 2026-09-04 on this machine, Go 1.26.5, by BenchmarkOneAttempt beside
+// BenchmarkRule: an attempt that fails at its first byte costs 68-104ns
+// depending on the rule, against 16.1ns per byte for the whole-buffer pass --
+// so 4.2 to 6.5 bytes, and eight is the round number above it.
+//
+// The budget barely moves on this number, because reach is 20 bytes at the
+// smallest and 171 at the largest. It is here so that a machine where the two
+// costs drift apart has one constant to re-measure rather than a figure buried
+// in a ratio.
+const attemptCost = 8
+
+// budget is how many prefilter hits are worth one anchored attempt each.
+//
+// The two arms are being compared in the same unit. One attempt reads at most
+// the rule's reach and pays attemptCost on top; the whole-buffer pass reads the
+// buffer once. So hits times the first, against the length of the second -- and
+// past that the pass this replaces is the cheaper arm and the loop takes it.
+//
+// It charges every attempt the rule's worst case, which most of them do not
+// spend: an attempt dies where the pattern stops matching, usually within a few
+// bytes. Over the corpus bench_test.go assembles -- about 1.36 MB of this
+// repository's own text -- with `AKIA` planted every 16 bytes, the two arms met
+// at 85,086 hits, where this stops at 48,579. So it gives up about 1.75x before
+// it has to, and that direction is deliberate: an over-estimate costs
+// throughput on a buffer nobody has, and an under-estimate costs it on every
+// buffer, in the arm nothing measures.
+func budget(n, reach int) int {
+	return n / (reach + attemptCost)
+}
+
+// matchRule runs one rule over text, either from the prefilter's hits or by
+// scanning the whole buffer for it, and returns what survived in offset order.
+//
+// One rule at a time, whichever arm it takes. Folding the patterns into a
+// single alternation is the obvious optimization and it runs at 0.5x in Go and
+// 0.7x with Rust's RegexSet: the DFA state space explodes and the lazy cache
+// thrashes on heterogeneous input. Two engines, same result, so it is a
+// property of the approach rather than of either implementation.
+// docs/design/language-choice.md section 2.
+func matchRule(path string, text []byte, source func(int) int, rule rules.Rule) ([]Finding, error) {
+	// The prefilter gates the credential family and nothing else. A pii rule is
+	// pure-numeric with no literal to anchor on, which is one of the reasons
+	// that family ships disabled.
+	if rule.Family != rules.Credential || !gates(rule.Keywords) {
+		return matchAll(path, text, source, rule)
+	}
+
+	// Where the loader settled that every match this rule can produce starts at
+	// one of its keywords, the hits are the whole list of places to look, and
+	// the pass that would find them again is work already done. What makes that
+	// pass expensive is the \b eight of the ten enabled rules open on: an
+	// empty-width op at the head of the compiled program, so regexp derives no
+	// literal prefix, has nothing to skip towards, and runs the NFA over every
+	// byte of the buffer to arrive back at the positions this already holds.
+	// Seven of the eight get here; anchor.go says what the eighth fails.
+	if rule.Anchor != nil && boundedKeywords(rule.Keywords) {
+		if at, ok := keywordPositions(text, rule.Keywords, budget(len(text), rule.Reach)); ok {
+			return matchAt(path, text, source, rule, at)
+		}
+		// Past the budget, so the whole-buffer pass below is the cheaper arm --
+		// and it needs no gate in front of it, because going over the budget is
+		// itself the answer the gate would have given.
+		return matchAll(path, text, source, rule)
+	}
+	if !hasKeyword(text, rule.Keywords) {
+		return nil, nil
+	}
+	return matchAll(path, text, source, rule)
+}
+
+// matchAll scans the whole buffer for the rule.
+func matchAll(path string, text []byte, source func(int) int, rule rules.Rule) ([]Finding, error) {
+	var findings []Finding
+	for _, m := range rule.Regex.FindAllSubmatchIndex(text, -1) {
+		found, ok, err := accept(path, text, source, rule, m)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			findings = append(findings, found)
 		}
 	}
 	return findings, nil
+}
+
+// matchAt runs the rule once at each of at, which is what the whole-buffer pass
+// would have had to find for itself.
+//
+// The result has to be the findings that pass produces and not a superset of
+// them, so the non-overlap rule comes with it: FindAll resumes at the end of
+// each match, and next is that. A hit inside a match already taken is skipped
+// whether or not the checks kept the finding, because it is the match and not
+// the finding that FindAll steps over.
+func matchAt(path string, text []byte, source func(int) int, rule rules.Rule, at []int) ([]Finding, error) {
+	var findings []Finding
+	next := 0
+	for _, hit := range at {
+		if hit < next {
+			continue
+		}
+		m := rule.Anchor.FindSubmatchIndex(text[hit:])
+		if m == nil {
+			continue
+		}
+		for i, v := range m {
+			if v >= 0 {
+				m[i] = v + hit
+			}
+		}
+		next = m[1]
+		found, ok, err := accept(path, text, source, rule, m)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			findings = append(findings, found)
+		}
+	}
+	return findings, nil
+}
+
+// accept turns one match into a finding, or reports that a check dropped it.
+func accept(path string, text []byte, source func(int) int, rule rules.Rule, m []int) (Finding, bool, error) {
+	lo, hi := m[2*rule.Group], m[2*rule.Group+1]
+	if lo < 0 {
+		// The group is in the pattern but took part in no match, which an
+		// alternation makes ordinary.
+		return Finding{}, false, nil
+	}
+	ok, err := passes(rule, text, lo, hi)
+	if err != nil || !ok {
+		return Finding{}, false, err
+	}
+	return Finding{
+		RuleID: rule.ID,
+		Path:   path,
+		// The digest is over the decoded bytes, so one secret written in two
+		// encodings dedups to one key -- which is what a dedup key is for. The
+		// offset is the field that has to name a place in the file, and source
+		// is what maps it back.
+		Offset: source(lo),
+		Digest: digest(rule.ID, text[lo:hi]),
+	}, true, nil
 }
 
 // gates reports whether a keyword list can gate anything, which is not the

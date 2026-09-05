@@ -75,6 +75,16 @@ type Rule struct {
 	Entropy     float64
 	Validators  []Validator
 	Enabled     bool
+
+	// Anchor is Regex with \A in front, or nil where the pipeline may not run
+	// the rule once at each prefilter hit instead of scanning the whole buffer
+	// for it. anchor.go carries the conditions and why each one is about the
+	// two paths agreeing rather than about which is faster.
+	Anchor *regexp.Regexp
+	// Reach is the longest match Anchor can produce, in bytes, and so what one
+	// attempt costs. It is set only where Anchor is, and internal/scan is where
+	// it turns into a decision.
+	Reach int
 }
 
 // Uses reports whether the rule names v.

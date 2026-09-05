@@ -53,13 +53,15 @@ const margin = 15 * time.Second
 // silently fifteen seconds later.
 //
 // What it costs is the calls that would have finished between 45 and 60
-// seconds. At the worst measured rate -- 6.5 MiB/s, text carrying every keyword
-// the ruleset gates on -- that is a call adding up to between 293 and 390 MiB
-// on the machine those figures were taken on. Nothing in the two populations
-// this repo has counted comes near either end: nothing outside `.git` in this
-// worktree exceeds 5 MiB, and the largest session transcript on the author's
-// machine is 35.4 MiB. docs/design/README.md, "The scanner's own budget", has
-// the table and what a slower machine does to it.
+// seconds. At the worst rate measured before rules ran at their keyword
+// positions -- 6.5 MiB/s, text carrying every keyword the ruleset gates on --
+// that was a call adding up to between 293 and 390 MiB on the machine those
+// figures were taken on. The same fixture now runs 5.8x faster, which moves the
+// band up rather than changing what it is, and nothing in the two populations
+// this repo has counted came near either end of the old one: nothing outside
+// `.git` in this worktree exceeds 5 MiB, and the largest session transcript on
+// the author's machine is 35.4 MiB. docs/design/README.md, "The scanner's own
+// budget", has the table and what a slower machine does to it.
 const budget = hookTimeout - margin
 
 // A scanned is what scanCall made of a call, boxed so that the goroutine below

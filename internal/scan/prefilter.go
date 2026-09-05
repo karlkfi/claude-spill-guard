@@ -1,6 +1,9 @@
 package scan
 
-import "bytes"
+import (
+	"bytes"
+	"slices"
+)
 
 // hasKeyword reports whether any of keywords appears in buf with a word
 // boundary in front of it. It is the gate in front of the regex pass: a buffer
@@ -46,7 +49,26 @@ func hasKeyword(buf []byte, keywords []string) bool {
 }
 
 // containsKeyword is a case-insensitive search for keyword in buf with a word
-// boundary in front of the match.
+// boundary in front of the match. It stops at the first hit, which is the whole
+// difference between it and keywordPositions.
+func containsKeyword(buf []byte, keyword string) bool {
+	hit := false
+	keywordAt(buf, keyword, func(int) bool {
+		hit = true
+		return false
+	})
+	return hit
+}
+
+// keywordAt calls found at every position where keyword sits in buf with a word
+// boundary in front of it, and stops where found returns false. Positions come
+// out grouped by case-head rather than in order, which is why the caller that
+// wants them all sorts.
+//
+// The two questions this file answers -- is the keyword here at all, and where
+// -- are the same walk with different stopping rules, and the walk is the part
+// that is easy to get subtly wrong in both directions. One implementation, so a
+// fix to the boundary or the fold reaches both.
 //
 // It finds candidate positions with bytes.Index over a single byte, which
 // dispatches to the runtime's assembly IndexByte, rather than walking the
@@ -74,7 +96,10 @@ func hasKeyword(buf []byte, keywords []string) bool {
 // Two passes over the buffer, because the match may be mixed-case and so its
 // first byte can be either -- searching the whole needle in one case would miss
 // `Akia`. A keyword whose first byte has no case gets one pass.
-func containsKeyword(buf []byte, keyword string) bool {
+func keywordAt(buf []byte, keyword string, found func(int) bool) {
+	if keyword == "" {
+		return
+	}
 	lower := []byte(keyword)
 	upper := make([]byte, len(lower))
 	for i, c := range lower {
@@ -102,12 +127,57 @@ func containsKeyword(buf []byte, keyword string) bool {
 			if bounded && i > 0 && isWordByte(buf[i-1]) {
 				continue
 			}
-			if matchesLower(buf[i:i+len(lower)], lower) {
-				return true
+			if matchesLower(buf[i:i+len(lower)], lower) && !found(i) {
+				return
 			}
 		}
 	}
-	return false
+}
+
+// keywordPositions is every place in buf a rule's match can start, in order and
+// without repeats: the hits hasKeyword answers yes on, kept rather than thrown
+// away. ok is false where there are more than limit of them, which is the one
+// arm that is a cost decision rather than an answer -- scan.go's budget() sizes
+// limit so that arm is the one where the whole-buffer pass is cheaper anyway.
+//
+// It is only a complete list of match starts for a rule internal/rules gave an
+// Anchor to, and only where boundedKeywords holds. Both are the caller's to
+// check, and anchor.go says what each one is for.
+func keywordPositions(buf []byte, keywords []string, limit int) ([]int, bool) {
+	var at []int
+	over := false
+	for _, keyword := range keywords {
+		keywordAt(buf, keyword, func(i int) bool {
+			if len(at) >= limit {
+				over = true
+				return false
+			}
+			at = append(at, i)
+			return true
+		})
+		if over {
+			return nil, false
+		}
+	}
+	slices.Sort(at)
+	return slices.Compact(at), true
+}
+
+// boundedKeywords reports whether every keyword carries the boundary the
+// prefilter checks, which is what makes a hit and the pattern's own leading \b
+// the same predicate. A keyword opening on punctuation does not: nothing in
+// front of it is required here, while \b in front of it demands a word byte
+// behind, so the two disagree in both directions.
+//
+// It lives beside isWordByte rather than in the loader for that reason -- the
+// condition is about this file's boundary, and anchor.go carries the rest.
+func boundedKeywords(keywords []string) bool {
+	for _, keyword := range keywords {
+		if keyword == "" || !isWordByte(keyword[0]) {
+			return false
+		}
+	}
+	return len(keywords) > 0
 }
 
 func matchesLower(hay, lowered []byte) bool {
