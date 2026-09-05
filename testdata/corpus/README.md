@@ -60,9 +60,12 @@ The third is the encrypted layout deliberately. Indentation and encryption are
 one fixture rather than two because a widening that admits an indented body and
 not indented `Proc-Type:` and `DEK-Info:` lines leaves this file reporting
 nothing — driven, and the reason it is not a plain indented key. Its body is
-`private-key-block-rfc1421.pem`'s, which is the one place two fixtures here
-share a literal on purpose: what varies between them is the layout around the
-body, so a body that varied too would be noise.
+the other two's: all three carry the same two lines, which is the one place
+fixtures here share a literal on purpose. What varies across them is the layout
+around the body, so a body that varied too would be noise. That is the reverse
+of the rule two paragraphs down, where `aws-access-key-id-utf16le.env` has a key
+of its own — those two differ in *encoding*, and an identical literal would make
+an edit to one a silent break in the other.
 
 Two further layouts cannot be files at all — a CRLF fixture depends on what git
 does to it on checkout — so `TestPrivateKeyBlockAcrossThePEMLayouts` in

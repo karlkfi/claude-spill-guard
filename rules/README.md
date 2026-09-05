@@ -166,6 +166,18 @@ cross it where a bounded window over printable bytes would. The narrow form and
 the 200-byte window agree on every key and disagree there, which is the whole
 of why one shipped.
 
+**The clean corpus is 13 kB, so it cannot settle whether precision moved. The
+differential can.** Compiling both clauses and counting the files the new one
+matches and the old one does not, over `~/go/pkg/mod` — 239,670 files, 5.05
+GiB — the widening adds **3 matches in 1 file**, and all three are indented
+`client-key: |` block scalars in
+`gitlab.com/gitlab-org/api/client-go@v1.46.0/config/config_test.go`, at header
+indents of 8, 10 and 10 columns. Three true positives of exactly the shape this
+section is about, and no new false positive anywhere in the population. Found
+by the review of the pull request that landed the widening and re-taken here;
+it is a reading over one machine's module cache, not a gate, so nothing
+re-runs it.
+
 `TestTheCorpusHoldsTheIndentedShape` in
 [`pemblock_test.go`](../internal/scan/pemblock_test.go) is the guard on the
 *corpus* rather than on the rule. It compiles the clause with the whitespace
