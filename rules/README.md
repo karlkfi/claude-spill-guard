@@ -168,7 +168,7 @@ of why one shipped.
 
 **The clean corpus is 13 kB, so it cannot settle whether precision moved. The
 differential can.** Compiling both clauses and counting the files the new one
-matches and the old one does not, over `~/go/pkg/mod` — 239,670 files, 5.05
+matches and the old one does not, over `~/go/pkg/mod` — 239,671 files, 5.05
 GiB — the widening adds **3 matches in 1 file**, and all three are indented
 `client-key: |` block scalars in
 `gitlab.com/gitlab-org/api/client-go@v1.46.0/config/config_test.go`, at header
@@ -227,8 +227,7 @@ What can be measured is the cost of being wrong in each direction, and it is
 lopsided. Each arm compiled alone over `~/go/pkg/mod`, 239,671 files and 5.05
 GiB of third-party Go source, with every arm first driven against a value built
 for it so a zero below is a property of the population rather than of the
-pattern. (One file more than the differential above counts, minutes apart on a
-cache a build can write to — same tree, two walks.)
+pattern.
 
 | Arm | regex matches | surviving entropy 3.0 and `aws-placeholder` |
 |---|---|---|
@@ -247,12 +246,20 @@ cache is published source, so it holds placeholders and test fixtures rather
 than issued credentials. It says which prefixes people *write down*, never which
 AWS hands out.
 
-What it does settle is the cost. Keeping an arm nobody here can justify adds no
-surviving match to a 5 GiB population, and cutting one AWS does issue costs a
-missed credential, which is the failure the tool exists to prevent. That
-asymmetry decides it on its own, without needing the zeros to mean more than
-they do. `private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on the
-same reasoning one section up.
+What it does settle is the cost. The three unsourced arms are `A3T`, `ABIA` and
+`ACCA`, and each adds no match at all to a 5 GiB population — not a surviving
+one, not a dropped one — so keeping them costs nothing this reading can find.
+Cutting one AWS does issue costs a missed credential, which is the failure the
+tool exists to prevent. That asymmetry decides it on its own, without needing
+the zeros to mean more than they do.
+
+`private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on the
+keep-anyway half of the argument one section up: deleting an arm is a judgement
+about what nothing writes rather than a proof, so the cheaper error is to keep
+it. Only that half carries. Those two arms are shown dead *structurally*, by
+reading the armor real toolchains emit, and no equivalent reading exists for a
+prefix AWS may or may not issue — which is exactly the move the paragraph above
+says these zeros cannot make.
 
 What the arms did lack was evidence they could fire.
 `TestEveryAWSPrefixArmIsReachable` in
