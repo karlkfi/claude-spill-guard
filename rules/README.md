@@ -215,14 +215,20 @@ real key whose last seven characters are `EXAMPLE`, which is one in 3.4e10 at
 the smallest alphabet that tail can be drawn from.
 
 **All five prefixes stay, and each one is now reachable by a test.** The
-ruleset was inherited, so which prefixes AWS actually issues is a question this
-repository has never asked, and it still cannot: answering it means reading
-AWS's IAM identifiers reference, which this build graph is forbidden to fetch.
+ruleset was inherited, and for three of the five — `A3T`, `ABIA` and `ACCA` —
+nothing here traces the prefix to anything AWS publishes. The other two are
+sourced: `aws-placeholder` below, `internal/validate/aws.go` and
+`testdata/corpus/README.md` all cite `AKIAIOSFODNN7EXAMPLE` on the IAM pages and
+`ASIAIOSFODNN7EXAMPLE` on the STS ones, which is AWS printing a key on each of
+those prefixes. Settling the unsourced three means reading AWS's IAM identifiers
+reference, which this build graph is forbidden to fetch.
+
 What can be measured is the cost of being wrong in each direction, and it is
 lopsided. Each arm compiled alone over `~/go/pkg/mod`, 239,671 files and 5.05
 GiB of third-party Go source, with every arm first driven against a value built
 for it so a zero below is a property of the population rather than of the
-pattern:
+pattern. (One file more than the differential above counts, minutes apart on a
+cache a build can write to — same tree, two walks.)
 
 | Arm | regex matches | surviving entropy 3.0 and `aws-placeholder` |
 |---|---|---|
@@ -260,8 +266,11 @@ absent is surface with no evidence behind it, and that was the defect rather
 than the arms.
 
 What would reverse this is the reading nobody here has taken: AWS's own list of
-the prefixes it issues. A prefix absent from it is an arm to cut, and this
-paragraph is what to delete when somebody checks.
+the prefixes it issues. A prefix absent from it is an arm to cut. What gets
+deleted then is the paragraph above opening **All five prefixes stay** and this
+one; the table and the paragraph between them survive either way, because they
+are about what the arms cost and what tests them rather than about why they are
+kept.
 
 `jwt` names `jwt-sample-key`, which recomputes the HMAC and drops a token that
 verifies under a published sample secret. A debugger that wants its own example
