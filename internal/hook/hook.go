@@ -112,15 +112,15 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 	}
 	findings, skips, err := got.findings, got.skips, got.err
 	if err != nil {
-		// A shape refusal is not a scan that failed, and failed() would say it
-		// was: its sentence is that nothing scanned this call, which is true
-		// here and is not the reason. The call was refused for what it would
-		// do, so the body has to say so and name the filtered form -- shape.go
-		// carries that argument.
-		var shape *shapeRefusal
-		if errors.As(err, &shape) {
+		// A refusal is not a scan that failed, and failed() would say it was:
+		// its sentence is that nothing scanned this call, which is true here
+		// and is not the reason. The call was stopped for what it would do, so
+		// the body has to say so and name what the caller can do instead --
+		// shape.go and guarded.go carry the two arguments.
+		var refused refusal
+		if errors.As(err, &refused) {
 			return decide(stdout, stderr, call, event, overridden,
-				dumped(shape.command), "")
+				refused.body(), "")
 		}
 		// No notice: scanCall reports nothing it read when it errors, so there
 		// is no set of allowed skips to name and failed() already says that
@@ -448,6 +448,14 @@ func toolTargets(call payload) ([]target, error) {
 			return nil, errors.New("the Read call names something that is " +
 				"neither a file nor a directory, so what it would send cannot " +
 				"be read here")
+		}
+		// Ahead of the read, because the whole of this refusal is that the
+		// file is not opened. There is no pipeline to read position in the way
+		// bash.go does -- a Read call sends the file to the model and nothing
+		// stands between the two -- so every member of the class is refused
+		// here.
+		if class := guardedClass(*in.FilePath); class != "" {
+			return nil, &pathRefusal{*in.FilePath, class}
 		}
 		buf, err := os.ReadFile(*in.FilePath)
 		if err != nil {

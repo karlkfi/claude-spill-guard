@@ -343,6 +343,43 @@ func dumped(command string) string {
 		command)
 }
 
+// guarded is the body for a read refused because the path is credentials by
+// convention, whatever is in it.
+//
+// It has one job dumped() does not: saying that nothing was opened. A reader
+// who meets a block from this tool looks for the finding, and here the file was
+// never read -- so the sentence has to be that no rule was consulted, rather
+// than anything that could be taken for a clean or a dirty scan.
+//
+// It names the cap for the same reason dumped() calls itself a net rather than
+// a wall. This refuses the readers internal/readers knows, so an interpreter
+// pointed at the same path walks past it, and a reader who takes the deny for
+// path protection will trust it further than it goes.
+//
+// The remedy is real rather than a formality: a filter with a stage after it is
+// not refused, and unlike the environment case the file is still opened and
+// still matched against every rule -- driven, `cat matches.env | cut -d= -f1`
+// blocks naming aws-access-key-id. So the careful form keeps its coverage
+// instead of trading it for the deny.
+//
+// %q on both, for found()'s reason. The path is one this binary resolved and
+// stat'ed rather than a token out of the command string, which is the
+// distinction resolve() draws about what a reason may carry; the class is one
+// of guarded.go's own literals.
+func guarded(path, class string) string {
+	return fmt.Sprintf("%q is %s, and this refused to read it on that alone. "+
+		"Nothing here opened the file, so nothing here has an opinion about "+
+		"what is in it -- the class is refused because most of what these files "+
+		"hold matches no rule in this set, and a clean scan of one would report "+
+		"a safety it is not providing. Nothing was sent. If you want the shape "+
+		"of the file rather than its values, a filter with a stage after it -- "+
+		"`cat FILE | cut -d= -f1` -- is not refused and is still scanned. This "+
+		"reaches the readers it knows and no others: an interpreter told to open "+
+		"the same path goes straight past it, so read this as a net for the "+
+		"accident rather than as a claim that the path is guarded.",
+		path, class)
+}
+
 // failed is the body for a scan that could not be completed.
 //
 // Every internal error blocks. That is the inversion this project makes

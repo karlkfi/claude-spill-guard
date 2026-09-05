@@ -146,6 +146,17 @@ func Run(version string, stdout, stderr io.Writer) int {
 			"canary file, so nothing below was driven: %v\n", err)
 		return 1
 	}
+	// A path in the guarded class holding nothing a rule would match, so the
+	// arms it drives turn on the path and on nothing else. A dotenv file that
+	// holds a port and no credential is the ordinary case, which is what makes
+	// the pair below worth having: the blocking arm shows the class is
+	// refused, and the allowing one shows the filtered form is not.
+	dotenv := filepath.Join(dir, ".env")
+	if err := os.WriteFile(dotenv, []byte("PORT=3000\n"), 0o600); err != nil {
+		fmt.Fprintf(stderr, "spill-guard: selftest could not write its dotenv "+
+			"file, so nothing below was driven: %v\n", err)
+		return 1
+	}
 	undecodable := filepath.Join(dir, "notes.utf32")
 	if err := os.WriteFile(undecodable, utf32LE("no credentials in this one\n"), 0o600); err != nil {
 		fmt.Fprintf(stderr, "spill-guard: selftest could not write its "+
@@ -163,7 +174,7 @@ func Run(version string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "ruleset: compiled in\n\n")
 
-	list := arms(planted, quiet, undecodable, binary)
+	list := arms(planted, quiet, undecodable, binary, dotenv)
 	total := len(list)
 	failed := report(stdout, list)
 
@@ -214,7 +225,7 @@ func report(stdout io.Writer, list []arm) int {
 
 // arms is every payload driven, rebuilt per call so nothing is shared between
 // a caller's two runs.
-func arms(planted, quiet, undecodable, binary string) []arm {
+func arms(planted, quiet, undecodable, binary, dotenv string) []arm {
 	return []arm{
 		{
 			name: "a prompt carrying the canary",
@@ -322,6 +333,35 @@ func arms(planted, quiet, undecodable, binary string) []arm {
 				"hook_event_name": "PreToolUse",
 				"tool_name":       "Bash",
 				"tool_input":      map[string]any{"command": "env | cut -d= -f1"},
+			},
+		},
+		{
+			// The other shape deny, and the one whose bar is precision rather
+			// than reach. This file holds `PORT=3000` and no rule matches it,
+			// so a block here is the path being refused and can be nothing
+			// else -- which is what makes it the arm that says the class is
+			// wired at all.
+			name: "a Bash reader pointed at a dotenv file",
+			want: blocks,
+			by:   "a dotenv file",
+			payload: map[string]any{
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "Bash",
+				"tool_input":      map[string]any{"command": "cat " + quote(dotenv)},
+			},
+		},
+		{
+			// And its careful form. A filter with a stage after it sends the
+			// names alone, so refusing it would be the defect rather than the
+			// control -- and unlike the environment pair above, the file is
+			// still opened and still matched here, so this arm allows because
+			// nothing is in it rather than because nothing looked.
+			name: "a Bash reader filtering a dotenv file",
+			want: allows,
+			payload: map[string]any{
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "Bash",
+				"tool_input":      map[string]any{"command": "cat " + quote(dotenv) + " | cut -d= -f1"},
 			},
 		},
 		{
