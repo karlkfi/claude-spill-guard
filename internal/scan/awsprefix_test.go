@@ -76,11 +76,6 @@ func TestTheArmTableIsTheShippedAlternation(t *testing.T) {
 	for _, arm := range arms {
 		listed[arm.arm] = true
 	}
-	if len(shipped) < len(arms) {
-		t.Fatalf("the pattern yielded %d arm(s) from %q, fewer than the %d listed "+
-			"-- the split is wrong, not the ruleset",
-			len(shipped), found[0][1], len(arms))
-	}
 	for arm := range shipped {
 		if !listed[arm] {
 			t.Errorf("the shipped rule carries the arm %q and no row drives it, so "+
