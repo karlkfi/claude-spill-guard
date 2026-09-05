@@ -36,14 +36,24 @@ They are here as literals rather than assembled at scan time because the thing
 under test is a buffer, and a fixture that only exists inside a test is a
 fixture nobody can read.
 
-Two files carry `private-key-block`, because the rule has two layouts to reach.
-`private-key-block.pem` is a body on the line after the header;
+Three files carry `private-key-block`, because the rule has three layouts to
+reach. `private-key-block.pem` is a body on the line after the header;
 `private-key-block-rfc1421.pem` is the encrypted PKCS#1 form, with `Proc-Type:`
 and `DEK-Info:` in between, which is what `openssl rsa -aes128 -p` and
-`ssh-keygen -m PEM -N` write. Two further layouts cannot be files at all — a
-CRLF fixture depends on what git does to it on checkout — so
-`TestPrivateKeyBlockAcrossThePEMLayouts` in `internal/scan` carries those as
-literals.
+`ssh-keygen -m PEM -N` write; and `private-key-block-indented.yaml` is that same
+encrypted key inside a Kubernetes secret's block scalar, indented by four.
+
+The third is the encrypted layout deliberately. Indentation and encryption are
+one fixture rather than two because a widening that admits an indented body and
+not indented `Proc-Type:` and `DEK-Info:` lines leaves this file reporting
+nothing — driven, and the reason it is not a plain indented key. Its body is
+`private-key-block-rfc1421.pem`'s, which is the one place two fixtures here
+share a literal on purpose: what varies between them is the layout around the
+body, so a body that varied too would be noise.
+
+Two further layouts cannot be files at all — a CRLF fixture depends on what git
+does to it on checkout — so `TestPrivateKeyBlockAcrossThePEMLayouts` in
+`internal/scan` carries those as literals.
 
 ## `clean/` has to stay adversarial
 
@@ -73,8 +83,11 @@ repository is full of and what a scanner has to be silent about.
 body line after the PEM header, and nothing else in the corpus reaches that
 rule at all — so the clause could be deleted with every test still green. The
 runbook quotes four private-key headers inline and displays a fifth in an
-indented block, which turns a deletion into 5 findings and a red gate. The
-sixth armour line is a `CERTIFICATE`, which is public and which the rule's
+indented block, which turns a deletion into 5 findings and a red gate. That
+fifth carries a second job now that the clause admits leading whitespace: it is
+a displayed header and an indented body line with prose between them, so it is
+what separates stepping over whitespace from stepping over a window of anything
+printable. The sixth armour line is a `CERTIFICATE`, which is public and which the rule's
 alternation does not reach. A rule with no clean
 file touching it has a guard that cannot fire.
 
