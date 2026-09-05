@@ -16,6 +16,8 @@
 package scan
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
@@ -33,19 +35,69 @@ func awsAccessKeyID(t *testing.T) []rules.Rule {
 	return nil
 }
 
+// arms is one vector per arm of the rule's alternation, keyed by the arm as the
+// pattern writes it so the two can be compared as sets rather than by hand.
+var arms = []struct{ arm, prefix, vector string }{
+	{"A3T[A-Z0-9]", "A3T", "aws-a3t-key-id"},
+	{"AKIA", "AKIA", "aws-access-key-id"},
+	{"ASIA", "ASIA", "aws-session-key-id"},
+	{"ABIA", "ABIA", "aws-bearer-token-id"},
+	{"ACCA", "ACCA", "aws-context-credential-id"},
+}
+
+// alternation pulls the arms out of the shipped pattern. It fails rather than
+// returning nothing on a pattern it cannot read, because a reshape that
+// defeated the extraction would otherwise leave the test below comparing two
+// empty sets and reporting green.
+var alternation = regexp.MustCompile(`\(\?:([^)]*)\)`)
+
+// The table above says every listed arm fires. It cannot say the rule carries
+// no *other* arm, and containment only catches the loud direction: an arm added
+// to the pattern with a keyword beside it leaves the whole suite green, so a
+// prefix nobody argued for ships matching real files with no test naming it.
+// Driven -- a sixth arm `AZZZ` with its keyword is green without this, and
+// `TestWhichShippedRulesRunFromTheirKeywordPositions` catches it only when the
+// keyword is left off. internal/hook/manifest_test.go holds its two sets the
+// same way and for the same reason.
+func TestTheArmTableIsTheShippedAlternation(t *testing.T) {
+	rule := awsAccessKeyID(t)[0]
+	found := alternation.FindAllStringSubmatch(rule.Regex.String(), -1)
+	if len(found) != 1 {
+		t.Fatalf("found %d non-capturing group(s) in %q, want exactly 1 -- the "+
+			"extraction no longer reads this pattern, so it cannot hold the sets",
+			len(found), rule.Regex.String())
+	}
+
+	shipped := map[string]bool{}
+	for _, arm := range strings.Split(found[0][1], "|") {
+		shipped[arm] = true
+	}
+	listed := map[string]bool{}
+	for _, arm := range arms {
+		listed[arm.arm] = true
+	}
+	if len(shipped) < len(arms) {
+		t.Fatalf("the pattern yielded %d arm(s) from %q, fewer than the %d listed "+
+			"-- the split is wrong, not the ruleset",
+			len(shipped), found[0][1], len(arms))
+	}
+	for arm := range shipped {
+		if !listed[arm] {
+			t.Errorf("the shipped rule carries the arm %q and no row drives it, so "+
+				"nothing here can tell it from an arm nobody added", arm)
+		}
+	}
+	for arm := range listed {
+		if !shipped[arm] {
+			t.Errorf("a row drives the arm %q and the shipped rule no longer carries "+
+				"it", arm)
+		}
+	}
+}
+
 func TestEveryAWSPrefixArmIsReachable(t *testing.T) {
 	set := awsAccessKeyID(t)
 	vec := testvec.Load(t)
-
-	// One vector per arm of the alternation. A row missing here is an arm
-	// whose deletion nothing in the tree can report.
-	arms := []struct{ prefix, vector string }{
-		{"A3T", "aws-a3t-key-id"},
-		{"AKIA", "aws-access-key-id"},
-		{"ASIA", "aws-session-key-id"},
-		{"ABIA", "aws-bearer-token-id"},
-		{"ACCA", "aws-context-credential-id"},
-	}
 
 	for _, arm := range arms {
 		t.Run(arm.prefix, func(t *testing.T) {
