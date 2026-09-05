@@ -1998,6 +1998,22 @@ have covered in 13 ms is refused, and the user retypes it against files. The
 alternative on the bottom rows is a scanner reporting on a file set the command
 would not have sent.
 
+**The reason has to name its own subject, because nothing here parses a
+recursion flag.** `-rn`, `-r`, `--recursive` and no flag at all reach one
+return — driven on a built binary, four arms, byte-identical reasons — so a
+clause reading *this reads files rather than walking them* is false of the
+three spellings that do walk, and the recursive form is the one this refusal
+meets: `grep -rn pat docs/` is the 7.1% measured above. It was read that way:
+a friction report on 0.2.0 filed the refusal as a flag-parsing defect and
+proposed the cluster `-rn` as the first hypothesis to test, when there is no
+flag parser to have a bug in. So the clause says **this scanner** reads files
+rather than walking a tree, and
+`TestADirectoryOperandSaysSoAndSaysWhatToDoInstead` runs its four arms against
+that substring. The remedy stays *name the files instead* even though a
+recursive caller wanted a tree, because the repair that fits their intent is a
+reader with no row — `git grep` — and a refusal that routes the model to an
+unscanned command is a bypass this hook would be recommending.
+
 ## Output discipline
 
 **The raw secret never enters a struct that outlives the match.** The
