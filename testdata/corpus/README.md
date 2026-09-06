@@ -62,10 +62,12 @@ not indented `Proc-Type:` and `DEK-Info:` lines leaves this file reporting
 nothing — driven, and the reason it is not a plain indented key. Its body is
 the other two's: all three carry the same two lines, which is the one place
 fixtures here share a literal on purpose. What varies across them is the layout
-around the body, so a body that varied too would be noise. That is the reverse
-of the rule two paragraphs down, where `aws-access-key-id-utf16le.env` has a key
-of its own — those two differ in *encoding*, and an identical literal would make
-an edit to one a silent break in the other.
+around the body, so a body that varied too would be noise. That is the reverse of
+the rule **Adding to it** gives below for `aws-access-key-id-utf16le.env` —
+"its key is its own". Those two differ in *encoding*, so an identical literal
+would make an edit to one a silent break in the other; these three differ only
+in the layout around a body that has to stay identical for the comparison to
+mean anything.
 
 Two further layouts cannot be files at all — a CRLF fixture depends on what git
 does to it on checkout — so `TestPrivateKeyBlockAcrossThePEMLayouts` in
