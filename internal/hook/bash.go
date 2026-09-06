@@ -197,10 +197,10 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// command. Nothing here parses a recursion flag -- `-rn`,
 				// `-r`, `--recursive` and no flag at all reach this same
 				// return, driven -- so a reason saying the command reads
-				// rather than walks is false of every recursive form, which is
-				// most of the traffic. It cost a friction report the day it
-				// was read that way, spent hunting a flag parser that does not
-				// exist.
+				// rather than walks is false of every recursive form, and the
+				// recursive form is the one this refusal meets. It cost a
+				// friction report the day it was read that way, spent hunting
+				// a flag parser that does not exist.
 				if info.IsDir() {
 					return nil, fmt.Errorf("in the %q here, a file operand names a "+
 						"directory, and this scanner reads files rather than walking "+
