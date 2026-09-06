@@ -368,6 +368,14 @@ jobs:
       #
       # So a new subcommand reaching the pipeline belongs in this list. The
       # precondition is what says so, loudly, rather than this comment.
+      #
+      # It said so again on 2026-09-05, when `coverage` landed. That one does
+      # not reach `internal/scan` at all -- it reads a log -- but it calls into
+      # `internal/hook`, so cutting the import while leaving its arm behind
+      # left main.go not compiling, and the step failed on the build rather
+      # than on the table. The reading to take from that is the general one:
+      # what the list has to cover is every arm that NAMES a cut package, not
+      # every arm that reaches the scanner.
       - name: Unwiring the scanner must fail the check and flip the table
         run: |
           python3 - <<'PY'
@@ -379,8 +387,10 @@ jobs:
               '\t"github.com/karlkfi/claude-spill-guard/internal/selftest"\n',
               '\tcase "hook":\n\t\treturn hook.Run(stdin, stdout, stderr)\n',
               '\tcase "selftest":\n\t\treturn selftest.Run(version, stdout, stderr)\n',
+              '\tcase "coverage":\n\t\treturn hook.Summarize(stdout, stderr)\n',
               "  hook      scan a Claude Code hook payload read from stdin\n",
               "  selftest  drive the hook path over a canary and report what it did\n",
+              "  coverage  report what this scanner could not read, commonest first\n",
           ):
               if line not in s:
                   raise SystemExit(f"main.go no longer carries {line!r}, so this "

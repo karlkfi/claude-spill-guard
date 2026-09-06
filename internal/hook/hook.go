@@ -105,10 +105,17 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 
 	got, finished := within(call, event, budget-time.Since(start))
 	if !finished {
-		// No notice, for failed()'s reason and one of its own: the scan was
-		// still running when this was written, so what it had read by then is
-		// not a set anything here can name.
-		return decide(stdout, stderr, call, event, overridden, overran(budget), "")
+		// A scan that ran out of budget read nothing this can name, so there is
+		// no notice to carry and no finding to report -- it is a coverage
+		// failure like any other and defers with one.
+		//
+		// This is the branch where deferring is least comfortable, because a
+		// buffer big enough or keyword-dense enough to exhaust 45 seconds is
+		// also where a secret is most likely to be sitting unexamined. It
+		// defers anyway, for consistency with the rule the other two follow:
+		// the alternative is a prompt on the one call a person has least
+		// context to judge. The performance defect underneath it is Q122.
+		return abstain(stdout, stderr, call, event, overran(budget))
 	}
 	findings, skips, err := got.findings, got.skips, got.err
 	if err != nil {
@@ -125,7 +132,11 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// No notice: scanCall reports nothing it read when it errors, so there
 		// is no set of allowed skips to name and failed() already says that
 		// nothing scanned this call at all.
-		return decide(stdout, stderr, call, event, overridden, failed(err), "")
+		//
+		// This is the class the measurement in coverage.go is about -- an
+		// operand carrying a `$`, a glob, a directory, a relative path after a
+		// `cd`. It is 94.3% of what this hook used to block and it defers.
+		return abstain(stdout, stderr, call, event, failed(err))
 	}
 	// Ahead of the findings, because found() says what the matches in this call
 	// are, and a buffer nothing opened makes that a claim about coverage rather
@@ -146,7 +157,11 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		notice = alsoUnread(allowed)
 	}
 	if len(blocking) > 0 {
-		return decide(stdout, stderr, call, event, overridden, unread(blocking), notice)
+		// A buffer that declared an encoding nothing here decodes. Coverage,
+		// not content, so it defers -- and the allowed skips beside it still
+		// get their notice, which is the one thing on this branch a person can
+		// act on.
+		return abstain(stdout, stderr, call, event, unread(blocking), allowed...)
 	}
 	if len(findings) > 0 {
 		return decide(stdout, stderr, call, event, overridden, found(findings), notice)
@@ -200,6 +215,34 @@ func decide(stdout, stderr io.Writer, call payload, event Event, overridden bool
 	// on exit 2, which blocks.
 	if err := confirm(stdout, event, confirmLead+body, notice); err != nil {
 		return refuse(stderr, err)
+	}
+	return 0
+}
+
+// abstain defers: it writes no verdict, records the coverage failure, and
+// exits 0. The call then meets whatever permission handling it would have met
+// with this hook uninstalled.
+//
+// Writing nothing is the whole mechanism, and it is chosen over an explicit
+// allow deliberately. `permissionDecision: "allow"` is an opinion -- it
+// suppresses the rules the user configured and any prompt they would otherwise
+// have seen. This package has no opinion here by definition: it could not read
+// the call. Emitting nothing cannot change what any other mode does, which is
+// the property that makes it safe to do on the busiest path in the binary.
+//
+// The override is not consulted. There is nothing to downgrade -- the call is
+// already proceeding -- and a hatch that appeared to wave through a scan that
+// never ran would be the most misleading string this package could print.
+//
+// allowed carries the skips that were permitted on the same call. They keep
+// the notice they would have had, because that one names buffers a person can
+// convert and is the pre-existing behaviour of every allowed call.
+func abstain(stdout, stderr io.Writer, call payload, event Event, reason string, allowed ...skipped) int {
+	record(stderr, call, event, reason)
+	if len(allowed) > 0 {
+		if err := notify(stdout, noticeLead+unscanned(allowed)); err != nil {
+			return refuse(stderr, err)
+		}
 	}
 	return 0
 }

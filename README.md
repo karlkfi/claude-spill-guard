@@ -33,8 +33,8 @@ authoritative and is not.
 | Run as a Claude Code hook | yes |
 | Ship a ruleset | yes |
 
-`spill-guard` builds, answers `hook`, `selftest`, `version`, and reaches
-`internal/bash`, `internal/hook`, `internal/readers`, `internal/rules`,
+`spill-guard` builds, answers `coverage`, `hook`, `selftest`, `version`, and
+reaches `internal/bash`, `internal/hook`, `internal/readers`, `internal/rules`,
 `internal/scan`, `internal/selftest`, `internal/validate`, `rules`.
 <!-- status:end -->
 
@@ -168,10 +168,16 @@ goes `FAIL` if its call is blocked at all, by any rule, so one bad regex
 reddens allowing rows rather than leaving thirteen green.
 
 One row is neither an allowing row nor a block by a rule: a `Read` of a file
-behind a UTF-32 byte-order mark, which this build does not decode and therefore
-refuses to call clean. It reports `blocked` on the skip reason rather than on a
-rule id, and it is there because it is the only payload in the list that
-reaches a verdict with nothing found.
+behind a UTF-32 byte-order mark, which this build does not decode. It reports
+`deferred` on the skip reason rather than `blocked` on a rule id, because a
+buffer nothing could read is a coverage failure — the call proceeds and the gap
+is recorded rather than stopped. It is the only payload in the list that
+reaches that branch.
+
+`deferred` is its own row type for a reason worth knowing if you read this
+report: a deferred call writes no verdict, so it looks exactly like a clean
+allow from outside. A row that only knew *allowed* and *blocked* would print
+`ok` for a binary whose scanner had quietly stopped reading anything at all.
 
 It also does not run the dispatch a session would. `selftest` calls the
 scanner directly, so it cannot tell you that `spill-guard hook` itself still

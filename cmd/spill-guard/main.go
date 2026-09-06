@@ -1,9 +1,9 @@
 // Command spill-guard scans local content for secrets and PII before a Claude
 // Code session can send it to the API.
 //
-// The design is in docs/design/README.md. `hook`, `selftest` and `version` are
-// implemented; the scan and rules subcommands land with the rows that specify
-// them.
+// The design is in docs/design/README.md. `hook`, `selftest`, `coverage` and
+// `version` are implemented; the scan and rules subcommands land with the rows
+// that specify them.
 package main
 
 import (
@@ -23,6 +23,7 @@ const usage = `usage: spill-guard <command>
 commands:
   hook      scan a Claude Code hook payload read from stdin
   selftest  drive the hook path over a canary and report what it did
+  coverage  report what this scanner could not read, commonest first
   version   print the version and exit
 `
 
@@ -48,6 +49,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return hook.Run(stdin, stdout, stderr)
 	case "selftest":
 		return selftest.Run(version, stdout, stderr)
+	case "coverage":
+		return hook.Summarize(stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0

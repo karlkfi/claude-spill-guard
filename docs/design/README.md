@@ -1087,15 +1087,71 @@ guards, which the `group` field handles — capture a wider window, post-filter 
 code. RE2 also caps bounded repetition at 1000, so `{1,1024}` becomes `{1,1000}`.
 [`language-choice.md` §4](language-choice.md) names all nine.
 
-## Fail closed, and prove it
+## Block on a finding, defer on a gap, and prove both
+
+> **Changed 2026-09-05.** This section governed as *fail closed* — every
+> internal error blocked. It no longer does, and the sections below it under
+> [An unread buffer is not a clean one](#an-unread-buffer-is-not-a-clean-one-and-the-two-reasons-are-not-alike),
+> [A declared encoding whose decoded text is binary](#a-declared-encoding-whose-decoded-text-is-binary-blocks),
+> [The scanner's own budget](#the-scanners-own-budget-and-overrunning-it-blocks)
+> and [A directory operand](#a-directory-operand-is-refused-rather-than-walked-and-that-is-a-decision-now)
+> still describe the old verdict in their prose. Their *measurements* stand and
+> their *axes* stand; only the word "blocks" is wrong, and it should be read as
+> "is recorded". The prose pass is queued.
 
 The sibling guards fail **silent**: an unparseable input or a missing registry
 means no opinion, because a hook that runs on every Bash call must never be the
-reason ordinary work fails. spill-guard inverts that. A secret scanner that
-fails quietly reports a safety it is not providing, which is worse than not
-being installed.
+reason ordinary work fails. spill-guard used to invert that wholesale. It now
+splits, because the inversion was measured and only half of it was earning its
+cost.
 
-So every internal error blocks, with a reason naming the error.
+**A finding blocks.** A rule matched something, and that is the product.
+
+**A shape refusal blocks.** An `env` dump, or a read of one of the fourteen
+guarded credential paths: the tool knows there is something to stop and no rule
+could recognise it.
+
+**A coverage failure defers.** An operand that will not resolve, a buffer
+nothing decoded, a scan past its budget — the hook writes no verdict at all, so
+the permission flow that would have run without it runs unchanged. Not an
+explicit `allow`, which would suppress the user's own rules; this has no
+opinion to spend on them, because it could not read the call.
+
+**A payload that does not decode still blocks on exit 2.** Not JSON, no event,
+an event this binary cannot withhold at. That is the hook being invoked wrongly
+rather than a scanner failing to read something, and it is the signal that says
+a broken install is broken.
+
+Why the split, measured over the week to 2026-09-05, 540 verdicts across 100
+sessions on one machine:
+
+| | Count | Share |
+|---|---|---|
+| Coverage failures | 509 | 94.3% |
+| Findings | 31 | 5.7% |
+| Shape refusals, budget overruns | 0 | 0% |
+
+Of 69 confirmed confirmation prompts in the same window, 49 (71%) were coverage
+failures — 47 of those on one reason, an operand carrying a `$`. And after a
+coverage block, the session got a clean call through within four attempts
+**99.2% of the time** (505 of 509), reading the same tree by another route. The
+block was not withholding the bytes. It charged a turn, and then a person's
+attention, for a refusal the next call walked around. A scanner that trains its
+users to click through is one that gets uninstalled, and precision is the
+product.
+
+What replaces the block is a **coverage record**, on two sinks: a line on
+stderr, which reaches neither the model nor the person and rides into the
+transcript's `hook_success` attachment; and a capped JSONL under
+`$XDG_STATE_HOME/spill-guard/` that `spill-guard coverage` groups and counts.
+Both are best-effort — a sink that cannot be written must never change the
+verdict, or a full disk rebuilds the friction on the machines least able to
+diagnose it.
+
+The record is what keeps this from being a retreat. The old block did not close
+gaps; it deferred them to a retry. The log makes the gap countable, which is
+the first time the question *which resolver limitation costs the most* has had
+an instrument pointed at it.
 
 The predecessor shows why this needs more than a policy statement.
 `coo-quack/sensitive-canary` exits 2 to block on internal error — correct — but

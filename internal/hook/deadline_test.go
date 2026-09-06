@@ -23,6 +23,9 @@ const unhurried = time.Hour
 // it.
 func driveWithin(t *testing.T, budget time.Duration, payload string) (code int, stdout, stderr string) {
 	t.Helper()
+	// See drive: a coverage failure appends to the state directory, and the
+	// suite must not write into the developer's own log.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var out, errs bytes.Buffer
 	code = run(time.Now(), budget, strings.NewReader(payload), &out, &errs)
 	return code, out.String(), errs.String()
@@ -86,7 +89,7 @@ func slowToScan(t *testing.T, size int, planted string) string {
 // and there is no third answer to weigh. Both events, because the block
 // encodings are not interchangeable and a wrong one on UserPromptSubmit is
 // accepted and ignored.
-func TestAScanThatOverrunsItsBudgetBlocks(t *testing.T) {
+func TestAScanThatOverrunsItsBudgetDefers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "clean.txt")
 	if err := os.WriteFile(path, []byte("nothing to see\n"), 0o600); err != nil {
@@ -110,15 +113,12 @@ func TestAScanThatOverrunsItsBudgetBlocks(t *testing.T) {
 			// deadline fires once the match loop has started, which is the arm
 			// below.
 			code, stdout, stderr := driveWithin(t, 0, tc.payload)
-			if code != 0 {
-				t.Fatalf("exit code = %d, want 0 with a decision object (stderr %q)", code, stderr)
-			}
-			reason := reasonOf(t, stdout)
+			reason := deferred(t, code, stdout, stderr)
 			if !strings.Contains(reason, "did not finish inside its") {
-				t.Errorf("reason = %q, want it to say the scan ran out of budget", reason)
+				t.Errorf("coverage reason = %q, want it to say the scan ran out of budget", reason)
 			}
 			if !strings.Contains(reason, "went unread") {
-				t.Errorf("reason = %q, want it to say what the call would have sent went unread", reason)
+				t.Errorf("coverage reason = %q, want it to say what the call would have sent went unread", reason)
 			}
 
 			// The control for the three above, and without it a hook that
@@ -155,11 +155,8 @@ func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 		`"tool_input":{"file_path":` + quote(t, path) + `}}`
 
 	code, stdout, stderr := driveWithin(t, 20*time.Millisecond, payload)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object (stderr %q)", code, stderr)
-	}
-	if reason := reasonOf(t, stdout); !strings.Contains(reason, "did not finish inside its") {
-		t.Fatalf("reason = %q, want the deadline to have fired mid-scan", reason)
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "did not finish inside its") {
+		t.Fatalf("coverage reason = %q, want the deadline to have fired mid-scan", reason)
 	}
 
 	// The positive control. The same file scans to a real finding, so the
@@ -173,65 +170,38 @@ func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 	}
 }
 
-// An overrun takes the same hatch every other block here takes.
+// An override on a coverage failure changes nothing, and both modes agree.
 //
-// It is the same reading the override is built on: the scan still ran, nothing
-// was waved through, and what an approval is worth is what is in front of the
-// person approving. A block with no way past it would be the one class of
-// refusal in this package that a user cannot answer.
-func TestAnOverrunIsDowngradedByAnOverride(t *testing.T) {
+// This is the half of the override contract that inverted on 2026-09-05. An
+// overrun used to block, so the hatch downgraded it to a confirmation; now it
+// defers, and there is no block left to downgrade. The hatch is not consulted
+// at all -- abstain never reads it -- because a confirmation saying "approving
+// sends what is named below" would be describing a call that was already
+// proceeding, which is the most misleading string this package could print.
+//
+// Driven on both permission modes because the old behaviour differed between
+// them: default got an ask, bypassPermissions got a deny. Neither happens now,
+// and a regression restoring either would show up as a verdict on stdout.
+func TestAnOverrideOnACoverageFailureIsInert(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "clean.txt"), []byte("hello\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` +
-		quote(t, dir) + `,"tool_input":{"command":` +
-		`"SPILL_GUARD_OVERRIDE='it is a build log' cat clean.txt"}}`
-
-	code, stdout, stderr := driveWithin(t, 0, payload)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object (stderr %q)", code, stderr)
-	}
-	got := decision(t, stdout)
-	out, ok := got["hookSpecificOutput"].(map[string]any)
-	if !ok {
-		t.Fatalf("stdout carries no PreToolUse verdict: %q", stdout)
-	}
-	if out["permissionDecision"] != "ask" {
-		t.Errorf("permissionDecision = %v, want ask", out["permissionDecision"])
-	}
-	if reason := reasonOf(t, stdout); !strings.Contains(reason, "did not finish inside its") {
-		t.Errorf("reason = %q, want the confirmation to say what it is about", reason)
-	}
-}
-
-// And the one mode where the downgrade has nobody to reach.
-//
-// A confirmation nobody can answer is not a confirmation, so the block stands
-// and the reason goes to the model instead of the session stalling. Same
-// branch as every other overridden block, which is why this asserts the arm
-// rather than the argument.
-func TestAnOverrunUnderBypassPermissionsStillBlocks(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "clean.txt"), []byte("hello\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` +
-		quote(t, dir) + `,"permission_mode":"bypassPermissions","tool_input":{"command":` +
-		`"SPILL_GUARD_OVERRIDE='it is a build log' cat clean.txt"}}`
-
-	code, stdout, stderr := driveWithin(t, 0, payload)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object (stderr %q)", code, stderr)
-	}
-	got := decision(t, stdout)
-	out, ok := got["hookSpecificOutput"].(map[string]any)
-	if !ok {
-		t.Fatalf("stdout carries no PreToolUse verdict: %q", stdout)
-	}
-	if out["permissionDecision"] != "deny" {
-		t.Errorf("permissionDecision = %v, want deny where nobody can answer an ask",
-			out["permissionDecision"])
+	for _, mode := range []string{"", "bypassPermissions"} {
+		name := mode
+		if name == "" {
+			name = "default"
+		}
+		t.Run(name, func(t *testing.T) {
+			payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` +
+				quote(t, dir) + `,"permission_mode":` + quote(t, mode) +
+				`,"tool_input":{"command":` +
+				`"SPILL_GUARD_OVERRIDE='it is a build log' cat clean.txt"}}`
+			code, stdout, stderr := driveWithin(t, 0, payload)
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "did not finish inside its") {
+				t.Errorf("coverage reason = %q, want the overrun recorded", reason)
+			}
+		})
 	}
 }
 
@@ -254,11 +224,10 @@ func TestThePreludeIsChargedAgainstTheBudget(t *testing.T) {
 	var out, errs bytes.Buffer
 	// A start an hour ago against a budget of an hour: nothing is left, and
 	// the scan is never given a chance to be quick.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	code := run(time.Now().Add(-unhurried), unhurried, strings.NewReader(payload), &out, &errs)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object (stderr %q)", code, errs.String())
-	}
-	if reason := reasonOf(t, out.String()); !strings.Contains(reason, "did not finish inside its") {
-		t.Errorf("reason = %q, want the budget already spent when the scan was reached", reason)
+	reason := deferred(t, code, out.String(), errs.String())
+	if !strings.Contains(reason, "did not finish inside its") {
+		t.Errorf("coverage reason = %q, want the budget already spent when the scan was reached", reason)
 	}
 }

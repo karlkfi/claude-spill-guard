@@ -75,11 +75,19 @@ const blockedLead = "spill-guard: blocked."
 // invisible until the noise has trained everyone to ignore the tool, and
 // selftest is the check a user runs. A third state costs one constant and
 // closes it, because an outcome no arm wants disagrees with every arm.
+// `defers` is the fourth, added 2026-09-05 when a coverage failure stopped
+// blocking. It is a distinct want for the same reason `anomalous` is a
+// distinct outcome: a deferred call writes no verdict, so on the two-state
+// reading it is indistinguishable from a clean allow, and an allowing arm
+// would print `ok` for a binary whose scanner had stopped reading anything at
+// all. The record on stderr is what tells the two apart, and only a want that
+// asks for it will look.
 type expectation int
 
 const (
 	blocks expectation = iota
 	allows
+	defers
 	anomalous
 )
 
@@ -89,6 +97,8 @@ func (e expectation) String() string {
 		return "blocked"
 	case allows:
 		return "allowed"
+	case defers:
+		return "deferred"
 	default:
 		return "neither"
 	}
@@ -373,12 +383,13 @@ func arms(planted, quiet, undecodable, binary, dotenv string) []arm {
 			// happened to produce no skips either, which is a property of the
 			// list rather than of hook.Run.
 			//
-			// It is a blocking arm, and that bounds what it buys. Blocking
-			// arms already disagree with every value but the one they name, so
-			// this makes the branch cheaply reachable and gives no *allowing*
-			// arm anything it did not have.
+			// It defers rather than blocks since 2026-09-05: a buffer nothing
+			// decoded is a coverage failure, and those stopped stopping calls.
+			// The arm keeps its value because `defers` is a want of its own --
+			// it asserts the record naming the skip, so a build that quietly
+			// stopped recording reads as a failure here rather than as `ok`.
 			name: "a Read of a file this build cannot decode",
-			want: blocks,
+			want: defers,
 			by:   string(scan.SkippedUTF32),
 			payload: map[string]any{
 				"hook_event_name": "PreToolUse",
@@ -406,6 +417,24 @@ func drive(a arm) (expectation, string) {
 	if code != 0 {
 		return anomalous, fmt.Sprintf("refused (exit %d): %s", code,
 			strings.TrimSpace(errs.String()))
+	}
+	// A coverage failure writes no verdict and records on stderr. That has to
+	// be told apart from a clean allow, which writes neither -- otherwise the
+	// arm below passes for a scanner that reads nothing.
+	if record := strings.TrimSpace(errs.String()); record != "" {
+		// The same defaulting the block branch below does, and for the same
+		// reason: an arm that named nothing is asking for the canary's rule,
+		// so a record that does not carry it is an anomaly rather than a pass.
+		// Letting `by == ""` match any record here would make naming a skip a
+		// loosening for every arm at once.
+		by := a.by
+		if by == "" {
+			by = canaryRule
+		}
+		if !strings.Contains(record, by) {
+			return anomalous, fmt.Sprintf("deferred, but not for %s: %q", by, clip(record))
+		}
+		return defers, "deferred (" + by + ")"
 	}
 	if out.Len() == 0 {
 		return allows, "allowed"

@@ -63,15 +63,15 @@ func TestTheOverrideDowngradesABlockToAConfirmation(t *testing.T) {
 	})
 }
 
-// The unread-buffer block is a block like any other, so the hatch reaches it.
-// Left on deny it would be the one class of refusal with nothing past it and
-// nothing saying so, and the design asks for the opposite -- the reason for a
-// declared encoding this build cannot decode "names a remedy: convert the file,
-// or override".
+// An unread buffer is a coverage failure, so since 2026-09-05 there is no
+// block for the hatch to reach and both arms defer.
 //
-// The control beside it is the same call without the prefix, so the ask is the
-// override's doing rather than a property of a call carrying an unread buffer.
-func TestTheOverrideReachesTheUnreadBufferBlock(t *testing.T) {
+// The pair is kept rather than deleted, because the direction that regresses
+// is the old one coming back: a coverage failure that starts asking again
+// spends a person's attention on a call the scanner has no reading of, which
+// is the 71% of confirmations the change was made to remove. So the override
+// arm asserts inertness rather than a downgrade.
+func TestTheOverrideIsInertOnAnUnreadBuffer(t *testing.T) {
 	dir := t.TempDir()
 	// A byte-order mark is a declaration the file makes about itself, so this
 	// is text this build cannot decode rather than bytes something inferred
@@ -87,31 +87,23 @@ func TestTheOverrideReachesTheUnreadBufferBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("without it", func(t *testing.T) {
-		_, stdout, _ := drive(t, bashCall(t, "cat "+name, dir))
-		if got := verdictOf(t, stdout); got != "deny" {
-			t.Errorf("permissionDecision = %q, want deny", got)
-		}
-	})
-	t.Run("with it", func(t *testing.T) {
-		code, stdout, stderr := drive(t,
-			bashCall(t, `SPILL_GUARD_OVERRIDE="a UTF-32 fixture I wrote" cat `+name, dir))
-		if code != 0 {
-			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
-		}
-		if got := verdictOf(t, stdout); got != "ask" {
-			t.Errorf("permissionDecision = %q, want ask", got)
-		}
-		// A confirmation is worth what it says, so the skip reason and the
-		// file it names have to survive the downgrade.
-		reason := reasonOf(t, stdout)
-		if !strings.Contains(reason, string(scan.SkippedUTF32)) {
-			t.Errorf("the confirmation does not say why the buffer went unread: %q", reason)
-		}
-		if !strings.Contains(reason, name) {
-			t.Errorf("the confirmation does not name the file: %q", reason)
-		}
-	})
+	for _, tc := range []struct{ name, command string }{
+		{"without it", "cat " + name},
+		{"with it", `SPILL_GUARD_OVERRIDE="a UTF-32 fixture I wrote" cat ` + name},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			record := deferred(t, code, stdout, stderr)
+			// The record is worth what it says either way, so the skip reason
+			// and the file it names survive.
+			if !strings.Contains(record, string(scan.SkippedUTF32)) {
+				t.Errorf("the record does not say why the buffer went unread: %q", record)
+			}
+			if !strings.Contains(record, name) {
+				t.Errorf("the record does not name the file: %q", record)
+			}
+		})
+	}
 }
 
 // The whole of what the design refuses. A magic string that turns the scanner
@@ -196,24 +188,25 @@ func TestAnOverriddenCallThatScansCleanIsStillSilent(t *testing.T) {
 	}
 }
 
-// A scan that could not run blocks, and the override downgrades that too --
-// an unresolvable operand is exactly the case a user knows the answer to and
-// the scanner does not. What it must not do is turn it into silence.
-func TestTheOverrideDowngradesAScanThatCouldNotRun(t *testing.T) {
+// A scan that could not run defers, with or without the hatch.
+//
+// The unresolvable operand is the single largest case -- 197 of 509 coverage
+// blocks and 47 of 49 coverage confirmations in the week to 2026-09-05 -- so
+// this is the arm where a regression would cost the most. Both sides assert
+// the same thing, because the override has nothing here to act on.
+func TestTheOverrideIsInertOnAScanThatCouldNotRun(t *testing.T) {
 	dir := t.TempDir()
-	t.Run("without it", func(t *testing.T) {
-		_, stdout, _ := drive(t, bashCall(t, `cat $SOME_VAR`, dir))
-		if got := verdictOf(t, stdout); got != "deny" {
-			t.Errorf("permissionDecision = %q, want deny", got)
-		}
-	})
-	t.Run("with it", func(t *testing.T) {
-		_, stdout, _ := drive(t,
-			bashCall(t, `SPILL_GUARD_OVERRIDE="it expands to a fixture" cat $SOME_VAR`, dir))
-		if got := verdictOf(t, stdout); got != "ask" {
-			t.Errorf("permissionDecision = %q, want ask", got)
-		}
-	})
+	for _, tc := range []struct{ name, command string }{
+		{"without it", `cat $SOME_VAR`},
+		{"with it", `SPILL_GUARD_OVERRIDE="it expands to a fixture" cat $SOME_VAR`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if record := deferred(t, code, stdout, stderr); !strings.Contains(record, "expands at run time") {
+				t.Errorf("coverage record = %q, want the unresolvable operand", record)
+			}
+		})
+	}
 }
 
 // A prefix on any segment covers the call, matching prod-guard. The call is

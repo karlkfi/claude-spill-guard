@@ -105,8 +105,13 @@ func TestAHeredocBodyIsScanned(t *testing.T) {
 }
 
 // An operand of a command known to read files, whose path cannot be settled.
-// Skipping one reports a clean scan for content nothing opened, so each blocks.
-func TestAnOperandThatCannotBeResolvedBlocks(t *testing.T) {
+//
+// Each defers: no verdict, and a coverage record naming what could not be
+// resolved. It blocked until 2026-09-05, and the measurement that changed it is
+// in coverage.go -- this class was 94.3% of every block this hook wrote, and
+// the session read the same tree another way within four calls 99.2% of the
+// time, so the block bought a turn's delay and no coverage at all.
+func TestAnOperandThatCannotBeResolvedDefers(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct {
 		name    string
@@ -129,13 +134,10 @@ func TestAnOperandThatCannotBeResolvedBlocks(t *testing.T) {
 		{"relative after a popd", "popd && cat deploy.env", "changes directory first"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			code, stdout, _ := drive(t, bashCall(t, tc.command, dir))
-			if code != 0 {
-				t.Fatalf("exit code = %d, want 0 with a deny object", code)
-			}
-			reason := reasonOf(t, stdout)
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			reason := deferred(t, code, stdout, stderr)
 			if !strings.Contains(reason, tc.says) {
-				t.Errorf("reason = %q, want it to say %q", reason, tc.says)
+				t.Errorf("coverage reason = %q, want it to say %q", reason, tc.says)
 			}
 		})
 	}
@@ -143,15 +145,12 @@ func TestAnOperandThatCannotBeResolvedBlocks(t *testing.T) {
 
 // A relative operand with no cwd to resolve against is the same class, and it
 // is the one a payload rather than a command produces.
-func TestARelativeOperandWithNoCwdBlocks(t *testing.T) {
-	code, stdout, _ := drive(t,
+func TestARelativeOperandWithNoCwdDefers(t *testing.T) {
+	code, stdout, stderr := drive(t,
 		`{"hook_event_name":"PreToolUse","tool_name":"Bash",`+
 			`"tool_input":{"command":"cat deploy.env"}}`)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a deny object", code)
-	}
-	if reason := reasonOf(t, stdout); !strings.Contains(reason, "no working directory") {
-		t.Errorf("reason = %q, want it to name the missing cwd", reason)
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "no working directory") {
+		t.Errorf("coverage reason = %q, want it to name the missing cwd", reason)
 	}
 }
 
@@ -205,32 +204,25 @@ func TestAnAbsentOperandIsNotAnError(t *testing.T) {
 }
 
 // A command string the segmenter cannot read is one whose operands are
-// unknown, and internal/bash's contract is that a caller which cannot read a
-// command blocks it.
-func TestACommandThatCannotBeSegmentedBlocks(t *testing.T) {
-	code, stdout, _ := drive(t, bashCall(t, `cat "unbalanced`, t.TempDir()))
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a deny object", code)
-	}
-	if reason := reasonOf(t, stdout); !strings.Contains(reason, "could not be read") {
-		t.Errorf("reason = %q, want it to say the command could not be read", reason)
+// unknown. That is a coverage failure like any other, so it defers and records.
+func TestACommandThatCannotBeSegmentedDefers(t *testing.T) {
+	code, stdout, stderr := drive(t, bashCall(t, `cat "unbalanced`, t.TempDir()))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "could not be read") {
+		t.Errorf("coverage reason = %q, want it to say the command could not be read", reason)
 	}
 }
 
 // The cap is a backstop, so it has to be reachable to mean anything -- and
-// hitting it blocks rather than silently stopping the walk, because the
+// hitting it records rather than silently stopping the walk, because the
 // operands past it were never looked at.
-func TestNestingPastTheSubstitutionCapBlocks(t *testing.T) {
+func TestNestingPastTheSubstitutionCapDefers(t *testing.T) {
 	command := "echo hi"
 	for i := 0; i <= maxSubstDepth; i++ {
 		command = "echo $(" + command + ")"
 	}
-	code, stdout, _ := drive(t, bashCall(t, command, t.TempDir()))
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a deny object", code)
-	}
-	if reason := reasonOf(t, stdout); !strings.Contains(reason, "command substitutions") {
-		t.Errorf("reason = %q, want it to name the nesting cap", reason)
+	code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "command substitutions") {
+		t.Errorf("coverage reason = %q, want it to name the nesting cap", reason)
 	}
 }
 
@@ -270,14 +262,11 @@ func TestASingleQuotedSubstitutionIsNotFollowed(t *testing.T) {
 
 // The list is read and what it names is not, so scanning the list alone would
 // report a clean result for every path inside it.
-func TestAnIndirectlyNamedFileBlocks(t *testing.T) {
+func TestAnIndirectlyNamedFileDefers(t *testing.T) {
 	dir := t.TempDir()
-	code, stdout, _ := drive(t, bashCall(t, "sort --files0-from list.txt", dir))
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a deny object", code)
-	}
-	if reason := reasonOf(t, stdout); !strings.Contains(reason, "named indirectly") {
-		t.Errorf("reason = %q, want it to name the indirection", reason)
+	code, stdout, stderr := drive(t, bashCall(t, "sort --files0-from list.txt", dir))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "named indirectly") {
+		t.Errorf("coverage reason = %q, want it to name the indirection", reason)
 	}
 }
 
@@ -314,10 +303,11 @@ func TestADirectoryOperandSaysSoAndSaysWhatToDoInstead(t *testing.T) {
 				t.Fatal(err)
 			}
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
-			if code != 0 {
-				t.Fatalf("exit code = %d, want 0 with a deny object (stderr %q)", code, stderr)
-			}
-			reason := reasonOf(t, stdout)
+			// A directory operand is a coverage failure, so this defers and
+			// records rather than blocking. Everything the four arms assert
+			// about the wording is unchanged -- the reason moved channel, not
+			// content.
+			reason := deferred(t, code, stdout, stderr)
 			if !strings.Contains(reason, "names a directory") {
 				t.Errorf("reason = %q, want it to name the directory case", reason)
 			}
@@ -366,9 +356,9 @@ func TestADrivenRefusalDoesNotNameTheOverride(t *testing.T) {
 	}
 	for name, payload := range payloads {
 		t.Run(name, func(t *testing.T) {
-			_, stdout, _ := drive(t, payload)
-			if reason := reasonOf(t, stdout); strings.Contains(reason, overrideVar) {
-				t.Errorf("the reason names the hatch: %q", reason)
+			code, stdout, stderr := drive(t, payload)
+			if reason := deferred(t, code, stdout, stderr); strings.Contains(reason, overrideVar) {
+				t.Errorf("the coverage reason names the hatch: %q", reason)
 			}
 		})
 	}

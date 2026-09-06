@@ -17,10 +17,10 @@ measured.
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
 | `docs/development/release-process.md` | Cutting a release: what a person does, and what the tag does. |
-| `cmd/spill-guard/` | The entry point. `hook`, `selftest` and `version`; the rest land with the rows that specify them. |
+| `cmd/spill-guard/` | The entry point. `hook`, `selftest`, `coverage` and `version`; the rest land with the rows that specify them. |
 | `internal/validate/` | The eight validators. Precision lives here, not in the regex. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
-| `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. Where fail-closed holds or does not. |
+| `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. `coverage.go` is the other half: what to do when there is no verdict to reach, and where the gap gets recorded. |
 | `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it could not read the text. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
 | `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. |
@@ -47,17 +47,27 @@ project ruleset at `.claude/spill-guard.json` is still read by nobody, and Q73
 is narrowed to why: it is a file the model can write, so honouring a
 disablement in it is a question about a bypass rather than a loader change.
 
-A buffer the pipeline declined to read is now a verdict rather than a field
-nobody consumes, and the axis is declaration rather than content: a buffer that
-declared an encoding blocks, and one that declared nothing does not, because
-that second case the design chose against a measurement. So a UTF-32 mark
-blocks, a UTF-16 mark whose *decoded* text holds a NUL blocks, and a NUL in a
-buffer nothing declared — an image, an executable, UTF-16 written with no
-mark — is allowed.
+A buffer the pipeline declined to read is a **coverage record** rather than a
+field nobody consumes, and the axis is declaration rather than content: a
+buffer that declared an encoding is recorded, and one that declared nothing is
+not, because that second case the design chose against a measurement. So a
+UTF-32 mark is recorded, a UTF-16 mark whose *decoded* text holds a NUL is
+recorded, and a NUL in a buffer nothing declared — an image, an executable,
+UTF-16 written with no mark — is noticed rather than recorded.
+
+**The axis survived the 2026-09-05 change and the verb did not.** Both arms
+proceed now; what differs is which channel says so — a declared encoding this
+build cannot read goes to the coverage log, and an undeclared binary goes to
+the person as a `systemMessage`. Do not collapse them on the grounds that
+neither stops the call: the split is what decides whether a gap is swept for
+later or shown to somebody who can convert the file.
 
 Allowed is not silent, and neither is a block. Every verdict over a call
 carrying a buffer nothing read names that buffer and why, so the person who can
-convert the file or arm an override is told. `systemMessage` is the field
+convert the file or arm an override is told. A *deferred* call is the exception
+and is deliberately quiet to the person: its record goes to stderr and the
+coverage log, because a prompt nobody will act on is the friction this scanner
+was measured to be spending. `systemMessage` is the field
 measured to reach the *person* rather than the model — a hook's stderr on exit 0
 reaches neither, and plain stdout and `additionalContext` reach only the model.
 
@@ -380,19 +390,65 @@ prevent, and it shipped inside it until the mutation control was driven.
 Enforced by a job over `go list -deps`, not by review. A telemetry field added
 in good faith is the failure mode here, and review does not reliably catch it.
 
-**Fail closed.** The sibling guards fail silent so that a hook on every call
-never breaks ordinary work. This one inverts that, because a secret scanner that
-fails quietly reports a safety it is not providing. Every internal error blocks
-with a reason.
+**Block on a finding; defer on a gap.** This was *fail closed* until
+2026-09-05, and the change is the measurement rather than a softening.
+
+A **finding** — a rule matched something — blocks, and that is untouched. So
+does a **shape refusal**: an `env` dump, or a read of one of the fourteen
+guarded credential paths, where the tool knows there is something to stop and
+no rule could recognise it.
+
+A **coverage failure** — an operand that will not resolve, a buffer nothing
+decoded, a scan past its budget — no longer blocks. It **defers**: the hook
+writes no verdict at all, so the permission flow that would have run without
+this hook runs unchanged. An explicit `allow` would suppress the user's own
+rules; this has no opinion to spend on them, because it could not read the
+call.
+
+Why, measured over the week to 2026-09-05 across 100 sessions on one machine:
+
+- 509 of 540 blocks (94.3%) were coverage failures, and 49 of 69 confirmed
+  confirmation prompts (71%) were too — 47 of those 49 on one reason, an
+  operand carrying a `$`.
+- After a coverage block the session got a clean call through within four
+  attempts **99.2% of the time** (505 of 509), reading the same tree another
+  way. The block was not withholding the bytes; it charged a turn, and then a
+  person's attention, for a refusal the next call walked around.
+- All 31 content findings in the window fired inside this repo's own
+  worktrees, on its own corpus fixtures.
+
+What replaces the block is a record, on two sinks: a line on stderr, which
+reaches neither the model nor the person and rides into the transcript's
+`hook_success` attachment, and a capped JSONL under `$XDG_STATE_HOME` that
+`spill-guard coverage` groups and counts. Both are best-effort — a sink that
+cannot be written must never change the verdict, or a full disk rebuilds the
+friction on the machines least able to diagnose it.
+
+**A payload that does not decode at all still blocks on exit 2.** Not JSON, no
+event, an event this binary cannot withhold at: that is not a scanner failing
+to resolve an operand, it is the hook being invoked wrongly, and it is the
+signal that says a broken install is broken. 0 of the 540 verdicts in the
+measured week were this.
+
+**The override is not consulted on a deferred call.** There is nothing to
+downgrade — the call is already proceeding — and a confirmation saying
+"approving sends what is named below" would be describing a call that was
+never stopped. `TestTheOverrideIsInertOnAScanThatCouldNotRun` and its
+neighbour pin both arms.
 
 `spill-guard selftest` is the check a user runs, and what it can answer is
 narrower than "is the hook live". It drives canary payloads through `hook.Run`
 in-process -- prompt, `Read`, `Bash` command, `Bash` operand -- and asserts a
 block naming the rule, with an allowing arm on every surface. One arm carries
 no canary and names no rule: a `Read` of a file behind a UTF-32 mark, whose
-block names the skip reason instead, because it is the one payload here that
-reaches a verdict with no finding behind it. It is a blocking arm, so it makes
-that branch cheaply reachable and adds nothing an allowing arm can see.
+**coverage record** names the skip reason instead, because it is the one
+payload here that reaches the no-finding branch.
+
+That arm wants `defers`, which is a fourth outcome added with the change and is
+there for the reason `anomalous` is. A deferred call writes no verdict, so on a
+three-state reading it is indistinguishable from a clean allow — an allowing
+arm would print `ok` for a binary whose scanner had stopped reading anything at
+all. Only a want that asks for the record will look at it.
 
 **The allowing arms are what can see an over-block, and they only can because
 `drive` has a third outcome.** With two, an arm was `blocks` or `allows`, and
