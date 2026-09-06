@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -147,5 +148,21 @@ func class(reason string) string {
 		}
 		b.WriteRune(r)
 	}
-	return strings.TrimSpace(b.String())
+	return strings.TrimSpace(bare.ReplaceAllString(b.String(), `"…"`))
 }
+
+// bare matches a path that is not inside quotes, which the elision above
+// cannot reach.
+//
+// Two of the three coverage bodies quote what they name and one does not:
+// unread() builds its list through listSkips, which writes the path plain. So
+// fourteen records of the same shape over fourteen temp files grouped as
+// fourteen classes, which is the grouping bug again in the one body the first
+// fix did not cover -- found by running the subcommand over a real log rather
+// than by a test, twice now.
+//
+// Eliding at the reader rather than quoting at the source is deliberate. The
+// bodies are user-visible strings with tests pinning their wording, and a
+// class function that only works for reasons written a particular way is the
+// thing that just failed twice. This copes with a path however it arrives.
+var bare = regexp.MustCompile(`(?:[A-Za-z]:\\|/)[^\s,;:()"]*(?:[/\\][^\s,;:()"]*)+`)
