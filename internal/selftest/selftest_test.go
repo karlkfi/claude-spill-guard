@@ -149,9 +149,11 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 // the arm named is what catches an over-matching rule, and an arm that has not
 // named the skip has to still land there.
 //
-// What this does not establish is anything about an *allowing* arm. The arm is
-// a blocking one, so it disagrees with every wrong value the way the blocking
-// arms already did; the asymmetry Q107 named is untouched.
+// The arm defers rather than blocks since 2026-09-05, and that changes what it
+// is worth rather than retiring it. `defers` is a want no other arm holds and
+// no clean call can produce, so it still disagrees with every wrong value --
+// including the one that matters most here, a build that stopped writing the
+// coverage record and would otherwise read as an ordinary allow.
 func TestTheUnreadArmNamesTheSkipAndTheCanaryArmsStillDoNot(t *testing.T) {
 	planted, quiet, undecodable, binary, dotenv := fixtures(t)
 	var unread arm
@@ -166,11 +168,11 @@ func TestTheUnreadArmNamesTheSkipAndTheCanaryArmsStillDoNot(t *testing.T) {
 	}
 
 	got, detail := drive(unread)
-	if got != blocks {
-		t.Errorf("the unread arm came back %s (%s), want blocked", got, detail)
+	if got != defers {
+		t.Errorf("the unread arm came back %s (%s), want deferred", got, detail)
 	}
 	if strings.Contains(detail, canaryRule) {
-		t.Errorf("the unread arm's block names %s, so it is not the "+
+		t.Errorf("the unread arm's record names %s, so it is not the "+
 			"no-finding branch: %s", canaryRule, detail)
 	}
 

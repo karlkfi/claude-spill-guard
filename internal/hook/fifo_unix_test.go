@@ -38,24 +38,26 @@ func mkfifo(t *testing.T) (dir, path string) {
 // and there is no way to interrupt it -- os.ReadFile takes no context. Losing
 // one goroutine and a cleanup error is the price of the test reporting at all,
 // and it only happens on the run where the guard is already gone.
-func withinDeadline(t *testing.T, payload string) (code int, stdout string) {
+func withinDeadline(t *testing.T, payload string) (code int, stdout, stderr string) {
 	t.Helper()
+	// Before the goroutine: t.Setenv must not run from one.
+	isolateState(t)
 	type result struct {
-		code   int
-		stdout string
+		code           int
+		stdout, stderr string
 	}
 	done := make(chan result, 1)
 	go func() {
-		c, out, _ := drive(t, payload)
-		done <- result{c, out}
+		c, out, errs := driveRaw(payload)
+		done <- result{c, out, errs}
 	}()
 	select {
 	case r := <-done:
-		return r.code, r.stdout
+		return r.code, r.stdout, r.stderr
 	case <-time.After(fifoDeadline):
 		t.Fatalf("the hook did not return within %s, so it is opening what it "+
 			"should have refused", fifoDeadline)
-		return 0, ""
+		return 0, "", ""
 	}
 }
 
@@ -67,17 +69,13 @@ func withinDeadline(t *testing.T, payload string) (code int, stdout string) {
 // reports "did not return within 5s" and its two neighbours below report the
 // same, while every other test in the package still passes. That is what says
 // the guard is what these three are measuring.
-func TestABashOperandNamingAFifoBlocksInsteadOfHanging(t *testing.T) {
+func TestABashOperandNamingAFifoDefersInsteadOfHanging(t *testing.T) {
 	dir, _ := mkfifo(t)
-	code, stdout := withinDeadline(t, `{"hook_event_name":"PreToolUse",`+
+	code, stdout, stderr := withinDeadline(t, `{"hook_event_name":"PreToolUse",`+
 		`"tool_name":"Bash","cwd":`+quote(t, dir)+`,`+
 		`"tool_input":{"command":"cat p.fifo"}}`)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object", code)
-	}
-	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
-		t.Errorf("reason = %q, want it to name what it declined to open",
-			reasonOf(t, stdout))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "neither a file nor a directory") {
+		t.Errorf("coverage reason = %q, want it to name what it declined to open", reason)
 	}
 }
 
@@ -86,35 +84,27 @@ func TestABashOperandNamingAFifoBlocksInsteadOfHanging(t *testing.T) {
 // case from a link to a regular file -- it would either hang here or refuse
 // every symlinked file in a repo. Driven: Lstat gives Lrwxr-xr-x for both,
 // os.Stat gives prw------- and -rw-------.
-func TestABashOperandNamingASymlinkToAFifoBlocks(t *testing.T) {
+func TestABashOperandNamingASymlinkToAFifoDefers(t *testing.T) {
 	dir, path := mkfifo(t)
 	if err := os.Symlink(path, filepath.Join(dir, "link")); err != nil {
 		t.Skipf("no symlink here: %v", err)
 	}
-	code, stdout := withinDeadline(t, `{"hook_event_name":"PreToolUse",`+
+	code, stdout, stderr := withinDeadline(t, `{"hook_event_name":"PreToolUse",`+
 		`"tool_name":"Bash","cwd":`+quote(t, dir)+`,`+
 		`"tool_input":{"command":"cat link"}}`)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object", code)
-	}
-	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
-		t.Errorf("reason = %q, want it to name what it declined to open",
-			reasonOf(t, stdout))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "neither a file nor a directory") {
+		t.Errorf("coverage reason = %q, want it to name what it declined to open", reason)
 	}
 }
 
 // The Read arm takes its file_path straight from the tool, so the same fifo
 // hangs it by the same open(2).
-func TestAReadCallNamingAFifoBlocksInsteadOfHanging(t *testing.T) {
+func TestAReadCallNamingAFifoDefersInsteadOfHanging(t *testing.T) {
 	_, path := mkfifo(t)
-	code, stdout := withinDeadline(t, `{"hook_event_name":"PreToolUse",`+
+	code, stdout, stderr := withinDeadline(t, `{"hook_event_name":"PreToolUse",`+
 		`"tool_name":"Read","tool_input":{"file_path":`+quote(t, path)+`}}`)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object", code)
-	}
-	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
-		t.Errorf("reason = %q, want it to name what it declined to open",
-			reasonOf(t, stdout))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "neither a file nor a directory") {
+		t.Errorf("coverage reason = %q, want it to name what it declined to open", reason)
 	}
 }
 
@@ -148,14 +138,10 @@ func TestASymlinkToARegularFileIsStillScanned(t *testing.T) {
 // the class is not safe. /dev/null stands in for it on every unix and needs no
 // mknod, which is also how prompt.go's test drives the same rule.
 func TestABashOperandNamingADeviceIsRefusedRatherThanSkipped(t *testing.T) {
-	code, stdout := withinDeadline(t, `{"hook_event_name":"PreToolUse",`+
+	code, stdout, stderr := withinDeadline(t, `{"hook_event_name":"PreToolUse",`+
 		`"tool_name":"Bash","cwd":"/tmp",`+
 		`"tool_input":{"command":"grep -l . /dev/null"}}`)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object", code)
-	}
-	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
-		t.Errorf("reason = %q, want the device refused rather than skipped",
-			reasonOf(t, stdout))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "neither a file nor a directory") {
+		t.Errorf("coverage reason = %q, want the device refused rather than skipped", reason)
 	}
 }

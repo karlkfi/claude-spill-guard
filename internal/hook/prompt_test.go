@@ -93,10 +93,11 @@ func TestThePromptResolverAgreesWithTheHarnessOracle(t *testing.T) {
 	}
 }
 
-// A prompt naming a file this cannot identify blocks, for the reason an
-// unresolvable Bash operand does: skipping one reports a clean result for
-// content nothing opened, and the token is spliced whatever this decided.
-func TestAPromptNamingAFileThisCannotIdentifyBlocks(t *testing.T) {
+// A prompt naming a file this cannot identify defers with a record, for the
+// reason an unresolvable Bash operand does: nothing opened it, so there is no
+// reading to report -- and the token is spliced whatever this decided, which
+// is why the gap is worth recording even though the call proceeds.
+func TestAPromptNamingAFileThisCannotIdentifyDefers(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		payload string
@@ -106,12 +107,8 @@ func TestAPromptNamingAFileThisCannotIdentifyBlocks(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, tc.payload)
-			if code != 0 {
-				t.Fatalf("exit code = %d, want 0 with a decision object (stderr %q)", code, stderr)
-			}
-			if !strings.Contains(reasonOf(t, stdout), "scan could not be completed") {
-				t.Errorf("reason = %q, want it to say the scan did not finish",
-					reasonOf(t, stdout))
+			if record := deferred(t, code, stdout, stderr); !strings.Contains(record, "scan could not be completed") {
+				t.Errorf("coverage record = %q, want it to say the scan did not finish", record)
 			}
 		})
 	}
@@ -154,17 +151,14 @@ func TestOnlyTheHomePrefixTheHarnessExpandsIsExpanded(t *testing.T) {
 // session rather than scan anything, so anything that is not a regular file or
 // a directory refuses instead of being opened. /dev/null stands in for the
 // class because it needs no mknod: it is a character device on every unix.
-func TestAPromptNamingSomethingThatIsNotAFileBlocks(t *testing.T) {
+func TestAPromptNamingSomethingThatIsNotAFileDefers(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no /dev/null to stand in for the class")
 	}
 	code, stdout, stderr := drive(t, `{"hook_event_name":"UserPromptSubmit",`+
 		`"cwd":"/tmp","prompt":"read @/dev/null please"}`)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a decision object (stderr %q)", code, stderr)
-	}
-	if !strings.Contains(reasonOf(t, stdout), "neither a file nor a directory") {
-		t.Errorf("reason = %q, want it to name what it declined to open", reasonOf(t, stdout))
+	if record := deferred(t, code, stdout, stderr); !strings.Contains(record, "neither a file nor a directory") {
+		t.Errorf("coverage record = %q, want it to name what it declined to open", record)
 	}
 }
 
@@ -324,11 +318,14 @@ func TestNoPromptRefusalCarriesTheToken(t *testing.T) {
 				t.Skip("running as root, so the unreadable directory is readable")
 			}
 			code, stdout, stderr := drive(t, tc.payload)
-			if code == 0 && stdout == "" {
-				t.Fatalf("the prompt was allowed, so this asserts nothing about a refusal")
+			// These defer rather than block since 2026-09-05, so the output
+			// that must be checked for the token is the coverage record on
+			// stderr as much as anything on stdout.
+			if code == 0 && stdout == "" && strings.TrimSpace(stderr) == "" {
+				t.Fatalf("the prompt was allowed silently, so this asserts nothing")
 			}
 			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
-				t.Errorf("a refusal carries the token:\nstdout %q\nstderr %q", stdout, stderr)
+				t.Errorf("a refusal or coverage record carries the token:\nstdout %q\nstderr %q", stdout, stderr)
 			}
 		})
 	}

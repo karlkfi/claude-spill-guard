@@ -294,13 +294,14 @@ func unread(skips []skipped) string {
 // overran is the body for a scan that did not reach a verdict inside its
 // budget.
 //
-// It blocks, and everything else here is downstream of that. Past the hook's
-// own timeout this process is killed, whatever it was going to say is
-// discarded, and the call proceeds -- measured on both events, and neither
-// blocking encoding reaches it, because a killed process writes none. So a
-// scan that cannot finish has to stop itself while it can still speak, and the
-// verdict it speaks is the one the rest of this package takes on a buffer it
-// could not read.
+// It defers, like every other coverage failure, and the budget still exists
+// for the reason it always did: past the hook's own timeout this process is
+// killed, whatever it was going to say is discarded, and no record is written
+// at all. So the point of stopping short is no longer to block in time -- it
+// is to still be alive to write the record.
+//
+// This is the branch where deferring is least comfortable, and hook.go carries
+// that argument rather than this string.
 //
 // The reason claims nothing about what was read. A call carrying several
 // buffers may have been through some of them when the clock ran out, and which
@@ -311,10 +312,8 @@ func unread(skips []skipped) string {
 func overran(budget time.Duration) string {
 	return fmt.Sprintf("the scan did not finish inside its %s budget, so what "+
 		"this call would have sent went unread. The budget stops short of this "+
-		"hook's %s timeout on purpose: past that this process is killed, "+
-		"whatever it was going to say is discarded, and the call runs with "+
-		"nothing scanned -- so a scan that cannot finish blocks while it still "+
-		"can. Name fewer or smaller files and try again.", budget, hookTimeout)
+		"hook's %s timeout on purpose: past that this process is killed and "+
+		"not even this record survives.", budget, hookTimeout)
 }
 
 // dumped is the body for a call refused on its shape rather than on anything a
@@ -382,15 +381,20 @@ func guarded(path, class string) string {
 
 // failed is the body for a scan that could not be completed.
 //
-// Every internal error blocks. That is the inversion this project makes
-// against its sibling guards, and it is the whole of what a hook entry is for:
-// a decoder that shrugs at a payload it cannot read, and lets the call
-// through, reports a safety it is not providing and leaves nothing in the
-// transcript to say so.
+// This is a coverage record and no longer a block, so the sentence has to say
+// what actually happened. It said "a scanner that cannot run blocks rather
+// than passing quietly" until 2026-09-05, and leaving that in would have been
+// the exact defect this repo keeps catching in its own prose: a claim that
+// stayed green because nothing asserts on a sentence.
+//
+// The framing -- why this is recorded rather than blocked -- deliberately is
+// not repeated here. This string is written on the order of five hundred times
+// a week, and `spill-guard coverage` is where a reader meets the explanation
+// once.
 func failed(err error) string {
 	return fmt.Sprintf("Nothing scanned this call for secrets, because the scan "+
-		"could not be completed: %q. A scanner that cannot run blocks rather than "+
-		"passing quietly -- silence from this hook is supposed to mean checked.",
+		"could not be completed: %q. The call was not stopped; this is recorded "+
+		"so the gap can be closed. See `spill-guard coverage`.",
 		err.Error())
 }
 

@@ -27,9 +27,62 @@ const secret = "AKIA0123456789ABCDEF"
 // the process would see.
 func drive(t *testing.T, payload string) (code int, stdout, stderr string) {
 	t.Helper()
+	isolateState(t)
+	return driveRaw(payload)
+}
+
+// isolateState points the coverage log at a temp dir for the rest of the test.
+//
+// Without it the suite appends fixture reasons to whatever home the test
+// runner has, which corrupts the developer's own log for the one thing it
+// exists to answer. It is separate from driveRaw because t.Setenv must not be
+// called from a goroutine, and withinDeadline runs the hook in one.
+func isolateState(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+}
+
+// driveRaw is drive without the environment work, for the one caller that has
+// already done it and cannot do it again from where it runs.
+func driveRaw(payload string) (code int, stdout, stderr string) {
 	var out, errs bytes.Buffer
 	code = Run(strings.NewReader(payload), &out, &errs)
 	return code, out.String(), errs.String()
+}
+
+// deferred asserts the call was deferred rather than decided -- exit 0 and no
+// verdict on stdout, so the permission flow runs as if this hook were not
+// installed -- and hands back the coverage reason recorded on stderr.
+//
+// The two halves both matter. An empty stdout alone is also what a clean scan
+// produces, so a test that checked only that would pass if the coverage path
+// stopped recording anything at all; the stderr line is what separates "read
+// it, found nothing" from "could not read it".
+func deferred(t *testing.T, code int, stdout, stderr string) string {
+	t.Helper()
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0: a coverage failure defers (stderr: %q)", code, stderr)
+	}
+	// No decision, rather than no output. A notice may ride along -- an
+	// allowed skip on the same call keeps the one it would have had -- and
+	// that is not a verdict. What must be absent is anything that decides.
+	if stdout != "" {
+		got := decision(t, stdout)
+		if _, ok := got["hookSpecificOutput"]; ok {
+			t.Fatalf("stdout carries a PreToolUse verdict, want none: %q", stdout)
+		}
+		if _, ok := got["decision"]; ok {
+			t.Fatalf("stdout carries a prompt block, want none: %q", stdout)
+		}
+	}
+	line := strings.TrimSpace(stderr)
+	if line == "" {
+		t.Fatalf("stderr is empty, want the coverage record")
+	}
+	if !strings.HasPrefix(line, "spill-guard: ") {
+		t.Fatalf("coverage line = %q, want it to open with the plugin name", line)
+	}
+	return line
 }
 
 // decision is the verdict on stdout, or a failure naming what was there.
@@ -222,11 +275,16 @@ func TestNoRefusalCarriesScannedContent(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, tc.payload)
-			if code == 0 && stdout == "" {
-				t.Fatalf("the call was allowed, so this asserts nothing about a refusal")
+			// The arm has to have produced something, or it asserts nothing.
+			// Since 2026-09-05 most of these defer rather than block, so the
+			// output that must be checked is the coverage record on stderr as
+			// well as any verdict on stdout -- and a silent allow is still a
+			// dead arm.
+			if code == 0 && stdout == "" && strings.TrimSpace(stderr) == "" {
+				t.Fatalf("the call was allowed silently, so this asserts nothing")
 			}
 			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
-				t.Errorf("a refusal carries the value:\nstdout %q\nstderr %q", stdout, stderr)
+				t.Errorf("a refusal or coverage record carries the value:\nstdout %q\nstderr %q", stdout, stderr)
 			}
 		})
 	}
@@ -245,10 +303,10 @@ func TestARefusalBoundsTheEventNameItEchoes(t *testing.T) {
 	}
 }
 
-// A file that is not there sends nothing, so blocking would claim a safety
-// nobody needed and hide the tool's own error. Every other read failure is a
-// file that exists and went unchecked, which blocks.
-func TestAReadThatCannotBeCheckedBlocksAndAMissingFileDoesNot(t *testing.T) {
+// A file that is not there sends nothing, so recording it would claim a gap
+// nobody has and hide the tool's own error. Every other read failure is a file
+// that exists and went unchecked, which defers with a coverage record.
+func TestAReadThatCannotBeCheckedDefersAndAMissingFileDoesNot(t *testing.T) {
 	dir := t.TempDir()
 
 	t.Run("absent", func(t *testing.T) {
@@ -262,21 +320,26 @@ func TestAReadThatCannotBeCheckedBlocksAndAMissingFileDoesNot(t *testing.T) {
 	// A directory rather than a mode-000 file: the read fails for every uid,
 	// including the one CI runs as, so the control cannot pass by accident.
 	t.Run("unreadable", func(t *testing.T) {
-		code, stdout, _ := drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
+		code, stdout, stderr := drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
 			`"tool_input":{"file_path":`+quote(t, dir)+`}}`)
-		if code != 0 {
-			t.Fatalf("exit code = %d, want 0 with a deny object", code)
-		}
-		if !strings.Contains(reasonOf(t, stdout), "scan could not be completed") {
-			t.Errorf("reason = %q, want it to say the scan did not finish", reasonOf(t, stdout))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "scan could not be completed") {
+			t.Errorf("coverage reason = %q, want it to say the scan did not finish", reason)
 		}
 	})
 }
 
-// A payload shape the decoder cannot act on blocks. Each of these is a call
-// nothing scanned, and letting one through reports a safety it is not
-// providing while leaving nothing in the transcript to say so.
-func TestAPayloadThatCannotBeActedOnBlocks(t *testing.T) {
+// A payload shape the decoder cannot act on.
+//
+// The two halves part company here. A payload that does not decode at all --
+// not JSON, no event, an event this binary cannot withhold at -- still blocks
+// on exit 2: that is not a scanner failing to resolve an operand, it is the
+// hook being invoked wrongly, and it is the signal that says a broken install
+// is broken. It also carries no measured traffic; 0 of the 540 verdicts in the
+// week to 2026-09-05 were this.
+//
+// A payload that decodes but names nothing scannable is an ordinary coverage
+// failure and defers with a record.
+func TestAPayloadThatCannotBeActedOnBlocksOrDefers(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		payload string
@@ -311,12 +374,8 @@ func TestAPayloadThatCannotBeActedOnBlocks(t *testing.T) {
 				}
 				return
 			}
-			if code != 0 {
-				t.Fatalf("exit code = %d, want 0 with a decision object", code)
-			}
-			if !strings.Contains(reasonOf(t, stdout), "scan could not be completed") {
-				t.Errorf("reason = %q, want it to say the scan did not finish",
-					reasonOf(t, stdout))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "scan could not be completed") {
+				t.Errorf("coverage reason = %q, want it to say the scan did not finish", reason)
 			}
 		})
 	}
@@ -359,27 +418,24 @@ func quote(t *testing.T, s string) string {
 // tool's, so an os.ReadFile miss here would be a hit there. Refusing costs
 // nothing: driven against a live Claude Code on 2026-08-27, file_path arrived
 // absolute even where the model had only named the file.
-func TestAReadWithARelativePathBlocks(t *testing.T) {
-	code, stdout, _ := drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
+func TestAReadWithARelativePathDefers(t *testing.T) {
+	code, stdout, stderr := drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
 		`"tool_input":{"file_path":"secrets.env"}}`)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a deny object", code)
-	}
-	if !strings.Contains(reasonOf(t, stdout), "relative file_path") {
-		t.Errorf("reason = %q, want it to name the relative path", reasonOf(t, stdout))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "relative file_path") {
+		t.Errorf("coverage reason = %q, want it to name the relative path", reason)
 	}
 }
 
 // The per-reason verdict Q74 decided. blocks() carries the argument for it; this
 // pins both arms end to end, through the process a caller actually runs.
-func TestAnUnreadBufferBlocksByTheReasonItWentUnread(t *testing.T) {
+func TestAnUnreadBufferIsRecordedByTheReasonItWentUnread(t *testing.T) {
 	read := func(t *testing.T, path string) (int, string, string) {
 		t.Helper()
 		return drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
 			`"tool_input":{"file_path":`+quote(t, path)+`}}`)
 	}
 
-	t.Run("UTF-32 blocks", func(t *testing.T) {
+	t.Run("UTF-32 defers with a record", func(t *testing.T) {
 		// A byte-order mark is a declaration the file makes about itself, so
 		// this is text this build cannot read rather than a buffer something
 		// inferred was not text. The content is innocuous on purpose: the block
@@ -394,22 +450,15 @@ func TestAnUnreadBufferBlocksByTheReasonItWentUnread(t *testing.T) {
 			t.Fatal(err)
 		}
 		code, stdout, stderr := read(t, path)
-		if code != 0 {
-			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
-		}
-		if stdout == "" {
-			t.Fatal("the call was allowed with nothing on stdout, so a buffer " +
-				"that declared itself text and went unread was reported clean")
-		}
-		reason := reasonOf(t, stdout)
+		reason := deferred(t, code, stdout, stderr)
 		if !strings.Contains(reason, string(scan.SkippedUTF32)) {
-			t.Errorf("the reason does not say why the buffer went unread: %q", reason)
+			t.Errorf("the record does not say why the buffer went unread: %q", reason)
 		}
 		if !strings.Contains(reason, path) {
-			t.Errorf("the reason does not name the file that went unread: %q", reason)
+			t.Errorf("the record does not name the file that went unread: %q", reason)
 		}
 		if strings.Contains(reason, "rule match") {
-			t.Errorf("this is found()'s verdict, whose sentence claims a coverage "+
+			t.Errorf("this is found()'s body, whose sentence claims a coverage "+
 				"this call did not have: %q", reason)
 		}
 	})
@@ -538,7 +587,7 @@ func utf16bom(t *testing.T, s string, bigEndian bool) []byte {
 // still classified so on its decoded content -- what it also carries now is
 // that an encoding was declared before that check ran, which is the fact this
 // package's verdict was always keyed on and the one the old constant dropped.
-func TestADeclaredUTF16BufferWithANULBlocks(t *testing.T) {
+func TestADeclaredUTF16BufferWithANULIsRecorded(t *testing.T) {
 	read := func(t *testing.T, path string) (int, string, string) {
 		t.Helper()
 		return drive(t, `{"hook_event_name":"PreToolUse","tool_name":"Read",`+
@@ -561,20 +610,15 @@ func TestADeclaredUTF16BufferWithANULBlocks(t *testing.T) {
 				t.Fatal(err)
 			}
 			code, stdout, stderr := read(t, nulled)
-			if code != 0 {
-				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
-			}
-			if stdout == "" {
-				t.Fatalf("stdout is empty, so the call was allowed -- a declared " +
-					"UTF-16 buffer holding a key crossed with nothing said")
-			}
-			// The reason, not just the block. What this buffer's user can act
-			// on is being told the encoding and that the decoded text is what
-			// held the NUL; the undeclared class's phrase would tell them their
-			// file is binary, which for a PowerShell-written .env it is not.
-			if reason := reasonOf(t, stdout); !strings.Contains(reason, string(scan.SkippedUTF16Binary)) {
-				t.Errorf("the reason is %q, and it does not name the declared "+
-					"UTF-16 skip", reason)
+			// The record, not just the fact of one. What this buffer's user
+			// can act on is being told the encoding and that the decoded text
+			// is what held the NUL; the undeclared class's phrase would tell
+			// them their file is binary, which for a PowerShell-written .env
+			// it is not.
+			record := deferred(t, code, stdout, stderr)
+			if !strings.Contains(record, string(scan.SkippedUTF16Binary)) {
+				t.Errorf("the record is %q, and it does not name the declared "+
+					"UTF-16 skip", record)
 			}
 
 			// The control, and it is what stops the assertion above being
@@ -606,22 +650,23 @@ func TestAReadCallNamingADirectorySaysSo(t *testing.T) {
 	dir := t.TempDir()
 	code, stdout, stderr := drive(t, `{"hook_event_name":"PreToolUse",`+
 		`"tool_name":"Read","tool_input":{"file_path":`+quote(t, dir)+`}}`)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 with a deny object (stderr %q)", code, stderr)
-	}
-	if reason := reasonOf(t, stdout); !strings.Contains(reason, "names a directory") {
-		t.Errorf("reason = %q, want it to name the directory case", reason)
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "names a directory") {
+		t.Errorf("coverage reason = %q, want it to name the directory case", reason)
 	}
 }
 
-// A call carrying both kinds of skip blocks, and the notice does not soften it.
+// A call carrying both kinds of skip: the recorded one is recorded, and the
+// allowed one keeps the notice it would have had on its own.
 //
-// partition() is the whole of the new branch, and the direction that fails
-// quietly is a blocking buffer being sorted into the allowed pile: the call
-// would then go through wearing a notice, which reads as the hook having
-// spoken. So this drives a Bash command naming two files at once -- one UTF-32,
-// which blocks, and one binary, which alone would only be noticed.
-func TestABlockingSkipOutranksAnAllowedOneOnTheSameCall(t *testing.T) {
+// partition() is still the branch under test, and since 2026-09-05 the two
+// halves go to different places -- the blocking skip to the coverage record on
+// stderr, the allowed one to the person via systemMessage. That split is the
+// thing that can regress quietly: a recorded buffer sorted into the allowed
+// pile would appear in the notice and nowhere else, which reads as the hook
+// having looked. So this drives a Bash command naming two files at once -- one
+// UTF-32, which is a coverage failure, and one binary, which alone is only
+// noticed.
+func TestARecordedSkipAndAnAllowedOneGoToDifferentChannels(t *testing.T) {
 	dir := t.TempDir()
 
 	declared := filepath.Join(dir, "notes.txt")
@@ -640,23 +685,28 @@ func TestABlockingSkipOutranksAnAllowedOneOnTheSameCall(t *testing.T) {
 	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":` +
 		strconv.Quote("cat "+declared+" "+image) + `}}`
 	code, stdout, stderr := drive(t, payload)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	record := deferred(t, code, stdout, stderr)
+	if !strings.Contains(record, string(scan.SkippedUTF32)) {
+		t.Errorf("the coverage record does not name the reason that produced it: %q", record)
+	}
+	// The allowed buffer is not in the coverage record, which is unread()'s
+	// list. Naming a skip that is not a coverage gap there would make the
+	// record useless for the thing it is swept for.
+	if strings.Contains(record, image) {
+		t.Errorf("the coverage record names a buffer that is not a gap: %q", record)
+	}
+	// And the allowed one still reaches the person, on the channel it always
+	// used. Losing this is the quiet direction: the call proceeds either way.
+	if stdout == "" {
+		t.Fatalf("no notice at all, so the allowed skip went unreported")
 	}
 	got := decision(t, stdout)
-	if _, ok := got["hookSpecificOutput"]; !ok {
-		t.Fatalf("the call carries no decision object, so a buffer that declared "+
-			"itself text and went unread was allowed: %q", stdout)
+	msg, ok := got["systemMessage"].(string)
+	if !ok {
+		t.Fatalf("stdout carries no systemMessage: %q", stdout)
 	}
-	reason := reasonOf(t, stdout)
-	if !strings.Contains(reason, string(scan.SkippedUTF32)) {
-		t.Errorf("the block does not name the reason that produced it: %q", reason)
-	}
-	// The allowed buffer is not in the block's reason, which is unread()'s
-	// list and is what the model is told it must act on. Naming a skip nothing
-	// is being asked to fix there would make the deny's own list unreadable.
-	if strings.Contains(reason, image) {
-		t.Errorf("the block names a buffer that does not block: %q", reason)
+	if !strings.Contains(msg, image) {
+		t.Errorf("the notice does not name the buffer nothing read: %q", msg)
 	}
 }
 

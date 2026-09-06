@@ -33,8 +33,8 @@ authoritative and is not.
 | Run as a Claude Code hook | yes |
 | Ship a ruleset | yes |
 
-`spill-guard` builds, answers `hook`, `selftest`, `version`, and reaches
-`internal/bash`, `internal/hook`, `internal/readers`, `internal/rules`,
+`spill-guard` builds, answers `coverage`, `hook`, `selftest`, `version`, and
+reaches `internal/bash`, `internal/hook`, `internal/readers`, `internal/rules`,
 `internal/scan`, `internal/selftest`, `internal/validate`, `rules`.
 <!-- status:end -->
 
