@@ -168,7 +168,7 @@ of why one shipped.
 
 **The clean corpus is 13 kB, so it cannot settle whether precision moved. The
 differential can.** Compiling both clauses and counting the files the new one
-matches and the old one does not, over `~/go/pkg/mod` — 239,670 files, 5.05
+matches and the old one does not, over `~/go/pkg/mod` — 239,671 files, 5.05
 GiB — the widening adds **3 matches in 1 file**, and all three are indented
 `client-key: |` block scalars in
 `gitlab.com/gitlab-org/api/client-go@v1.46.0/config/config_test.go`, at header
@@ -215,14 +215,19 @@ real key whose last seven characters are `EXAMPLE`, which is one in 3.4e10 at
 the smallest alphabet that tail can be drawn from.
 
 **All five prefixes stay, and each one is now reachable by a test.** The
-ruleset was inherited, so which prefixes AWS actually issues is a question this
-repository has never asked, and it still cannot: answering it means reading
-AWS's IAM identifiers reference, which this build graph is forbidden to fetch.
+ruleset was inherited, and for three of the five — `A3T`, `ABIA` and `ACCA` —
+nothing here traces the prefix to anything AWS publishes. The other two are
+sourced: `aws-placeholder` below, `internal/validate/aws.go` and
+`testdata/corpus/README.md` all cite `AKIAIOSFODNN7EXAMPLE` on the IAM pages and
+`ASIAIOSFODNN7EXAMPLE` on the STS ones, which is AWS printing a key on each of
+those prefixes. Settling the unsourced three means reading AWS's IAM identifiers
+reference, which this build graph is forbidden to fetch.
+
 What can be measured is the cost of being wrong in each direction, and it is
 lopsided. Each arm compiled alone over `~/go/pkg/mod`, 239,671 files and 5.05
 GiB of third-party Go source, with every arm first driven against a value built
 for it so a zero below is a property of the population rather than of the
-pattern:
+pattern.
 
 | Arm | regex matches | surviving entropy 3.0 and `aws-placeholder` |
 |---|---|---|
@@ -241,12 +246,20 @@ cache is published source, so it holds placeholders and test fixtures rather
 than issued credentials. It says which prefixes people *write down*, never which
 AWS hands out.
 
-What it does settle is the cost. Keeping an arm nobody here can justify adds no
-surviving match to a 5 GiB population, and cutting one AWS does issue costs a
-missed credential, which is the failure the tool exists to prevent. That
-asymmetry decides it on its own, without needing the zeros to mean more than
-they do. `private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on the
-same reasoning one section up.
+What it does settle is the cost. The three unsourced arms are `A3T`, `ABIA` and
+`ACCA`, and each adds no match at all to a 5 GiB population — not a surviving
+one, not a dropped one — so keeping them costs nothing this reading can find.
+Cutting one AWS does issue costs a missed credential, which is the failure the
+tool exists to prevent. That asymmetry decides it on its own, without needing
+the zeros to mean more than they do.
+
+`private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on the
+keep-anyway half of the argument one section up: deleting an arm is a judgement
+about what nothing writes rather than a proof, so the cheaper error is to keep
+it. Only that half carries. Those two arms are shown dead *structurally*, by
+reading the armor real toolchains emit, and no equivalent reading exists for a
+prefix AWS may or may not issue — which is exactly the move the paragraph above
+says these zeros cannot make.
 
 What the arms did lack was evidence they could fire.
 `TestEveryAWSPrefixArmIsReachable` in
@@ -260,8 +273,11 @@ absent is surface with no evidence behind it, and that was the defect rather
 than the arms.
 
 What would reverse this is the reading nobody here has taken: AWS's own list of
-the prefixes it issues. A prefix absent from it is an arm to cut, and this
-paragraph is what to delete when somebody checks.
+the prefixes it issues. A prefix absent from it is an arm to cut. What gets
+deleted then is the paragraph above opening **All five prefixes stay** and this
+one; the table and the paragraph between them survive either way, because they
+are about what the arms cost and what tests them rather than about why they are
+kept.
 
 `jwt` names `jwt-sample-key`, which recomputes the HMAC and drops a token that
 verifies under a published sample secret. A debugger that wants its own example
