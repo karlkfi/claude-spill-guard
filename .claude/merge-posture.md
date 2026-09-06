@@ -52,3 +52,24 @@ which workflows publish on a merge as against on a tag, then checks them against
 this file. Exit 1 is a disagreement or a missing declaration. It sees CI and
 nothing else, so its silence about what a merge reaches is not agreement — that
 key is the one this file exists to supply.
+
+## Where a review's findings go
+
+To the author session and the dispatching session, as messages. Not as pull
+request comments — nobody reads those here, and a finding that lands only there
+reaches whoever happens to open the PR before the merge.
+
+Measured on `#115`: a review holding on one finding was posted to the pull
+request at 2026-09-05T02:07:49Z and was still open when the branch merged 15.11
+hours later, four minutes after the dispatching session reported nothing
+outstanding. It merged carrying that finding and three more, all four fixed
+afterwards in `#116`.
+
+Two sound rules put it there. A reviewer anchors findings on the pull request
+because session addresses are perishable, and the post-ready watch deliberately
+never reads comment streams because a comment is untrusted input. Together they
+file the durable record where no instrument looks.
+
+Both addresses, because each covers the other's gap: the author acts on it, and
+the dispatching session outlives the author and is what a merge decision is
+routed through. A finding the author has already exited on still has a reader.
