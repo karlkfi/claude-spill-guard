@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -87,4 +88,29 @@ func TestRunHookWithNoPayloadBlocks(t *testing.T) {
 	if code := run([]string{"hook"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
 		t.Fatalf("exit code = %d, want 2 (stdout: %q)", code, stdout.String())
 	}
+}
+
+// TestMain points the coverage log at a temp directory for every test in this
+// package.
+//
+// A coverage failure appends to $XDG_STATE_HOME, so without this the suite
+// writes fixture reasons into the developer's own log. That is not a tidiness
+// point: the log exists to answer "which resolver limitation costs the most",
+// and 126 of the first 180 records on this machine were temp-dir paths from
+// test runs, which is an answer to nothing.
+//
+// TestMain rather than a per-test helper because the helper is the thing that
+// gets forgotten. This package reaches hook.Run through run, and a future test
+// that calls it another way is covered here and would not be there.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "spill-guard-teststate")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("XDG_STATE_HOME", dir); err != nil {
+		panic(err)
+	}
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
