@@ -236,3 +236,18 @@ func TestAnInputRedirectOfAGuardedPathIsRefused(t *testing.T) {
 		}
 	})
 }
+
+// A guarded path reached through a variable the same string assigned. Before
+// the resolver the operand was a coverage record and the file crossed; now the
+// path resolves and meets the refusal like a literal one -- the direction the
+// port's gain matters most in.
+func TestAGuardedPathReachedThroughAVariableIsRefused(t *testing.T) {
+	dir, name := dotenv(t)
+	code, stdout, stderr := drive(t, bashCall(t, "SP="+dir+"; cat $SP/"+name, t.TempDir()))
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "a dotenv file") {
+		t.Errorf("the reason does not name the class: %q", reason)
+	}
+}

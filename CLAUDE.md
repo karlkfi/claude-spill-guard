@@ -207,9 +207,27 @@ carries the manual check that closes the rest, after a draft is published.
 The `Bash` surface is now whole: the command string is scanned and so are the
 files its readers are pointed at, `internal/readers` being what decides which
 token is a path. An operand of a known reader that cannot be resolved — a
-`$VAR`, a glob, a relative path after a `cd` this cannot follow — is a coverage
-failure: the call defers and the operand is recorded, because a scanner that
-skipped one and allowed would report a clean result for a file nothing opened.
+`$VAR` the string never assigned a literal, a glob, a relative path after a
+`cd` this cannot follow — is a coverage failure: the call defers and the
+operand is recorded, because a scanner that skipped one and allowed would
+report a clean result for a file nothing opened. A variable the same command
+string assigns a plain literal is substituted before anything reads the
+segment, so `SP=/x; tail "$SP/unit.log"` resolves; `internal/hook/vars.go` is
+the port of workspace-guard's propagation and poisons rather than guesses at
+the rest — a substitution or another variable in the value, an assignment in a
+subshell or pipeline stage, a name a builtin may have rewritten, an IFS change,
+and an assignment bash reached through `||`. One reached through `&&` counts
+only while everything before it in its and-or list is certain to have exited 0
+— a plain assignment, with no substitution and no redirect, or a `cd` the
+tracker followed — and is otherwise dropped
+when the statement ends, so `cd "$(git rev-parse --show-toplevel)" && SP=/x;
+tail "$SP/f"` resolves (220 of the week's 655 conditional assignments take
+that shape) and `mkdir -p x && SP=/x; tail "$SP/f"` records; `andOr` in
+`vars.go` is the rule and upstream has none, since it never opens the file. A
+queued substitution body starts with an empty map, which is Q147's class; a
+quoted assignment `'SP=/x'` is read as one here where bash runs a command,
+which is Q92's class; a `case` arm is read as unconditional, which is Q151's.
+All three are pinned.
 A literal `cd` target is followed, per segment in order, so `cd sub && cat x`
 resolves `x` under `sub` and gets a verdict; what is not followed is bare `cd`,
 `cd -`, `popd`, a `$`-bearing target other than the quoted `"$(git rev-parse

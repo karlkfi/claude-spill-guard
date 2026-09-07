@@ -110,16 +110,32 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// says so at the arm.
 		dir, dirUnknown := cur.dir, cur.dirUnknown
 		moved := false
+		// The variables the string assigns, substituted into each segment
+		// before anything reads it, as bash expands before it runs. vars.go
+		// is the port and carries what it declines to resolve.
+		v := newVars()
+		// The and-or list, which says whether a conditional assignment or
+		// move had run by the time a later segment does; vars.go has the rule.
+		list := andOr{settled: true}
 		for i, segment := range segments {
-			tokens := bash.StripEnvPrefix(bash.StripShKeywords(segment.Tokens))
+			list.enter(segment, v, &dirUnknown)
+			sub := v.expand(segment.Tokens)
+			inputs := v.expand(segment.Inputs)
+			if names, only := v.observe(segment.Tokens, sub, list.persists(segment)); only {
+				list.assigned(segment, names)
+				continue
+			}
+			tokens := bash.StripEnvPrefix(bash.StripShKeywords(sub))
 			if len(tokens) == 0 {
 				continue
 			}
 			if kind, arg := classifyCd(tokens); kind != "" {
 				moved = true
 				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment)
+				list.moved(segment, dirUnknown)
 				continue
 			}
+			list.ran()
 			operands, known := readers.Files(tokens)
 			if !known {
 				continue
@@ -131,7 +147,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// because everything below asks the same question of it. Known
 			// readers only, every reader in the table, never a `<(…)`, and
 			// docs/design/README.md, "An input redirect", has the week behind each.
-			operands = append(operands, segment.Inputs...)
+			operands = append(operands, inputs...)
 			// A flag whose value is a file naming other files. The list itself
 			// is an operand and is scanned; what it names cannot be known
 			// without opening it, and scanning the list alone would report a
@@ -418,6 +434,10 @@ func classifyCd(tokens []string) (kind, arg string) {
 func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, bool) {
 	switch {
 	case !segment.Persists:
+		return dir, true
+	case segment.Conditional == "||":
+		// Ran only if what came before failed, which nothing here can know;
+		// the `&&` arm is the list's to settle, in andOr.
 		return dir, true
 	case kind == "arg":
 		if !filepath.IsAbs(arg) {
