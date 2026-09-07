@@ -433,8 +433,8 @@ in good faith is the failure mode here, and review does not reliably catch it.
 2026-09-05, and the change is the measurement rather than a softening.
 
 A **finding** — a rule matched something — blocks, and that is untouched. So
-does a **shape refusal**: an `env` dump, or a read of one of the fourteen
-guarded credential paths, where the tool knows there is something to stop and
+does a **shape refusal**: an `env` dump, or a read of one of the six
+guarded credential-path classes, where the tool knows there is something to stop and
 no rule could recognise it.
 
 A **coverage failure** — an operand that will not resolve, a buffer nothing
