@@ -24,7 +24,8 @@ sandboxed home directory — and fails until this file agrees with all four.
 | `PreToolUse` | `Read` | the `file_path`, and the file it names |
 | `UserPromptSubmit` | every prompt | the prompt, and the files its `@` tokens name |
 
-The binary reads `HOME`, `TMPDIR` and `XDG_STATE_HOME` from its environment,
+The binary reads `CDPATH`, `GIT_CEILING_DIRECTORIES`, `GIT_DIR`,
+`GIT_WORK_TREE`, `HOME`, `TMPDIR` and `XDG_STATE_HOME` from its environment,
 and nothing else. The launcher, `hooks/run-spill-guard.cmd`, reads `HOME`,
 `LOCALAPPDATA`, `PATH` and `SPILL_GUARD_BIN`.
 
@@ -36,8 +37,15 @@ reason names the path of what went unread, and none of its bytes.
 <!-- privacy:end -->
 
 `TMPDIR` is `selftest`'s, not the hook's: it plants its canaries in a
-temporary directory and removes them before it exits. The hook reads the other
-two, to expand a `~` in a path and to find the coverage log below.
+temporary directory and removes them before it exits. The hook reads `HOME` to
+expand a `~` in a path and `XDG_STATE_HOME` to find the coverage log below. The
+other four decide whether a `cd` in a `Bash` command can be followed, so that a
+relative file operand after it resolves against the right directory: `CDPATH`
+because bash searches it before the directory a relative target names, and
+`GIT_DIR`, `GIT_WORK_TREE` and `GIT_CEILING_DIRECTORIES` because any of them
+moves the answer to `git rev-parse --show-toplevel`, which the hook computes by
+walking for a `.git` entry rather than by running git. Each is tested for being
+set, or read as a path to compare against; none is stored, logged or emitted.
 
 The rules are compiled into the binary. There is no rule file on disk and no
 project override: a ruleset that cannot be separated from the binary cannot

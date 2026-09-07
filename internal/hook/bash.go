@@ -496,10 +496,12 @@ func normalizeSubst(tok string) string {
 // from the plain walk. A filesystem walk and nothing else: os/exec is
 // forbidden across this build graph, which is also why cdSubst is two long.
 func gitToplevel(start string) string {
-	for _, v := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_CEILING_DIRECTORIES"} {
-		if os.Getenv(v) != "" {
-			return ""
-		}
+	// Three literal reads rather than a loop over the names, because the
+	// privacy gate derives PRIVACY.md's list of what the binary reads from
+	// the source, and a variable it cannot name is one the page cannot say.
+	if os.Getenv("GIT_DIR") != "" || os.Getenv("GIT_WORK_TREE") != "" ||
+		os.Getenv("GIT_CEILING_DIRECTORIES") != "" {
+		return ""
 	}
 	for d := start; ; {
 		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
