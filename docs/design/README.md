@@ -1156,8 +1156,8 @@ cost.
 
 **A finding blocks.** A rule matched something, and that is the product.
 
-**A shape refusal blocks.** An `env` dump, or a read of one of the fourteen
-guarded credential paths: the tool knows there is something to stop and no rule
+**A shape refusal blocks.** An `env` dump, or a read of one of the six
+guarded credential-path classes: the tool knows there is something to stop and no rule
 could recognise it.
 
 **A coverage failure defers.** An operand that will not resolve, a buffer
