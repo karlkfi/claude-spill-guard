@@ -104,10 +104,6 @@ ALLOWED = {
     "internal/validate/jwt_test.go":
         "a table of JWT shapes where each case is a specific malformation, so "
         "the bytes are the assertion",
-    "internal/rules/capture_test.go":
-        "the one entry here that is not a decision. Q121 moves this literal "
-        "into testdata/corpus/vectors/, and the stale-entry check below is "
-        "what makes that pull request delete this line rather than leave it",
 }
 
 
