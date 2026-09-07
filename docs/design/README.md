@@ -2142,6 +2142,73 @@ reader it is written for is whoever runs `spill-guard coverage`; the wording
 argument is the same for that reader, and the bypass argument is why it still
 does not name `git grep`.
 
+### A glob operand is expanded, because bash settles it before the command runs
+
+A pattern is the one unresolved operand whose file set *is* settled at
+`PreToolUse`: bash expands it against the filesystem before the command sees an
+argv, no reader flag alters what the shell produced, and this process reads the
+same filesystem. That is what keeps it out of the directory refusal above. A
+walk has to agree with each reader's own traversal; an expansion has to agree
+with one shell's globbing, under options this can enumerate.
+
+**Measured 2026-09-06** over this machine's transcripts: 95 calls carried the
+glob refusal, 135 glob operands among them, and every one was a plain POSIX
+pattern -- `internal/hook/*.go`, `docs/queue/*.md`. 0 carried `shopt`, `set -f`
+or `GLOBIGNORE`; 1 carried an `eval`. Q135 had measured 51 of 393 refusals on
+the arm two days earlier, the same shape throughout.
+
+**What the expansion assumes is the shell's options, and they were read rather
+than assumed.** The Bash tool's shell restores the options of the shell it was
+snapshotted from, and 22 of 22 snapshots under `~/.claude/shell-snapshots/`
+restore `dotglob`, `nullglob`, `failglob`, `globstar`, `nocaseglob` and
+`extglob` unset, which are the defaults. So `filepath.Glob` runs under those,
+and where bash 5.3.15 and Go disagree under them the pattern is translated, its
+matches are filtered, or it is refused. Driven over one fixture, 36 patterns,
+and `TestTheExpansionAgreesWithBash` holds the table:
+
+| Shape | bash 5.3.15, default options | `filepath.Glob` | Here |
+|---|---|---|---|
+| `d/*` beside `d/.hidden.txt` | omits it | includes it | filtered: a leading `.` is matched only by a literal `.` at the start of the pattern element. `[.]` and `?` do not reach it in bash and do in Go, so those are filtered too |
+| `d/[!a]*.txt` | everything but `a.txt` | `a.txt`, and a file named `!` | `[!` is rewritten `[^` |
+| `d/[[:alpha:]]*` | names starting with a letter | an ordinary class, then a literal `]` | refused |
+| `d/*/../x` | resolves the step | nothing: `..` is an entry name no directory lists | refused |
+| `d/*/` | directories only | nothing | refused |
+| `d/{a,b}.txt`, `d/*.{txt,md}` | brace-expands first | literal braces, matching nothing | refused, wildcard or not -- passing it through would `Stat` a file that does not exist and send nothing |
+| `d/nomatch*` | the literal token | the empty set | nothing crosses, unless a file by that literal name exists -- then bash opens it, and so does this. `app/[id]/page.tsx` is a Next.js route, and `filepath.Glob` reads its `[id]` as a class matching nothing; the literal is included whenever it is on disk, quoted or not, since the lexer has removed the quotes. Found in review as a fail-open: five spellings of `cat x[1].env` exited 0 with nothing scanned and nothing recorded |
+| `d/[` | the literal token | `ErrBadPattern`, but only on reaching an entry to match | refused before Glob, so the answer does not turn on what the directory holds |
+
+**Anything in the string that could change the options puts the pattern back
+on the record.** `shopt` with any argument, `set -f`, `set -o noglob`, an
+assignment to `GLOBIGNORE` -- which turns `dotglob` on as a side effect -- and
+`eval` or `source`, which can do any of those. Whether the segment persists
+does not matter: `(shopt -s dotglob; cat *)` applies to the `cat` beside it.
+Two shapes were driven and left alone because they do not change the set: a
+prefix assignment on the reading command, since bash expands the operands
+before `GLOBIGNORE=x cat *` assigns, and the environment, which bash 5.3.15
+ignores for that variable -- so nothing here reads one, and `PRIVACY.md` is
+unchanged. A queued substitution body inherits the flag the way it inherits the
+directory, which is Q147's position problem again.
+
+**A quoted pattern is Q92's class, in the precision direction.** The lexer
+strips quotes and backslashes, so `cat "*.env"` and `cat \*.env` arrive as
+`*.env` and expand, where bash would open one file named `*.env`. Every file
+bash would send is in the set and files it would not are too -- including the
+other half of the same class, `cat 'x[1].env'` beside a real `x1.env`, where
+bash sends the literal alone and this sends both.
+`TestAQuotedGlobExpandsWhereBashWouldNot` pins both halves.
+
+**A matched directory meets the directory refusal above**, as it would had the
+session typed the name: `grep -rn pat docs/*` expands to `docs/design`, and
+that is the walk this design refuses. The measured population has no such call
+in it.
+
+**What this machine cannot show is another machine's rc file.** The snapshot
+restores whatever the user's shell had, so on a machine whose `.bashrc` sets
+`dotglob`, every pattern in the tool's shell reaches hidden files and the
+filter here drops them: a gap of exactly the hidden files, on exactly the
+machines that opted into them. Nothing at `PreToolUse` reads that shell's
+options today, and Q150 is whether the snapshots are the instrument that could.
+
 ### A refusal is whole-call, and the reason names one segment of it
 
 A `PreToolUse` deny refuses the tool call. It does not refuse the segment the
@@ -2163,9 +2230,10 @@ The refusal named the `grep`'s glob operand. `marker.txt` was still absent
 afterwards, so the `echo` ahead of the `&&` never ran either.
 
 That exhibit was driven on a build where an unresolvable operand denied. A glob
-operand defers since 2026-09-05, so the same command runs whole today and the
-mechanism is now exercised by the refusals that remain — a finding, an `env`
-dump, a guarded path — where it holds unchanged: a deny is still whole-call.
+operand defers since 2026-09-05 and expands since 2026-09-06, so the same
+command runs whole today with every `Q*.md` scanned, and the mechanism is now
+exercised by the refusals that remain — a finding, an `env` dump, a guarded
+path — where it holds unchanged: a deny is still whole-call.
 
 So a session that bundles an edit with the grep that checks it loses the edit,
 and the only thing in the transcript is a scanner error about the grep. Split a
