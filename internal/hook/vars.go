@@ -3,18 +3,20 @@ package hook
 import (
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/karlkfi/claude-spill-guard/internal/bash"
 )
 
-// The literal-variable propagation of bash-workspace-guard.py (its issue 58),
-// ported function for function: literal_assignment_value, substitute_vars,
+// The literal-variable propagation of bash-workspace-guard.py (its issues 58
+// and 70), ported function for function: literal_assignment_value,
+// literal_for_item, for_loop_binding, expand_loop_candidates, substitute_vars,
 // apply_assignment_group, poison_vars, printf_assigns, unglue_printf_v and
 // clobbers_ifs, with the constants they read. A `$NAME` in a reader's operand
-// whose NAME the same command string assigned a literal is what bash and this
-// hook can both read off the string; everything else keeps the `$`, and
-// resolve records it as it did before.
+// whose NAME the same command string assigned a literal -- or bound to a `for`
+// list -- is what bash and this hook can both read off the string; everything
+// else keeps the `$`, and resolve records it as it did before.
 //
 // Fail-closed direction is the port's own. A value that is not a provable
 // literal, an assignment that cannot persist, a builtin that might assign, a
@@ -22,8 +24,8 @@ import (
 // the unresolved operand. Nothing here guesses.
 //
 // What is not ported, and why, is at each site: the Windows drive-prefix
-// exemption (Q79's class), for-loop binding (a row of its own), and the stable
-// subset the upstream recursion starts from (Q147).
+// exemption (Q79's class), the stable subset the upstream recursion starts from
+// (Q147), and the loop bindings that subset seeds, which are the same argument.
 
 // varUseRE is a plain `$NAME` or `${NAME}`. A parameter-expansion operator
 // (`${f:-x}`, `${f%.*}`) deliberately does not match, so its `$` stays and the
@@ -44,6 +46,28 @@ var assignishRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)(\+?=|\[|\+\+|--)
 // -- whitespace for the default IFS, and `:` so a PATH-shaped value cannot be
 // split by an IFS this never saw.
 const impureValueChars = " \t\n$`*?[:"
+
+// impureItemChars is that set with the glob metacharacters back out, for a
+// `for` list item, which bash expands as a pattern. literalLoopItem carries
+// what makes a pattern safe to keep here.
+const impureItemChars = " \t\n$`:"
+
+// maxLoopCandidates bounds what a loop variable expands to: the values one
+// variable may be bound to, and the cross product a token naming several of
+// them stands for. Upstream's MAX_LOOP_CANDIDATES, at its number.
+//
+// The scanner's own budget does not stand in for it, because what the cap
+// bounds is where the time goes rather than how much there is. Three nested
+// loops over 256 literals each make `cat $a/$b/$c` 16.7M tokens to build before
+// a byte is read, so the budget would be spent producing paths instead of
+// scanning what the call sends -- and the verdict at the end of it is the
+// coverage record the cap reaches at once. Upstream measured that shape past
+// two minutes, at which point its hook answered nothing at all.
+//
+// The product is known before any expansion happens, so the cap costs nothing
+// to enforce, and it POISONS rather than truncating: checking a prefix of the
+// candidates would report a clean scan for the files after it.
+const maxLoopCandidates = 256
 
 // neverPropagate are the names bash treats specially: assigning one does not
 // make `$NAME` expand to the literal.
@@ -74,11 +98,18 @@ var argAssignerCmds = map[string]bool{
 // resolver must not take, and the reason upstream's stable-subset seed is not
 // ported (Q147).
 type vars struct {
-	m         map[string]string
+	m map[string]string
+	// loops is the candidate set each `for` variable stands for, kept apart
+	// from m as upstream keeps it: the two poison each other, since a name
+	// assigned a scalar is no longer a loop variable and a name a `for` binds
+	// is no longer a scalar.
+	loops     map[string][]string
 	propagate bool
 }
 
-func newVars() *vars { return &vars{m: map[string]string{}, propagate: true} }
+func newVars() *vars {
+	return &vars{m: map[string]string{}, loops: map[string][]string{}, propagate: true}
+}
 
 // expand substitutes what the map holds into tokens, so the readers and the
 // cd tracker see the argv bash would have run.
@@ -93,30 +124,60 @@ func (v *vars) expand(tokens []string) []string {
 	return out
 }
 
-// observe folds one segment into the map and reports whether it was
-// assignments alone, which leaves no command for the caller to judge. raw is
-// the segment's own tokens, which is what decides whether it is an assignment;
-// sub is raw with the map substituted, which is what a builtin's arguments
-// name. An IFS change stops propagation for the rest of the string: every
-// later expansion is re-split by a value this never saw.
-func (v *vars) observe(raw, sub []string, persists bool) (assigned []string, assignmentOnly bool) {
+// observation is what observe made of a segment: a command for the caller to
+// judge, assignments alone, or a `for NAME in …` header. The three arms are
+// upstream's, in its order -- an assignment group first, because bash decides
+// what is an assignment before expansion, then the header, then the poison
+// every other segment gets.
+type observation int
+
+const (
+	observedCommand observation = iota
+	observedAssignments
+	observedLoopHeader
+)
+
+// observe folds one segment into the maps and says which of the three it was.
+// raw is the segment's own tokens, which is what decides whether it is an
+// assignment; sub is raw with the map substituted, which is what a builtin's
+// arguments name and what a `for` list iterates. An IFS change stops
+// propagation for the rest of the string: every later expansion is re-split by
+// a value this never saw. binds is andOr's, and gates the header alone.
+func (v *vars) observe(raw, sub []string, persists, binds bool) ([]string, observation) {
 	if !v.propagate {
-		return nil, false
+		return nil, observedCommand
 	}
 	if names, ok := applyAssignmentGroup(raw, v.m, persists); ok {
 		for _, name := range names {
+			delete(v.loops, name) // a name set as a scalar is no longer a loop variable
 			if name == "IFS" {
 				v.stop()
 			}
 		}
-		return names, true
+		return names, observedAssignments
+	}
+	if name, values, ok := forLoopBinding(bash.StripShKeywords(sub), v.loops); ok {
+		delete(v.m, name) // and a loop variable is not a scalar
+		if values == nil || !binds {
+			delete(v.loops, name)
+		} else {
+			v.loops[name] = values
+		}
+		return nil, observedLoopHeader
 	}
 	if clobbersIFS(sub) {
 		v.stop()
 	} else {
 		poisonVars(sub, v.m)
+		poisonVars(sub, v.loops) // the same rules invalidate a binding
 	}
-	return nil, false
+	return nil, observedCommand
+}
+
+// candidates is the concrete tokens a loop variable in tok stands for, one per
+// value bash iterates, or false when that set is over maxLoopCandidates.
+func (v *vars) candidates(tok string) ([]string, bool) {
+	return expandLoopCandidates(tok, v.loops)
 }
 
 // andOr is the and-or list a pass is inside, which is what says whether an
@@ -182,6 +243,21 @@ func (l *andOr) persists(segment bash.Segment) bool {
 	return segment.Persists && segment.Conditional != "||"
 }
 
+// binds is whether a `for` header here may record its candidate set. Narrower
+// than persists, and asked separately: a binding is read by the operands
+// INSIDE the loop and not only after it, so the tentative hold assigned gives
+// an `&&` cannot serve it -- those names are dropped at the list's end, and the
+// body sits after that end. So a header the shell may not have reached, or one
+// whose loop runs where the segments after it are not -- a subshell, a pipeline
+// stage, a background job -- poisons the name instead, which is how follow
+// refuses a `cd`. l.settled is post-enter, so it is already false after a `||`.
+//
+// Upstream binds through all of those, because a candidate bash never took
+// only ever adds a prompt there where here it decides which file gets opened.
+func (l *andOr) binds(segment bash.Segment) bool {
+	return segment.Persists && l.settled
+}
+
 // assigned records an assignment-only segment that applied names. One whose
 // value runs a command exits with that command's status, and one with a
 // redirect fails when the target cannot open, so either unsettles the list
@@ -218,6 +294,7 @@ func (l *andOr) ran() { l.settled = false }
 
 func (v *vars) stop() {
 	clear(v.m)
+	clear(v.loops)
 	v.propagate = false
 }
 
@@ -235,9 +312,12 @@ func isAssignment(tok string) bool {
 // plus a paren run, and the scalar empty string would miss the array's real
 // `$f`.
 //
+// allowGlob keeps `*?[` instead of rejecting them; only literalLoopItem passes
+// it, and only it carries the argument for why a pattern is safe to keep.
+//
 // Upstream exempts a Windows drive prefix from the `:` rule. Not here: nothing
 // in this resolver reads a drive path, and Q79 is where that divergence lives.
-func literalAssignmentValue(raw string) (string, bool) {
+func literalAssignmentValue(raw string, allowGlob bool) (string, bool) {
 	if raw == "" {
 		return "", false
 	}
@@ -247,10 +327,154 @@ func literalAssignmentValue(raw string) (string, bool) {
 	if strings.HasPrefix(raw, "~") {
 		return "", false
 	}
-	if strings.ContainsAny(raw, impureValueChars) {
+	impure := impureValueChars
+	if allowGlob {
+		impure = impureItemChars
+	}
+	if strings.ContainsAny(raw, impure) {
 		return "", false
 	}
 	return raw, true
+}
+
+// literalLoopItem is the literal a `for NAME in <list>` item resolves to, or
+// false when bash would expand it into paths this cannot predict (upstream's
+// literal_for_item, its issue 70). It reuses the assignment-value purity test
+// -- same tilde handling, same rejection of `$`, a backtick and whitespace --
+// and then rejects a brace item: unlike an assignment value, a for-list item IS
+// brace-expanded, so `{a,b}` kept as the literal string would miss the real `a`
+// and `b`. A rejected item poisons the loop variable, which is the coverage
+// record the operand had before any of this.
+//
+// A glob item is kept, as the pattern itself (upstream's issue 99), and what
+// makes that sound here is not what makes it sound there. Upstream only asks
+// where a path lands, and a pattern proxies its whole expansion because `*`,
+// `?` and `[…]` never match `/`, so every path it expands to sits in the same
+// directory. This opens the file, where a proxy settles nothing -- the
+// candidate is sound because it goes on to expand, which globs it into the
+// files bash would hand the command. A token built around the candidate keeps
+// that: `cat "$f.bak"` over `docs/*.md` reaches expand as `docs/*.md.bak`,
+// which matches every file bash reads that exists, and one that does not exist
+// sends nothing either way.
+func literalLoopItem(raw string) (string, bool) {
+	val, ok := literalAssignmentValue(raw, true)
+	if !ok || strings.ContainsAny(val, "{}") {
+		return "", false
+	}
+	return val, true
+}
+
+// forLoopBinding classifies a segment as a `for NAME in <list>` header
+// (upstream's for_loop_binding, its issue 70).
+//
+//	"", nil, false     not a `for NAME in` header: the caller's poison path
+//	                   runs unchanged, which is where `for ((…))` goes, since
+//	                   the arithmetic form lexes a `(` where the name would be
+//	name, nil, true    a list this cannot expand -- a non-literal or brace
+//	                   item, a `for NAME` over "$@", an empty list, or more
+//	                   values than the cap. The caller drops NAME from both
+//	                   maps, which is the poison it had before loops existed
+//	name, values, true the candidate set, so a `$NAME` in a later operand is
+//	                   one path per value bash iterates
+//
+// Called on the post-substitution tokens with the reserved words already off:
+// `SP=/x; for f in $SP/a` binds what bash iterates, and a nested loop's header
+// shares its segment with the enclosing `do`.
+//
+// A list item may use an enclosing loop's variable -- `for d in docs/*; do for
+// f in "$d"/*.md` -- so items are expanded over loops first and the inner
+// variable binds one candidate per (outer candidate, item) pair, which is what
+// bash visits. Expanding before the caller rebinds the name reads the outer
+// value, which is what bash expands the list with even where the inner loop
+// reuses the name. The count is capped per item as well as in total, so a list
+// that would blow past the cap stops there rather than after materialising the
+// whole cross product.
+func forLoopBinding(tokens []string, loops map[string][]string) (string, []string, bool) {
+	if len(tokens) < 2 || filepath.Base(tokens[0]) != "for" {
+		return "", nil, false
+	}
+	name := tokens[1]
+	if name == "" || identRE.FindString(name) != name || neverPropagate[name] {
+		return "", nil, false
+	}
+	if len(tokens) < 3 || tokens[2] != "in" {
+		return name, nil, true // `for NAME` over "$@"
+	}
+	items := tokens[3:]
+	if len(items) == 0 {
+		return name, nil, true // empty list -> the body never runs
+	}
+	var values []string
+	for _, item := range items {
+		cands, ok := expandLoopCandidates(item, loops)
+		if !ok {
+			return name, nil, true // over-cap item
+		}
+		for _, cand := range cands {
+			val, ok := literalLoopItem(cand)
+			if !ok {
+				return name, nil, true // non-literal item
+			}
+			values = append(values, val)
+			if len(values) > maxLoopCandidates {
+				return name, nil, true // over-cap list
+			}
+		}
+	}
+	return name, values, true
+}
+
+// expandLoopCandidates expands every `$NAME`/`${NAME}` whose NAME is a loop
+// variable into the concrete tokens bash iterates over (upstream's
+// expand_loop_candidates, its issue 70). A token using one stands for one path
+// per candidate and bash visits all of them, so the caller reads all of them --
+// which is the file set the command sends rather than a walk of anything, the
+// reading the directory refusal in bash.go turns on.
+//
+// Comes back as tok alone when the token uses no loop variable, or holds a
+// backtick this will not evaluate. Several distinct loop variables in one token
+// expand as the cross product; the order is variable order then candidate
+// order, so a reason and a test read the same twice.
+//
+// False when that cross product would exceed maxLoopCandidates. Its size is the
+// product of the per-variable counts, so it is known before any expansion
+// happens and the work is never done; the caller records the operand, which is
+// the verdict a runtime-expanded token had before loops existed.
+func expandLoopCandidates(tok string, loops map[string][]string) ([]string, bool) {
+	if len(loops) == 0 || !strings.Contains(tok, "$") || strings.Contains(tok, "`") {
+		return []string{tok}, true
+	}
+	var names []string
+	for _, m := range varUseRE.FindAllStringSubmatch(tok, -1) {
+		name := m[1]
+		if name == "" {
+			name = m[2]
+		}
+		if _, ok := loops[name]; ok && !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return []string{tok}, true
+	}
+	total := 1
+	for _, name := range names {
+		total *= len(loops[name])
+		if total > maxLoopCandidates {
+			return nil, false
+		}
+	}
+	results := []string{tok}
+	for _, name := range names {
+		expanded := make([]string, 0, len(results)*len(loops[name]))
+		for _, r := range results {
+			for _, val := range loops[name] {
+				expanded = append(expanded, substituteVars(r, map[string]string{name: val}))
+			}
+		}
+		results = expanded
+	}
+	return results, true
 }
 
 // substituteVars replaces the plain `$NAME` and `${NAME}` uses whose literal
@@ -315,7 +539,7 @@ func applyAssignmentGroup(tokens []string, varmap map[string]string, persists bo
 	for _, t := range pairs {
 		name, raw, _ := strings.Cut(t, "=")
 		names = append(names, name)
-		val, ok := literalAssignmentValue(substituteVars(raw, varmap))
+		val, ok := literalAssignmentValue(substituteVars(raw, varmap), false)
 		if !ok || !persists || neverPropagate[name] {
 			delete(varmap, name)
 		} else {
@@ -373,7 +597,11 @@ func ungluePrintfV(t string) string {
 // command behind it: `LC_ALL=C read f` matched no rule upstream and left f at
 // its stale literal (its Q69). The prefix names are still poisoned, because a
 // special builtin under `set -o posix` keeps such an assignment.
-func poisonVars(tokens []string, varmap map[string]string) {
+//
+// Generic over the value type because upstream runs it on both maps and this
+// port has to as well: it only ever deletes keys, so what a map holds never
+// reaches it.
+func poisonVars[V any](tokens []string, varmap map[string]V) {
 	if len(varmap) == 0 {
 		return
 	}

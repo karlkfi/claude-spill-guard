@@ -168,8 +168,13 @@ func probeVars(t *testing.T, setup, probe string) string {
 	var dirUnknown bool
 	for _, segment := range segments {
 		list.enter(segment, v, &dirUnknown)
-		if names, only := v.observe(segment.Tokens, v.expand(segment.Tokens), list.persists(segment)); only {
+		switch names, observed := v.observe(segment.Tokens, v.expand(segment.Tokens),
+			list.persists(segment), list.binds(segment)); observed {
+		case observedAssignments:
 			list.assigned(segment, names)
+			continue
+		case observedLoopHeader:
+			list.ran()
 			continue
 		}
 		if kind, arg := classifyCd(bash.StripEnvPrefix(bash.StripShKeywords(segment.Tokens))); kind != "" {
@@ -326,4 +331,112 @@ func mapsEqual(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// Upstream's unit cases for the loop functions, carried across beside the four
+// above. `for` is not a shell keyword to StripShKeywords -- upstream's list
+// omits it for the same reason -- so a header reaches these with its own first
+// token, and a nested loop's `do for f in …` arrives with the `do` off.
+func TestLiteralLoopItem(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	for raw, want := range map[string]string{
+		"docs/a.md":  "docs/a.md",
+		"docs/*.md":  "docs/*.md", // a pattern is kept; expand globs it later
+		"a?.md":      "a?.md",
+		"[ab].md":    "[ab].md",
+		"~/notes.md": "/home/me/notes.md",
+		"{a,b}.md":   "", // brace-expanded by bash, so the literal is not a path
+		"a{1..3}":    "",
+		"$SP/a.md":   "",
+		"a b":        "",
+		"/a:/b":      "",
+		"~someone/x": "",
+		"":           "",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			got, ok := literalLoopItem(raw)
+			if want == "" {
+				if ok {
+					t.Errorf("literalLoopItem(%q) = %q, want it declined", raw, got)
+				}
+				return
+			}
+			if !ok || got != want {
+				t.Errorf("literalLoopItem(%q) = %q, %v; want %q, true", raw, got, ok, want)
+			}
+		})
+	}
+}
+
+func TestForLoopBinding(t *testing.T) {
+	outer := map[string][]string{"d": {"d1", "d2"}}
+	for _, c := range []struct {
+		name   string
+		tokens []string
+		loops  map[string][]string
+		want   []string // nil with isFor true is the poison
+		isFor  bool
+	}{
+		{"a literal list", []string{"for", "f", "in", "/a", "/b"}, nil, []string{"/a", "/b"}, true},
+		{"an absolute path to for", []string{"/usr/bin/for", "f", "in", "/a"}, nil, []string{"/a"}, true},
+		{"a glob item", []string{"for", "f", "in", "d/*.md"}, nil, []string{"d/*.md"}, true},
+		{"over the outer variable", []string{"for", "f", "in", "$d/c.env"}, outer,
+			[]string{"d1/c.env", "d2/c.env"}, true},
+		{"a non-literal item", []string{"for", "f", "in", "$X"}, nil, nil, true},
+		{"a brace item", []string{"for", "f", "in", "{a,b}"}, nil, nil, true},
+		{"no in", []string{"for", "f"}, nil, nil, true},
+		{"an empty list", []string{"for", "f", "in"}, nil, nil, true},
+		{"a name bash treats specially", []string{"for", "IFS", "in", "/a"}, nil, nil, false},
+		{"the arithmetic form", []string{"for", "((", "i=0", "))"}, nil, nil, false},
+		{"not a for", []string{"cat", "f", "in", "/a"}, nil, nil, false},
+		{"nothing to read", []string{"for"}, nil, nil, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, values, isFor := forLoopBinding(c.tokens, c.loops)
+			if isFor != c.isFor {
+				t.Fatalf("isFor = %v, want %v", isFor, c.isFor)
+			}
+			if strings.Join(values, " ") != strings.Join(c.want, " ") {
+				t.Errorf("values = %q, want %q", values, c.want)
+			}
+		})
+	}
+}
+
+func TestExpandLoopCandidates(t *testing.T) {
+	loops := map[string][]string{"f": {"/a", "/b"}, "g": {"x", "y"}}
+	for _, c := range []struct {
+		tok  string
+		want []string
+		ok   bool
+	}{
+		{"$f/deploy.env", []string{"/a/deploy.env", "/b/deploy.env"}, true},
+		{"${f}x", []string{"/ax", "/bx"}, true},
+		{"$f/$g", []string{"/a/x", "/a/y", "/b/x", "/b/y"}, true},
+		{"$f/$f", []string{"/a//a", "/b//b"}, true}, // one variable, one axis
+		{"plain.env", []string{"plain.env"}, true},
+		{"$UNKNOWN/x", []string{"$UNKNOWN/x"}, true},
+		{"`echo $f`", []string{"`echo $f`"}, true},
+	} {
+		t.Run(c.tok, func(t *testing.T) {
+			got, ok := expandLoopCandidates(c.tok, loops)
+			if ok != c.ok {
+				t.Fatalf("ok = %v, want %v", ok, c.ok)
+			}
+			if strings.Join(got, " ") != strings.Join(c.want, " ") {
+				t.Errorf("expandLoopCandidates(%q) = %q, want %q", c.tok, got, c.want)
+			}
+		})
+	}
+	t.Run("over the cap", func(t *testing.T) {
+		big := map[string][]string{}
+		var wide []string
+		for i := 0; i <= maxLoopCandidates; i++ {
+			wide = append(wide, "v")
+		}
+		big["w"] = wide
+		if got, ok := expandLoopCandidates("$w/x", big); ok {
+			t.Errorf("expandLoopCandidates returned %d candidates, want the cap to refuse", len(got))
+		}
+	})
 }

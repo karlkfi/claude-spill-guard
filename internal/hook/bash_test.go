@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -755,4 +756,140 @@ func TestAQuotedAssignmentResolvesWhereBashWouldNotAssign(t *testing.T) {
 			}
 		})
 	}
+}
+
+// loopFixture is the tree the `for` tests iterate: a planted file, a clean one
+// beside it, a `.bak` beside that, and the same pair one level down. Which file
+// a reason names is what says which candidate was opened.
+func loopFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for rel, body := range map[string]string{
+		"clean.env":      "PORT=8080\n",
+		"deploy.env":     "AWS_ACCESS_KEY_ID=" + secret + "\n",
+		"deploy.env.bak": "AWS_ACCESS_KEY_ID=" + secret + "\n",
+		"d1/c.env":       "PORT=8080\n",
+		"d2/c.env":       "AWS_ACCESS_KEY_ID=" + secret + "\n",
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// A `$f` bound to a `for f in <list>` is one path per value bash iterates, and
+// the loop body reads all of them, so all of them are scanned (Q149). Each row
+// plants the key in exactly one candidate, so a reason naming that file is the
+// port having opened it rather than having stopped at the first.
+//
+// The list is bash's, driven 2026-09-07 on 5.3.15 over the same tree: each of
+// these read the file the row expects, and the glob rows skipped a `.hidden.env`
+// beside them, which is the default globFiles already models.
+func TestALoopVariableResolvesToTheFilesBashIterates(t *testing.T) {
+	dir := loopFixture(t)
+	for _, tc := range []struct{ name, command, wants string }{
+		{"the first item", `for f in deploy.env clean.env; do cat "$f"; done`, "deploy.env"},
+		{"a later item", `for f in clean.env deploy.env; do cat "$f"; done`, "deploy.env"},
+		{"a glob item", `for f in *.env; do cat "$f"; done`, "deploy.env"},
+		// The candidate is the pattern, and what makes that sound here is that
+		// it goes on to expand: `*.env` + `.bak` matches every file bash reads.
+		{"a glob item under a suffix", `for f in *.env; do cat "$f".bak; done`, "deploy.env.bak"},
+		{"a literal item under a suffix", `for f in deploy; do cat "$f".env; done`, "deploy.env"},
+		{"an item from a literal assignment", `SP=d2; for f in "$SP"/c.env; do cat "$f"; done`, "d2/c.env"},
+		{"a nested loop over the outer variable", `for d in d1 d2; do for f in "$d"/c.env; do cat "$f"; done; done`, "d2/c.env"},
+		{"a loop in a pipeline", `for f in deploy.env; do cat "$f"; done | head -1`, "deploy.env"},
+		// bash leaves f at the last item, so the port's candidate set is a
+		// superset here -- it scans clean.env too. Both are files the same call
+		// already read inside the loop, which is what bounds the superset.
+		{"a use after the loop", `for f in clean.env deploy.env; do :; done; cat "$f"`, "deploy.env"},
+		{"an input redirect", `for f in clean.env deploy.env; do cat < "$f"; done`, "deploy.env"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, filepath.FromSlash(tc.wants)) {
+				t.Errorf("reason = %q, want the candidate %q opened", reason, tc.wants)
+			}
+		})
+	}
+}
+
+// The lists the port declines, each because bash would iterate something this
+// cannot compute, or because the header sits where the segments reading it are
+// not. Every one poisons the name, which is the coverage record the operand had
+// before loop binding existed -- so nothing here is a new refusal.
+//
+// The last four are the divergence from upstream, which binds regardless: there
+// a candidate bash never took only adds a prompt, here it decides which file
+// gets opened. andOr.binds carries the argument.
+func TestALoopListThePortCannotExpandRecordsTheOperand(t *testing.T) {
+	dir := loopFixture(t)
+	for _, tc := range []struct{ name, command string }{
+		{"a brace item", `for f in {clean,deploy}.env; do cat "$f"; done`},
+		{"an unset variable", `for f in $X; do cat "$f"; done`},
+		{"an environment variable", `for f in $HOME/deploy.env; do cat "$f"; done`},
+		{"a substitution item", "for f in `echo deploy.env`; do cat \"$f\"; done"},
+		{"no list at all", `for f; do cat "$f"; done`},
+		{"an empty list", `for f in; do cat "$f"; done`},
+		{"the arithmetic form", `for ((i=0;i<1;i++)); do cat "$f"; done`},
+		{"rewritten by read", `for f in deploy.env; do :; done; read -r f; cat "$f"`},
+		{"rewritten by eval", `for f in deploy.env; do :; done; eval x=1; cat "$f"`},
+		{"reassigned as a scalar to a substitution", `for f in deploy.env; do :; done; f=$(pwd); cat "$f"`},
+		{"a header in a subshell", `(for f in deploy.env; do cat "$f"; done)`},
+		{"a header in a pipeline stage", `echo x | for f in deploy.env; do cat "$f"; done`},
+		{"a header reached through ||", `false || for f in deploy.env; do cat "$f"; done`},
+		{"a header reached through && after a command", `mkdir -p x && for f in deploy.env; do cat "$f"; done`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "expands at run time") {
+				t.Errorf("coverage reason = %q, want the operand unresolved", reason)
+			}
+		})
+	}
+}
+
+// Over the cap the name poisons and the token records; neither enumerates
+// anything. The two limbs are separate because they fail at different places --
+// the list as it is built, the token before a single candidate is materialised
+// -- and the second is the one that would otherwise be 289 paths to stat for a
+// reader that reads two files.
+//
+// The list's length is derived from the cap, so raising the constant is not a
+// mutation that can break this: the fixture grows with it and stays one item
+// past. What breaks it is deleting the guard, which is how it was driven.
+func TestALoopOverTheCandidateCapIsNotEnumerated(t *testing.T) {
+	dir := loopFixture(t)
+	var many []string
+	for i := 0; i <= maxLoopCandidates; i++ {
+		many = append(many, fmt.Sprintf("f%d.env", i))
+	}
+	t.Run("a list over the cap", func(t *testing.T) {
+		command := "for f in " + strings.Join(many, " ") + `; do cat "$f"; done`
+		code, stdout, stderr := drive(t, bashCall(t, command, dir))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "expands at run time") {
+			t.Errorf("coverage reason = %q, want the operand unresolved", reason)
+		}
+	})
+	t.Run("a token whose cross product is over the cap", func(t *testing.T) {
+		var items []string
+		for i := 0; i < 17; i++ { // 17*17 = 289
+			items = append(items, fmt.Sprintf("d%d", i))
+		}
+		list := strings.Join(items, " ")
+		command := "for a in " + list + "; do for b in " + list + `; do cat "$a/$b"; done; done`
+		code, stdout, stderr := drive(t, bashCall(t, command, dir))
+		reason := deferred(t, code, stdout, stderr)
+		if !strings.Contains(reason, "more than 256") {
+			t.Errorf("coverage reason = %q, want the cap named", reason)
+		}
+	})
 }
