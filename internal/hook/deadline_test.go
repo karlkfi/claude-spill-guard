@@ -46,7 +46,7 @@ func driveWithin(t *testing.T, budget time.Duration, payload string) (code int, 
 // more characters of its own alphabet, and the filler is lowercase and spaces.
 func slowToScan(t *testing.T, size int, planted string) string {
 	t.Helper()
-	set, err := rules.Load(embedded.Shipped, nil)
+	set, err := rules.Load(embedded.Shipped)
 	if err != nil {
 		t.Fatalf("loading the compiled-in ruleset: %v", err)
 	}

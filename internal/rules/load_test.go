@@ -1,8 +1,6 @@
 package rules
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -28,7 +26,7 @@ const awsRule = `{
 
 func load(t *testing.T, shipped []byte) ([]Rule, error) {
 	t.Helper()
-	return Load(shipped, nil)
+	return Load(shipped)
 }
 
 // quote renders a Go string as a JSON string literal, which for these patterns
@@ -412,111 +410,23 @@ func TestFileLevelRejections(t *testing.T) {
 	}
 }
 
-// The project file extends the shipped set rather than replacing it, so the
-// interesting cases are what an override leaves alone.
-func TestProjectOverrides(t *testing.T) {
-	shipped := one(awsRule)
-
-	t.Run("disabling a shipped rule without restating it", func(t *testing.T) {
-		got, err := Load(shipped,
-			one(`{"id": "aws-access-key-id", "enabled": false}`))
-		if err != nil {
-			t.Fatalf("Load() = %v", err)
-		}
-		if len(got) != 1 {
-			t.Fatalf("Load() returned %d rules, want 1", len(got))
-		}
-		if got[0].Enabled {
-			t.Error("the override did not take")
-		}
-		if got[0].Description != "AWS access key ID" || got[0].Group != 1 {
-			t.Errorf("the override dropped fields it did not mention: %+v", got[0])
-		}
-	})
-
-	t.Run("adding a rule the shipped set does not have", func(t *testing.T) {
-		added := set(`"id": "aws-access-key-id"`, `"id": "local"`)
-		got, err := Load(shipped, one(added))
-		if err != nil {
-			t.Fatalf("Load() = %v", err)
-		}
-		if len(got) != 2 || got[1].ID != "local" {
-			t.Fatalf("Load() = %d rules, last %q; want the shipped one and then local",
-				len(got), got[len(got)-1].ID)
-		}
-	})
-
-	t.Run("an override for an id nothing ships, with fields missing", func(t *testing.T) {
-		_, err := Load(shipped,
-			one(`{"id": "typo-in-the-id", "enabled": false}`))
-		if err == nil {
-			t.Fatal("Load() = nil error, want one -- there is no rule to extend")
-		}
-		if !strings.Contains(err.Error(), "typo-in-the-id") {
-			t.Errorf("the error does not name the id: %v", err)
-		}
-	})
-
-	t.Run("an override whose regex does not compile", func(t *testing.T) {
-		_, err := Load(shipped,
-			one(`{"id": "aws-access-key-id", "regex": "(unclosed"}`))
-		if err == nil {
-			t.Fatal("Load() = nil error, want a startup failure")
-		}
-	})
-
-	t.Run("a field the schema has no room for", func(t *testing.T) {
-		_, err := Load(shipped,
-			one(`{"id": "aws-access-key-id", "window": 32}`))
-		if err == nil || !strings.Contains(err.Error(), "window") {
-			t.Fatalf("Load() = %v, want an error naming window", err)
-		}
-	})
-}
-
-func TestLoadFiles(t *testing.T) {
-	dir := t.TempDir()
-	shipped := filepath.Join(dir, "spill-guard.json")
-	project := filepath.Join(dir, "project.json")
-	if err := os.WriteFile(shipped, one(awsRule), 0o644); err != nil {
-		t.Fatal(err)
+// There is one ruleset. The loader used to layer a project file over the
+// shipped one, where `{"id": "aws-access-key-id", "enabled": false}` was a
+// whole entry; that override is retired, so the same shape is now a rule
+// missing every field the schema requires, and it is refused rather than
+// merged. What this pins is the shipped set's own strictness -- the deletion
+// itself is pinned by Load's signature, which the compiler holds.
+func TestAnOverrideShapedEntryIsNotARule(t *testing.T) {
+	_, err := Load(one(`{"id": "aws-access-key-id", "enabled": false}`))
+	if err == nil {
+		t.Fatal("Load() = nil error, want one -- an entry naming only id and enabled is not a rule")
 	}
-
-	t.Run("a project with no ruleset of its own", func(t *testing.T) {
-		got, err := LoadFiles(shipped, project)
-		if err != nil {
-			t.Fatalf("LoadFiles() = %v, want no error", err)
+	// compile reports the first field it finds missing, and family is first.
+	for _, want := range []string{"aws-access-key-id", "no family"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load() = %v, want it to name %q", err, want)
 		}
-		if len(got) != 1 || !got[0].Enabled {
-			t.Errorf("LoadFiles() = %+v", got)
-		}
-	})
-
-	t.Run("a project ruleset that is there", func(t *testing.T) {
-		if err := os.WriteFile(project,
-			one(`{"id": "aws-access-key-id", "enabled": false}`), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		got, err := LoadFiles(shipped, project)
-		if err != nil {
-			t.Fatalf("LoadFiles() = %v, want no error", err)
-		}
-		if got[0].Enabled {
-			t.Error("the project override did not take")
-		}
-	})
-
-	// The binary that cannot find its own rules scans nothing, and scanning
-	// nothing reports the same clean result as scanning everything.
-	t.Run("no shipped ruleset", func(t *testing.T) {
-		_, err := LoadFiles(filepath.Join(dir, "absent.json"), project)
-		if err == nil {
-			t.Fatal("LoadFiles() = nil error, want one")
-		}
-		if !strings.Contains(err.Error(), "shipped ruleset") {
-			t.Errorf("LoadFiles() = %v", err)
-		}
-	})
+	}
 }
 
 // Everything this binary writes reaches a terminal and the API both, so a

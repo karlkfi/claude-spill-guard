@@ -1002,8 +1002,9 @@ not need to do.
 
 ## Rule schema
 
-Rules are data. The shipped set lives in `rules/spill-guard.json`; a project
-extends it from `.claude/spill-guard.json`, matching the sibling guards.
+Rules are data. The shipped set lives in `rules/spill-guard.json`, and it is
+the only set: the sibling guards read a project file beside theirs, and this
+one deliberately does not — [Output discipline](#output-discipline) has why.
 
 ```json
 {
@@ -1115,21 +1116,16 @@ which `ababab` reaches exactly.
 
 ## Loading the ruleset
 
-Both files are one JSON object with a `rules` array, so the config keys
-`.claude/spill-guard.json` grows later need no format change. `id`, `family`,
-`description`, `regex` and `enabled` are required of a rule; the rest default
-to absent, and `enabled` has no default because a rule that does not say is a
-rule somebody has not decided about.
+The file is one JSON object with a `rules` array, so a top-level key added
+later needs no format change. `id`, `family`, `description`, `regex` and
+`enabled` are required of a rule; the rest default to absent, and `enabled` has
+no default because a rule that does not say is a rule somebody has not decided
+about. Every entry has to be a whole rule: the loader merges nothing over the
+shipped set, so a partial entry is a rule missing fields and is refused as one.
 
-A project entry whose `id` is already shipped overrides the fields it mentions
-and leaves the others, which makes
-
-```json
-{"rules": [{"id": "aws-access-key-id", "enabled": false}]}
-```
-
-the way to turn a shipped rule off. An entry with a new `id` is appended and
-has to be a whole rule.
+Turning a shipped rule off is an edit to `rules/spill-guard.json` — set its
+`enabled` to `false` — and a pull request somebody reviews. That is the whole
+of the local-tuning story, and it is deliberate.
 
 **A field the schema has no room for is a load failure.** Go's `encoding/json`
 drops an unknown field in silence unless the decoder is told not to — measured,
@@ -2280,14 +2276,14 @@ binary is updated, which is #33's failure re-opened. The denylist is what both
 sibling guards chose, and it is the one whose failure needs Claude Code to add a
 *new* unattended mode rather than merely to add a mode.
 
-**Per-rule disablement in `.claude/spill-guard.json` is not wired, and it is
-not the same kind of thing.** `internal/rules` merges a project ruleset over
-the shipped one and `Load` takes the bytes, so the loader call is one argument.
-What that argument would admit is a two-step bypass: write the file with
-`{"id": "…", "enabled": false}`, then read the secret. Neither step is caught.
-`Write` and `Edit` are not in the scanned set, and a `cat > .claude/spill-guard.json`
-heredoc that *is* scanned carries no secret, so a scanner looking for
-credentials passes it either way.
+**Per-rule disablement in `.claude/spill-guard.json` is retired, and it was
+never the same kind of thing.** The design once had `internal/rules` merge a
+project ruleset over the shipped one, with `Load` taking both as bytes, so
+honouring the file was one argument away. What that argument would admit is a
+two-step bypass: write the file with `{"id": "…", "enabled": false}`, then read
+the secret. Neither step is caught. `Write` and `Edit` are not in the scanned
+set, and a `cat > .claude/spill-guard.json` heredoc that *is* scanned carries no
+secret, so a scanner looking for credentials passes it either way.
 
 Saying the model can author both hatches is true and settles nothing, because
 the design does not defend against a user who means it. What separates them is
@@ -2306,17 +2302,26 @@ The three guards that suggest themselves each fail on their own terms:
   direction — `enabled: false`, a regex that matches nothing, keywords the
   prefilter will never find in the buffer, a raised entropy floor under the
   ceiling `compile` already enforces. The one mechanically clean version is *a
-  project entry may add a rule and may not touch a shipped one*, which
-  `apply` is already shaped to express and which removes the reason the file
-  exists: turning a noisy rule off is the precision case the whole ruleset is
-  tuned for.
+  project entry may add a rule and may not touch a shipped one*, which the
+  merge was shaped to express and which removes the reason the file exists:
+  turning a noisy rule off is the precision case the whole ruleset is tuned
+  for.
 - **Require a signature from outside the workspace.** Needs a key, a verifier
   and somebody to hold both, in a binary whose stated property is an empty
   supply chain.
 
-So this half stays a decision rather than a loader change, and [Q73](../queue/Q73.md)
-is narrowed to it. The environment prefix had no such question, which is why it
-landed first.
+So the fourth answer is the one taken: there is no project ruleset. A
+precision complaint is answered by changing the shipped set, which is a pull
+request somebody reviews, rather than by a local override the model can author
+through an unscanned `Write`. That removes the bypass instead of guarding it
+and keeps the empty supply chain — no key, no verifier, nobody holding both.
+What it costs is local tuning, which nobody has measured and the shipped set
+absorbs. The removal reached the loader: `Load` takes one argument, and the
+merge, its overlay and the file reader that opened either path are gone, so
+restoring the feature is a diff somebody reviews rather than a token somebody
+passes — the same reasoning this document applies to a raw secret in a struct
+that outlives the match. The environment prefix had no such question, which is
+why it landed first.
 
 ## Repo layout
 

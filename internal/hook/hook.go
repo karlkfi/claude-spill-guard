@@ -25,10 +25,11 @@
 // two do not take the same block encoding -- see verdict.go, where getting
 // that wrong is a call that runs with no warning anywhere.
 //
-// The ruleset is the one compiled into the binary. A project ruleset at
-// .claude/spill-guard.json is in the design and is not read here: it is a file
-// the model can write, so wiring it up is a question about a bypass rather
-// than a loader change, and it has a row of its own.
+// The ruleset is the one compiled into the binary, and it is the only one. The
+// design retired the project ruleset at .claude/spill-guard.json rather than
+// wiring it up: it is a file the model can write, so honouring a disablement
+// from it is a two-step bypass, and internal/rules no longer has a merge to
+// hand it to. docs/design/README.md, "Output discipline", has the argument.
 //
 // The design's other escape hatch is wired, in override.go. It is read from
 // command position on a Bash call and nowhere else, and it downgrades a block
@@ -265,7 +266,7 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 	if err != nil || len(buffers) == 0 {
 		return nil, nil, err
 	}
-	set, err := rules.Load(embedded.Shipped, nil)
+	set, err := rules.Load(embedded.Shipped)
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading the compiled-in ruleset: %w", err)
 	}
