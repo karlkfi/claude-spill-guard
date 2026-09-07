@@ -208,3 +208,31 @@ func TestAnOverrideDowngradesAGuardedPathRefusal(t *testing.T) {
 		t.Errorf("permissionDecision = %v, want ask", out["permissionDecision"])
 	}
 }
+
+// The redirect spelling walked past this refusal exactly as it walked past
+// content matching -- driven 2026-09-04, `cat < .env` exit 0 silent where
+// `cat .env` was refused. It is the same operand list now, so it is refused on
+// the same test, and the filtered form keeps the same standing.
+func TestAnInputRedirectOfAGuardedPathIsRefused(t *testing.T) {
+	dir, name := dotenv(t)
+	for _, command := range []string{"cat < " + name, "cat <" + name, "wc -l < " + name} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, "a dotenv file") {
+				t.Errorf("the reason does not name the class: %q", reason)
+			}
+		})
+	}
+	t.Run("the filtered form is not refused", func(t *testing.T) {
+		code, stdout, stderr := drive(t, bashCall(t, "cat < "+name+" | cut -d= -f1", dir))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("the filtered form was not allowed: %q", stdout)
+		}
+	})
+}

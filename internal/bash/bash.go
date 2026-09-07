@@ -22,7 +22,9 @@
 // number are kept, and every place Go forced a difference says so at the site:
 // lex (no shlex in the standard library), matchWord (no anchored-at-offset
 // regexp match), Heredocs (no default-None list argument), CommandSubstitutions
-// (no default argument), and isDigits below.
+// (no default argument), and isDigits below. One difference is this repo's
+// rather than Go's: Segment.Inputs records which of the redirects were `<`,
+// and the field's comment carries why upstream has no need of it.
 //
 // The layers, in the order a command passes through them:
 //
@@ -59,6 +61,17 @@ type Segment struct {
 	// Redirects is every redirect target written in this segment. A heredoc
 	// delimiter and a here-string's content are not paths and are not here.
 	Redirects []string
+	// Inputs is the subset of Redirects written with `<`: a file the command
+	// reads through a descriptor rather than by name, so a reader's operand
+	// list is short of it. Upstream records the target alone, because its
+	// question -- does this command touch a path outside the workspace -- has
+	// the same answer for a read and a write. This repo's does not, so the
+	// operator is kept here, at the one branch of the loop that sees it. `<<`
+	// and `<<<` are not here for the reason above, and `<&` names a
+	// descriptor. An explicit descriptor is not read: `3<in` opens in for
+	// reading on fd 3, and which descriptor a command consumes is not
+	// something the tokens say.
+	Inputs []string
 	// Persists is true only when a variable assignment in this segment
 	// survives into later commands of the same string: at paren depth 0 (not a
 	// subshell -- `(f=x); cat $f` does not set f), not a pipeline stage (each
@@ -97,12 +110,13 @@ func Segments(cmd string) ([]Segment, error) {
 	tokens = glueDollarParen(splitOperatorRuns(tokens))
 
 	var (
-		segs     []Segment
-		cur      []string
-		curRedir []string
-		paren    int
-		pipe     int
-		prevSep  string
+		segs      []Segment
+		cur       []string
+		curRedir  []string
+		curInputs []string
+		paren     int
+		pipe      int
+		prevSep   string
 	)
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
@@ -110,8 +124,8 @@ func Segments(cmd string) ([]Segment, error) {
 			if len(cur) > 0 || len(curRedir) > 0 {
 				persists := paren == 0 && prevSep != "|" &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
-				segs = append(segs, Segment{cur, curRedir, persists, pipe})
-				cur, curRedir = nil, nil
+				segs = append(segs, Segment{cur, curRedir, curInputs, persists, pipe})
+				cur, curRedir, curInputs = nil, nil, nil
 			}
 			switch t {
 			case "(":
@@ -161,6 +175,13 @@ func Segments(cmd string) ([]Segment, error) {
 					continue
 				}
 				curRedir = append(curRedir, tokens[i+1])
+				// `<(cmd)` lexes as `<` and `(`, so upstream records the
+				// paren as a target. It is a process substitution and not a
+				// file, and the loop that reads Inputs would try to open it,
+				// so it is kept out of Inputs and left in Redirects as it is.
+				if t == "<" && tokens[i+1] != "(" {
+					curInputs = append(curInputs, tokens[i+1])
+				}
 				i += 2
 				continue
 			}
@@ -171,7 +192,7 @@ func Segments(cmd string) ([]Segment, error) {
 		i++
 	}
 	if len(cur) > 0 || len(curRedir) > 0 {
-		segs = append(segs, Segment{cur, curRedir, paren == 0 && prevSep != "|", pipe})
+		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && prevSep != "|", pipe})
 	}
 	return segs, nil
 }

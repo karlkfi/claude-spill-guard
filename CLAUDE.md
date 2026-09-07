@@ -262,11 +262,13 @@ knows, and nothing else. Three things about it are settled. It refuses reads and
 not writes, because a write to one of these changes what another tool does,
 which is not a spill. It stops where `internal/readers` stops, so an interpreter
 opening the same path walks past it and the reason says so rather than reading
-as path protection — and an input redirect walks past it too, because
-`internal/bash` strips the target out of the tokens `readers.Files` reads, so
-`cat < .env` is allowed where `cat .env` is refused. That last one is a bypass
-rather than a cap, it defeats content matching identically, and it is Q131
-rather than something this answer covers. And `~/.claude/settings.json` is
+as path protection. An input redirect no longer walks past it: `internal/bash`
+strips a redirect target out of the tokens `readers.Files` reads, so `cat < .env`
+was allowed where `cat .env` was refused and content matching was defeated the
+same way, until `Segment.Inputs` put the `<` targets back among a known reader's
+operands. Known readers only — 141 of the 360 input redirects in the week to
+2026-09-04 were on a command with no row, 77 of them `python3` — which is the
+limitation the operand path already states. And `~/.claude/settings.json` is
 **not** in the class: a
 sweep of 24,381 `Bash` calls and 521 `Read` calls in the week to 2026-09-04
 found 29 reads of a `.claude/settings*.json`, none of them a credential and 26

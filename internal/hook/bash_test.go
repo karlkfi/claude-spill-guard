@@ -363,3 +363,70 @@ func TestADrivenRefusalDoesNotNameTheOverride(t *testing.T) {
 		})
 	}
 }
+
+// The other spelling of a reader pointed at a file. Segments takes a redirect
+// target out of the tokens, so before Segment.Inputs this loop saw `cat` with
+// no operand and the file crossed unread -- driven 2026-09-04 on a built
+// binary, `cat < deploy.env` exit 0 silent where `cat deploy.env` blocked.
+func TestAnInputRedirectIsOpenedAndScanned(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		"cat < " + name,
+		"cat <" + name,
+		"head -n 20 < " + name,
+		"grep -c AKIA < " + name,
+		"wc -l < " + name,
+		"cat 0< " + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("reason does not name the rule: %q", reason)
+			}
+			if !strings.Contains(reason, name) {
+				t.Errorf("reason does not name the file: %q", reason)
+			}
+		})
+	}
+	// The negative control: the same shape over a file holding nothing.
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("nothing here\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "cat < notes.txt", dir))
+	if code != 0 || stdout != "" {
+		t.Errorf("exit %d, stdout %q, want a silent 0 (stderr: %q)", code, stdout, stderr)
+	}
+}
+
+// An input redirect joins the operands of a reader the table knows and no
+// other command's. Over the week to 2026-09-04, 141 of the 360 input
+// redirects in 28,187 Bash calls were on a command with no row, 77 of them
+// `python3`, and those stay the design's stated limitation: what a script
+// does with its stdin is not something the tokens say.
+func TestAnInputRedirectOnACommandWithNoRowIsNotJudged(t *testing.T) {
+	dir, name := planted(t)
+	code, stdout, stderr := drive(t, bashCall(t, "python3 - < "+name, dir))
+	if code != 0 || stdout != "" {
+		t.Errorf("exit %d, stdout %q, want a silent 0 (stderr: %q)", code, stdout, stderr)
+	}
+}
+
+// `<(cmd)` reaches Segments as `<` and `(`, and the paren is not a file. A
+// file literally named `(` holding the key is what would be opened if it were
+// taken for one, so that is the fixture -- 49 of the 219 input redirects on a
+// known reader in the week to 2026-09-04 were process substitutions.
+func TestAProcessSubstitutionIsNotAnInput(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "("),
+		[]byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "cat <(echo hi)", dir))
+	if code != 0 || stdout != "" {
+		t.Errorf("exit %d, stdout %q, want a silent 0 (stderr: %q)", code, stdout, stderr)
+	}
+}
