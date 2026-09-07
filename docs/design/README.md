@@ -2226,12 +2226,19 @@ or a backtick, a brace item — bash brace-expands a for-list item where it does
 not an assignment value — a `for NAME` over `"$@"`, an empty list, and the
 `for ((…))` arithmetic form, which lexes a `(` where the name would be.
 
-**Measured 2026-09-07** over a week of this machine's transcripts, 28,276 Bash
-calls: 3,290 carry a `for NAME in`, 723 of those point a command in the reader
-table at `$NAME`, and 454 of those 723 have a list this binds. So about 1.6% of
-Bash calls move from a coverage record to a scan. The census is a regex over
-the command strings rather than a run of the resolver, so read it as the shape
-of the traffic and not as a verdict count.
+**Measured 2026-09-07** over a week of this machine's transcripts, in one
+pass: 28,763 Bash calls, of which 3,351 carry a `for NAME in`, 746 of those
+point a command in the reader table at `$NAME`, and 464 of those 746 have a
+list this binds. So about 1.6% of Bash calls move from a coverage record to a
+scan.
+
+Read the ratio rather than the counts. The corpus is this machine's live
+session transcripts, so it grows while the sweep runs — three passes within
+the hour put the denominator at 28,265, 28,276 and 28,763 — and every figure
+in this section is from the last of them, because figures from two passes read
+as one measurement and are not. The census is also a regex over the command
+strings rather than a run of the resolver, so it is the shape of the traffic
+and not a verdict count.
 
 **Three things diverge from upstream, and each is the same difference: it asks
 where a path lands and this opens the file.**
@@ -2264,7 +2271,7 @@ prefix of the candidates would report a clean scan for the files after it.
 **What it over-scans is a use after `done`.** bash leaves the variable at the
 last item and the candidate set holds all of them, so `for f in a b; do :;
 done; cat "$f"` scans `a` as well. Every such file is one the same call already
-read inside the loop, which is what bounds it; 93 of the week's 1,435
+read inside the loop, which is what bounds it; 95 of that pass's 1,465
 loop-variable uses sit after a `done`.
 
 ### A refusal is whole-call, and the reason names one segment of it
