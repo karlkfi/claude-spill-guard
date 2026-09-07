@@ -2435,8 +2435,9 @@ writing. For `Read` and `Bash`, what stands in:
 
 A stated limitation is worth more than a gate that cannot fail. A `PreToolUse`
 job that ran with no credential would fire nothing and report no check, which
-reads exactly like passing — and a job that ran with one would put a credential
-in CI for a project whose stated property is that nothing leaves the machine.
+reads exactly like passing — and a job that ran with one needs a credential
+this repository neither has nor wants, on a job a fork's pull request could not
+run at all, so it would gate the maintainer's pushes and nothing else.
 
 ## Benchmarking, if you benchmark at all
 
