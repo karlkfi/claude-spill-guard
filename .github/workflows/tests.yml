@@ -2918,6 +2918,143 @@ jobs:
             exit 1
           fi
 
+  self-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Every tracked file through the hook, and the class allowed to match
+        run: make self-scan
+
+  # The gate reports a zero -- no tracked file entered the class -- and a zero
+  # is the cheapest thing here to produce by accident. A ruleset that did not
+  # compile matches nothing and reads exactly like a clean tree, so the first
+  # arm is the control on that, and the rest cover each direction the
+  # allowlist is asserted in.
+  #
+  # Every arm asserts its own mutation landed before running the gate. A
+  # mutation that silently did not apply leaves a green run indistinguishable
+  # from a control that worked.
+  self-scan-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      # The control on the gate's own zero. With the rule off, the planted
+      # fixtures stop being refused, and every "did not match" below would
+      # otherwise be reported as a clean tree.
+      - name: A ruleset that has stopped firing must fail the gate
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("rules/spill-guard.json")
+          t = p.read_text()
+          at = t.index('"id": "aws-access-key-id"')
+          at = t.index('"enabled": true', at)
+          p.write_text(t[:at] + '"enabled": false' + t[at + len('"enabled": true'):])
+          off = [r for r in json.loads(p.read_text())["rules"] if r["id"] == "aws-access-key-id"]
+          assert off and off[0]["enabled"] is False, "aws-access-key-id is still enabled"
+          PY
+          if git diff --quiet rules/spill-guard.json; then
+            echo "::error::the mutation changed nothing -- it no longer matches the ruleset" >&2
+            exit 1
+          fi
+          make self-scan > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- rules/spill-guard.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::self-scan passed with the planted fixtures no longer refused" >&2
+            exit 1
+          fi
+          if ! grep -q 'planted/aws-access-key-id.env was not refused' mutant.log; then
+            echo "::error::self-scan failed, but not on the planted control" >&2
+            exit 1
+          fi
+      # The property the gate is for. A byte-for-byte transplant of a fixture
+      # this same gate proves is refused, so the precondition is a comparison
+      # against a case already measured rather than an assertion a command ran.
+      - name: A matching file outside every region and the allowlist must fail the gate
+        run: |
+          cp testdata/corpus/planted/aws-access-key-id.env testdata/corpus/clean/mutant.env
+          if ! cmp -s testdata/corpus/planted/aws-access-key-id.env testdata/corpus/clean/mutant.env; then
+            echo "::error::the transplant is not byte-identical to the fixture, so it is not the measured case" >&2
+            exit 1
+          fi
+          git add -N testdata/corpus/clean/mutant.env
+          make self-scan > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git rm -q --cached testdata/corpus/clean/mutant.env
+          rm -f testdata/corpus/clean/mutant.env
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::self-scan passed with a planted AWS key among the clean corpus" >&2
+            exit 1
+          fi
+          if ! grep -q 'clean/mutant.env matches the shipped ruleset and nothing says it should' mutant.log; then
+            echo "::error::self-scan failed, but not on the file entering the class" >&2
+            exit 1
+          fi
+      # The other direction. An entry kept after its reason has gone stops
+      # describing the tree, and nothing but this would say so.
+      - name: An allowlist entry that no longer matches must fail the gate
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path("README.md")
+          t = p.read_text()
+          found = re.findall(r"AKIA\w{16}", t)
+          assert len(found) == 1, f"expected one canary in README.md, found {len(found)}"
+          p.write_text(t.replace(found[0], "AKIA" + "0" * 16))
+          PY
+          if git diff --quiet README.md; then
+            echo "::error::the mutation changed nothing -- the README canary is not where this expects it" >&2
+            exit 1
+          fi
+          make self-scan > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::self-scan passed with a dead allowlist entry" >&2
+            exit 1
+          fi
+          if ! grep -q 'README.md is on the allowlist and no longer' mutant.log; then
+            echo "::error::self-scan failed, but not on the dead entry" >&2
+            exit 1
+          fi
+      - name: An allowlist entry naming a file that is not tracked must fail the gate
+        run: |
+          git rm -q --cached internal/scan/decode_test.go
+          if git ls-files --error-unmatch internal/scan/decode_test.go > /dev/null 2>&1; then
+            echo "::error::the mutation changed nothing -- the file is still tracked" >&2
+            exit 1
+          fi
+          make self-scan > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git reset -q HEAD internal/scan/decode_test.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::self-scan passed with an allowlist entry for an untracked file" >&2
+            exit 1
+          fi
+          if ! grep -q 'decode_test.go is on the allowlist and is not tracked' mutant.log; then
+            echo "::error::self-scan failed, but not on the orphan entry" >&2
+            exit 1
+          fi
+
   no-deps:
     runs-on: ubuntu-latest
     steps:

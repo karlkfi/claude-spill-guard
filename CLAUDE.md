@@ -27,7 +27,7 @@ measured.
 | `internal/selftest/` | The `selftest` subcommand. Canary payloads through `hook.Run` in-process, an allowing arm per surface, and a report that says what it cannot establish. |
 | `internal/testvec/` | The loader for `testdata/corpus/vectors/`. Test-only, linked into no binary, and it takes a `TB` rather than `*testing.T` so nothing outside a test imports `testing`. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. The JSON is data; `embed.go` beside it is the `go:embed` that compiles it in, which has to live here because the directive reaches only its own directory. |
-| `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. `vectors/` is neither: it is the credential-shaped strings the unit tests read, kept where secret scanning is told not to look. |
+| `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. `vectors/` is neither: it is the credential-shaped strings the unit tests read. `.github/secret_scanning.yml` is what keeps the whole corpus out of GitHub's push protection; spill-guard has no path arm and refuses these files like any other, which is what `self-scan` accounts for. |
 | `scripts/` | The gate scripts CI runs, `check-install-scripts.py` which only the release workflow can run, and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
@@ -538,6 +538,17 @@ regressions are invisible until the noise has trained everyone to ignore the
 tool. Every new rule needs a corpus case proving it stays quiet on clean input,
 and the `precision` job pins the false-positive count.
 
+**The scanner runs over this repository too, and the answer is not that no
+tracked file may match.** 23 of 251 do, and 15 of those are the corpus doing
+its job -- a gate whose first run had to be suppressed for fifteen files would
+teach everyone to suppress it. So `self-scan` allows two *regions* whose
+contents are credential-shaped by specification, `planted/` and `vectors/`,
+where a new file is the ordinary way of working; everywhere else it takes a
+named path and the decision behind it. The list is asserted both ways, so an
+exemption outliving its reason fails too. Do not re-derive this as a path
+exclusion inside the scanner: the ruleset has no path field, and a file the
+model can point at is the two-step bypass the project ruleset was retired for.
+
 **Do not hand-roll shell parsing.** The Bash operand resolution is a port of
 `claude-workspace-guard`'s segmentation layer, kept structurally identical so a
 fix there transfers by inspection. Writing quote-state tracking from scratch is
@@ -687,6 +698,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `action-pins` | every `uses:` in every workflow names an immutable revision, not a tag |
 | `test` | gofmt, go vet and go test |
 | `precision` | the shipped ruleset stays quiet on the clean corpus and finds every planted secret |
+| `self-scan` | no tracked file trips the scanner except the corpus and a named list that says why |
 | `no-deps` | go.mod requires nothing and the build graph is this module plus stdlib |
 | `no-network` | the build graph reaches no net, net/http or os/exec |
 | `vulns` | govulncheck finds no known vulnerability the build graph calls |

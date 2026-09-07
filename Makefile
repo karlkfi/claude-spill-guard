@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision no-deps no-network vulns cross-compile
+GATES := doctor gate-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -31,6 +31,7 @@ queue.desc          := the backlog store format holds, every filed id holds a cl
 action-pins.desc    := every `uses:` in every workflow names an immutable revision, not a tag
 test.desc           := gofmt, go vet and go test
 precision.desc      := the shipped ruleset stays quiet on the clean corpus and finds every planted secret
+self-scan.desc      := no tracked file trips the scanner except the corpus and a named list that says why
 no-deps.desc        := go.mod requires nothing and the build graph is this module plus stdlib
 no-network.desc     := the build graph reaches no net, net/http or os/exec
 vulns.desc          := govulncheck finds no known vulnerability the build graph calls
@@ -230,6 +231,9 @@ test:
 # -run` exits 0 when it matches nothing.
 precision:
 	$(PYTHON) scripts/check-precision.py
+
+self-scan:
+	$(PYTHON) scripts/check-self-scan.py
 
 no-deps:
 	$(PYTHON) scripts/check-supply-chain.py no-deps

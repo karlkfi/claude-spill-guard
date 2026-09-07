@@ -51,15 +51,20 @@ func TestTheShippedFileLoads(t *testing.T) {
 
 // Each of these drives one check in loadFrom. An assertion that has never
 // failed is not evidence that it can.
+//
+// The values are the padded placeholder rather than anything that could pass
+// for a key. These cases are about the file's shape, so the value is not what
+// they assert on -- and a matching literal here would put a string the scanner
+// refuses in the package that exists to keep such strings out of source.
 func TestLoadRejects(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		body string
 	}{
 		{"a file holding fewer vectors than the floor",
-			`{"only-one": {"value": "AKIA0SPILLGUARD11111", "note": "x"}}`},
+			`{"only-one": {"value": "AKIA0000000000000000", "note": "x"}}`},
 		{"a field the entry does not carry, which is how a typo arrives",
-			`{"id": {"value": "AKIA0SPILLGUARD11111", "values": "x"}}`},
+			`{"id": {"value": "AKIA0000000000000000", "values": "x"}}`},
 		{"an entry with no value at all",
 			`{"id": {"note": "x"}}`},
 		{"a file that is not JSON",
