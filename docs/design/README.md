@@ -1011,9 +1011,9 @@ one deliberately does not — [Output discipline](#output-discipline) has why.
   "id": "aws-access-key-id",
   "family": "credential",
   "description": "AWS access key ID",
-  "regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16})\\b",
+  "regex": "\\b((?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16})\\b",
   "group": 1,
-  "keywords": ["AKIA", "ASIA", "ABIA", "ACCA", "A3T"],
+  "keywords": ["AKIA", "ASIA", "ABIA", "ACCA"],
   "entropy": 3.0,
   "validators": ["entropy"],
   "enabled": true

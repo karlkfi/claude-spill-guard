@@ -28,7 +28,7 @@ carried by a planted fixture in
 
 | Rule | Anchor | What keeps it quiet |
 |---|---|---|
-| `aws-access-key-id` | `AKIA` `ASIA` `ABIA` `ACCA` `A3T` | 20 fixed characters, Shannon floor 3.0, and no `EXAMPLE` suffix |
+| `aws-access-key-id` | `AKIA` `ASIA` `ABIA` `ACCA` | 20 fixed characters, Shannon floor 3.0, and no `EXAMPLE` suffix |
 | `github-token` | `ghp_` `gho_` `ghu_` `ghs_` `ghr_` | 36 fixed characters, floor 3.0 |
 | `github-fine-grained-pat` | `github_pat_` | 70–90 characters, floor 3.0 |
 | `slack-token` | `xoxa-` `xoxb-` `xoxe-` `xoxp-` `xoxr-` `xoxs-` | floor 3.0 |
@@ -211,24 +211,34 @@ carried the same key and was rewritten rather than dropped. What it costs is a
 real key whose last seven characters are `EXAMPLE`, which is one in 3.4e10 at
 the smallest alphabet that tail can be drawn from.
 
-**All five prefixes stay, and each one is now reachable by a test.** The
-ruleset was inherited, and for three of the five — `A3T`, `ABIA` and `ACCA` —
-nothing here traces the prefix to anything AWS publishes. The other two are
-sourced: `aws-placeholder` below, `internal/validate/aws.go` and
-`testdata/corpus/README.md` all cite `AKIAIOSFODNN7EXAMPLE` on the IAM pages and
-`ASIAIOSFODNN7EXAMPLE` on the STS ones, which is AWS printing a key on each of
-those prefixes. Settling the unsourced three means reading AWS's IAM identifiers
-reference, which this build graph is forbidden to fetch.
+**Four prefixes ship, and each one is reachable by a test.** The ruleset was
+inherited carrying five, and three of them — `A3T`, `ABIA` and `ACCA` — traced
+to nothing AWS publishes. Reading [AWS's IAM identifiers reference][iam-ids] on
+2026-09-07 settled all three at once. Its *Understanding unique ID prefixes*
+table names twelve: `ABIA` (AWS STS service bearer token), `ACCA`
+(context-specific credential), `AGPA`, `AIDA`, `AIPA`, `AKIA` (access key),
+`ANPA`, `ANVA`, `APKA`, `AROA`, `ASCA` and `ASIA` (temporary STS access key).
+`ABIA` and `ACCA` are on it and stay. `A3T` is not on it, and is cut.
 
-What can be measured is the cost of being wrong in each direction, and it is
-lopsided. Each arm compiled alone over `~/go/pkg/mod`, 239,671 files and 5.05
-GiB of third-party Go source, with every arm first driven against a value built
-for it so a zero below is a property of the population rather than of the
-pattern.
+The reading is dated because the table carries its own caveat — "Prefixes may
+vary based on when they were created" — so a prefix retired before AWS kept a
+public list would be missing from it for a reason that has nothing to do with
+whether keys on it exist.
+
+The other two were already sourced twice over: `aws-placeholder` below,
+`internal/validate/aws.go` and `testdata/corpus/README.md` all cite
+`AKIAIOSFODNN7EXAMPLE` on the IAM pages and `ASIAIOSFODNN7EXAMPLE` on the STS
+ones, which is AWS printing a key on each of those prefixes.
+
+What the arms cost on real source is a separate reading, taken before that one
+and unaffected by it. Each arm compiled alone over `~/go/pkg/mod`, 239,671 files
+and 5.05 GiB of third-party Go source, with every arm first driven against a
+value built for it so a zero below is a property of the population rather than
+of the pattern.
 
 | Arm | regex matches | surviving entropy 3.0 and `aws-placeholder` |
 |---|---|---|
-| `A3T` | 0 | 0 |
+| `A3T`, since cut | 0 | 0 |
 | `AKIA` | 56 | **0** |
 | `ASIA` | 5 | 2 |
 | `ABIA` | 0 | 0 |
@@ -243,20 +253,26 @@ cache is published source, so it holds placeholders and test fixtures rather
 than issued credentials. It says which prefixes people *write down*, never which
 AWS hands out.
 
-What it does settle is the cost. The three unsourced arms are `A3T`, `ABIA` and
-`ACCA`, and each adds no match at all to a 5 GiB population — not a surviving
-one, not a dropped one — so keeping them costs nothing this reading can find.
-Cutting one AWS does issue costs a missed credential, which is the failure the
-tool exists to prevent. That asymmetry decides it on its own, without needing
-the zeros to mean more than they do.
+**The cut is AWS's list, and not the zeros.** `A3T` reports 0 and 0 in the
+table, and so does `AKIA` on the surviving column — the paragraph above forbids
+reading a zero as evidence an arm is dead, and it forbids it in this direction
+too. What the zero does add is a bound on what cutting `A3T` costs here: over
+5.05 GiB of published Go source, nothing writes an `A3T` key ID down at all, so
+no observable match is lost. What no reading here bounds is a prefix AWS issues
+and has not listed, which is what the table's own caveat leaves open.
+
+`ABIA` and `ACCA` report the same 0 and 0 and stay, because they are on the
+list. That is the whole of the rule: an arm is kept or cut on what AWS
+documents, and the population reading says only what it costs either way.
 
 `private-key-block` keeps its `SSH2 ENCRYPTED ` and `PGP ` arms on the
 keep-anyway half of the argument one section up: deleting an arm is a judgement
 about what nothing writes rather than a proof, so the cheaper error is to keep
 it. Only that half carries. Those two arms are shown dead *structurally*, by
-reading the armor real toolchains emit, and no equivalent reading exists for a
-prefix AWS may or may not issue — which is exactly the move the paragraph above
-says these zeros cannot make.
+reading the armor real toolchains emit. The AWS arms have their own version of
+that reading now — AWS's published prefix table — and it is what cut one and
+kept four. Until it was read, the zeros could not make the move and every arm
+stayed.
 
 What the arms did lack was evidence they could fire.
 `TestEveryAWSPrefixArmIsReachable` in
@@ -327,3 +343,5 @@ Four things, and the `precision` gate fails without the last two.
    reports the same clean result as a rule that checked.
 4. The clean corpus still at zero. A rule that needs an exception to stay quiet
    is a rule to drop.
+
+[iam-ids]: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html

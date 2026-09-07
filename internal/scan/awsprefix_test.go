@@ -1,11 +1,11 @@
 // aws-access-key-id against one value per arm of its alternation, because
-// before this file one of the five was exercised end to end. Every other
-// occurrence of ASIA, A3T, ABIA and ACCA in the tree is one of three things
+// before this file only one arm was exercised end to end. Every other
+// occurrence of ASIA, ABIA and ACCA in the tree is one of three things
 // that cannot see an arm go missing: a keyword handed to the prefilter, a
 // literal inside some other test's own fixture regex, or ASIAIOSFODNN7EXAMPLE,
 // which aws-placeholder is required to drop. So the corpus's one ASIA reading
 // was a rule staying quiet, and nothing measured one firing -- deleting four of
-// the five arms left `go test ./...` green.
+// the five arms the rule then carried left `go test ./...` green.
 //
 // The values come from testdata/corpus/vectors/ rather than from literals here,
 // for the reason internal/testvec's own doc comment gives: GitHub's detector
@@ -38,7 +38,6 @@ func awsAccessKeyID(t *testing.T) []rules.Rule {
 // arms is one vector per arm of the rule's alternation, keyed by the arm as the
 // pattern writes it so the two can be compared as sets rather than by hand.
 var arms = []struct{ arm, prefix, vector string }{
-	{"A3T[A-Z0-9]", "A3T", "aws-a3t-key-id"},
 	{"AKIA", "AKIA", "aws-access-key-id"},
 	{"ASIA", "ASIA", "aws-session-key-id"},
 	{"ABIA", "ABIA", "aws-bearer-token-id"},
