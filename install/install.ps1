@@ -231,11 +231,21 @@ try {
             }
             Say "cosign verified checksums.txt against $Repo at $Version"
         } elseif ($found -eq 'gh') {
-            & gh attestation verify $archivePath --repo $Repo --signer-workflow "$Repo/$Workflow"
+            # The ref is part of the value, because --signer-workflow matches
+            # the certificate subject as a prefix: the bare "$Repo/$Workflow"
+            # this used to pass accepts that workflow at any ref, where the
+            # cosign branch above pins the tag. Measured against the published
+            # v0.3.0 attestation -- bare exits 0, @refs/tags/v0.3.0 exits 0,
+            # @refs/heads/main exits 1.
+            #
+            # Not --bundle. The release attaches the provenance as an asset for
+            # a consumer with no network path to the attestations API, and this
+            # script is not one: it has just downloaded the archive from GitHub.
+            & gh attestation verify $archivePath --repo $Repo --signer-workflow "$Repo/$Workflow@refs/tags/$Version"
             if ($LASTEXITCODE -ne 0) {
-                Die "gh could not verify that $archive was built by $Repo's release workflow. Nothing was installed."
+                Die "gh could not verify that $archive was built by $Repo's release workflow at $Version. Nothing was installed."
             }
-            Say "gh verified the build provenance of $archive"
+            Say "gh verified the build provenance of $archive against $Repo at $Version"
         } else {
             Die "$NoVerifier Nothing was installed."
         }

@@ -272,11 +272,25 @@ elif found="$(verifier)"; then
 		say "cosign verified checksums.txt against $REPO at $version"
 		;;
 	gh)
+		# The ref is part of the value, because `--signer-workflow` matches
+		# the certificate subject as a prefix: the bare `$REPO/$WORKFLOW`
+		# this used to pass accepts that workflow at any ref, where the
+		# cosign branch above pins the tag. Measured against the published
+		# v0.3.0 attestation -- bare exits 0, `@refs/tags/v0.3.0` exits 0,
+		# `@refs/heads/main` exits 1 -- so the two verifiers assert the same
+		# thing rather than one of them being weaker for whoever happens to
+		# have it installed.
+		#
+		# Not `--bundle`. The release attaches the provenance as an asset for
+		# a consumer with no network path to the attestations API, and this
+		# script is not one: it has just downloaded the archive from GitHub.
+		# The bundle would be a second download that removes no network --
+		# `gh` fetches the Sigstore trust root either way.
 		gh attestation verify "$work/$archive" \
 			--repo "$REPO" \
-			--signer-workflow "$REPO/$WORKFLOW" ||
-			die "gh could not verify that $archive was built by $REPO's release workflow. Nothing was installed."
-		say "gh verified the build provenance of $archive"
+			--signer-workflow "$REPO/$WORKFLOW@refs/tags/$version" ||
+			die "gh could not verify that $archive was built by $REPO's release workflow at $version. Nothing was installed."
+		say "gh verified the build provenance of $archive against $REPO at $version"
 		;;
 	esac
 else

@@ -312,3 +312,29 @@ free and a human is asking the question directly.
   Install-time only, and structurally so — the shipped binary cannot reach
   either verifier, because `scripts/check-supply-chain.py` forbids `os/exec`
   across the build graph.
+
+- **The install scripts do not pass `--bundle`, and the flag they were missing
+  was a different one.** The release attaches the provenance as
+  `spill-guard_<version>.intoto.jsonl` so that a consumer with no network path
+  to GitHub's attestations API can still check it. An install script is not that
+  consumer: it has just downloaded the archive from GitHub, so the API is
+  reachable by construction, and `--bundle` would be a second download that
+  removes no network. Measured 2026-09-07 behind a dead proxy, with `gh release
+  view` failing first to show the proxy bites: both forms fail identically on
+  `error creating Sigstore verifier: no valid Sigstore verifiers could be
+  initialized`, because `gh` fetches the Sigstore trust root either way. The
+  asset is offline in the attestation, not in every byte it needs. Its consumers
+  are a mirror or packager republishing the assets, and the release job itself,
+  which byte-compares the published bundle against what it built.
+
+  What the `gh` branch was actually missing is the tag. `--signer-workflow`
+  matches the certificate subject as a prefix, so the bare
+  `<owner>/<repo>/.github/workflows/release.yml` it passed accepted that
+  workflow at *any* ref, while the cosign branch beside it pinned
+  `@refs/tags/<version>`. Two machines installing the same release got different
+  guarantees depending on which verifier they happened to have. Measured against
+  the published v0.3.0 attestation: bare exits 0, `@refs/tags/v0.3.0` exits 0,
+  `@refs/heads/main` exits 1 — and the pinned form verifies against all three
+  tags this repository has cut, so it refuses none of them.
+  `--cert-identity` says the same thing and cannot be used here: `gh` refuses it
+  alongside `--signer-workflow` outright.
