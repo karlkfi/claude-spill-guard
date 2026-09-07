@@ -16,7 +16,7 @@ import (
 // loader would refuse fails here rather than testing a rule that cannot exist.
 func load(t *testing.T, ruleset string) []rules.Rule {
 	t.Helper()
-	loaded, err := rules.Load([]byte(ruleset), nil)
+	loaded, err := rules.Load([]byte(ruleset))
 	if err != nil {
 		t.Fatalf("the fixture ruleset does not load: %v", err)
 	}

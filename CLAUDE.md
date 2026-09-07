@@ -43,9 +43,11 @@ binary and a ruleset that cannot be separated cannot disagree. One of the two
 escape hatches the design names is wired — `SPILL_GUARD_OVERRIDE=` on a `Bash`
 command, read from an inline assignment prefix and never from the environment,
 and it downgrades a block to a confirmation rather than to an allow. The
-project ruleset at `.claude/spill-guard.json` is still read by nobody, and Q73
-is narrowed to why: it is a file the model can write, so honouring a
-disablement in it is a question about a bypass rather than a loader change.
+other, a project ruleset at `.claude/spill-guard.json`, is retired: there is
+one ruleset and it is the one compiled in. A file the model can write is a
+two-step bypass — disable the rule, then read the secret — and a precision
+complaint is answered by changing the shipped set in a PR somebody reviews.
+The loader has no second source, so restoring one takes a reviewed diff.
 
 A buffer the pipeline declined to read is a **coverage record** rather than a
 field nobody consumes, and the axis is declaration rather than content: a

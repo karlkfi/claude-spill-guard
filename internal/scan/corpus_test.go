@@ -10,15 +10,13 @@ import (
 	"testing"
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
+	embedded "github.com/karlkfi/claude-spill-guard/rules"
 )
 
 // The precision corpus. Every other test here pins a mechanism against a
 // fixture written to exercise it; this one pins the shipped ruleset against
 // files nobody wrote for it. testdata/corpus/README.md is the specification.
-const (
-	corpusRoot = "../../testdata/corpus"
-	shipped    = "../../rules/spill-guard.json"
-)
+const corpusRoot = "../../testdata/corpus"
 
 // The count CI pins.
 const cleanFindings = 0
@@ -30,15 +28,17 @@ const (
 	minPlantedFiles = 14
 )
 
-// loadShipped is the ruleset as the binary will load it, no project overrides.
+// loadShipped is the ruleset as the binary loads it: the bytes rules/embed.go
+// compiles in, through the same call internal/hook makes, so a corpus verdict
+// here is a verdict on the set that ships and not on a file beside it.
 //
 // testing.TB rather than *testing.T because the benchmarks load it too, which
 // is the same reason internal/testvec takes one.
 func loadShipped(t testing.TB) []rules.Rule {
 	t.Helper()
-	set, err := rules.LoadFiles(shipped, filepath.Join(t.TempDir(), "absent.json"))
+	set, err := rules.Load(embedded.Shipped)
 	if err != nil {
-		t.Fatalf("loading %s: %v", shipped, err)
+		t.Fatalf("loading the shipped ruleset: %v", err)
 	}
 	return set
 }

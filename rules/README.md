@@ -1,22 +1,19 @@
 # The shipped ruleset
 
 `spill-guard.json` is the v1 ruleset: ten credential rules, and four numeric
-PII rules that ship off. `internal/rules` can layer `.claude/spill-guard.json`
-over it — an entry whose `id` is already here overrides the fields it names, so
-
-```json
-{"rules": [{"id": "jwt", "enabled": false}]}
-```
-
-is the shape that turns one off. The schema, the merge, and what the loader
-refuses are in
+PII rules that ship off. It is the only ruleset. `rules/embed.go` compiles it
+into the binary and `internal/rules` loads nothing else — there is no project
+file layered over it, and a rule that is too noisy is turned off here, in a
+change somebody reviews. The schema and what the loader refuses are in
 [`docs/design/README.md`](../docs/design/README.md#rule-schema).
 
-**Nothing reads that file yet.** `spill-guard hook` loads the compiled-in set
-and passes no override, so the paragraph above describes the loader rather than
-the shipped tool. Honouring a disablement written by whatever can write files
-in the project is a decision about a bypass, and it is
-[Q73](../docs/queue/Q73.md).
+**There used to be a project ruleset in the design, and retiring it was the
+decision rather than wiring it up.** `.claude/spill-guard.json` is a file the
+model can write, so honouring `{"id": "jwt", "enabled": false}` from it is a
+two-step bypass that no scan of the write can catch, because the disablement
+carries no secret. `docs/design/README.md` under *Output discipline* has the
+argument, and the loader no longer has the merge, so bringing it back is a
+reviewed diff rather than a flag.
 
 JSON has no comments, so the reasoning is here.
 

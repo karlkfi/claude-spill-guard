@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"regexp"
 )
 
-// entry is a rule as it appears in a file. Every field but the id is a pointer,
-// so a project override can say "just this one": `{"id": "aws-access-key-id",
-// "enabled": false}` is how a project turns a shipped rule off without
-// restating it, and a nil field is one the override did not mention. A shipped
-// rule and an override decode into the same type; what tells them apart is
-// whether the id was already known.
+// entry is a rule as it appears in the file. Every field but the id is a
+// pointer so that compile can tell a field the file left out from one it set
+// to the zero value: a rule that does not say whether it is enabled is refused
+// rather than defaulted, and the same goes for a missing family or regex. The
+// pointers used to serve a second purpose, letting a project override mention
+// only the fields it changed. That override is retired -- there is one ruleset
+// and it is the one compiled in -- and the nil check is the shipped set's own
+// strictness, so the shape stays.
 type entry struct {
 	ID          string    `json:"id"`
 	Family      *string   `json:"family"`
@@ -29,52 +29,24 @@ type entry struct {
 	Enabled     *bool     `json:"enabled"`
 }
 
-// ruleset is the top level of a ruleset file: an object rather than a bare
-// array, so the config keys .claude/spill-guard.json grows later do not change
-// the format of the shipped set.
+// ruleset is the top level of the ruleset file: an object rather than a bare
+// array, so a top-level key added later does not change the format.
 type ruleset struct {
 	Rules []entry `json:"rules"`
 }
 
-// LoadFiles reads the shipped ruleset and layers the project's over it.
-//
-// A missing project file means no overrides, because most projects have none.
-// A missing shipped ruleset is an error: the binary that cannot find its own
-// rules scans nothing, and a scanner that scans nothing reports the same clean
-// result as one that scanned everything.
-func LoadFiles(shippedPath, projectPath string) ([]Rule, error) {
-	shipped, err := os.ReadFile(shippedPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading the shipped ruleset: %w", err)
-	}
-	project, err := os.ReadFile(projectPath)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("reading the project ruleset: %w", err)
-	}
-	return Load(shipped, project)
-}
+// shippedSet names the one ruleset in every error, so a rule author is told
+// which file to go and edit. There used to be two roles here; the project
+// ruleset is retired, and with it the merge that layered one over the other.
+const shippedSet = "the shipped ruleset"
 
-// The two roles a ruleset file can have. An error names the role rather than
-// the path: there are exactly two of these files, at locations the design
-// fixes, and which one to go and edit is what a rule author needs told.
-const (
-	shippedSet = "the shipped ruleset"
-	projectSet = "the project ruleset"
-)
-
-// Load decodes the shipped ruleset, applies the project's overrides, and
-// compiles what comes out. A nil project means no overrides.
-func Load(shipped, project []byte) ([]Rule, error) {
+// Load decodes the shipped ruleset and compiles it. It takes bytes rather than
+// a path because the caller that ships holds the set compiled into the binary,
+// and a second source would be the override this package no longer has.
+func Load(shipped []byte) ([]Rule, error) {
 	base, err := decode(shippedSet, shipped)
 	if err != nil {
 		return nil, err
-	}
-	if project != nil {
-		over, err := decode(projectSet, project)
-		if err != nil {
-			return nil, err
-		}
-		base = apply(base, over)
 	}
 	if len(base) == 0 {
 		// Every check below passes over an empty ruleset, so this is what stops
@@ -135,60 +107,7 @@ func decode(name string, data []byte) ([]entry, error) {
 // is already known overrides the fields it mentions and leaves the rest; one
 // with a new id is appended, and has to be a whole rule.
 //
-// Order is the shipped order, then whatever the project added. Nothing depends
-// on it yet -- rules run separately, never as one alternation -- but a stable
-// order is what makes an error list reproducible.
-func apply(base, over []entry) []entry {
-	at := make(map[string]int, len(base))
-	for i, e := range base {
-		at[e.ID] = i
-	}
-	merged := append([]entry(nil), base...)
-	for _, e := range over {
-		i, known := at[e.ID]
-		if !known {
-			at[e.ID] = len(merged)
-			merged = append(merged, e)
-			continue
-		}
-		merged[i] = overlay(merged[i], e)
-	}
-	return merged
-}
-
-// overlay copies the fields the override mentions onto the rule underneath.
-func overlay(base, over entry) entry {
-	if over.Family != nil {
-		base.Family = over.Family
-	}
-	if over.Description != nil {
-		base.Description = over.Description
-	}
-	if over.Regex != nil {
-		base.Regex = over.Regex
-	}
-	if over.Group != nil {
-		base.Group = over.Group
-	}
-	if over.Keywords != nil {
-		base.Keywords = over.Keywords
-	}
-	if over.Labels != nil {
-		base.Labels = over.Labels
-	}
-	if over.Entropy != nil {
-		base.Entropy = over.Entropy
-	}
-	if over.Validators != nil {
-		base.Validators = over.Validators
-	}
-	if over.Enabled != nil {
-		base.Enabled = over.Enabled
-	}
-	return base
-}
-
-// compile turns one merged entry into a Rule, or says why it cannot.
+// compile turns one entry into a Rule, or says why it cannot.
 func compile(e entry) (Rule, error) {
 	// Every string that came out of a file goes through %q, including the ones
 	// inside a wrapped error. Anything this binary emits reaches a terminal and
