@@ -286,7 +286,7 @@ resolver over the real command strings:
 |---|---|
 | Calls swept | 24,381 `Bash` (3 could not be segmented), 521 `Read` |
 | Segments whose command the reader table knows | 29,398 |
-| Reader operands resolved | 19,214, with 7,283 unresolvable — those block today |
+| Reader operands resolved | 19,214, with 7,283 unresolvable — those blocked when this was taken, and defer since 2026-09-05 |
 | Reads of a `.claude/settings*.json` | **29**, none of them a credential |
 | Reads of every other member of the class | **0** |
 | The same sweep with 12 planted class reads appended | 11 |
@@ -1089,16 +1089,6 @@ code. RE2 also caps bounded repetition at 1000, so `{1,1024}` becomes `{1,1000}`
 
 ## Block on a finding, defer on a gap, and prove both
 
-> **Changed 2026-09-05.** This section governed as *fail closed* — every
-> internal error blocked. It no longer does, and the sections below it under
-> [An unread buffer is not a clean one](#an-unread-buffer-is-not-a-clean-one-and-the-two-reasons-are-not-alike),
-> [A declared encoding whose decoded text is binary](#a-declared-encoding-whose-decoded-text-is-binary-blocks),
-> [The scanner's own budget](#the-scanners-own-budget-and-overrunning-it-blocks)
-> and [A directory operand](#a-directory-operand-is-refused-rather-than-walked-and-that-is-a-decision-now)
-> still describe the old verdict in their prose. Their *measurements* stand and
-> their *axes* stand; only the word "blocks" is wrong, and it should be read as
-> "is recorded". The prose pass is queued.
-
 The sibling guards fail **silent**: an unparseable input or a missing registry
 means no opinion, because a hook that runs on every Bash call must never be the
 reason ordinary work fails. spill-guard used to invert that wholesale. It now
@@ -1179,21 +1169,25 @@ Step 6 has every path that declines to read name its reason. What the hook does
 with that reason is a second decision, and it comes out differently for the two
 the pipeline can give. The axis is the one step 1 already runs on: a byte-order
 mark is a declaration the buffer makes about itself, and a NUL in the sniff
-window is an inference drawn from its bytes. What blocks is a buffer that
+window is an inference drawn from its bytes. What is recorded is a buffer that
 declared itself text and could not be read.
 
-**A declared encoding this build cannot decode blocks.** A UTF-32 mark says the
-file is text, so the class is text by declaration and credential-shaped bytes
-can be in it. The skip is a decoder this build does not have rather than a trade
-it made — step 1 names the encoding because no measurement said the class was
-worth carrying. Blocking costs close to nothing, because close to nothing is
-written in UTF-32, and the reason names a remedy: convert the file, or override.
+**A declared encoding this build cannot decode is recorded.** A UTF-32 mark says
+the file is text, so the class is text by declaration and credential-shaped
+bytes can be in it. The skip is a decoder this build does not have rather than a
+trade it made — step 1 names the encoding because no measurement said the class
+was worth carrying. Recording costs close to nothing, because close to nothing
+is written in UTF-32, and the record names the file and the reason, so whoever
+sweeps the coverage log can convert it. The call itself proceeds and the
+override is not consulted, because there is no block left to downgrade.
 
-**The binary skip does not block.** That one *is* the trade, and step 2 took it
+**The binary skip is not recorded.** That one *is* the trade, and step 2 took it
 against a measurement — one PNG was 55% of the benchmark corpus. Denying every
 image read is not a convenience cost: a hook that does it gets uninstalled, and
 an uninstalled scanner enforces nothing, which lands on the same side of the
-ledger as failing open.
+ledger as failing open. What it gets instead is the notice the next section
+measures, to the person rather than to the log: neither arm stops the call, and
+the split is which channel says so.
 
 #### An allowed skip says so, and the channel for saying it is measured
 
@@ -1349,18 +1343,19 @@ the heuristic the NUL check was chosen instead of. That one stands. The second
 *did* declare itself: a UTF-16 mark whose decoded sniff window holds a `U+0000`
 is classified as binary deliberately, after the decode, on the rule that a NUL
 in decoded text describes the text rather than the encoding. It satisfied the
-description of what blocks and was allowed anyway, because step 2 routed on
+description of what is recorded and was allowed anyway, because step 2 routed on
 decoded content where this routes on declaration and one skip reason stood for
 both.
 
-#### A declared encoding whose decoded text is binary blocks
+#### A declared encoding whose decoded text is binary is recorded
 
 Step 2 gives that case its own reason now, so it arrives here as a reason
-nothing was taught and blocks on the fail-closed default. The classification is
-untouched — the buffer is still binary, and still binary because of its decoded
-content, which is step 2's rule read on its own terms and was never the thing in
-dispute. What a separate reason adds is the declaration, which is what this
-verdict has always routed on.
+nothing was taught and is recorded on the same default that catches one — a
+`Skip` that `blocks()` does not know is treated as declared rather than as
+allowed. The classification is untouched — the buffer is still binary, and
+still binary because of its decoded content, which is step 2's rule read on its
+own terms and was never the thing in dispute. What a separate reason adds is the
+declaration, which is what this arm has always routed on.
 
 **The argument is not how often the class turns up, and this repository cannot
 find out.** Measured 2026-08-31, twice. Over the same session corpus as the
@@ -1396,7 +1391,7 @@ What the 43 do establish is the **cost**, which is a different question and one
 this machine can answer. Every one of them is `Scanned` — they decode as UTF-16
 and their sniff windows hold no NUL — so not one changes verdict under this
 change. The flip costs nothing on the only marked-file population observable
-here. Note what that is not: it is not evidence about the newly-blocked class,
+here. Note what that is not: it is not evidence about the newly-recorded class,
 which has zero organic observations, and the two must not be run together.
 
 **What settles it is `FF FE 00 00`.** Those bytes are the UTF-32LE mark and
@@ -1407,8 +1402,8 @@ whose first character was a `U+0000` took the UTF-32 arm and blocked, while the
 same buffer with the `U+0000` one character later took the binary skip and was
 allowed. Two neighbours, the same encoding, the same credential, opposite
 verdicts, and the only difference between them an ambiguity nobody here chose.
-Now both block, and the two readings differ only over which encoding to name —
-the most such an ambiguity should ever cost.
+Now both are recorded, and the two readings differ only over which encoding to
+name — the most such an ambiguity should ever cost.
 `TestAUTF16NULIsNamedAsDeclaredWhereverItSits` is that pair. Undo the split and
 it fails on the `NUL second` arm alone: `NUL first` stays green, because it
 never went through the UTF-16 branch.
@@ -1632,12 +1627,13 @@ alternatives. Nothing inside the pipeline can be interrupted — the match loop
 and `os.ReadFile` both take no context — so a deadline written here could only
 be a check between rules, and one pass over a 306 MiB buffer is the granularity
 that defeats that.
-[The budget](#the-scanners-own-budget-and-overrunning-it-blocks) sits a layer up
-and works by outrunning the scan rather than by stopping it. It does not retire
-this limit, because the two answer differently above their thresholds: past the
-budget the verdict is a block, and past this limit it is the allow the skip
+[The budget](#the-scanners-own-budget-and-overrunning-it-is-recorded) sits a
+layer up and works by outrunning the scan rather than by stopping it. It does
+not retire this limit, because the two answer differently above their
+thresholds: past the budget the call is deferred and the gap recorded, with
+nothing shown to the person, and past this limit it is the allow the skip
 already gives, with the notice out in 39ms. For a 306 MiB executable that is the
-right answer and a block is not.
+right answer and a record nobody is shown is not.
 
 What this closes is one surface. A credential in a binary-looking `@` target
 blocks, and so does one behind a UTF-8 byte-order mark ahead of a NUL, which is
@@ -1848,17 +1844,18 @@ this repo ships can turn an expiry into a block.
 
 **So the budget has to be the scanner's own**, which is the section below.
 
-### The scanner's own budget, and overrunning it blocks
+### The scanner's own budget, and overrunning it is recorded
 
 `internal/hook` gives the scan **45 seconds** and keeps 15 of the 60 for
-itself. A scan still running at the end of the 45 stops and writes the verdict
-this design gives a buffer it could not read: a block, on the same branch, with
-a reason naming the budget, and downgraded to a confirmation by an override
-exactly as every other block here is.
+itself. A scan still running at the end of the 45 stops and does what this
+design does with a buffer it could not read: it defers, on the same branch, and
+the record names the budget. The override is not consulted, because there is no
+block left to downgrade.
 
 There is no third answer to weigh. Fifteen seconds later the process is killed
-and the call proceeds, so the choice at the deadline is between blocking and
-allowing silently, and the allow is what this whole file is about.
+and the call proceeds with nothing written anywhere, so the choice at the
+deadline is between recording the gap and letting it pass unrecorded, and the
+unrecorded gap is what this whole file is about.
 
 **A size cap is the cheaper half and is not the fix.** A cap answers before
 reading and a deadline answers during, and three things walk past the first.
@@ -1872,6 +1869,12 @@ up rather than arriving one file at a time — the same row has `cat` over four
 with no file in it near any plausible cap. And a directory operand has no size
 to cap at all, which is what made this the section the directory-operand
 question was waiting on — [answered below](#a-directory-operand-is-refused-rather-than-walked-and-that-is-a-decision-now).
+
+Blocking was the verdict when the rows below were taken, and the cells say so.
+They are not re-taken for the deferral, which changes what is written at
+45.011s and nothing about when: a run that reaches the budget writes a coverage
+record instead of a deny and the call proceeds. What the rows measure — that the
+deadline outruns a scan the harness would otherwise kill — is unchanged.
 
 **A deadline is available even though nothing here takes a `context`.**
 `os.ReadFile` takes none and neither does the match loop, which is why a fifo
@@ -1920,7 +1923,7 @@ were made — one such run did block at 45.046s on the same fixture, which is th
 measurement failing rather than a second answer.
 
 What the change moves is which fixture reaches the budget, not whether the
-budget fires. That half is driven by `TestAScanThatOverrunsItsBudgetBlocks`
+budget fires. That half is driven by `TestAScanThatOverrunsItsBudgetDefers`
 against a budget already spent, on all three surfaces, and is untouched here.
 A fixture that does reach the budget, and the table re-taken beside it, is
 [Q132](../queue/Q132.md).
@@ -1953,27 +1956,29 @@ forty times the worst two of those added together, and it is not sized to them �
 it is sized so that being wrong about scheduling on somebody else's machine
 costs nothing.
 
-What the budget costs is the calls that would have finished between 45 and 60
-seconds, which at the worst measured rate is a call adding up to between 293 and
-390 MiB. Nothing in the two populations this repo has counted comes near either
-end: nothing outside `.git` in this worktree exceeds 5 MiB, and the largest
-session transcript on the author's machine is 35.4 MiB, which is 5.4 seconds.
+What the budget costs is the verdict on the calls that would have finished
+between 45 and 60 seconds, which at the worst measured rate is a call adding up
+to between 293 and 390 MiB. Nothing in the two populations this repo has counted
+comes near either end: nothing outside `.git` in this worktree exceeds 5 MiB,
+and the largest session transcript on the author's machine is 35.4 MiB, which
+is 5.4 seconds.
 
 A smaller budget is the change to argue for rather than against, and the
 argument that stops it is the slower machine. 45 seconds is a wall clock, so it
 needs no per-machine tuning to stay under the ceiling — but the *population* it
-blocks does scale with single-core speed. A 35.4 MiB transcript is 5.4s here and
-would be 16s on a machine three times slower, which a 10-second budget refuses
-and this one does not. The stall is the objection on the other side, and it is
-weaker than it looks: the alternative to waiting 45 seconds was never a quick
-answer, it was waiting 60 and getting no answer at all.
+gives up on does scale with single-core speed. A 35.4 MiB transcript is 5.4s
+here and would be 16s on a machine three times slower, which a 10-second budget
+leaves unread and this one does not. The stall is the objection on the other
+side, and it is weaker than it looks: the alternative to waiting 45 seconds was
+never a quick answer, it was waiting 60 and getting no answer at all.
 
 ### A directory operand is refused rather than walked, and that is a decision now
 
 `grep -rn pat docs/` and `rg pat docs/` name a directory. `internal/readers`
 returns it as a read operand because it is one, and `bashTargets` refuses the
 call, because a directory is not a regular file; a `Read` whose `file_path` is
-one takes the same branch. It costs **7.1%** of the `Bash` calls that carry a
+one takes the same branch, and since 2026-09-05 that branch defers and records
+rather than blocking. It reaches **7.1%** of the `Bash` calls that carry a
 reader operand — 5,036 of 70,480, measured over this machine's transcripts by
 driving the real segmenter, and a floor rather than a rate, since `grep -rn pat
 docs` with no trailing separator is a directory operand too and is not in the
@@ -1983,8 +1988,9 @@ Three answers were open. Scanning the directory listing is a fail-open over
 every file in the tree and was never in contention. What decides between the
 other two is below, and neither argument is the one the question started with:
 that one was *an unbounded walk that overruns allows the call*, and
-[the budget](#the-scanners-own-budget-and-overrunning-it-blocks) has taken it
-away — an overrunning walk blocks now, like anything else.
+[the budget](#the-scanners-own-budget-and-overrunning-it-is-recorded) has taken
+it away — an overrunning walk is recorded now, like anything else, rather than
+killed with nothing written.
 
 **Nothing in the operand says what a walk would cost.** Measured 2026-09-04 by
 walking each root with `filepath.WalkDir` and putting every regular file through
@@ -2001,8 +2007,8 @@ already carrying other work:
 
 Four orders of magnitude, and the operand is one token either way. Two of the
 five are past the 45-second budget, so on those a walk buys a stall and then the
-same block a refusal gives in microseconds. The three that fit are the honest
-cost of refusing, and the top row is the one the row was filed about.
+same coverage record a refusal writes in microseconds. The three that fit are
+the honest cost of refusing, and the top row is the one the row was filed about.
 
 **A walk reads a different file set from the one the command would send, and by
 how much depends on which reader named the directory.** `grep -r` reads
@@ -2050,9 +2056,9 @@ reason names the case and the remedy — *name the files instead* — rather tha
 reporting the mode class, and
 `TestADirectoryOperandSaysSoAndSaysWhatToDoInstead` pins that wording. What it
 costs is the top rows of the table: a `grep -rn pat docs/` that a walk would
-have covered in 13 ms is refused, and the user retypes it against files. The
-alternative on the bottom rows is a scanner reporting on a file set the command
-would not have sent.
+have covered in 13 ms goes through unread, with the record as the only trace.
+The alternative on the bottom rows is a scanner reporting on a file set the
+command would not have sent.
 
 **The reason has to name its own subject, because nothing here parses a
 recursion flag.** `-rn`, `-r`, `--recursive` and no flag at all reach one
@@ -2068,7 +2074,11 @@ rather than walking a tree, and
 that substring. The remedy stays *name the files instead* even though a
 recursive caller wanted a tree, because the repair that fits their intent is a
 reader with no row — `git grep` — and a refusal that routes the model to an
-unscanned command is a bypass this hook would be recommending.
+unscanned command is a bypass this hook would be recommending. Since the
+deferral the reason reaches the coverage record rather than the model, so the
+reader it is written for is whoever runs `spill-guard coverage`; the wording
+argument is the same for that reader, and the bypass argument is why it still
+does not name `git grep`.
 
 ### A refusal is whole-call, and the reason names one segment of it
 
@@ -2089,6 +2099,11 @@ echo "the mutation ran" > <scratchpad>/marker.txt && grep -ln 'anything' docs/qu
 
 The refusal named the `grep`'s glob operand. `marker.txt` was still absent
 afterwards, so the `echo` ahead of the `&&` never ran either.
+
+That exhibit was driven on a build where an unresolvable operand denied. A glob
+operand defers since 2026-09-05, so the same command runs whole today and the
+mechanism is now exercised by the refusals that remain — a finding, an `env`
+dump, a guarded path — where it holds unchanged: a deny is still whole-call.
 
 So a session that bundles an edit with the grep that checks it loses the edit,
 and the only thing in the transcript is a scanner error about the grep. Split a
