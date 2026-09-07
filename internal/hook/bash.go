@@ -110,8 +110,17 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// says so at the arm.
 		dir, dirUnknown := cur.dir, cur.dirUnknown
 		moved := false
+		// The variables the string assigns, substituted into each segment
+		// before anything reads it, as bash expands before it runs. vars.go
+		// is the port and carries what it declines to resolve.
+		v := newVars()
 		for i, segment := range segments {
-			tokens := bash.StripEnvPrefix(bash.StripShKeywords(segment.Tokens))
+			sub := v.expand(segment.Tokens)
+			inputs := v.expand(segment.Inputs)
+			if v.observe(segment.Tokens, sub, segment.Persists) {
+				continue
+			}
+			tokens := bash.StripEnvPrefix(bash.StripShKeywords(sub))
 			if len(tokens) == 0 {
 				continue
 			}
@@ -131,7 +140,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// because everything below asks the same question of it. Known
 			// readers only, every reader in the table, never a `<(…)`, and
 			// docs/design/README.md, "An input redirect", has the week behind each.
-			operands = append(operands, segment.Inputs...)
+			operands = append(operands, inputs...)
 			// A flag whose value is a file naming other files. The list itself
 			// is an operand and is scanned; what it names cannot be known
 			// without opening it, and scanning the list alone would report a

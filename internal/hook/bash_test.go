@@ -644,3 +644,100 @@ func TestACdThisCannotFollowLeavesTheOperandUnsettled(t *testing.T) {
 		}
 	})
 }
+
+// A variable the same command string assigns a literal is one bash and this
+// hook read off the same text, so the operand it appears in gets a verdict
+// instead of a coverage record. The key is planted where only the resolved
+// path finds it.
+func TestAnOperandFromALiteralAssignmentIsResolved(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		"SP=" + dir + "; cat $SP/" + name,
+		"SP=" + dir + "; cat \"$SP/" + name + "\"",
+		"SP=" + dir + "; cat ${SP}/" + name,
+		"export SP=" + dir + "; cat $SP/" + name,
+		"SP=" + dir + "\ncat $SP/" + name,
+		"A=" + dir + "; SP=$A; cat $SP/" + name,
+		// The shape Q136 measured: a scratchpad path written down once, a
+		// redirect through it, and a reader of the result.
+		"SP=" + dir + "; python3 -c pass > \"$SP/unit.log\" 2>&1; rc=$?; tail -30 \"$SP/" + name + "\"",
+		// The cd tracker sees the substituted target.
+		"D=" + dir + "; cd $D && cat " + name,
+		// An input redirect is an operand now (#121), and it is substituted too.
+		"SP=" + dir + "; cat < $SP/" + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file the variable names", reason)
+			}
+		})
+	}
+}
+
+// What stays unresolved, each because bash would not have used the literal
+// the string shows: a value the string does not settle, an assignment that
+// cannot persist, a name a builtin may have rewritten, a prefix assignment on
+// the reading command itself, and a variable the string never assigns. The
+// port poisons rather than guesses, so all of these are the record they were
+// before it.
+func TestAnAssignmentThePortCannotTrustLeavesTheOperandUnresolved(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct{ name, command string }{
+		{"never assigned", "cat $SP/" + name},
+		{"a substitution value", "SP=$(mktemp -d); cat $SP/" + name},
+		{"a variable value", "SP=$HOME/x; cat $SP/" + name},
+		{"a value with a space", "SP='" + dir + " x'; cat $SP/" + name},
+		{"a glob value", "SP=" + dir + "*; cat $SP/" + name},
+		{"assigned in a subshell", "(SP=" + dir + "); cat $SP/" + name},
+		{"assigned in a pipeline stage", "SP=" + dir + " | cat $SP/" + name},
+		{"assigned in the background", "SP=" + dir + " & cat $SP/" + name},
+		{"a prefix on the reader", "SP=" + dir + " cat $SP/" + name},
+		{"rewritten by read", "SP=" + dir + "; read -r SP; cat $SP/" + name},
+		{"rewritten by eval", "SP=" + dir + "; eval x=1; cat $SP/" + name},
+		{"reassigned to a substitution", "SP=" + dir + "; SP=$(pwd); cat $SP/" + name},
+		{"appended to", "SP=" + dir + "; SP+=/x; cat $SP/" + name},
+		{"after an IFS change", "SP=" + dir + "; IFS=/; cat $SP/" + name},
+		{"an expansion operator", "SP=" + dir + "; cat ${SP%/}/" + name},
+		{"in a queued body", "SP=" + dir + "; echo `cat $SP/" + name + "`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, t.TempDir()))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "expands at run time") {
+				t.Errorf("coverage reason = %q, want the operand unresolved", reason)
+			}
+		})
+	}
+}
+
+// The Q92 divergence, arriving in the resolver. bash reads `'SP=…'` as a
+// command name and never assigns; the lexer strips the quotes before this
+// sees the token, so the port assigns it and the operand resolves to a file
+// bash would read only if SP already held that path. Pinned as
+// TestAQuotedAssignmentInCommandPositionArmsTheHatchToo pins the hatch: the
+// behaviour is deliberate, and a lexer that keeps quote provenance makes both
+// pins a decision rather than a regression. Since #117 the unresolved form of
+// this operand proceeds unscanned with a record, so what the divergence costs
+// is the record and a scan of the wrong path, not bytes that would otherwise
+// have been stopped.
+func TestAQuotedAssignmentResolvesWhereBashWouldNotAssign(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		"'SP=" + dir + "'; cat $SP/" + name,
+		"\"SP=" + dir + "\"; cat $SP/" + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the known divergence to resolve the file -- if it "+
+					"no longer does, the lexer keeps quote provenance and Q92 is the row to close", reason)
+			}
+		})
+	}
+}

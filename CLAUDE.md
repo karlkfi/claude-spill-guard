@@ -207,9 +207,18 @@ carries the manual check that closes the rest, after a draft is published.
 The `Bash` surface is now whole: the command string is scanned and so are the
 files its readers are pointed at, `internal/readers` being what decides which
 token is a path. An operand of a known reader that cannot be resolved — a
-`$VAR`, a glob, a relative path after a `cd` this cannot follow — is a coverage
-failure: the call defers and the operand is recorded, because a scanner that
-skipped one and allowed would report a clean result for a file nothing opened.
+`$VAR` the string never assigned a literal, a glob, a relative path after a
+`cd` this cannot follow — is a coverage failure: the call defers and the
+operand is recorded, because a scanner that skipped one and allowed would
+report a clean result for a file nothing opened. A variable the same command
+string assigns a plain literal is substituted before anything reads the
+segment, so `SP=/x; tail "$SP/unit.log"` resolves; `internal/hook/vars.go` is
+the port of workspace-guard's propagation and poisons rather than guesses at
+anything else — a substitution or another variable in the value, an assignment
+in a subshell or pipeline stage, a name a builtin may have rewritten, an IFS
+change. A queued substitution body starts with an empty map, which is Q147's
+class; a quoted assignment `'SP=/x'` is read as one here where bash runs a
+command, which is Q92's class and is pinned.
 A literal `cd` target is followed, per segment in order, so `cd sub && cat x`
 resolves `x` under `sub` and gets a verdict; what is not followed is bare `cd`,
 `cd -`, `popd`, a `$`-bearing target other than the quoted `"$(git rev-parse

@@ -1,0 +1,272 @@
+package hook
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/karlkfi/claude-spill-guard/internal/bash"
+)
+
+// The port driven against bash rather than read. Each row is a command string
+// and a probe token; `want` is what bash 5.3.15 printed for the probe after
+// running the string, taken 2026-09-06 with P and Q preset to /env in the
+// environment and HOME=/home/me, so an assignment the string does not make
+// shows as the environment's value. The property under test is the port's
+// fail-closed direction: whatever the port resolves, it never resolves to a
+// literal bash would not have used. Rows the port declines are allowed to keep
+// their `$`; rows in `resolves` must not.
+//
+// Three rows are the exception and are pinned as one: a quoted or escaped
+// assignment is a command to bash and an assignment to this lexer, which is
+// the Q92 divergence arriving in the resolver. It is asserted rather than
+// tolerated so a fix to the lexer is a decision here too.
+func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	rows := []struct{ setup, probe, want string }{
+		{"P=/lit", "$P/f", "/lit/f"},
+		{"P=/lit", "${P}/f", "/lit/f"},
+		{"P=/lit", "${P}x", "/litx"},
+		{"P=/lit", "$Px", ""},
+		{"P=/lit", "${P%/lit}/f", "/f"},
+		{"P='/with space'", "$P/f", "/withspace/f"},
+		{`P="/dq"`, "$P/f", "/dq/f"},
+		{"P=~/h", "$P/f", "/home/me/h/f"},
+		{"P=~", "$P/f", "/home/me/f"},
+		{"P=~someone", "$P/f", "~someone/f"},
+		{"P=$(echo /sub)", "$P/f", "/sub/f"},
+		{"P=`echo /sub`", "$P/f", "/sub/f"},
+		{"P=$HOME/x", "$P/f", "/home/me/x/f"},
+		{"P=/a:/b", "$P/f", "/a:/b/f"},
+		{"P=/lit*", "$P/f", "/lit*/f"},
+		{"P=", "$P/f", "/f"},
+		{"P=(a b)", "$P/f", "a/f"},
+		{"A=/a; P=$A/b", "$P/f", "/a/b/f"},
+		{"A=/a P=$A/b", "$P/f", "/a/b/f"},
+		{"P=/lit cat /dev/null", "$P/f", "/env/f"},
+		{"(P=/lit)", "$P/f", "/env/f"},
+		{"P=/lit | cat", "$P/f", "/env/f"},
+		{"P=/lit &", "$P/f", "/env/f"},
+		{"export P=/lit", "$P/f", "/lit/f"},
+		{"export -n P=/lit", "$P/f", "/lit/f"},
+		{"export P", "$P/f", "/env/f"},
+		{"local P=/lit 2>/dev/null", "$P/f", "/env/f"},
+		{"declare P=/lit", "$P/f", "/lit/f"},
+		{"readonly Q=/lit", "$Q/f", "/lit/f"},
+		{"P=/lit; P=/other", "$P/f", "/other/f"},
+		{"P=/lit; P+=/more", "$P/f", "/lit/more/f"},
+		{"P=/lit; read -r P <<< /read", "$P/f", "/read/f"},
+		{"P=/lit; printf -v P /pf", "$P/f", "/pf/f"},
+		{"P=/lit; printf '%s' P >/dev/null", "$P/f", "/lit/f"},
+		{"P=/lit; eval P=/ev", "$P/f", "/ev/f"},
+		{"P=/lit; unset P", "$P/f", "/f"},
+		{"P=/lit; for P in /loop; do :; done", "$P/f", "/loop/f"},
+		{"P=/lit; (( P = 5 ))", "$P/f", "5/f"},
+		{"P=/lit; IFS=/", "$P/f", "lit/f"},
+		{"if P=/lit; then :; fi", "$P/f", "/lit/f"},
+		{"RANDOM=5", "$RANDOM", "18498"},
+		{"PWD=/x", "$PWD/f", "/x/f"},
+		{"P=/lit; echo $(P=/in)", "$P/f", "/lit/f"},
+		{"P=/lit; cd /tmp", "$P/f", "/lit/f"},
+		{`P=/l\ it`, "$P/f", "/lit/f"},
+		{`P=/lit\$x`, "$P/f", "/lit$x/f"},
+		{"P=/lit; P[0]=/arr", "$P/f", "/arr/f"},
+		{"P=/lit; P++", "$P/f", "/lit/f"},
+		{"P=/lit; mapfile P < /dev/null", "$P/f", "/f"},
+		{"P=/lit; source /dev/null", "$P/f", "/lit/f"},
+		{"P=/lit; . /dev/null", "$P/f", "/lit/f"},
+		{"P=/lit; let P=3", "$P/f", "3/f"},
+		{"P=/lit; LC_ALL=C read -r P <<< /read", "$P/f", "/read/f"},
+		{"P=/lit; while read -r P; do :; done < /dev/null", "$P/f", "/f"},
+	}
+	// The rows the port must resolve, not merely not get wrong. Everything the
+	// row Q136 measured -- a literal path assigned once and used later -- is
+	// one of these shapes.
+	resolves := map[string]bool{
+		"P=/lit ; $P/f": true, "P=/lit ; ${P}/f": true, "P=/lit ; ${P}x": true,
+		`P="/dq" ; $P/f`: true, "P=~/h ; $P/f": true, "P=~ ; $P/f": true,
+		"A=/a; P=$A/b ; $P/f": true, "A=/a P=$A/b ; $P/f": true,
+		"export P=/lit ; $P/f": true, "export -n P=/lit ; $P/f": true,
+		"P=/lit; P=/other ; $P/f":                 true,
+		"P=/lit; printf '%s' P >/dev/null ; $P/f": true, "P=/lit; cd /tmp ; $P/f": true,
+	}
+	for _, row := range rows {
+		name := row.setup + " ; " + row.probe
+		t.Run(name, func(t *testing.T) {
+			got := probeVars(t, row.setup, row.probe)
+			if got != row.want && !strings.Contains(got, "$") {
+				t.Errorf("port resolved %q, bash gave %q", got, row.want)
+			}
+			if resolves[name] && strings.Contains(got, "$") {
+				t.Errorf("port left %q unresolved, bash gave %q", got, row.want)
+			}
+		})
+	}
+	// The three Q92 spellings. bash ran a command it could not find and left P
+	// at the environment's /env; the lexer handed the port `P=/lit` with its
+	// quotes gone, and the port assigned it. Pinned so a lexer fix that keeps
+	// quote provenance is a decision here, as it is in override_test.go.
+	for _, setup := range []string{`'P=/lit'`, `"P=/lit"`, `P\=/lit`} {
+		t.Run("Q92: "+setup, func(t *testing.T) {
+			if got := probeVars(t, setup, "$P/f"); got != "/lit/f" {
+				t.Errorf("got %q, want the inherited divergence to resolve /lit/f -- if the "+
+					"lexer now keeps quote provenance, this pin and Q92's are the ones to revisit", got)
+			}
+		})
+	}
+}
+
+// probeVars runs the propagation over setup the way bashTargets does, then
+// expands probe against what it holds.
+func probeVars(t *testing.T, setup, probe string) string {
+	t.Helper()
+	segments, err := bash.Segments(setup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := newVars()
+	for _, segment := range segments {
+		v.observe(segment.Tokens, v.expand(segment.Tokens), segment.Persists)
+	}
+	return v.expand([]string{probe})[0]
+}
+
+// Upstream's own unit cases for the four functions, carried across so a
+// divergence in the port is caught at the function rather than through a
+// verdict.
+func TestSubstituteVars(t *testing.T) {
+	m := map[string]string{"SP": "/opt/scratch", "f": "in.txt"}
+	for tok, want := range map[string]string{
+		"$SP/q.csv":   "/opt/scratch/q.csv",
+		"${SP}.bak":   "/opt/scratch.bak",
+		"$SPX":        "$SPX",
+		"$nope/x":     "$nope/x",
+		"${f%.txt}":   "${f%.txt}",
+		"$f`cmd`":     "$f`cmd`",
+		"plain":       "plain",
+		"$SP/$f":      "/opt/scratch/in.txt",
+		"${SP}/${f}x": "/opt/scratch/in.txtx",
+	} {
+		if got := substituteVars(tok, m); got != want {
+			t.Errorf("substituteVars(%q) = %q, want %q", tok, got, want)
+		}
+	}
+	if got := substituteVars("$SP", map[string]string{}); got != "$SP" {
+		t.Errorf("empty map: got %q", got)
+	}
+}
+
+func TestApplyAssignmentGroup(t *testing.T) {
+	type tc struct {
+		name     string
+		tokens   []string
+		before   map[string]string
+		persists bool
+		ok       bool
+		names    []string
+		after    map[string]string
+	}
+	for _, c := range []tc{
+		{"single", []string{"f=in.txt"}, nil, true, true, []string{"f"}, map[string]string{"f": "in.txt"}},
+		{"sequential", []string{"a=sub", "b=$a/x.txt"}, nil, true, true, []string{"a", "b"}, map[string]string{"a": "sub", "b": "sub/x.txt"}},
+		{"export", []string{"export", "f=in.txt"}, nil, true, true, []string{"f"}, map[string]string{"f": "in.txt"}},
+		{"export bare name", []string{"export", "f"}, map[string]string{"f": "in.txt"}, true, true, []string{}, map[string]string{"f": "in.txt"}},
+		{"impure value", []string{"f=$(cmd)"}, map[string]string{"f": "in.txt"}, true, true, []string{"f"}, map[string]string{}},
+		{"non-persisting", []string{"f=new.txt"}, map[string]string{"f": "old.txt"}, false, true, []string{"f"}, map[string]string{}},
+		{"special names", []string{"RANDOM=5", "PWD=/x", "_=/y"}, nil, true, true, []string{"RANDOM", "PWD", "_"}, map[string]string{}},
+		{"prefix on a command", []string{"f=x", "cat", "y"}, nil, true, false, nil, map[string]string{}},
+		{"plain command", []string{"cat", "x"}, nil, true, false, nil, map[string]string{}},
+		{"export of a non-name", []string{"export", "f=x", "y/z"}, nil, true, false, nil, map[string]string{}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := map[string]string{}
+			for k, v := range c.before {
+				m[k] = v
+			}
+			names, ok := applyAssignmentGroup(c.tokens, m, c.persists)
+			if ok != c.ok {
+				t.Fatalf("ok = %v, want %v", ok, c.ok)
+			}
+			if ok && strings.Join(names, ",") != strings.Join(c.names, ",") {
+				t.Errorf("names = %q, want %q", names, c.names)
+			}
+			if !mapsEqual(m, c.after) {
+				t.Errorf("map = %v, want %v", m, c.after)
+			}
+		})
+	}
+}
+
+func TestPoisonVars(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		tokens []string
+		before map[string]string
+		after  map[string]string
+	}{
+		{"eval clears", []string{"eval", "echo"}, map[string]string{"f": "x", "g": "y"}, map[string]string{}},
+		{"source clears", []string{"source", "lib.sh"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"dot clears", []string{".", "lib.sh"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"read poisons its names", []string{"read", "-r", "f"}, map[string]string{"f": "x", "g": "y"}, map[string]string{"g": "y"}},
+		{"read with a $ arg clears", []string{"read", "$n"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"read clobbers REPLY", []string{"read"}, map[string]string{"REPLY": "x", "g": "y"}, map[string]string{"g": "y"}},
+		{"keyword prefix skipped", []string{"while", "read", "-r", "f"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"for poisons the loop var", []string{"for", "f", "in", "a", "b"}, map[string]string{"f": "x", "g": "y"}, map[string]string{"g": "y"}},
+		{"env prefix skipped before dispatch", []string{"LC_ALL=C", "read", "-r", "f"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"env prefix name still poisoned", []string{"f=/y", "read", "g"}, map[string]string{"f": "x", "g": "y"}, map[string]string{}},
+		{"prefix assignment poisons", []string{"f=/y", "cat", "z"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"append", []string{"f+=/y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"array element", []string{"f[0]=/y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"increment", []string{"f++"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"torn arithmetic", []string{"f", "=", "5"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"plain command leaves it", []string{"grep", "PAT", "y.txt"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
+		{"printf without -v leaves it", []string{"printf", "%s\n", "$UNSET"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
+		{"printf -- -v leaves it", []string{"printf", "--", "-v", "f"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
+		{"printf -v poisons", []string{"printf", "-v", "f", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"printf -vNAME poisons", []string{"printf", "-vf", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"printf option-region $ clears", []string{"printf", "$fmt", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := map[string]string{}
+			for k, v := range c.before {
+				m[k] = v
+			}
+			poisonVars(c.tokens, m)
+			if !mapsEqual(m, c.after) {
+				t.Errorf("map = %v, want %v", m, c.after)
+			}
+		})
+	}
+}
+
+func TestClobbersIFS(t *testing.T) {
+	for _, c := range []struct {
+		tokens []string
+		want   bool
+	}{
+		{[]string{"eval", "x"}, true},
+		{[]string{"declare", "IFS=x"}, true},
+		{[]string{"read", "IFS"}, true},
+		{[]string{"printf", "-v", "IFS", "x"}, true},
+		{[]string{"read", "$n"}, true},
+		{[]string{"unset", "IFS"}, false},
+		{[]string{"printf", "%s", "IFS"}, false},
+		{[]string{"cat", "IFS"}, false},
+		{[]string{"IFS=x", "cat", "f"}, false},
+	} {
+		if got := clobbersIFS(c.tokens); got != c.want {
+			t.Errorf("clobbersIFS(%q) = %v, want %v", c.tokens, got, c.want)
+		}
+	}
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
