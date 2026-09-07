@@ -218,7 +218,8 @@ the rest — a substitution or another variable in the value, an assignment in a
 subshell or pipeline stage, a name a builtin may have rewritten, an IFS change,
 and an assignment bash reached through `||`. One reached through `&&` counts
 only while everything before it in its and-or list is certain to have exited 0
-— an assignment, or a `cd` the tracker followed — and is otherwise dropped
+— a plain assignment, with no substitution and no redirect, or a `cd` the
+tracker followed — and is otherwise dropped
 when the statement ends, so `cd "$(git rev-parse --show-toplevel)" && SP=/x;
 tail "$SP/f"` resolves (220 of the week's 655 conditional assignments take
 that shape) and `mkdir -p x && SP=/x; tail "$SP/f"` records; `andOr` in

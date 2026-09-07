@@ -128,13 +128,14 @@ func (v *vars) observe(raw, sub []string, persists bool) (assigned []string, ass
 // either direction:
 //
 //   - A segment reached through `&&` ran only if everything before it in the
-//     list exited 0. That is certain while the list holds nothing but
-//     assignments and moves this tracker followed to a directory that exists;
-//     a command whose status nothing here knows makes the rest of the list
-//     unsettled. `cd "$(git rev-parse --show-toplevel)" && SP=/x; tail
-//     $SP/f` resolves, and is 220 of the 655 conditional assignments in a
-//     week of this machine's Bash calls; `mkdir -p x && SP=/x; tail $SP/f`
-//     does not.
+//     list exited 0. That is certain while the list holds nothing but plain
+//     assignments -- no substitution, whose status the assignment takes, and
+//     no redirect, which fails the segment when it cannot open -- and moves
+//     this tracker followed to a directory that exists; a command whose
+//     status nothing here knows makes the rest of the list unsettled. `cd
+//     "$(git rev-parse --show-toplevel)" && SP=/x; tail $SP/f` resolves, and
+//     is 220 of the 655 conditional assignments in a week of this machine's
+//     Bash calls; `mkdir -p x && SP=/x; tail $SP/f` does not.
 //   - What an unsettled `&&` segment assigns still holds for the rest of its
 //     own list -- a later `&&` segment runs only if this one did -- and is
 //     dropped at the list's end, where a new statement runs on both branches.
@@ -181,10 +182,23 @@ func (l *andOr) persists(segment bash.Segment) bool {
 	return segment.Persists && segment.Conditional != "||"
 }
 
-// assigned records an assignment-only segment that applied names.
+// assigned records an assignment-only segment that applied names. One whose
+// value runs a command exits with that command's status, and one with a
+// redirect fails when the target cannot open, so either unsettles the list
+// as a command would. Only the backtick spelling reaches this: Segments
+// flattens an unquoted `$(…)` body into a segment of its own ahead of the
+// assignment, and that segment is a command to ran().
 func (l *andOr) assigned(segment bash.Segment, names []string) {
 	if segment.Conditional == "&&" && !l.settled {
 		l.tentative = append(l.tentative, names...)
+	}
+	if len(segment.Redirects) > 0 {
+		l.settled = false
+	}
+	for _, tok := range segment.Tokens {
+		if strings.ContainsAny(tok, "`") || strings.Contains(tok, "$(") {
+			l.settled = false
+		}
 	}
 }
 

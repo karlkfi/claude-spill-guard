@@ -79,6 +79,18 @@ func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 		{"P=/lit && Q=/lit2", "$Q/f", "/lit2/f"},
 		{"cd /tmp && P=/lit", "$P/f", "/lit/f"},
 		{"cd /nowhere-such && P=/lit", "$P/f", "/env/f"},
+		// An assignment is not always exit 0: one whose value runs a command
+		// takes that command's status, and a redirect that cannot open fails
+		// the segment. The `$(…)` spelling came out unresolved before assigned
+		// learned this, because Segments flattens the body into a segment of
+		// its own ahead of the assignment and ran() unsettles on it; the
+		// backtick body is not flattened, so it reached assigned as a plain
+		// segment. `export` returns 0 whatever its value did, so the last row
+		// is the port under-resolving, which is the allowed direction.
+		{"X=`false` && Q=/lit", "$Q/f", "/env/f"},
+		{"X=/x >/nonexistent-dir/z && Q=/lit", "$Q/f", "/env/f"},
+		{"X=$(false) && Q=/lit", "$Q/f", "/env/f"},
+		{"export X=$(false) && Q=/lit", "$Q/f", "/lit/f"},
 		{"P=/lit; IFS=/", "$P/f", "lit/f"},
 		{"if P=/lit; then :; fi", "$P/f", "/lit/f"},
 		{"RANDOM=5", "$RANDOM", "18498"},
