@@ -103,10 +103,6 @@ func decode(name string, data []byte) ([]entry, error) {
 	return set.Rules, nil
 }
 
-// apply layers the project's entries over the shipped ones. An entry whose id
-// is already known overrides the fields it mentions and leaves the rest; one
-// with a new id is appended, and has to be a whole rule.
-//
 // compile turns one entry into a Rule, or says why it cannot.
 func compile(e entry) (Rule, error) {
 	// Every string that came out of a file goes through %q, including the ones
