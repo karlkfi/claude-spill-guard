@@ -99,9 +99,9 @@ func (v *vars) expand(tokens []string) []string {
 // sub is raw with the map substituted, which is what a builtin's arguments
 // name. An IFS change stops propagation for the rest of the string: every
 // later expansion is re-split by a value this never saw.
-func (v *vars) observe(raw, sub []string, persists bool) (assignmentOnly bool) {
+func (v *vars) observe(raw, sub []string, persists bool) (assigned []string, assignmentOnly bool) {
 	if !v.propagate {
-		return false
+		return nil, false
 	}
 	if names, ok := applyAssignmentGroup(raw, v.m, persists); ok {
 		for _, name := range names {
@@ -109,15 +109,98 @@ func (v *vars) observe(raw, sub []string, persists bool) (assignmentOnly bool) {
 				v.stop()
 			}
 		}
-		return true
+		return names, true
 	}
 	if clobbersIFS(sub) {
 		v.stop()
 	} else {
 		poisonVars(sub, v.m)
 	}
-	return false
+	return nil, false
 }
+
+// andOr is the and-or list a pass is inside, which is what says whether an
+// assignment or a cd that bash reached through `&&` had run by the time a
+// later segment does. Upstream does not ask: its Persists reads the separator
+// after a segment, so `false && P=/x; cat $P/f` assigns P there and resolves a
+// path bash never used. This resolver opens the file the path names, so it
+// asks, and the answer is bash's own evaluation order rather than a guess in
+// either direction:
+//
+//   - A segment reached through `&&` ran only if everything before it in the
+//     list exited 0. That is certain while the list holds nothing but
+//     assignments and moves this tracker followed to a directory that exists;
+//     a command whose status nothing here knows makes the rest of the list
+//     unsettled. `cd "$(git rev-parse --show-toplevel)" && SP=/x; tail
+//     $SP/f` resolves, and is 220 of the 655 conditional assignments in a
+//     week of this machine's Bash calls; `mkdir -p x && SP=/x; tail $SP/f`
+//     does not.
+//   - What an unsettled `&&` segment assigns still holds for the rest of its
+//     own list -- a later `&&` segment runs only if this one did -- and is
+//     dropped at the list's end, where a new statement runs on both branches.
+//   - A `||` picks the branch nothing here can pick, so what it reaches is
+//     poisoned outright and what was tentative before it is dropped: `false
+//     && P=/x || cat $P/f` runs the cat on the branch where P was never set.
+//
+// A `case` arm is not an and-or list and is read as unconditional, which is
+// Q151's class and is pinned in vars_test.go.
+type andOr struct {
+	settled      bool
+	tentative    []string
+	tentativeDir bool
+}
+
+// enter opens the segment. One reached through neither operator starts a new
+// list; `||` ends certainty for the rest of this one. Both drop what was
+// tentative, because what follows runs on branches where it was never set.
+func (l *andOr) enter(segment bash.Segment, v *vars, dirUnknown *bool) {
+	switch segment.Conditional {
+	case "":
+		l.close(v, dirUnknown)
+		l.settled = true
+	case "||":
+		l.close(v, dirUnknown)
+		l.settled = false
+	}
+}
+
+func (l *andOr) close(v *vars, dirUnknown *bool) {
+	if !l.settled {
+		for _, name := range l.tentative {
+			delete(v.m, name)
+		}
+		if l.tentativeDir {
+			*dirUnknown = true
+		}
+	}
+	l.tentative, l.tentativeDir = nil, false
+}
+
+// persists is whether an assignment in segment may be applied at all.
+func (l *andOr) persists(segment bash.Segment) bool {
+	return segment.Persists && segment.Conditional != "||"
+}
+
+// assigned records an assignment-only segment that applied names.
+func (l *andOr) assigned(segment bash.Segment, names []string) {
+	if segment.Conditional == "&&" && !l.settled {
+		l.tentative = append(l.tentative, names...)
+	}
+}
+
+// moved records a cd, followed or not.
+func (l *andOr) moved(segment bash.Segment, unknown bool) {
+	if unknown {
+		l.settled = false
+		return
+	}
+	if segment.Conditional == "&&" && !l.settled {
+		l.tentativeDir = true
+	}
+}
+
+// ran records a command, whose exit status nothing here knows.
+func (l *andOr) ran() { l.settled = false }
 
 func (v *vars) stop() {
 	clear(v.m)

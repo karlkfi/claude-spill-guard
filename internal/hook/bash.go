@@ -114,10 +114,15 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// before anything reads it, as bash expands before it runs. vars.go
 		// is the port and carries what it declines to resolve.
 		v := newVars()
+		// The and-or list, which says whether a conditional assignment or
+		// move had run by the time a later segment does; vars.go has the rule.
+		list := andOr{settled: true}
 		for i, segment := range segments {
+			list.enter(segment, v, &dirUnknown)
 			sub := v.expand(segment.Tokens)
 			inputs := v.expand(segment.Inputs)
-			if v.observe(segment.Tokens, sub, segment.Persists) {
+			if names, only := v.observe(segment.Tokens, sub, list.persists(segment)); only {
+				list.assigned(segment, names)
 				continue
 			}
 			tokens := bash.StripEnvPrefix(bash.StripShKeywords(sub))
@@ -127,8 +132,10 @@ func bashTargets(command, cwd string) ([]target, error) {
 			if kind, arg := classifyCd(tokens); kind != "" {
 				moved = true
 				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment)
+				list.moved(segment, dirUnknown)
 				continue
 			}
+			list.ran()
 			operands, known := readers.Files(tokens)
 			if !known {
 				continue
@@ -427,6 +434,10 @@ func classifyCd(tokens []string) (kind, arg string) {
 func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, bool) {
 	switch {
 	case !segment.Persists:
+		return dir, true
+	case segment.Conditional == "||":
+		// Ran only if what came before failed, which nothing here can know;
+		// the `&&` arm is the list's to settle, in andOr.
 		return dir, true
 	case kind == "arg":
 		if !filepath.IsAbs(arg) {

@@ -78,10 +78,28 @@ type Segment struct {
 	// side of `|` runs in a subshell), and not backgrounded (`f=x & …` assigns
 	// in the background copy only).
 	Persists bool
+	// Conditional is the operator this segment is reached through when it is
+	// `&&` or `||`, and empty otherwise: whether bash ran the segment turns on
+	// the exit status of what came before it. Persists does not consult that
+	// -- upstream's rule reads the separator after a segment and not the one
+	// before it, so `false && P=/x; cat $P/f` assigns there. This repo's
+	// resolver opens the file a path names, so it wants to know, and this is
+	// the one field that carries it. Kept beside Persists rather than folded
+	// into it so the ported rule stays upstream's and the consumer decides
+	// what a conditional segment is worth; Inputs is the precedent.
+	Conditional string
 	// Pipe numbers the pipeline this segment belongs to, which is what tells a
 	// `grep` filtering another command's output apart from a `grep` reading
 	// ordinary files.
 	Pipe int
+}
+
+// conditional is the Conditional field for a segment reached through sep.
+func conditional(sep string) string {
+	if sep == "&&" || sep == "||" {
+		return sep
+	}
+	return ""
 }
 
 // Segments splits one command string into its simple commands.
@@ -124,7 +142,7 @@ func Segments(cmd string) ([]Segment, error) {
 			if len(cur) > 0 || len(curRedir) > 0 {
 				persists := paren == 0 && prevSep != "|" &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
-				segs = append(segs, Segment{cur, curRedir, curInputs, persists, pipe})
+				segs = append(segs, Segment{cur, curRedir, curInputs, persists, conditional(prevSep), pipe})
 				cur, curRedir, curInputs = nil, nil, nil
 			}
 			switch t {
@@ -192,7 +210,8 @@ func Segments(cmd string) ([]Segment, error) {
 		i++
 	}
 	if len(cur) > 0 || len(curRedir) > 0 {
-		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && prevSep != "|", pipe})
+		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && prevSep != "|",
+			conditional(prevSep), pipe})
 	}
 	return segs, nil
 }

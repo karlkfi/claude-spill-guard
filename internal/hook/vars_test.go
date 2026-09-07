@@ -16,10 +16,14 @@ import (
 // literal bash would not have used. Rows the port declines are allowed to keep
 // their `$`; rows in `resolves` must not.
 //
-// Three rows are the exception and are pinned as one: a quoted or escaped
+// Four rows are the exception and are pinned as such. A quoted or escaped
 // assignment is a command to bash and an assignment to this lexer, which is
-// the Q92 divergence arriving in the resolver. It is asserted rather than
-// tolerated so a fix to the lexer is a decision here too.
+// the Q92 divergence arriving in the resolver, three spellings; and a `case`
+// arm is conditional to bash and a plain segment to the segmenter, which is
+// Q151's. Each is asserted rather than tolerated so a fix upstream of the
+// resolver is a decision here too. Outside those four the property holds on
+// every row, and it is a property of the rows rather than a law: the next
+// shape bash evaluates conditionally is a drive away.
 func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 	t.Setenv("HOME", "/home/me")
 	rows := []struct{ setup, probe, want string }{
@@ -61,6 +65,20 @@ func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 		{"P=/lit; unset P", "$P/f", "/f"},
 		{"P=/lit; for P in /loop; do :; done", "$P/f", "/loop/f"},
 		{"P=/lit; (( P = 5 ))", "$P/f", "5/f"},
+		// Reached through && or ||: the assignment ran only on one branch, and
+		// the probe is the next statement, which runs on both. andOr in
+		// vars.go carries the rule; `true` is a command whose status the port
+		// does not know, so the fourth row is the allowed direction.
+		{"false && P=/other", "$P/f", "/env/f"},
+		{"P=/lit; false && P=/other", "$P/f", "/lit/f"},
+		{`[ -d "$D" ] || D=/fallback`, "$D/f", "/env/f"},
+		{"true && P=/lit", "$P/f", "/lit/f"},
+		{"true || P=/other", "$P/f", "/env/f"},
+		{"false || P=/other", "$P/f", "/other/f"},
+		{"false && P=/other || :", "$P/f", "/env/f"},
+		{"P=/lit && Q=/lit2", "$Q/f", "/lit2/f"},
+		{"cd /tmp && P=/lit", "$P/f", "/lit/f"},
+		{"cd /nowhere-such && P=/lit", "$P/f", "/env/f"},
 		{"P=/lit; IFS=/", "$P/f", "lit/f"},
 		{"if P=/lit; then :; fi", "$P/f", "/lit/f"},
 		{"RANDOM=5", "$RANDOM", "18498"},
@@ -88,6 +106,7 @@ func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 		"export P=/lit ; $P/f": true, "export -n P=/lit ; $P/f": true,
 		"P=/lit; P=/other ; $P/f":                 true,
 		"P=/lit; printf '%s' P >/dev/null ; $P/f": true, "P=/lit; cd /tmp ; $P/f": true,
+		"P=/lit && Q=/lit2 ; $Q/f": true, "cd /tmp && P=/lit ; $P/f": true,
 	}
 	for _, row := range rows {
 		name := row.setup + " ; " + row.probe
@@ -113,6 +132,15 @@ func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 			}
 		})
 	}
+	// A case arm. bash 5.3.15 ran none of it; the segmenter sees `)` at paren
+	// depth 0 and a plain segment after it, so the port assigns. Q151's
+	// class, pinned so a segmenter that learns case bodies is a decision here.
+	t.Run("Q151: case x in y) P=/case;; esac", func(t *testing.T) {
+		if got := probeVars(t, "case x in y) P=/case;; esac", "$P/f"); got != "/case/f" {
+			t.Errorf("got %q, want the pinned divergence to resolve /case/f -- if the "+
+				"segmenter now reads case arms, this pin and Q151 are the ones to revisit", got)
+		}
+	})
 }
 
 // probeVars runs the propagation over setup the way bashTargets does, then
@@ -124,9 +152,26 @@ func probeVars(t *testing.T, setup, probe string) string {
 		t.Fatal(err)
 	}
 	v := newVars()
+	list := andOr{settled: true}
+	var dirUnknown bool
 	for _, segment := range segments {
-		v.observe(segment.Tokens, v.expand(segment.Tokens), segment.Persists)
+		list.enter(segment, v, &dirUnknown)
+		if names, only := v.observe(segment.Tokens, v.expand(segment.Tokens), list.persists(segment)); only {
+			list.assigned(segment, names)
+			continue
+		}
+		if kind, arg := classifyCd(bash.StripEnvPrefix(bash.StripShKeywords(segment.Tokens))); kind != "" {
+			var dir string
+			dir, dirUnknown = follow(kind, arg, "/", dirUnknown, segment)
+			_ = dir
+			list.moved(segment, dirUnknown)
+			continue
+		}
+		list.ran()
 	}
+	// The probe stands for a reader in the next statement, as `; echo $P/f`
+	// did when the table was taken.
+	list.close(v, &dirUnknown)
 	return v.expand([]string{probe})[0]
 }
 

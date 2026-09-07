@@ -617,6 +617,8 @@ func TestACdThisCannotFollowLeavesTheOperandUnsettled(t *testing.T) {
 		{"a target that is a file", "cd " + base + "/" + name + "; cat " + name},
 		{"a CDPATH in the same segment", "CDPATH=/tmp cd " + base + " && cat " + name},
 		{"a relative target after a lost directory", "cd - && cd " + base + " && cat " + name},
+		{"a move reached through ||", "false || cd " + base + "; cat " + name},
+		{"a move reached through && after a command, in the next statement", "true && cd " + base + "; cat " + name},
 		{"a backtick body after a move", "cd " + base + " && echo `cat " + name + "`"},
 		{"a $(…) body after a move", "cd " + base + " && echo $(cat " + name + ")"},
 	} {
@@ -665,6 +667,14 @@ func TestAnOperandFromALiteralAssignmentIsResolved(t *testing.T) {
 		"D=" + dir + "; cd $D && cat " + name,
 		// An input redirect is an operand now (#121), and it is substituted too.
 		"SP=" + dir + "; cat < $SP/" + name,
+		// Reached through &&, after segments certain to have run: an
+		// assignment, and a cd the tracker followed. The shape the week's
+		// 220 `cd "$(git rev-parse --show-toplevel)" && SP=…` calls take.
+		"X=1 && SP=" + dir + "; cat $SP/" + name,
+		"cd " + dir + " && SP=" + dir + "; cat $SP/" + name,
+		// And within its own list after a command: the cat runs only if the
+		// assignment did.
+		"true && SP=" + dir + " && cat $SP/" + name,
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
@@ -696,6 +706,9 @@ func TestAnAssignmentThePortCannotTrustLeavesTheOperandUnresolved(t *testing.T) 
 		{"assigned in a pipeline stage", "SP=" + dir + " | cat $SP/" + name},
 		{"assigned in the background", "SP=" + dir + " & cat $SP/" + name},
 		{"a prefix on the reader", "SP=" + dir + " cat $SP/" + name},
+		{"reached through && after a command, in the next statement", "true && SP=" + dir + "; cat $SP/" + name},
+		{"reached through ||", "false || SP=" + dir + "; cat $SP/" + name},
+		{"tentative, then a ||", "false && SP=" + dir + " || cat $SP/" + name},
 		{"rewritten by read", "SP=" + dir + "; read -r SP; cat $SP/" + name},
 		{"rewritten by eval", "SP=" + dir + "; eval x=1; cat $SP/" + name},
 		{"reassigned to a substitution", "SP=" + dir + "; SP=$(pwd); cat $SP/" + name},
