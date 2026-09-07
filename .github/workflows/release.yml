@@ -19,8 +19,9 @@ name: release
 # One consequence worth naming rather than discovering: `gate-drift` reads
 # tests.yml alone (scripts/gates.py pins it), so nothing checks this file's job
 # list against anything. A job deleted from here goes unnoticed by the check
-# that exists to catch exactly that, and Q59 covers the mutation-control half
-# rather than this one.
+# that exists to catch exactly that, which is Q155 -- and it costs more now
+# than when it was written, because published-release-verify below is the only
+# coverage the signing path has outside a tag.
 on:
   push:
     tags:
@@ -481,6 +482,130 @@ jobs:
             exit 1
           fi
 
+  # The signature check the `release` job runs, run on a pull request against
+  # the last release that was published.
+  #
+  # Signing is one of the steps no pull request can reach, and its failure mode
+  # is silence: `cosign verify-blob` exits 0 and prints `Verified OK` whether or
+  # not `--certificate-identity` is still being enforced. cosign v3 defaulting
+  # `--new-bundle-format` to true is what that looks like in practice -- it
+  # turned two flags into no-ops and cost `v0.1.0-rc.1` a tag cycle.
+  #
+  # This asserts about a previous release rather than this one, which is the
+  # whole of what a pull request can assert about signing: a branch has no
+  # signature to check. What it establishes is that the file the tag will run
+  # still discriminates -- and since the `release` job now calls that same file
+  # with the same flags, the invocation a release depends on is exercised here
+  # rather than first executed on a permanent version number.
+  #
+  # No published release is a failure and not a skip. A skipped job reports no
+  # check at all, which reads exactly like one that passed.
+  published-release-verify:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # `gh release view` with no tag resolves what /releases/latest serves,
+      # which is the release install.sh fetches when it is not given a version.
+      # So this checks the signature a user installing today would be checking.
+      #
+      # The tag is resolved once and carried, rather than read again in each
+      # step. Driving these blocks under `bash -e` measured why: errexit does
+      # not fire on a command substitution that failed inside an argument, so a
+      # second `gh` call that came back empty left `--ref refs/tags/` -- a
+      # well-formed argument naming nothing, which the step below then
+      # "controlled" against.
+      - name: The published release verifies, and three identities it does not carry are rejected
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          if [ -z "$tag" ]; then
+            echo "::error::no published release, so there is no signature here to check and nothing establishes that scripts/check-signature-identity.py still discriminates. That file runs next on a tag, against a permanent version number." >&2
+            exit 1
+          fi
+          printf 'checking the signature published under %s\n' "$tag"
+          echo "PUBLISHED_TAG=$tag" >> "$GITHUB_ENV"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir published \
+            --pattern checksums.txt --pattern checksums.txt.sigstore.json
+          python3 scripts/check-signature-identity.py \
+            --bundle published/checksums.txt.sigstore.json \
+            --blob published/checksums.txt \
+            --repository "$GITHUB_REPOSITORY" \
+            --ref "refs/tags/$tag"
+
+      # The step above passing means the four verifications agreed. This is
+      # whether the first of them can disagree: pointed at a tag the bundle was
+      # not signed at, the check has to refuse rather than verify.
+      #
+      # The grep is for the identity wording specifically, and that is the
+      # whole of this control. Measured while driving these steps: with no
+      # `published/` directory, cosign refuses on `no such file or directory`,
+      # and a control matching any refusal reports success against a
+      # checksums.txt that was never downloaded.
+      - name: An identity this release was not signed under must fail the check
+        run: |
+          python3 scripts/check-signature-identity.py \
+            --bundle published/checksums.txt.sigstore.json \
+            --blob published/checksums.txt \
+            --repository "$GITHUB_REPOSITORY" \
+            --ref refs/tags/v0.0.0-signed-by-nothing > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the check verified checksums.txt under a tag it was not signed at, so the step above asserted nothing" >&2
+            exit 1
+          fi
+          if ! grep -q 'cosign compared the certificate subject and it was not that one' mutant.log; then
+            echo "::error::the check failed, and not on the identity -- so this control observed some other failure and the step above is still unasserted" >&2
+            exit 1
+          fi
+
+      # And the defect the three rejections exist for, made concrete: a cosign
+      # that accepts everything. The real one is left in place and shadowed, so
+      # what this measures is the check's reading of cosign's answer rather
+      # than a cosign that could not run.
+      - name: A cosign that stopped enforcing the identity must fail the check
+        run: |
+          mkdir -p stub
+          printf '#!/bin/sh\necho "Verified OK"\nexit 0\n' > stub/cosign
+          chmod +x stub/cosign
+          # Naming the tool rather than a directory to drop. A PATH edit that
+          # silently failed to hide cosign is a control that runs the real one
+          # and reports success -- which is this repository's own measured
+          # instance, from a `PATH=/usr/bin:/bin` that hid nothing because
+          # setup-go links Go into /usr/bin.
+          resolved="$(PATH="$PWD/stub:$PATH" command -v cosign)"
+          if [ "$resolved" != "$PWD/stub/cosign" ]; then
+            echo "::error::cosign resolves to $resolved and not the stub, so this control would have run the real one" >&2
+            exit 1
+          fi
+          if [ -z "$PUBLISHED_TAG" ]; then
+            echo "::error::PUBLISHED_TAG is empty, so this control would run against a ref naming nothing" >&2
+            exit 1
+          fi
+          PATH="$PWD/stub:$PATH" python3 scripts/check-signature-identity.py \
+            --bundle published/checksums.txt.sigstore.json \
+            --blob published/checksums.txt \
+            --repository "$GITHUB_REPOSITORY" \
+            --ref "refs/tags/$PUBLISHED_TAG" \
+            > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::a cosign that verifies everything passed the check, so the three rejections are not asserting anything" >&2
+            exit 1
+          fi
+          if ! grep -q 'is not the identity this release was signed under' mutant.log; then
+            echo "::error::the check failed, and not on an identity it should have rejected" >&2
+            exit 1
+          fi
+
   release:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -590,6 +715,13 @@ jobs:
       # The identity is pinned to this workflow at this tag. A signature minted
       # from a branch, from another workflow, or from a fork verifies as a
       # valid Sigstore signature and must not verify as this release's.
+      #
+      # That last sentence used to be a claim about a flag rather than
+      # something asserted: the step verified the right identity and never
+      # tried a wrong one, so a `--certificate-identity` that had stopped being
+      # enforced would have passed it. check-signature-identity.py is the same
+      # verification with the three rejections beside it, in a file the
+      # published-release-verify job runs on every pull request.
       - name: The published assets verify as an outside consumer would check them
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -602,12 +734,11 @@ jobs:
               exit 1
             fi
           done
-          cosign verify-blob \
+          python3 scripts/check-signature-identity.py \
             --bundle published/checksums.txt.sigstore.json \
-            --new-bundle-format \
-            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            published/checksums.txt
+            --blob published/checksums.txt \
+            --repository "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF"
           # How many archives a release publishes, read from the same import
           # check-release-artifacts.py uses rather than written down here. A
           # literal is the defect this PR removed from
