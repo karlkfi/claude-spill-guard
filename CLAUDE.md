@@ -207,10 +207,18 @@ carries the manual check that closes the rest, after a draft is published.
 The `Bash` surface is now whole: the command string is scanned and so are the
 files its readers are pointed at, `internal/readers` being what decides which
 token is a path. An operand of a known reader that cannot be resolved — a
-`$VAR`, a glob, a relative path after a `cd` — blocks, because a scanner that
-skips one reports a clean result for a file nothing opened. An operand that
-resolves to something other than a regular file blocks as well, and so does a
-`Read` call's `file_path`: opening a fifo waits for a writer that never comes,
+`$VAR`, a glob, a relative path after a `cd` this cannot follow — is a coverage
+failure: the call defers and the operand is recorded, because a scanner that
+skipped one and allowed would report a clean result for a file nothing opened.
+A literal `cd` target is followed, per segment in order, so `cd sub && cat x`
+resolves `x` under `sub` and gets a verdict; what is not followed is bare `cd`,
+`cd -`, `popd`, a `$`-bearing target other than the quoted `"$(git rev-parse
+--show-toplevel)"` and `"$(pwd)"`, and a move inside a subshell or a pipeline
+stage. `classifyCd` and `follow` in `internal/hook/bash.go` are the port of
+workspace-guard's tracker and say at each arm where this one loses the
+directory and upstream does not. An operand that resolves to something other
+than a regular file is a coverage failure as well, and so is a `Read` call's
+`file_path`: opening a fifo waits for a writer that never comes,
 which hangs the call instead of deciding it, and neither answer this project
 chooses between is reached. A device is refused with it rather than skipped,
 because the class is not safe — `/dev/zero` returns bytes for as long as
