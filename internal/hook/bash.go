@@ -113,6 +113,14 @@ func bashTargets(command, cwd string) ([]target, error) {
 			if !known {
 				continue
 			}
+			// A `<` target is a file the reader reads that Files cannot see:
+			// Segments takes redirects out of the tokens first, so `cat <
+			// deploy.env` reached here with no operand and crossed unread, past
+			// content matching and the path refusal alike. It joins the operands
+			// because everything below asks the same question of it. Known
+			// readers only, every reader in the table, never a `<(…)`, and
+			// docs/design/README.md, "An input redirect", has the week behind each.
+			operands = append(operands, segment.Inputs...)
 			// A flag whose value is a file naming other files. The list itself
 			// is an operand and is scanned; what it names cannot be known
 			// without opening it, and scanning the list alone would report a
@@ -160,7 +168,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// reaches a reader's operand list 12 times, all of them `/dev/null`
 				// named as a filename by grep (11) or awk (1) -- the 18,509
 				// ordinary ones are redirect targets, which Segments keeps in
-				// Redirects and this loop never reads. Skipping instead would claim
+				// Redirects, and the `<` subset this loop reads named `/dev/*` 0
+				// times in 219 over the week to 2026-09-04. Skipping instead would claim
 				// nothing crossed, and /dev/zero and /dev/random return bytes for
 				// as long as anything reads, with no bound on os.ReadFile.
 				//

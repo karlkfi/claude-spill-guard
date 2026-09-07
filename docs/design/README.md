@@ -341,18 +341,81 @@ trust it further than it goes, so the reason calls itself a net for the
 accident rather than a claim that the path is guarded, exactly as the
 environment one does.
 
-**An input redirect walks past it, and that one is a bypass rather than a cap.**
-`cat < .env` is allowed where `cat .env` is refused, and `cat < ~/.aws/credentials`
-where `cat ~/.aws/credentials` is refused. Driven 2026-09-04 on a binary built
-from this branch, against fixtures holding a password and an AWS secret access
-key — deliberately nothing a shipped rule matches, so no content verdict can
-account for either arm, and an unguarded path in the same run stays silent as
-the negative control. The cause is upstream: `internal/bash` strips a redirect
-out of a segment's tokens into `Segment.Redirects`, `readers.Files` reads
-tokens, so the target is never an operand and never reaches this check. It
-defeats content matching and this refusal alike, which is what makes it a
-bypass and not one more thing the class declines to cover. Filed as Q131, and
-this row was deliberately not widened to close it.
+**An input redirect used to walk past it, and that one was a bypass rather
+than a cap.** `cat < .env` was allowed where `cat .env` was refused, and `cat <
+~/.aws/credentials` where `cat ~/.aws/credentials` was. Driven 2026-09-04 on a
+binary built from `c47d7bc`, against fixtures holding a password and an AWS
+secret access key — deliberately nothing a shipped rule matches, so no content
+verdict could account for either arm, and an unguarded path in the same run
+stayed silent as the negative control. The cause was upstream of this check:
+`internal/bash` strips a redirect out of a segment's tokens into
+`Segment.Redirects`, `readers.Files` reads tokens, so the target was never an
+operand and never reached here. It defeated content matching and this refusal
+alike, which is what made it a bypass and not one more thing the class declines
+to cover.
+
+**Closed by recording the operator, and sized through the segmenter first.**
+`Segment.Redirects` is a list of targets with no operator, and upstream still
+keeps it that way at `49ce73b`: its question, whether a path is outside the
+workspace, has the same answer for a read and a write, so it never needed one.
+This repo's does not, so `Segment.Inputs` carries the `<` subset beside it and
+the hook appends it to a known reader's operands, where resolution, the
+regular-file check and the guarded class ask of `cat < .env` what they ask of
+`cat .env`. Q131, the row that filed this, counted a 215-segment ceiling with a
+regex. Over 28,187 `Bash` calls
+in the week to 2026-09-04 the segmenter finds 360 segments carrying an input
+redirect, 219 on a reader the table knows and 141 on a command with no row:
+
+| command | has a row | segments with `<` |
+|---|---|---|
+| `wc` | yes | 155 |
+| `python3` | no | 77 |
+| `diff` | yes | 23 |
+| `sed` | yes | 15 |
+| a keyword alone — `done < list.txt` | no | 12 |
+| `grep` | yes | 10 |
+| `read` | no | 8 |
+| `sort` | yes | 7 |
+| `base64` | yes | 7 |
+| `tr` | no | 7 |
+| `cat` | yes | 1 |
+| `tail` | yes | 1 |
+| 17 other names | no | 37 |
+
+Three decisions come off that table. **Every reader in the table**, not only
+the ones that emit content: `wc` is 155 of the 219, `wc -l big.log` is already
+scanned as an operand and blocks on a finding, so a split would allow `wc -l <
+big.log` on the finding that blocks it written the other way — the row's own
+inconsistency, inverted. The precision cost Q131 weighed is the operand path's
+and not a new one. **Known readers only**: `python3 - < script.py` is
+the limitation the operand path already states, that what a command does with
+its stdin is not something the tokens say, and 77 of the 141 are that shape.
+**A `<(…)` is not an input**: the lexer leaves it as `<` and `(`, upstream
+records the paren as a target, 49 of the 219 were that shape, and a `(` handed
+to the resolver is a relative path that defers whenever the payload has no
+`cwd`.
+
+Driven on binaries built from `main` and from this change, over every one of
+the 1,431 calls in that week whose command carries a bare `<`, each with its
+own `cwd`:
+
+| `main` | this change | calls |
+|---|---|---|
+| allow | allow | 1,125 |
+| deferred | deferred | 252 |
+| deny | deny | 11 |
+| allow | deferred | 43 |
+
+Nothing moved to deny or ask. The 43 that moved are `wc` with a target that
+expands (41) or is relative after a `cd` (2) — the coverage deferral the
+operand path already gives `wc -l $S/x.log`, now given to `wc -l < $S/x.log`: a
+stderr line and a coverage record, no prompt and no block. The positive control
+is the row's own two tables re-driven on the same pair of binaries: every
+redirect spelling — `cat <`, `cat <.env`, `head -n 20 <`, `grep -c AKIA <`,
+`wc -l <`, over the planted key and over `.env` and `.aws/credentials` — allows
+on `main` and denies on this change, while `cat < notes.txt`, `python3 - <
+planted.env`, `cat < .env | cut -d= -f1` and `diff <(sort a) <(sort b)` allow
+on both.
 
 **Reads only.** A *write* to one of these changes what some other tool then
 does — an environment variable injected, a registry credential replaced — which
