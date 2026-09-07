@@ -82,7 +82,7 @@ gh run list --workflow=release.yml --limit 1
 
 ## What the workflow asserts, and what it does not
 
-The `release` job fails closed at five points, and each one leaves the tag
+The `release` job fails closed at six points, and each one leaves the tag
 spent rather than the release wrong:
 
 | It stops when | Because |
@@ -92,11 +92,14 @@ spent rather than the release wrong:
 | The archives are not one per shipped target, named as the install channels expect | `scripts/check-release-artifacts.py`. Every channel builds an archive name from an OS and an architecture. |
 | An archive does not match its `checksums.txt` line | Signing a stale checksums file signs a wrong answer, and the signature over it verifies perfectly. |
 | A published asset does not verify as an outside consumer would check it | It re-downloads the release, re-runs `sha256sum -c`, verifies the cosign signature against this workflow **at this tag**, and verifies provenance for all five archives — twice each, once through the attestations API and once against the attached bundle, which is the only copy a consumer without that API has. |
+| A signature minted somewhere else verifies as this release's | The row above says the check rejects one. This is the job asserting it: `scripts/check-signature-identity.py` verifies `checksums.txt` and then requires three identities the release was not signed under — a branch, another workflow, a fork — to be rejected *on the identity*, since an empty `--certificate-identity` also exits non-zero and proves nothing. |
 
-The last row is the one worth reading twice. `--certificate-identity` is pinned
-to `.github/workflows/release.yml@refs/tags/<tag>`, so a signature minted from a
-branch, from another workflow, or from a fork is a valid Sigstore signature that
-this check rejects.
+The last two rows are the ones worth reading twice. `--certificate-identity` is
+pinned to `.github/workflows/release.yml@refs/tags/<tag>`, and until the sixth
+row that pinning was a claim about a flag rather than something asserted — which
+matters because cosign v3 turned two flags into no-ops and cost `v0.1.0-rc.1` a
+tag cycle. `published-release-verify` runs the same file on every pull request
+against the last published release, so it is checked before the tag.
 
 **The tag does not check that the binaries work, and a pull request does.** The
 `release` job cross-compiles and never runs what it built. `install-dry-run`
