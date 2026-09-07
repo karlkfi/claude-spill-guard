@@ -81,7 +81,7 @@ measures how much prose about PEM headers the repository holds, not how noisy
 the rule is, and it climbs every time somebody documents it: 19 while that
 branch was being reviewed, 21 after review asked for two more cases, 27 once
 the indentation arms below brought six more and a third fixture. The shipped
-count stays at its planted fixtures, 3 of them. The reading that holds is the
+count stays at its planted fixtures, 4 of them. The reading that holds is the
 gated one below.
 
 [`testdata/corpus/clean/tls-runbook.md`](../testdata/corpus/clean/tls-runbook.md)
@@ -189,6 +189,65 @@ a planted file it can find and no clean one. When Q76 was filed that reading
 was 0 and 0 — three deliberately varied candidates agreeing because the corpus
 held no instance of the shape at all, which is a finding about the corpus and
 not about the candidates.
+
+**A separator line carrying whitespace was not crossed, and a unified diff
+writes one.** The step from the header to the body ran over `[\r\n]+` —
+newlines and nothing else — so a key whose separator line held a space or a tab
+went unreported. Q143 filed that with no observed traffic behind it, which is
+why it was a row and not an edit: widening a shipped rule on nothing is how
+precision goes.
+
+The traffic is `git diff`. Unified format prefixes every context line with a
+space, so a blank line inside a quoted file arrives as a line carrying exactly
+one — driven on git 2.55.0, 2026-09-07, in a scratch repository rather than
+argued from the format. An encrypted key is what pays for it: `openssl rsa
+-aes128 -p` and `ssh-keygen -m PEM -N` both write a bare empty line between
+`DEK-Info:` and the body, so a patch quoting that file turns the one separator
+the rule depends on into a whitespace-only line.
+[`private-key-block-in-diff.patch`](../testdata/corpus/planted/private-key-block-in-diff.patch)
+is `git diff` output rather than a hand-written patch, because the producer is
+the evidence.
+
+**Both steps need it, and the row that filed this named one.** Widening only
+the header's separator leaves the diff shape missed, because in an encrypted key
+the whitespace-only line falls after `DEK-Info:` rather than after the header —
+the same half-fix the indentation widening above ran into, arriving at the other
+step. Driven against the shipped clause: of the five cases this section adds,
+the header-only form reports three — the ones separated after the header — and
+misses both the one whose whitespace line follows `DEK-Info:` and the planted
+patch, which is that shape.
+
+**The separator still has to reach a line ending, so it is `(?:[ \t]*[\r\n])+`
+and not `[ \t\r\n]+`.** The one-character form the row proposed also admits a
+body on the header's own line, which no toolchain writes and which nothing here
+asked for. Over 5.05 GiB the two forms are indistinguishable — neither admits a
+file the other does not — so no measurement separates them and the narrower one
+is preferred on the rule this section states by name. `the body on the header's
+own line` is a `false` row in `TestPrivateKeyBlockAcrossThePEMLayouts`, which is
+the only thing holding the choice down.
+
+**The differential says what the widening costs, which is nothing here.** Both
+clauses compiled and counted over `~/go/pkg/mod` — 244,160 files on 2026-09-07,
+753 of them carrying `PRIVATE KEY`, a larger cache than the 239,671 the
+indentation reading above walked — the shipped clause, `[ \t\r\n]+` and
+`(?:[ \t]*[\r\n])+` all report **642 matches in 466 files**, and the set each
+widening newly admits is **empty**. So this widening is not paid for by a
+population reading, and does not pretend to be: it is paid for by the producer
+above.
+
+**The clean corpus was re-taken rather than reasoned about**, which the row
+asked for by name. `tls-runbook.md`'s "What the parts look like" section
+separates a displayed header from an indented body line with prose, and prose is
+neither whitespace nor a line ending, so the prediction was that it stays quiet.
+It does: 13 files, 13,360 bytes, 0 findings, unchanged either side.
+
+`TestTheCorpusHoldsTheWhitespaceSeparatorShape` in
+[`pemblock_test.go`](../internal/scan/pemblock_test.go) is the guard on the
+corpus, and it computes what the widening newly admits instead of approximating
+it — walking each half of the corpus with the shipped rule and with the
+pre-widening clause and taking the difference. 1 newly admitted planted file, 0
+clean. A hand-written approximation can drift from the two patterns it stands
+between; a subtraction cannot.
 
 **Two rules carry a second check, because their vendor publishes a realistic
 example.** An entropy floor drops a padded placeholder and admits a plausible
