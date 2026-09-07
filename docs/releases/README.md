@@ -15,6 +15,11 @@ each published body reproducible from a commit. The invariant is that this file
 matches the published body — so an edit to the notes lands as a PR and is then
 republished, never typed into the Release.
 
+`release-notes` is the gate that re-reads the pair, and it binds on `main`
+rather than on a pull request: while the edit is open the divergence *is* the
+proposal, and no pull request can run the command above. So an edit merges
+green and reddens `main` until somebody republishes.
+
 These files target GitHub's comment-flavour renderer, where a single newline
 becomes a `<br>`. Do not hard-wrap paragraphs or list items; keep each on one
 line however long it gets. In-page anchors do not work in a release body, since

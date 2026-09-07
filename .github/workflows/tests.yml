@@ -1814,6 +1814,200 @@ jobs:
             exit 1
           fi
 
+  release-notes:
+    runs-on: ubuntu-latest
+    # `gh release view --json body` is the only reader of a published body, so
+    # unlike release-claims there is no second answer for a machine without
+    # `gh`. That is why the failing tier is this runner and not a contributor's
+    # clone.
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # MERGED, and a different expression from the `queue` job's, which is the
+      # decision Q124 turned on. A notes edit is a legitimate divergence for as
+      # long as its pull request is open: the branch cannot repair it, because
+      # the repair is `gh release edit` and no pull request runs one. So a
+      # branch failure would redden the one party who cannot act, during the one
+      # window in which the tree is right. It binds the moment that edit merges,
+      # which is the moment the invariant becomes false.
+      #
+      # `!= 'pull_request'` rather than `== 'push'`, so the weekly schedule
+      # binds it too. A body edited in the web form diverges with no merge
+      # behind it, and nothing else in this repository would ever look.
+      - name: Every published body is still the notes file it came from
+        run: make release-notes MERGED=${{ github.event_name != 'pull_request' }}
+
+  # Two things need a control here and only one of them is the check. The other
+  # is the tier: a promotion that silently stopped promoting reads exactly like
+  # a tree with nothing wrong in it, and this gate arrives green -- all three
+  # published bodies matched their notes file when it was written, so no
+  # standing finding would have shown either half working.
+  release-notes-mutation-control:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # A body that came back empty would make every comparison below compare
+      # nothing, and an empty published body is itself a defect this repository
+      # has shipped -- v0.1.0's draft published two newlines. So read one and
+      # require it non-empty before anything trusts the reader.
+      - name: The body reader can come back non-empty
+        run: |
+          gh release view v0.1.0 --json body --jq .body > probe.log 2>&1; rc=$?
+          echo "probe exit: $rc"
+          head -3 probe.log
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the body reader exited $rc against a published release, so an equal comparison below says nothing" >&2
+            exit 1
+          fi
+          if [ ! -s probe.log ]; then
+            echo "::error::the body reader came back empty against a published release, so it cannot tell a matching body from no reading" >&2
+            exit 1
+          fi
+
+      # Both tiers, because every red below is attributable only if neither
+      # tier was already failing.
+      - name: The tree is green in both tiers before anything below mutates it
+        run: |
+          make release-notes
+          make release-notes MERGED=true
+
+      # The defect the gate exists for, and the tier decision in the same arm:
+      # an edited notes file has to be a note at exit 0 on a branch and a
+      # failure on the merged tree, named both times. A promotion that stopped
+      # promoting is invisible any other way.
+      - name: An edited notes file is a note on a branch and a failure on main
+        run: |
+          printf '\nPlanted by the mutation control.\n' >> docs/releases/v0.1.0.md
+          if git diff --quiet -- docs/releases/v0.1.0.md; then
+            echo "::error::the mutation changed nothing -- the notes file was not edited" >&2
+            exit 1
+          fi
+          make release-notes > branch.log 2>&1 && rc=0 || rc=$?
+          echo "branch tier exit: $rc"
+          cat branch.log
+          make release-notes MERGED=true > mutant.log 2>&1 && rc2=0 || rc2=$?
+          echo "merged tier exit: $rc2"
+          cat mutant.log
+          git checkout -- docs/releases/v0.1.0.md
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the branch tier failed on a divergence it cannot repair -- the correcting pull request would be red for the whole of its review" >&2
+            exit 1
+          fi
+          if ! grep -q '^diverged: docs/releases/v0\.1\.0\.md:' branch.log; then
+            echo "::error::the branch tier said nothing about the divergence, so a contributor editing notes is told nothing" >&2
+            exit 1
+          fi
+          if [ "$rc2" -eq 0 ]; then
+            echo "::error::the merged tier passed over a published body that is not its notes file" >&2
+            exit 1
+          fi
+          if ! grep -q '^diverged: docs/releases/v0\.1\.0\.md:' mutant.log; then
+            echo "::error::the merged tier failed, but not on the edited notes file" >&2
+            exit 1
+          fi
+
+      # The same defect from the other side, which the walk sees for free
+      # because it walks releases rather than files.
+      - name: A published release with no notes file must fail the merged tier
+        run: |
+          gh release view v0.1.0 --json tagName > /dev/null 2>&1 || {
+            echo "::error::v0.1.0 does not read as published, so removing its notes tests nothing" >&2
+            exit 1
+          }
+          rm docs/releases/v0.1.0.md
+          if [ -e docs/releases/v0.1.0.md ]; then
+            echo "::error::the mutation changed nothing -- the notes file is still there" >&2
+            exit 1
+          fi
+          make release-notes MERGED=true > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- docs/releases/v0.1.0.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed with a published release whose notes are not in the tree" >&2
+            exit 1
+          fi
+          if ! grep -q '^missing: docs/releases/v0\.1\.0\.md:' mutant.log; then
+            echo "::error::the gate failed, but not on the removed notes file" >&2
+            exit 1
+          fi
+
+      # Precision, and the direction a red-only control cannot reach. A notes
+      # file whose release does not exist is a legitimate state -- both
+      # rehearsal drafts in this tree were deleted after their tags -- so the
+      # walk must go over releases and never over files. `-ne 0` here, between
+      # `-eq 0` neighbours, is deliberate rather than a typo.
+      - name: A notes file with no release must not fail the gate
+        run: |
+          if gh release view v99.0.0 --json tagName > /dev/null 2>&1; then
+            echo "::error::v99.0.0 reads as published, so this arm is no longer the unreleased case" >&2
+            exit 1
+          fi
+          printf 'Planted by the mutation control.\n' > docs/releases/v99.0.0.md
+          if [ ! -s docs/releases/v99.0.0.md ]; then
+            echo "::error::the mutation changed nothing -- the notes file was not written" >&2
+            exit 1
+          fi
+          make release-notes MERGED=true > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          rm -f docs/releases/v99.0.0.md
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the gate failed on a notes file whose release does not exist, which is what every rehearsal leaves behind" >&2
+            exit 1
+          fi
+
+      # The silent direction. A read that failed and was taken for "no release
+      # is published" reports every body in the tree as matching. Only `gh` can
+      # answer here, so breaking it is the whole of the mutation -- and the two
+      # tiers differ: on a branch an unreadable state must not fail `make
+      # check`, since `gh` is not in the required tool tier.
+      - name: A release list that cannot be read must not read as an answer
+        run: |
+          GH_TOKEN=not-a-token GH_CONFIG_DIR=/nonexistent \
+            make release-notes MERGED=true > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "merged tier exit: $rc"
+          cat mutant.log
+          GH_TOKEN=not-a-token GH_CONFIG_DIR=/nonexistent \
+            make release-notes > branch.log 2>&1 && rc2=0 || rc2=$?
+          echo "branch tier exit: $rc2"
+          cat branch.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the merged tier reported a verdict about the notes with no reader able to say what is published" >&2
+            exit 1
+          fi
+          if ! grep -q 'the release list could not be read' mutant.log; then
+            echo "::error::the merged tier failed, but not by saying the list was unreadable -- an unreadable state must not read as no release" >&2
+            exit 1
+          fi
+          if grep -q '^diverged:\|^missing:' mutant.log; then
+            echo "::error::the check judged the notes anyway" >&2
+            exit 1
+          fi
+          if [ "$rc2" -ne 0 ]; then
+            echo "::error::the branch tier failed on an unreadable release list, which is every clone without gh -- and gh is not in the required tool tier" >&2
+            exit 1
+          fi
+          if ! grep -q 'the release list could not be read' branch.log; then
+            echo "::error::the branch tier exited 0 without saying it could not read, which is indistinguishable from a clean comparison" >&2
+            exit 1
+          fi
+
   channel-claims:
     runs-on: ubuntu-latest
     steps:
