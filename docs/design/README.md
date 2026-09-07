@@ -2174,7 +2174,7 @@ and `TestTheExpansionAgreesWithBash` holds the table:
 | `d/*/../x` | resolves the step | nothing: `..` is an entry name no directory lists | refused |
 | `d/*/` | directories only | nothing | refused |
 | `d/{a,b}.txt`, `d/*.{txt,md}` | brace-expands first | literal braces, matching nothing | refused, wildcard or not -- passing it through would `Stat` a file that does not exist and send nothing |
-| `d/nomatch*` | the literal token | the empty set | nothing crosses either way |
+| `d/nomatch*` | the literal token | the empty set | nothing crosses, unless a file by that literal name exists -- then bash opens it, and so does this. `app/[id]/page.tsx` is a Next.js route, and `filepath.Glob` reads its `[id]` as a class matching nothing; the literal is included whenever it is on disk, quoted or not, since the lexer has removed the quotes. Found in review as a fail-open: five spellings of `cat x[1].env` exited 0 with nothing scanned and nothing recorded |
 | `d/[` | the literal token | `ErrBadPattern`, but only on reaching an entry to match | refused before Glob, so the answer does not turn on what the directory holds |
 
 **Anything in the string that could change the options puts the pattern back
@@ -2192,8 +2192,10 @@ directory, which is Q147's position problem again.
 **A quoted pattern is Q92's class, in the precision direction.** The lexer
 strips quotes and backslashes, so `cat "*.env"` and `cat \*.env` arrive as
 `*.env` and expand, where bash would open one file named `*.env`. Every file
-bash would send is in the set and files it would not are too.
-`TestAQuotedGlobExpandsWhereBashWouldNot` pins it.
+bash would send is in the set and files it would not are too -- including the
+other half of the same class, `cat 'x[1].env'` beside a real `x1.env`, where
+bash sends the literal alone and this sends both.
+`TestAQuotedGlobExpandsWhereBashWouldNot` pins both halves.
 
 **A matched directory meets the directory refusal above**, as it would had the
 session typed the name: `grep -rn pat docs/*` expands to `docs/design`, and

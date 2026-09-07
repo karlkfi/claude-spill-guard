@@ -213,7 +213,9 @@ defers and the operand is recorded, because a scanner that skipped one and
 allowed would report a clean result for a file nothing opened. A glob is
 expanded to the files bash would hand the command under its default options,
 which 22 of 22 shell snapshots on this machine restore, with a leading `.`
-matched only by a literal `.`; anything earlier in the string that could change
+matched only by a literal `.` and the literal word itself included whenever a
+file by that name exists, since bash passes an unmatched pattern through and
+`app/[id]/page.tsx` is an ordinary filename; anything earlier in the string that could change
 those options — `shopt`, `set -f`, a `GLOBIGNORE` assignment, `eval`, `source`
 — puts it back on the record, and a brace expansion is recorded rather than
 passed through as a file that does not exist. `internal/hook/glob.go` carries

@@ -2,8 +2,10 @@ package hook
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/karlkfi/claude-spill-guard/internal/bash"
@@ -91,7 +93,25 @@ func expand(operand, cwd string, cwdUnknown, globsAltered bool) ([]string, error
 	if !expandable(operand) {
 		return nil, errCannotExpand
 	}
-	return globFiles(path)
+	files, err := globFiles(path)
+	if err != nil {
+		return nil, err
+	}
+	// bash passes an unmatched pattern through as the literal word, and a
+	// filename can carry a glob character: `app/[id]/page.tsx` is a Next.js
+	// route, and filepath.Glob reads its `[id]` as a class that matches
+	// nothing. So the literal is a file the command reads whenever it exists,
+	// and it is included whether or not the pattern matched anything else --
+	// the lexer has stripped the quotes that would have told `cat 'x[1].env'`
+	// from `cat x[1].env`, so beside a real `x1.env` both are scanned. That
+	// superset is Q92's class, and TestAQuotedGlobExpandsWhereBashWouldNot
+	// pins it. Driven in review on the merge tree: before this the five
+	// spellings of that read exited 0 with nothing scanned and nothing
+	// recorded.
+	if _, err := os.Stat(path); err == nil && !slices.Contains(files, path) {
+		files = append(files, path)
+	}
+	return files, nil
 }
 
 // expandable is the structural check, on the operand as written rather than

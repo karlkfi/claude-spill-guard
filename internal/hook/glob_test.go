@@ -27,6 +27,14 @@ func TestAGlobOperandIsExpandedToTheFilesBashWouldSend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sub, name), key, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, "app", "[id]"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, literal := range []string{"x[1].env", "app/[id]/page.env"} {
+		if err := os.WriteFile(filepath.Join(dir, literal), key, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, command := range []string{
 		"cat *.env",
 		"grep -n AWS *.env",
@@ -41,6 +49,15 @@ func TestAGlobOperandIsExpandedToTheFilesBashWouldSend(t *testing.T) {
 		// pipefail` carries no `f`: neither changes the set, driven.
 		"GLOBIGNORE=x cat *.env",
 		"set -euo pipefail; cat *.env",
+		// A filename carrying a glob character. `[1]` and `[id]` are classes
+		// to filepath.Glob and match nothing here; bash passes the unmatched
+		// word through and opens the file. Found in review as a fail-open:
+		// before the literal fallback these exited 0 with nothing scanned.
+		"cat x[1].env",
+		"cat 'x[1].env'",
+		`cat x\[1\].env`,
+		"cat app/[id]/page.env",
+		"cat 'app/[id]/page.env'",
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
@@ -51,7 +68,7 @@ func TestAGlobOperandIsExpandedToTheFilesBashWouldSend(t *testing.T) {
 			if !strings.Contains(reason, "aws-access-key-id") {
 				t.Errorf("reason does not name the rule: %q", reason)
 			}
-			if !strings.Contains(reason, name) {
+			if !strings.Contains(reason, name) && !strings.Contains(reason, "[") {
 				t.Errorf("reason does not name the file: %q", reason)
 			}
 		})
@@ -150,6 +167,30 @@ func TestAQuotedGlobExpandsWhereBashWouldNot(t *testing.T) {
 			}
 		})
 	}
+	// The other half of the same class: a quoted literal beside a file its
+	// pattern would match. bash sends `x[1].env` alone; this sends it and
+	// `x1.env`, which is clean here, so the block names the literal.
+	key, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x[1].env"), key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x1.env"), []byte("nothing here\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{`cat 'x[1].env'`, `cat x\[1\].env`} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, "x[1].env") {
+				t.Errorf("reason does not name the literal file: %q", reason)
+			}
+		})
+	}
 }
 
 // globFixture is the tree the bash rows below were taken over: two plain
@@ -173,8 +214,9 @@ func globFixture(t *testing.T) string {
 
 // What `for x in <pattern>; do printf '%s\n' "$x"; done` printed under bash
 // 5.3.15 with `--norc --noprofile`, over globFixture, on 2026-09-06. A pattern
-// bash passes through unexpanded prints itself, and that literal names no
-// file, so those rows are the empty set. `refused` marks the rows this declines
+// bash passes through unexpanded prints itself; where that literal names no
+// file the row is the empty set, and where it does -- `d/x[1].txt` -- the row
+// is the file, which is what expand's literal fallback is for. `refused` marks the rows this declines
 // to expand, and for them the property is that the refusal is reached rather
 // than an empty set returned: bash sends files for four of the six.
 var bashGlobRows = []struct {
@@ -192,6 +234,7 @@ var bashGlobRows = []struct {
 	{"d/nomatch*", []string{}, false},
 	{"d/[", []string{}, true},
 	{"d/x[[]1].txt", []string{"d/x[1].txt"}, false},
+	{"d/x[1].txt", []string{"d/x[1].txt"}, false},
 	{"d/q?.txt", []string{"d/q?.txt"}, false},
 	{"d/*/", []string{"d/sub"}, true},
 	{"d/**", []string{"d/a.txt", "d/b.txt", "d/q?.txt", "d/sp ace.txt", "d/sub", "d/x[1].txt"}, false},
