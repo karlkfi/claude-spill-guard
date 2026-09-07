@@ -501,6 +501,228 @@ jobs:
             exit 1
           fi
 
+  # PRIVACY.md is the page a reader trusts the tool on, and its list of what
+  # the hook reads was wrong in every bullet through two releases because no
+  # gate read the file. Q130. Go as well as Python: the block is derived partly
+  # by driving the built binary.
+  privacy-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: PRIVACY.md still says what the hook reads and writes
+        run: make privacy-drift
+
+  # Six mutations, one per way the page and the tree come apart. The first is
+  # the row's own defect, a bullet edited by hand. The next four are the tree
+  # moving under a block nobody re-read: a new environment read, one the script
+  # cannot name, a new file written, a wider matcher. The last is the marker
+  # pair, without which nothing is compared at all.
+  privacy-drift-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The bullet the old page carried: a `Write` body the hook never receives.
+      - name: A hand-edited bullet must fail the check
+        run: |
+          sed -i 's/| `PreToolUse` | `Read` |/| `PreToolUse` | `Write` |/' PRIVACY.md
+          if git diff --quiet -- PRIVACY.md; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make privacy-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- PRIVACY.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::privacy-drift passed on a page naming a tool the hook never receives" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not match the tree' mutant.log; then
+            echo "::error::privacy-drift failed, but not on the block disagreeing with the tree" >&2
+            exit 1
+          fi
+
+      # The telemetry field added in good faith, one step before it phones
+      # home. The rewrite must track it too: a generator that always emitted
+      # the committed text would pass the assertion and be worth nothing.
+      - name: A new environment read must fail the check and enter the block
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("internal/hook/coverage.go")
+          s = p.read_text(encoding="utf-8")
+          old = "func record(stderr io.Writer, call payload, event Event, reason string) {\n"
+          assert s.count(old) == 1, "record() is not where the mutation expects it"
+          p.write_text(s.replace(old, old + '\t_ = os.Getenv("SPILL_GUARD_TELEMETRY")\n'), encoding="utf-8")
+          PY
+          if ! grep -q 'SPILL_GUARD_TELEMETRY' internal/hook/coverage.go; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make privacy-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::privacy-drift passed while the binary read a variable the page does not name" >&2
+            git checkout -- internal/hook/coverage.go
+            exit 1
+          fi
+          make privacy > /dev/null 2>&1 || true
+          grep -q 'SPILL_GUARD_TELEMETRY' PRIVACY.md && tracked=0 || tracked=1
+          git checkout -- internal/hook/coverage.go PRIVACY.md
+          if [ "$tracked" -ne 0 ]; then
+            echo "::error::the rewritten block does not name the variable the binary now reads" >&2
+            exit 1
+          fi
+
+      # The quiet direction. A read on a variable name matches nothing the
+      # script can list, so without the refusal the block would stay as it is
+      # and the page would be wrong with the gate green.
+      - name: An environment read the script cannot name must fail the check
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("internal/hook/coverage.go")
+          s = p.read_text(encoding="utf-8")
+          old = "func record(stderr io.Writer, call payload, event Event, reason string) {\n"
+          assert s.count(old) == 1, "record() is not where the mutation expects it"
+          p.write_text(s.replace(old, old + '\t_ = os.Getenv(reason)\n'), encoding="utf-8")
+          PY
+          if ! grep -q 'os.Getenv(reason)' internal/hook/coverage.go; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make privacy-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- internal/hook/coverage.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::privacy-drift passed on an environment read it could not name" >&2
+            exit 1
+          fi
+          if ! grep -q 'in a form this cannot name' mutant.log; then
+            echo "::error::privacy-drift failed, but not on the unnamed read" >&2
+            exit 1
+          fi
+
+      # #117 is the shape: the scanner starts writing a file and the privacy
+      # page goes on listing reads. The write is placed on the deferring path
+      # so the probe meets it where it meets the coverage log.
+      - name: A second file written must fail the check
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("internal/hook/coverage.go")
+          s = p.read_text(encoding="utf-8")
+          old = "\tappendCoverage(c)\n"
+          assert s.count(old) == 1, "record() is not where the mutation expects it"
+          new = old + ('\tif home, err := os.UserHomeDir(); err == nil {\n'
+                       '\t\t_ = os.WriteFile(filepath.Join(home, ".spill-guard-seen"), nil, 0o600)\n'
+                       '\t}\n')
+          p.write_text(s.replace(old, new), encoding="utf-8")
+          PY
+          if ! grep -q 'spill-guard-seen' internal/hook/coverage.go; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make privacy-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- internal/hook/coverage.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::privacy-drift passed while the hook wrote a file the page does not list" >&2
+            exit 1
+          fi
+          if ! grep -q 'the page says one' mutant.log; then
+            echo "::error::privacy-drift failed, but not on the second file" >&2
+            exit 1
+          fi
+
+      # A matcher wider than the page: the hook is delivered a tool whose
+      # arguments the page never mentions reading.
+      - name: A tool added to the matcher must fail the check
+        run: |
+          sed -i 's/"matcher": "Read|Bash"/"matcher": "Read|Bash|Write"/' hooks/hooks.json
+          if git diff --quiet -- hooks/hooks.json; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make privacy-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/hooks.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::privacy-drift passed with a tool in the matcher the page says nothing about" >&2
+            exit 1
+          fi
+          if ! grep -q 'has no sentence for what the hook reads from it' mutant.log; then
+            echo "::error::privacy-drift failed, but not on the unlisted tool" >&2
+            exit 1
+          fi
+
+      # Q55's control, one page over: without the pair there is no block to
+      # compare, and both the check and the rewrite have to say so by name.
+      - name: A page with no marker pair must fail the check and refuse the rewrite
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("PRIVACY.md")
+          keep = [l for l in p.read_text(encoding="utf-8").splitlines(keepends=True)
+                  if "privacy:begin" not in l and "privacy:end" not in l]
+          p.write_text("".join(keep), encoding="utf-8")
+          PY
+          if grep -q 'privacy:begin' PRIVACY.md || grep -q 'privacy:end' PRIVACY.md; then
+            echo "::error::the mutation changed nothing -- a marker survives, so block() still finds the pair" >&2
+            exit 1
+          fi
+          make privacy-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::privacy-drift passed on a page with no markers" >&2
+            git checkout -- PRIVACY.md
+            exit 1
+          fi
+          if ! grep -q 'PRIVACY.md has no `privacy:begin`' mutant.log; then
+            echo "::error::privacy-drift failed, but not on the missing markers" >&2
+            git checkout -- PRIVACY.md
+            exit 1
+          fi
+
+          before=$(git hash-object PRIVACY.md)
+          make privacy > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "rewrite exit: $rc"
+          cat mutant.log
+          after=$(git hash-object PRIVACY.md)
+          git checkout -- PRIVACY.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::make privacy exited 0 with no block to rewrite" >&2
+            exit 1
+          fi
+          if [ "$before" != "$after" ]; then
+            echo "::error::make privacy wrote to PRIVACY.md with no block to put one in" >&2
+            exit 1
+          fi
+          if ! grep -q 'there is nothing to rewrite' mutant.log; then
+            echo "::error::make privacy refused, but not on the missing markers -- a traceback refuses the same way" >&2
+            exit 1
+          fi
+
   hooks-check:
     runs-on: ubuntu-latest
     steps:
