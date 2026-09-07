@@ -1853,9 +1853,11 @@ the record names the budget. The override is not consulted, because there is no
 block left to downgrade.
 
 There is no third answer to weigh. Fifteen seconds later the process is killed
-and the call proceeds with nothing written anywhere, so the choice at the
-deadline is between recording the gap and letting it pass unrecorded, and the
-unrecorded gap is what this whole file is about.
+and the call proceeds with no verdict and no record from this hook — the
+harness's own `hook_cancelled` line, measured above, is all that remains, and
+nothing showed it reaching anyone. So the choice at the deadline is between
+recording the gap and leaving it to that line, and a gap nobody is shown is
+what this whole file is about.
 
 **A size cap is the cheaper half and is not the fix.** A cap answers before
 reading and a deadline answers during, and three things walk past the first.
@@ -1990,7 +1992,7 @@ other two is below, and neither argument is the one the question started with:
 that one was *an unbounded walk that overruns allows the call*, and
 [the budget](#the-scanners-own-budget-and-overrunning-it-is-recorded) has taken
 it away — an overrunning walk is recorded now, like anything else, rather than
-killed with nothing written.
+killed with only the harness's cancellation record behind it.
 
 **Nothing in the operand says what a walk would cost.** Measured 2026-09-04 by
 walking each root with `filepath.WalkDir` and putting every regular file through
