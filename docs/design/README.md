@@ -1851,7 +1851,8 @@ proceeds.** On both events.
 
 The hook logged its entry, slept, wrote a reason to stderr and exited a chosen
 code. `UserPromptSubmit` ran under a `HOME` of its own holding no credential,
-the route [Q94](../queue/Q94.md) established. `PreToolUse` needs one, a hook
+the route [the CI section](#two-of-the-three-surfaces-cannot-be-driven-by-a-gate)
+describes. `PreToolUse` needs one, a hook
 there firing only once the model has chosen a tool call, so it ran under
 `--settings` with `--setting-sources project` to keep this machine's own guards
 out of the arm.
@@ -2376,6 +2377,67 @@ does not cover. The other three steps break the corpus rather than the ruleset,
 because a zero over an empty corpus, a zero over a corpus nothing adversarial
 is left in, and a zero from a test that quietly stopped running are all the same
 zero from outside.
+
+### Two of the three surfaces cannot be driven by a gate
+
+Every gate above runs the scanner. None of them runs Claude Code, and the
+defects this project exists to prevent are found on the far side of that
+line: the batch of 2026-08-28 filed seven — Q85, Q86, Q91 and the rest — every
+one found by driving a real session, none by reading, and all seven under a
+green `make check` at the moment they were found. Five were fail-opens, a file
+crossing into the model's context with the scanner reporting clean. That class
+has no symptom and no reporter; a user's whole experience of it is a session
+that felt fine. So which surfaces a gate *can* drive is a stated property of
+this repository, and the answer is one of three.
+
+**The boundary is the first API call, not prompt-against-tool.** Everything
+before it is free and everything after it costs a credential. Driven 2026-09-01
+against Claude Code 2.1.251 on darwin/arm64: `claude -p` under a clean `HOME`
+holding no credential reports `Not logged in · Please run /login`, bills 0
+input and 0 output tokens at `total_cost_usd` 0 — and before it gets there it
+has already resolved the `@` tokens it recognises, written each resolved file to
+the transcript as an attachment whose `attachment.type` is `file`, and fired
+`UserPromptSubmit` with the payload `internal/hook` decodes. All 24 cases of
+`internal/hook/testdata/prompt-oracle.json` were replayed that way over the
+fixture's own tree, and 24 of 24 agreed with the recorded `harness_files`: 87
+seconds for the set, 3.63s a case, 14 cases expecting a non-empty splice, 33
+files crossing. Two controls, because a uniform 24 of 24 is usually a fact
+about the instrument: dropping one `@` token from the `positives` prompt moved
+the harness's own answer from three files to two, and a prompt naming
+`@secret.txt @sub/inner.txt @nosuchfile.txt @notafile` produced `file` records
+for the two that resolve and none for the two that do not.
+
+A `Read` path or a `Bash` operand reaches a hook only once the model has chosen
+a tool call, and choosing one is an API call. The observation beside that
+mechanism is 25 unauthenticated runs with the `PreToolUse` matcher wired the
+whole time, in which the recording hook fired `UserPromptSubmit` 25 times and
+`PreToolUse` **0** times. Neither alone would settle it; together they do.
+
+**So the prompt surface can be gated and the other two cannot**, and the
+reason is the credential boundary rather than a shortage of effort. The gate
+for the one surface is [Q109](../queue/Q109.md), not landed as of this
+writing. For `Read` and `Bash`, what stands in:
+
+- `spill-guard selftest` drives canary payloads through `hook.Run` in-process
+  on every surface. It proves the binary scans and blocks; it cannot prove
+  Claude Code is invoking it, and its report says so rather than letting a
+  green run imply it.
+- The measurements this document rests on — [the exit-code
+  contract](#the-exit-code-contract-measured), [the
+  timeout](#the-third-shape-is-a-timeout-and-it-is-the-one-this-repo-configures),
+  the `systemMessage` channel — were each taken by hand against a real session
+  holding a credential, on both events, and are re-taken the same way. Their
+  dates are in the sections that carry them, which is the only currency such a
+  measurement has.
+- The scanner's own budget and what the harness does past it were composed
+  from two measurements rather than observed in one; [Q122](../queue/Q122.md)
+  owns the drive that would close that, and it sits behind this same boundary.
+
+A stated limitation is worth more than a gate that cannot fail. A `PreToolUse`
+job that ran with no credential would fire nothing and report no check, which
+reads exactly like passing — and a job that ran with one needs a credential
+this repository neither has nor wants, on a job a fork's pull request could not
+run at all, so it would gate the maintainer's pushes and nothing else.
 
 ## Benchmarking, if you benchmark at all
 
