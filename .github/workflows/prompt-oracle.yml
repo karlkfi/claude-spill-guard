@@ -1,0 +1,108 @@
+name: prompt-oracle
+
+# The one surface a job can drive. `internal/hook/testdata/prompt-oracle.json`
+# is Claude Code's own answer to the `@`-token grammar, and a Go test compares
+# the resolver against it on every run -- so the resolver cannot drift from the
+# recording, and the recording drifts silently from the harness it stands in
+# for. This re-takes it.
+#
+# It needs no credential, which is what makes it a job at all: `claude -p`
+# resolves `@` tokens and writes each resolved file to the transcript before it
+# makes an API call, so a clean `HOME` gets the whole observation out of a run
+# that reports `Not logged in` and bills nothing. A fork's pull request gets no
+# secrets and this needs none.
+#
+# The `Read` and `Bash` surfaces stay out for the same reason this one is in:
+# they reach a hook only once the model has chosen a tool call, which is an API
+# call. See docs/design/README.md, "Two of the three surfaces cannot be driven
+# by a gate".
+#
+# It is not a `make` gate. The gates run on a fresh clone against the tool tier
+# `make doctor` requires, and Claude Code is not in it -- so a gate over this
+# would fail for a reason that says nothing about the tree. `check-install-
+# scripts.py` is the same shape and sits in the release workflow for the same
+# reason.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The subject is a third party's binary at a pinned version, so nothing in
+  # this repository moves it. What the weekly run catches is the mutation
+  # control rotting, and a download channel that has stopped serving the pin.
+  schedule:
+    - cron: '17 4 * * 1'
+
+env:
+  PYTHON_VERSION: '3.13'
+  # Pinned, never `latest`: this job exists to report drift between a recorded
+  # version and a named one, and resolving the binary to whatever shipped that
+  # morning makes a red run un-attributable and a green one un-repeatable.
+  # `harness.version` in the census has to carry this same number -- the script
+  # asserts it, so moving the pin without re-taking the census fails rather
+  # than quietly confirming nothing.
+  #
+  # The version and its checksum are read from
+  # https://downloads.claude.ai/claude-code-releases/<version>/manifest.json.
+  # The binary is fetched directly rather than through install.sh, which
+  # downloads whatever is latest to bootstrap itself -- an unpinned script
+  # executing on the runner, to install a pinned binary.
+  CLAUDE_VERSION: '2.1.261'
+  CLAUDE_SHA256: '4ae40dd1784e85753e742e09f267d29ecbb82890361ad3817d27560866d364a6'
+
+jobs:
+  prompt-oracle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Fetch the pinned harness, and refuse anything else
+        run: |
+          url="https://downloads.claude.ai/claude-code-releases/${CLAUDE_VERSION}/linux-x64/claude"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/claude"
+          echo "${CLAUDE_SHA256}  $RUNNER_TEMP/claude" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/claude"
+          got=$("$RUNNER_TEMP/claude" --version | cut -d' ' -f1)
+          if [ "$got" != "$CLAUDE_VERSION" ]; then
+            echo "the pin names $CLAUDE_VERSION and the binary reports $got" >&2
+            exit 1
+          fi
+
+      # Observing and comparing are separate steps because the mutation control
+      # below reuses this recording. Re-driving the harness to prove the
+      # comparison can fail would pay for an answer it already has.
+      - name: Replay every case against the pinned harness
+        run: python3 scripts/check-prompt-oracle.py --claude "$RUNNER_TEMP/claude" --record "$RUNNER_TEMP/observed.json"
+
+      - name: The census still says what the harness does
+        run: python3 scripts/check-prompt-oracle.py --compare "$RUNNER_TEMP/observed.json"
+
+      # The only thing this job can report is a fixture that has gone stale, so
+      # a run that drove nothing and a run that found no drift print alike --
+      # which is the failure mode the floor exists for. Two mutations, because
+      # "found nothing" has two shapes: a census whose expectation moved, and a
+      # replay that observed nothing at all.
+      - name: Mutation control -- a moved expectation, and a replay that drove nothing
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, os
+          temp = pathlib.Path(os.environ["RUNNER_TEMP"])
+          census = json.loads(pathlib.Path("internal/hook/testdata/prompt-oracle.json").read_text())
+          moved = [c for c in census["cases"] if c["harness_files"]][0]
+          moved["harness_files"] = ["secret.txt", "no-such-file.txt"]
+          (temp / "moved.json").write_text(json.dumps(census))
+          observed = json.loads((temp / "observed.json").read_text())
+          observed["cases"] = {name: [] for name in observed["cases"]}
+          (temp / "silent.json").write_text(json.dumps(observed))
+          PY
+          for mutant in "--fixture $RUNNER_TEMP/moved.json --compare $RUNNER_TEMP/observed.json" \
+                        "--compare $RUNNER_TEMP/silent.json"; do
+            # shellcheck disable=SC2086
+            if python3 scripts/check-prompt-oracle.py $mutant; then
+              echo "the comparison passed over a mutated census, so it checks nothing: $mutant" >&2
+              exit 1
+            fi
+          done
