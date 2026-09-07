@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims release-scope channel-claims plugin-version queue action-pins test precision no-deps no-network vulns cross-compile
+GATES := doctor gate-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -24,6 +24,7 @@ vendor.desc         := every vendored copy still hashes to the digest scripts/RE
 docs.desc           := every relative link in the repo markdown resolves
 release-claims.desc := the prose agrees with whether a release exists
 release-scope.desc  := no release-scope record survives the release it was written for
+release-notes.desc  := every published release body is still the notes file it came from
 channel-claims.desc := no message names an install channel that does not exist
 plugin-version.desc := the two plugin manifests carry the same version, so a release can be delivered
 queue.desc          := the backlog store format holds, every filed id holds a claim, no index is committed
@@ -184,6 +185,16 @@ release-claims:
 # record reads as current and nothing else opens it.
 release-scope:
 	$(PYTHON) scripts/check-release-scope.py
+
+# The invariant docs/releases/README.md states, re-read after the tag rather
+# than only at it. Only the merged tree can answer it: while a notes edit is an
+# open pull request the divergence is the proposal, and no pull request can
+# repair it either way, because the repair is `gh release edit`. So this reports
+# on a branch and fails on `main` -- the split `queue` already makes for a class
+# a branch cannot settle, and here it fires at the same merge that creates the
+# divergence rather than one merge later.
+release-notes:
+	$(PYTHON) scripts/check-release-notes.py $(if $(filter true,$(MERGED)),--merged)
 
 # Reads only what the install scripts and the launcher print. The tap named in
 # install.sh's own header is deliberate -- it is the argument for the refusal's
