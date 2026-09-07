@@ -12,11 +12,12 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift status-drift hooks-check launcher vendor docs release-claims channel-claims plugin-version queue action-pins test precision no-deps no-network vulns cross-compile
+GATES := doctor gate-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims channel-claims plugin-version queue action-pins test precision no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
 status-drift.desc   := the README's status table still says what the tree can actually do
+privacy-drift.desc  := PRIVACY.md still says what the hook reads and writes, against the manifest, the source and a driven binary
 hooks-check.desc    := every tracked git hook is executable, so none is silently inert
 launcher.desc       := the hook launcher is executable in the index, resolves a binary, and denies when it cannot
 vendor.desc         := every vendored copy still hashes to the digest scripts/README.md declares
@@ -75,7 +76,7 @@ MERGED ?= false
 queue_strict = $(QUEUE_STRICT) $(if $(filter true,$(MERGED)),$(QUEUE_STRICT_MERGED))
 
 .DEFAULT_GOAL := help
-.PHONY: help check list-gates print-gates gates status hooks $(GATES)
+.PHONY: help check list-gates print-gates gates status privacy hooks $(GATES)
 
 help:
 	@printf 'spill-guard\n\n'
@@ -84,6 +85,7 @@ help:
 	@printf '  make <gate>       run one gate\n'
 	@printf '  make gates        refresh the generated gate table in CLAUDE.md\n'
 	@printf '  make status       refresh the generated status table in README.md\n'
+	@printf '  make privacy      refresh the generated read/write block in PRIVACY.md\n'
 	@printf '  make hooks        install the pre-commit hook (git core.hooksPath)\n'
 	@printf '  make doctor       report which required tools are missing, and how to get them\n\n'
 	@$(MAKE) --no-print-directory list-gates
@@ -124,6 +126,12 @@ gates:
 status:
 	$(PYTHON) scripts/check-status.py
 
+# PRIVACY.md's list of what the hook reads and writes was hand-kept, and every
+# bullet was wrong through two releases with every gate green. Same split
+# again: this rewrites, `privacy-drift` asserts.
+privacy:
+	$(PYTHON) scripts/check-privacy.py
+
 # Tracked hooks, so the store gates run before a commit rather than at review.
 # --no-verify skips them; a hook is a fast local echo of CI, not a second
 # authority.
@@ -144,6 +152,9 @@ gate-drift:
 
 status-drift:
 	$(PYTHON) scripts/check-status.py --check
+
+privacy-drift:
+	$(PYTHON) scripts/check-privacy.py --check
 
 hooks-check:
 	$(PYTHON) scripts/check-githooks.py

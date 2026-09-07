@@ -628,6 +628,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `doctor` | scripts/check-tools.sh runs, and every required tool is present |
 | `gate-drift` | the gate list, the CI job list and the table in CLAUDE.md still agree |
 | `status-drift` | the README's status table still says what the tree can actually do |
+| `privacy-drift` | PRIVACY.md still says what the hook reads and writes, against the manifest, the source and a driven binary |
 | `hooks-check` | every tracked git hook is executable, so none is silently inert |
 | `launcher` | the hook launcher is executable in the index, resolves a binary, and denies when it cannot |
 | `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
