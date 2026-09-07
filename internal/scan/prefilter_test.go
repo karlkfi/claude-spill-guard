@@ -6,7 +6,7 @@ import (
 )
 
 func TestHasKeyword(t *testing.T) {
-	aws := []string{"AKIA", "ASIA", "ABIA", "ACCA", "A3T"}
+	aws := []string{"AKIA", "ASIA", "ABIA", "ACCA"}
 
 	for _, tc := range []struct {
 		name     string

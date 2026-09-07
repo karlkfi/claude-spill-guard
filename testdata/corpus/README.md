@@ -35,10 +35,10 @@ publishes in its own documentation, and the rule now drops that key on the
 is supposed to stay quiet on.
 
 Three files carry `aws-access-key-id`, and the third is about the rule rather
-than the encoding. The rule matches five prefixes — `A3T[A-Z0-9]`, `AKIA`,
-`ASIA`, `ABIA` and `ACCA` — and the two files above are both `AKIA`, so a walk
+than the encoding. The rule matches four prefixes — `AKIA`, `ASIA`, `ABIA` and
+`ACCA` — and the two files above are both `AKIA`, so a walk
 over this corpus could not tell `ASIA` from absent. `aws-access-key-id-asia.env`
-is the STS session key that closes it. The other three arms are covered by
+is the STS session key that closes it. The other two arms are covered by
 `TestEveryAWSPrefixArmIsReachable` in `internal/scan` off the vectors below,
 rather than by a file each: what a corpus file buys over a vector is the walk
 and the validators, and `ASIA` is the arm where that matters, because

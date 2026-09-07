@@ -120,7 +120,7 @@ func corpusBuffers(t *testing.T) [][]byte {
 // would clear no prefilter and compare nothing.
 func randomBuffers(n int) [][]byte {
 	pieces := []string{
-		"AKIA", "ASIA", "ABIA", "ACCA", "A3T", "AIza", "eyJ", "sk-", "sk_live_",
+		"AKIA", "ASIA", "ABIA", "ACCA", "AIza", "eyJ", "sk-", "sk_live_",
 		"rk_live_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_",
 		"xoxa-", "xoxb-", "xoxs-", "T3BlbkFJ", "akia", "Sk-", "GHP_",
 		" ", "-", "_", ".", "\n", "=", "\"", "/", ":", "x", "0",

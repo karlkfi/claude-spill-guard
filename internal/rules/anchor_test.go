@@ -87,8 +87,8 @@ func TestReachIsTheLongestMatch(t *testing.T) {
 		keywords []string
 		want     int
 	}{
-		{`\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16})\b`,
-			[]string{"AKIA", "ASIA", "ABIA", "ACCA", "A3T"}, 20},
+		{`\b((?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16})\b`,
+			[]string{"AKIA", "ASIA", "ABIA", "ACCA"}, 20},
 		{`\b(gh[oprsu]_[A-Za-z0-9]{36})\b`,
 			[]string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_"}, 40},
 		{`\b(github_pat_[A-Za-z0-9_]{70,90})\b`, []string{"github_pat_"}, 101},
