@@ -111,6 +111,63 @@ func TestTheCorpusHoldsTheIndentedShape(t *testing.T) {
 	}
 }
 
+// newlineOnlySeparator is the clause as it stepped from the header to the body
+// before this widening: across `[\r\n]+` and nothing else, at both of the two
+// places it steps. It ships nowhere and is compiled here for the reason
+// genericStep and indentedOnly above are compiled -- a corpus holding no
+// instance of a shape returns the same zero for a rule that is right about it
+// and one that is arbitrarily wrong.
+var newlineOnlySeparator = regexp.MustCompile(
+	`(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)` +
+		`[\r\n]+(?:[ \t]*(?:Proc-Type|DEK-Info):[^\r\n]*[\r\n]+)*[ \t]*[A-Za-z0-9+/=]{32,}`)
+
+// What this widening newly admits, computed rather than approximated by hand:
+// the files the shipped rule reports and the pattern above does not. An
+// approximation can drift from the two patterns it stands between, and this
+// cannot.
+//
+// Both halves are load-bearing. The planted count is what stops the clean
+// corpus's zero being a reading over a corpus with no instance of the shape --
+// which is what it was when Q143 was filed, and why the row refused to widen
+// the rule on it.
+func TestTheCorpusHoldsTheWhitespaceSeparatorShape(t *testing.T) {
+	before := []rules.Rule{{
+		ID:          "private-key-block-newline-separator-only",
+		Family:      rules.Credential,
+		Description: "the body clause as it stepped before the whitespace widening",
+		Regex:       newlineOnlySeparator,
+		Enabled:     true,
+	}}
+	shipped := privateKeyBlock(t)
+
+	for _, half := range []string{"planted", "clean"} {
+		now := walk(t, half, shipped)
+		then := walk(t, half, before)
+		newly := len(now.findings) - len(then.findings)
+		t.Logf("%s: %d finding(s) now, %d before the widening, %d newly admitted",
+			half, len(now.findings), len(then.findings), newly)
+
+		switch half {
+		case "planted":
+			if newly < 1 {
+				t.Error("no planted file separates the header from the body with " +
+					"a whitespace-only line, so the clean corpus's zero says nothing " +
+					"about this axis -- which is the reading that left the axis " +
+					"unexercised in the first place")
+			}
+		case "clean":
+			if newly != 0 {
+				t.Errorf("the widening newly reports %d clean file(s):\n%s",
+					newly, report(now.findings))
+			}
+			if len(now.findings) != 0 {
+				t.Errorf("the shipped rule reports %d clean file(s):\n%s",
+					len(now.findings), report(now.findings))
+			}
+		}
+	}
+}
+
 // pemCase is one layout and whether the shipped rule reports it.
 type pemCase struct {
 	name string
@@ -151,6 +208,27 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 			"-----BEGIN RSA PRIVATE KEY-----\n    " + pemBody + "\n", true},
 		{"indented with tabs rather than spaces",
 			"\t-----BEGIN RSA PRIVATE KEY-----\n\t" + pemBody + "\n", true},
+
+		// What sits between the header and the body, which the clause stepped
+		// across as newlines only. A unified diff prefixes every context line
+		// with a space, so a key quoted in one separates its header from its
+		// body with a line carrying exactly that space.
+		{"a separator line of spaces, then an indented body",
+			"-----BEGIN RSA PRIVATE KEY-----\n   \n    " + pemBody + "\n", true},
+		{"a separator line of spaces, then an un-indented body",
+			"-----BEGIN RSA PRIVATE KEY-----\n   \n" + pemBody + "\n", true},
+		{"a separator line of one space after DEK-Info, as a diff writes it",
+			"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n" +
+				"DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n \n" + pemBody + "\n", true},
+		{"a separator line of tabs",
+			"-----BEGIN RSA PRIVATE KEY-----\n\t\t\n" + pemBody + "\n", true},
+
+		// The separator has to reach a line ending, which is what keeps this
+		// row false. `[ \t\r\n]+` -- the one-character widening -- admits it,
+		// and no PEM a toolchain writes puts the body on the header's line, so
+		// admitting it would widen the rule further than the defect asked.
+		{"the body on the header's own line",
+			"-----BEGIN RSA PRIVATE KEY----- " + pemBody + "\n", false},
 
 		{"prose quoting a header inline",
 			"An unencrypted PKCS#1 key opens with `-----BEGIN RSA PRIVATE KEY-----`\n" +

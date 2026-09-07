@@ -210,6 +210,15 @@ var planted = map[string]string{
 	// the same leading whitespace the body does -- so a widening that admits
 	// only an indented body leaves this file unreported.
 	"private-key-block-indented.yaml": "private-key-block",
+	// And a fourth, for the axis the three above hold constant: what sits
+	// between the header and the body. All three separate them with a bare
+	// empty line, which is what every toolchain writes. A unified diff
+	// prefixes each context line with a space, so the same key inside a patch
+	// separates them with a line carrying one space -- and the clause stepped
+	// across `[\r\n]+` only, so it did not cross it. This file is `git diff`
+	// output rather than a hand-written patch, because the producer is the
+	// evidence.
+	"private-key-block-in-diff.patch": "private-key-block",
 	"jwt.txt":                         "jwt",
 }
 

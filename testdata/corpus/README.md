@@ -49,25 +49,33 @@ They are here as literals rather than assembled at scan time because the thing
 under test is a buffer, and a fixture that only exists inside a test is a
 fixture nobody can read.
 
-Three files carry `private-key-block`, because the rule has three layouts to
+Four files carry `private-key-block`, because the rule has four layouts to
 reach. `private-key-block.pem` is a body on the line after the header;
 `private-key-block-rfc1421.pem` is the encrypted PKCS#1 form, with `Proc-Type:`
 and `DEK-Info:` in between, which is what `openssl rsa -aes128 -p` and
-`ssh-keygen -m PEM -N` write; and `private-key-block-indented.yaml` is that same
-encrypted key inside a Kubernetes secret's block scalar, indented by four.
+`ssh-keygen -m PEM -N` write; `private-key-block-indented.yaml` is that same
+encrypted key inside a Kubernetes secret's block scalar, indented by four; and
+`private-key-block-in-diff.patch` is that manifest quoted in a unified diff,
+where every context line takes a space prefix and the key's blank separator
+line becomes a line carrying one.
 
 The third is the encrypted layout deliberately. Indentation and encryption are
 one fixture rather than two because a widening that admits an indented body and
 not indented `Proc-Type:` and `DEK-Info:` lines leaves this file reporting
 nothing — driven, and the reason it is not a plain indented key. Its body is
-the other two's: all three carry the same two lines, which is the one place
+the other three's: all four carry the same two lines, which is the one place
 fixtures here share a literal on purpose. What varies across them is the layout
 around the body, so a body that varied too would be noise. That is the reverse of
 the rule **Adding to it** gives below for `aws-access-key-id-utf16le.env` —
 "its key is its own". Those two differ in *encoding*, so an identical literal
-would make an edit to one a silent break in the other; these three differ only
+would make an edit to one a silent break in the other; these four differ only
 in the layout around a body that has to stay identical for the comparison to
 mean anything.
+
+The fourth is `git diff` output rather than a hand-written patch, and that is
+the point of it: a patch somebody typed would be a guess about what the format
+does, where this one is the producer. Its preamble records the command and the
+git version.
 
 Two further layouts cannot be files at all — a CRLF fixture depends on what git
 does to it on checkout — so `TestPrivateKeyBlockAcrossThePEMLayouts` in
