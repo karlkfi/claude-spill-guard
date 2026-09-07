@@ -1632,6 +1632,188 @@ jobs:
             exit 1
           fi
 
+  release-scope:
+    runs-on: ubuntu-latest
+    # The same instrument as release-claims, and the same permission: reading
+    # releases is the whole of what it needs. The store half reads tracked
+    # files, so the default shallow checkout is enough -- nothing here measures
+    # this branch against a merge base.
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: No release-scope record survives the release it was written for
+        run: make release-scope
+
+  # This gate is a check over an *absence*, which is the shape that most easily
+  # passes for the wrong reason: a run that found no docs/plan/ at all prints
+  # the same clean line a correctly retired one prints, and today the tree is
+  # in exactly that state for the plan half. So nothing in the script can stand
+  # in for this job -- the assertion that the gate can fire at all is here or
+  # nowhere.
+  #
+  # v0.1.0 is the planted version throughout, and it is read independently
+  # before each arm rather than taken from the gate's own output. Deleting a
+  # published release is the one thing docs/development/release-process.md says
+  # not to do, so the fixture is stable; and if it ever stops being true, these
+  # arms fail saying so rather than passing over a mutation that did nothing.
+  release-scope-mutation-control:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The gate's clean answer and a gate that read nothing print alike, so
+      # the first thing to establish is that the release reader works at all.
+      # cli/cli has releases, so an empty answer from it is the instrument.
+      - name: The release probe can come back non-empty
+        run: |
+          gh release list --repo cli/cli --limit 1 --json tagName --jq '.[].tagName' > probe.log 2>&1; rc=$?
+          echo "probe exit: $rc"
+          cat probe.log
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the release probe exited $rc against a repository that has releases, so an empty answer for this one says nothing" >&2
+            exit 1
+          fi
+          if [ ! -s probe.log ]; then
+            echo "::error::the release probe came back empty against a repository that has releases, so it cannot tell no record from no reading" >&2
+            exit 1
+          fi
+
+      # Every red below is its own mutation's only if this is green first.
+      - name: The tree is green before anything below mutates it
+        run: make release-scope
+
+      # The defect the gate exists for: the plan doc for a release that has
+      # already happened, still in the tree. Written here rather than copied
+      # from docs/plan/, which is empty for most of a release cycle and gone
+      # entirely between one plan doc and the next -- an arm resting on a file
+      # somebody else's PR is free to delete is a control that measures the
+      # calendar. release-claims learned that on this repository.
+      - name: A plan doc for a released version must fail the gate
+        run: |
+          gh release view v0.1.0 --json tagName > /dev/null 2>&1 || {
+            echo "::error::v0.1.0 does not read as released, so planting a plan doc for it tests nothing" >&2
+            exit 1
+          }
+          printf '# What v0.1.0 was for\n\nPlanted by the mutation control.\n' > docs/plan/v0.1.0.md
+          git add docs/plan/v0.1.0.md
+          if ! git ls-files --error-unmatch docs/plan/v0.1.0.md > /dev/null 2>&1; then
+            echo "::error::the mutation changed nothing -- the plan doc is not in the tree the gate reads" >&2
+            exit 1
+          fi
+          make release-scope > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git rm -q -f docs/plan/v0.1.0.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed over a plan doc naming a release that exists" >&2
+            exit 1
+          fi
+          if ! grep -q '^stale plan: docs/plan/v0\.1\.0\.md:' mutant.log; then
+            echo "::error::the gate failed, but not on the planted plan doc" >&2
+            exit 1
+          fi
+
+      # The other half of the same record. A row keeps its release label after
+      # the tag as easily as a file does, and `render --label` is then showing
+      # a scope nobody is deciding. A synthetic row rather than an edit to a
+      # real one, for the reason above: no arm here should name a file another
+      # PR can retire.
+      - name: A row labelled for a released version must fail the gate
+        run: |
+          gh release view v0.1.0 --json tagName > /dev/null 2>&1 || {
+            echo "::error::v0.1.0 does not read as released, so planting a label for it tests nothing" >&2
+            exit 1
+          }
+          printf -- '---\nid: Q9999\nrank: zzzz\nlabels:\n    - v0.1.0\nstatus: ready\nsize: S\n---\n\n# Planted by the mutation control\n\nRemoved by the step that wrote it.\n' > docs/queue/Q9999.md
+          git add docs/queue/Q9999.md
+          if ! git ls-files --error-unmatch docs/queue/Q9999.md > /dev/null 2>&1; then
+            echo "::error::the mutation changed nothing -- the row is not in the store the gate reads" >&2
+            exit 1
+          fi
+          make release-scope > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git rm -q -f docs/queue/Q9999.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed over a row labelled for a release that exists" >&2
+            exit 1
+          fi
+          if ! grep -q '^stale label: docs/queue/Q9999\.md:' mutant.log; then
+            echo "::error::the gate failed, but not on the planted label" >&2
+            exit 1
+          fi
+
+      # Precision, and the direction a red-only control cannot reach: a plan
+      # doc for a version nobody has released is the whole point of the
+      # arrangement, so it has to stay green. Without this the gate is a ban on
+      # docs/plan/ and the record it protects can never be written. `-ne 0`
+      # here, between `-eq 0` neighbours, is deliberate rather than a typo.
+      - name: A plan doc for an unreleased version must not fail the gate
+        run: |
+          if gh release view v99.0.0 --json tagName > /dev/null 2>&1; then
+            echo "::error::v99.0.0 reads as released, so this arm is no longer the unreleased case" >&2
+            exit 1
+          fi
+          printf '# What v99.0.0 is for\n\nPlanted by the mutation control.\n' > docs/plan/v99.0.0.md
+          git add docs/plan/v99.0.0.md
+          if ! git ls-files --error-unmatch docs/plan/v99.0.0.md > /dev/null 2>&1; then
+            echo "::error::the mutation changed nothing -- the plan doc is not in the tree the gate reads" >&2
+            exit 1
+          fi
+          make release-scope > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git rm -q -f docs/plan/v99.0.0.md
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the gate failed on a plan doc for a version no release exists for, which is what every plan doc is while it is worth reading" >&2
+            exit 1
+          fi
+
+      # The silent direction, and the one this design is most likely to hide.
+      # A read that failed and was taken for "no release exists" reports every
+      # record in the tree as correctly retired. Both readers are broken here:
+      # an unusable token for `gh`, and a remote that resolves to nothing for
+      # `git ls-remote`.
+      - name: A release state that cannot be read must not read as an answer
+        run: |
+          gh release view v0.1.0 --json tagName > /dev/null 2>&1 || {
+            echo "::error::v0.1.0 does not read as released before the readers are broken, so a red below says nothing about breaking them" >&2
+            exit 1
+          }
+          printf '# What v0.1.0 was for\n\nPlanted by the mutation control.\n' > docs/plan/v0.1.0.md
+          git add docs/plan/v0.1.0.md
+          git remote set-url origin https://127.0.0.1:1/nothing.git
+          GH_TOKEN=not-a-token GH_CONFIG_DIR=/nonexistent \
+            make release-scope > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git rm -q -f docs/plan/v0.1.0.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the check reported a verdict about the tree with neither reader able to say which versions are released" >&2
+            exit 1
+          fi
+          if ! grep -q 'the release state could not be read' mutant.log; then
+            echo "::error::the check failed, but not by saying the state was unreadable -- an unreadable state must not read as no release" >&2
+            exit 1
+          fi
+          if grep -q '^stale plan:\|^stale label:' mutant.log; then
+            echo "::error::the check judged the tree anyway" >&2
+            exit 1
+          fi
+
   channel-claims:
     runs-on: ubuntu-latest
     steps:

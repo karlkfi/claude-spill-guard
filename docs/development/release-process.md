@@ -171,9 +171,12 @@ matching label from every row still carrying it, in one docs-only commit:
 git rm docs/plan/vX.Y.Z.md
 ```
 
-Nothing checks this. It is a step somebody performs by reading it back, which
-is the construction this repository has already paid for once — see *What the
-workflow asserts, and what it does not*.
+The `release-scope` gate checks this, on every pull request rather than in the
+release job: a tag that has just published still has its plan doc, legitimately,
+so a check there would fail every correct release. What that costs is a red
+branch between the publish and the pull request that takes the deletion —
+which is the pressure rather than a defect, and the repair is the two steps
+above.
 
 ## Rehearsing without spending a version number
 

@@ -671,6 +671,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
 | `docs` | every relative link in the repo markdown resolves |
 | `release-claims` | the prose agrees with whether a release exists |
+| `release-scope` | no release-scope record survives the release it was written for |
 | `channel-claims` | no message names an install channel that does not exist |
 | `plugin-version` | the two plugin manifests carry the same version, so a release can be delivered |
 | `queue` | the backlog store format holds, every filed id holds a claim, no index is committed |

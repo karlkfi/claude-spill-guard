@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims channel-claims plugin-version queue action-pins test precision no-deps no-network vulns cross-compile
+GATES := doctor gate-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims release-scope channel-claims plugin-version queue action-pins test precision no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -23,6 +23,7 @@ launcher.desc       := the hook launcher is executable in the index, resolves a 
 vendor.desc         := every vendored copy still hashes to the digest scripts/README.md declares
 docs.desc           := every relative link in the repo markdown resolves
 release-claims.desc := the prose agrees with whether a release exists
+release-scope.desc  := no release-scope record survives the release it was written for
 channel-claims.desc := no message names an install channel that does not exist
 plugin-version.desc := the two plugin manifests carry the same version, so a release can be delivered
 queue.desc          := the backlog store format holds, every filed id holds a claim, no index is committed
@@ -176,6 +177,13 @@ docs:
 # alone is the wrong answer for prose about what a user can download.
 release-claims:
 	$(PYTHON) scripts/check-release-claims.py
+
+# The same two facts release-claims reads, one join further on: which versions
+# a release exists for, and what the tree still carries for each. A plan doc or
+# a `vX.Y.Z` label outliving its tag is the failure, and it is silent -- the
+# record reads as current and nothing else opens it.
+release-scope:
+	$(PYTHON) scripts/check-release-scope.py
 
 # Reads only what the install scripts and the launcher print. The tap named in
 # install.sh's own header is deliberate -- it is the argument for the refusal's
