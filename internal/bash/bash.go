@@ -88,6 +88,17 @@ type Segment struct {
 	// into it so the ported rule stays upstream's and the consumer decides
 	// what a conditional segment is worth; Inputs is the precedent.
 	Conditional string
+	// CaseArm is true for a segment bash runs only if a `case` pattern
+	// matched: everything between the `)` that ends the first pattern and the
+	// `esac` that closes the statement, patterns of later arms included. A
+	// second field rather than a third value of Conditional, because an arm is
+	// reached through a match rather than an operator, and a segment inside one
+	// carries its own `&&` or `||` that folding would lose. Upstream has
+	// neither the field nor the reading -- an arm it never enters costs it at
+	// most a prompt -- where this resolver opens the file the arm's assignment
+	// names: `case x in y) P=/case;; esac; cat $P/f` read `/case/f` on a call
+	// where bash matched nothing (Q151).
+	CaseArm bool
 	// Pipe numbers the pipeline this segment belongs to, which is what tells a
 	// `grep` filtering another command's output apart from a `grep` reading
 	// ordinary files.
@@ -135,6 +146,17 @@ func Segments(cmd string) ([]Segment, error) {
 		paren     int
 		pipe      int
 		prevSep   string
+		// One entry per open `case`, in the states scanDollarParen tracks it
+		// in: "in" | "pat" | "body". The two read against each other on
+		// purpose -- there the question is which `)` closes a substitution,
+		// here it is which segments an arm holds -- and neither is upstream's,
+		// whose group loop has no case handling at all. Segment.CaseArm has
+		// what this costs and why the port takes it.
+		clauses []string
+		// Whether the next word is where bash reads a command name, so `case`
+		// in `echo case` stays an operand. cmdPosKeywords is the same set
+		// scanDollarParen keys on.
+		cmdPos = true
 	)
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
@@ -142,7 +164,8 @@ func Segments(cmd string) ([]Segment, error) {
 			if len(cur) > 0 || len(curRedir) > 0 {
 				persists := paren == 0 && prevSep != "|" &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
-				segs = append(segs, Segment{cur, curRedir, curInputs, persists, conditional(prevSep), pipe})
+				segs = append(segs, Segment{cur, curRedir, curInputs, persists,
+					conditional(prevSep), inCaseArm(clauses), pipe})
 				cur, curRedir, curInputs = nil, nil, nil
 			}
 			switch t {
@@ -152,11 +175,22 @@ func Segments(cmd string) ([]Segment, error) {
 				if paren > 0 {
 					paren--
 				}
+				// A case pattern's `)` needs no opener, so it is the one
+				// separator that means something beyond the depth: it ends the
+				// pattern and opens the arm. Read AFTER the flush above, so
+				// the `case x in y` header -- which the same `)` terminates --
+				// is not itself marked. bash's optional `(` opener balanced
+				// the depth just above, and a `)` in an arm's body finds the
+				// clause already past "pat" and changes nothing.
+				if n := len(clauses); n > 0 && clauses[n-1] == "pat" {
+					clauses[n-1] = "body"
+				}
 			}
 			if t != "|" {
 				pipe++
 			}
 			prevSep = t
+			cmdPos = true
 			i++
 			continue
 		}
@@ -207,13 +241,53 @@ func Segments(cmd string) ([]Segment, error) {
 			continue
 		}
 		cur = append(cur, t)
+		cmdPos = trackCase(&clauses, t, cmdPos)
 		i++
 	}
 	if len(cur) > 0 || len(curRedir) > 0 {
 		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && prevSep != "|",
-			conditional(prevSep), pipe})
+			conditional(prevSep), inCaseArm(clauses), pipe})
 	}
 	return segs, nil
+}
+
+// trackCase advances the `case` clause states for one word token and reports
+// whether the next word is still in command position. The three arms and their
+// order are scanDollarParen's, which is what keeps the two readings the same:
+// a clause waiting for its `in` sees nothing else, an `esac` closes the
+// innermost clause that has one, and `case` opens one only in command
+// position. An unterminated `case` leaves its clause open, so every segment
+// after the pattern stays marked -- the fail-closed direction.
+func trackCase(clauses *[]string, word string, cmdPos bool) bool {
+	n := len(*clauses)
+	state := ""
+	if n > 0 {
+		state = (*clauses)[n-1]
+	}
+	switch {
+	case state == "in":
+		if word == "in" {
+			(*clauses)[n-1] = "pat"
+		}
+	case n > 0 && word == "esac":
+		*clauses = (*clauses)[:n-1]
+	case word == "case" && cmdPos:
+		*clauses = append(*clauses, "in")
+	}
+	return cmdPos && cmdPosKeywords[word]
+}
+
+// inCaseArm reports whether any open `case` is past its first pattern, which
+// is what makes the segment being flushed one bash runs only on a match. Any
+// rather than the innermost: a nested `case` header sits inside the outer
+// arm, and so does everything under it.
+func inCaseArm(clauses []string) bool {
+	for _, state := range clauses {
+		if state == "body" {
+			return true
+		}
+	}
+	return false
 }
 
 // isDigits stands for Python's str.isdigit, which is what decides whether the

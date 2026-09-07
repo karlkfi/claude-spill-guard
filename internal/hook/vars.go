@@ -204,8 +204,9 @@ func (v *vars) candidates(tok string) ([]string, bool) {
 //     poisoned outright and what was tentative before it is dropped: `false
 //     && P=/x || cat $P/f` runs the cat on the branch where P was never set.
 //
-// A `case` arm is not an and-or list and is read as unconditional, which is
-// Q151's class and is pinned in vars_test.go.
+// A `case` arm is not an and-or list, and is read through Segment.CaseArm
+// rather than through this operator: enter treats one as `||` does and
+// persists refuses it outright, so what an arm assigns never leaves it.
 type andOr struct {
 	settled      bool
 	tentative    []string
@@ -215,7 +216,15 @@ type andOr struct {
 // enter opens the segment. One reached through neither operator starts a new
 // list; `||` ends certainty for the rest of this one. Both drop what was
 // tentative, because what follows runs on branches where it was never set.
+// A `case` arm is checked ahead of both, because it holds whatever operator the
+// segment is also reached through: `case x in y) cd a && P=/case;; esac` is an
+// `&&` inside an arm, and the arm is what decides.
 func (l *andOr) enter(segment bash.Segment, v *vars, dirUnknown *bool) {
+	if segment.CaseArm {
+		l.close(v, dirUnknown)
+		l.settled = false
+		return
+	}
 	switch segment.Conditional {
 	case "":
 		l.close(v, dirUnknown)
@@ -238,9 +247,8 @@ func (l *andOr) close(v *vars, dirUnknown *bool) {
 	l.tentative, l.tentativeDir = nil, false
 }
 
-// persists is whether an assignment in segment may be applied at all.
 func (l *andOr) persists(segment bash.Segment) bool {
-	return segment.Persists && segment.Conditional != "||"
+	return segment.Persists && segment.Conditional != "||" && !segment.CaseArm
 }
 
 // binds is whether a `for` header here may record its candidate set. Narrower
