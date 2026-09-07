@@ -46,13 +46,7 @@ func override(call payload, event Event) (why string, present bool) {
 		return "", false
 	}
 	for _, segment := range segments {
-		// The assignments are what StripEnvPrefix drops, so they are the head
-		// it did not return. Taking them by difference rather than by matching
-		// the shape again keeps the one assignment regex in internal/bash,
-		// which is a port and is not diverged from here.
-		head := bash.StripShKeywords(segment.Tokens)
-		rest := bash.StripEnvPrefix(head)
-		for _, assignment := range head[:len(head)-len(rest)] {
+		for _, assignment := range envPrefix(segment.Tokens) {
 			name, value, _ := strings.Cut(assignment, "=")
 			if name == overrideVar {
 				return value, true

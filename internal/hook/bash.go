@@ -12,11 +12,15 @@ import (
 	"github.com/karlkfi/claude-spill-guard/internal/readers"
 )
 
-// movesCwd are the builtins that change the working directory, so a relative
-// operand after one of them names a file this cannot identify. Conservative in
-// the direction that blocks: any of them means unresolvable, whether or not
-// this particular invocation would have moved anywhere.
-var movesCwd = map[string]bool{"cd": true, "pushd": true, "popd": true}
+// cdSubst is the two substitutions a `cd` target may carry and still be
+// followed, because their value is computable here without running anything:
+// `$(pwd)` is the tracked directory itself and `$(git rev-parse
+// --show-toplevel)` is its nearest ancestor holding a `.git` entry. Upstream's
+// CD_SUBST. Anything else with a `$` in it is a target this cannot know.
+var cdSubst = map[string]string{
+	"$(git rev-parse --show-toplevel)": "toplevel",
+	"$(pwd)":                           "pwd",
+}
 
 // maxSubstDepth bounds the command-substitution recursion. internal/bash
 // returns only the outermost bodies and says the cap belongs to whoever drives
@@ -64,11 +68,17 @@ func bashTargets(command, cwd string) ([]target, error) {
 	targets := []target{{commandLabel, []byte(command)}}
 	seen := make(map[string]bool)
 
+	// A body queued for a later pass starts from the directory its parent
+	// ended in, or from none if the parent moved at all: a backtick or heredoc
+	// body has no position relative to the cd, so it cannot be told whether it
+	// runs before or after the move.
 	type job struct {
-		text  string
-		depth int
+		text       string
+		depth      int
+		dir        string
+		dirUnknown bool
 	}
-	queue := []job{{command, 0}}
+	queue := []job{{command, 0, cwd, false}}
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
@@ -89,24 +99,25 @@ func bashTargets(command, cwd string) ([]target, error) {
 			return nil, &shapeRefusal{name}
 		}
 
-		// Anything that moves the working directory changes what a later
-		// relative operand means, and this port does not carry the tracker the
-		// guards upstream key on. So a relative operand after one is a path
-		// this cannot settle rather than one it can guess at.
-		//
-		// `cd` is not the only name for it. `pushd` and `popd` move too, and
-		// bare `pushd` swaps the top two entries and moves as well -- driven,
-		// a `pushd elsewhere && cat rel.env` resolved the operand against the
-		// payload's cwd, scanned a file the command never reads, and allowed
-		// the call with `cd` blocking the same shape in the same run.
-		movedCwd := false
+		// The directory a relative operand resolves against, advanced through
+		// the segments in order: `cd a && cat x && cd b && cat y` reads x under
+		// a and y under b, and a `$(…)` body Segments flattened sits after the
+		// cd it follows. The tracker is upstream's, from the group loop in
+		// bash-workspace-guard.py, and it loses the directory the same way -- a
+		// move with no literal to follow marks it unknown, and a relative
+		// operand after that is a path this cannot settle rather than one it
+		// guesses at. Where this port loses it and upstream does not, follow
+		// says so at the arm.
+		dir, dirUnknown := cur.dir, cur.dirUnknown
+		moved := false
 		for i, segment := range segments {
 			tokens := bash.StripEnvPrefix(bash.StripShKeywords(segment.Tokens))
 			if len(tokens) == 0 {
 				continue
 			}
-			if movesCwd[filepath.Base(tokens[0])] {
-				movedCwd = true
+			if kind, arg := classifyCd(tokens); kind != "" {
+				moved = true
+				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment)
 				continue
 			}
 			operands, known := readers.Files(tokens)
@@ -138,7 +149,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// invoked as /tmp/<a key>/cat reports `cat`.
 			command := filepath.Base(tokens[0])
 			for _, operand := range operands {
-				path, err := resolve(operand, cwd, movedCwd)
+				path, err := resolve(operand, dir, dirUnknown)
 				if err != nil {
 					return nil, fmt.Errorf("in the %q here, %w", command, err)
 				}
@@ -264,7 +275,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			bodies = append(bodies, bash.CommandSubstitutions(body, false)...)
 		}
 		for _, body := range bodies {
-			queue = append(queue, job{body, cur.depth + 1})
+			queue = append(queue, job{body, cur.depth + 1, cur.dir, cur.dirUnknown || moved})
 		}
 	}
 	return targets, nil
@@ -298,7 +309,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 // the table's own keys, a closed set this repo authored, rather than anything
 // the caller chose. What that costs is which operand on a command with several,
 // and the reason reaching the API is what the cost buys.
-func resolve(operand, cwd string, movedCwd bool) (string, error) {
+func resolve(operand, cwd string, cwdUnknown bool) (string, error) {
 	switch {
 	case operand == "" || operand == "-":
 		// `-` is stdin to every reader in the table, not a file.
@@ -316,24 +327,192 @@ func resolve(operand, cwd string, movedCwd bool) (string, error) {
 			return "", errors.New("a file operand names another user's home, " +
 				"which this cannot resolve")
 		}
-		home, err := os.UserHomeDir()
-		if err != nil {
+		home := expandTilde(operand)
+		if home == operand {
 			return "", errors.New("a file operand is home-relative and there is " +
 				"no home directory to resolve it against")
 		}
-		return filepath.Join(home, strings.TrimPrefix(operand, "~")), nil
+		return home, nil
 	}
 
 	if filepath.IsAbs(operand) {
 		return operand, nil
 	}
-	if movedCwd {
+	if cwdUnknown {
 		return "", errors.New("a file operand is relative and the command " +
-			"changes directory first, so which file it names is not settled here")
+			"changes directory first to somewhere this cannot follow, so which " +
+			"file it names is not settled here")
 	}
 	if cwd == "" {
 		return "", errors.New("a file operand is relative and the payload names " +
 			"no working directory to resolve it against")
 	}
 	return filepath.Join(cwd, operand), nil
+}
+
+// classifyCd is the port of upstream's classify_cd. It says what a cd-family
+// segment does to the working directory:
+//
+//	"arg", path     cd or pushd to a literal target, resolvable here
+//	"subst", kind   cd or pushd to a cdSubst substitution, for follow to compute
+//	"unknown", ""   a move with nothing to follow: bare cd, `cd -`, popd,
+//	                `pushd +N`, a `~user` or `$`-bearing target
+//	"", ""          not a cd-family command
+//
+// Two targets are "unknown" here and "arg" upstream, because each puts the
+// shell somewhere other than where the literal says and the literal is what
+// follow would go to. `-P` resolves `..` through symlinks where filepath.Join
+// resolves it lexically, which is bash's default and the only reading taken
+// here. `pushd -n` rotates the stack and does not move at all. A backtick in
+// the target is the third: upstream tests for `$` alone, and a backtick body
+// comes through the lexer with the backticks still on it.
+func classifyCd(tokens []string) (kind, arg string) {
+	if len(tokens) == 0 {
+		return "", ""
+	}
+	name := filepath.Base(tokens[0])
+	if name != "cd" && name != "pushd" && name != "popd" {
+		return "", ""
+	}
+	if name == "popd" {
+		return "unknown", "" // stack not tracked
+	}
+	for _, t := range tokens[1:] {
+		if strings.HasPrefix(t, "-") {
+			if strings.Contains(t, "P") || (name == "pushd" && strings.Contains(t, "n")) {
+				return "unknown", ""
+			}
+			continue // option flag, keep looking
+		}
+		if sub, ok := cdSubst[normalizeSubst(t)]; ok {
+			return "subst", sub
+		}
+		t = expandTilde(t) // `cd ~/proj` tracks via home
+		if strings.HasPrefix(t, "+") || strings.HasPrefix(t, "~") || strings.ContainsAny(t, "$`") {
+			return "unknown", ""
+		}
+		return "arg", t
+	}
+	return "unknown", "" // bare `cd` -> $HOME
+}
+
+// follow moves the tracked directory the way the segment's cd would, or loses
+// it. Four arms lose it here and keep it upstream, each in the direction that
+// records the operand after it rather than resolving it against a directory
+// the shell may not be in:
+//
+//   - a move in a subshell, a pipeline stage or a background job (Persists
+//     false) reaches the commands inside that subshell and not the ones after
+//     it, and which later segments are inside is not in the segment model.
+//     Driven before any tracker existed: `pushd elsewhere && cat rel.env`
+//     resolved rel.env against the payload's cwd, scanned a file the command
+//     never reads, and allowed the call.
+//   - a relative target while the directory is already lost has nothing to
+//     join to. Upstream joins it to the stale one and calls it found.
+//   - a target that is not a directory here. Under `;` the shell stays where
+//     it was and under `&&` the next command never runs, and the operator is
+//     not in the segment model either.
+//   - CDPATH, in the environment or assigned on the segment, which bash
+//     searches before the directory named. The hook and the tool inherit one
+//     environment from Claude Code, so the reading here is the tool's.
+func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, bool) {
+	switch {
+	case !segment.Persists:
+		return dir, true
+	case kind == "arg":
+		if !filepath.IsAbs(arg) {
+			if unknown || dir == "" || os.Getenv("CDPATH") != "" || assigns(segment.Tokens, "CDPATH") {
+				return dir, true
+			}
+			arg = filepath.Join(dir, arg)
+		}
+		if info, err := os.Stat(arg); err != nil || !info.IsDir() {
+			return dir, true
+		}
+		return arg, false
+	case kind == "subst" && !unknown && dir != "":
+		if arg == "pwd" {
+			return dir, false
+		}
+		if top := gitToplevel(dir); top != "" {
+			return top, false
+		}
+	}
+	return dir, true
+}
+
+// assigns reports whether the segment's inline prefix assigns name.
+func assigns(tokens []string, name string) bool {
+	for _, assignment := range envPrefix(tokens) {
+		if strings.HasPrefix(assignment, name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+// envPrefix is the inline `NAME=VALUE` assignments at the head of a segment.
+// They are what StripEnvPrefix drops, so they are the head it did not return.
+// Taking them by difference rather than by matching the shape again keeps the
+// one assignment regex in internal/bash, which is a port and is not diverged
+// from here.
+func envPrefix(tokens []string) []string {
+	head := bash.StripShKeywords(tokens)
+	rest := bash.StripEnvPrefix(head)
+	return head[:len(head)-len(rest)]
+}
+
+// expandTilde is upstream's expand_tilde: a leading `~` or `~/…` becomes the
+// home directory, which bash resolves deterministically, and anything else
+// comes back unchanged for the caller to refuse -- `~user`, `~+`, `~-`, or a
+// `~` with no home to resolve against.
+func expandTilde(tok string) string {
+	if tok == "~" || strings.HasPrefix(tok, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, tok[1:])
+		}
+	}
+	return tok
+}
+
+// normalizeSubst collapses the whitespace bash allows inside `$( … )` so a
+// target compares against cdSubst's keys. A token that still matches no key is
+// simply not whitelisted.
+func normalizeSubst(tok string) string {
+	t := strings.Join(strings.Fields(tok), " ")
+	if strings.HasPrefix(t, "$( ") {
+		t = "$(" + t[3:]
+	}
+	if strings.HasSuffix(t, " )") {
+		t = t[:len(t)-2] + ")"
+	}
+	return t
+}
+
+// gitToplevel is the value `git rev-parse --show-toplevel` prints from start:
+// the nearest ancestor, start included, holding a `.git` entry -- a directory
+// for a checkout, a file for a worktree. Empty when no boundary is found, or
+// when a git-discovery variable is set, since those move git's answer away
+// from the plain walk. A filesystem walk and nothing else: os/exec is
+// forbidden across this build graph, which is also why cdSubst is two long.
+func gitToplevel(start string) string {
+	// Three literal reads rather than a loop over the names, because the
+	// privacy gate derives PRIVACY.md's list of what the binary reads from
+	// the source, and a variable it cannot name is one the page cannot say.
+	if os.Getenv("GIT_DIR") != "" || os.Getenv("GIT_WORK_TREE") != "" ||
+		os.Getenv("GIT_CEILING_DIRECTORIES") != "" {
+		return ""
+	}
+	for d := start; ; {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return ""
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return ""
+		}
+		d = parent
+	}
 }

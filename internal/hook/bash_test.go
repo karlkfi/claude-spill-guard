@@ -125,13 +125,14 @@ func TestAnOperandThatCannotBeResolvedDefers(t *testing.T) {
 		{"a substitution among the operands", "cat $(echo hi) f", "expands at run time"},
 		{"a glob", "cat *.env", "is a glob"},
 		{"another user's home", "cat ~someone/.aws/credentials", "another user's home"},
-		{"relative after a cd", "cd /tmp && cat deploy.env", "changes directory first"},
-		// `cd` is not the only name for it. Driven before the fix, a `pushd`
-		// resolved the operand against the payload's cwd, scanned a file the
-		// command never reads, and allowed the call -- with `cd` blocking the
-		// same shape in the same run.
-		{"relative after a pushd", "pushd /tmp && cat deploy.env", "changes directory first"},
-		{"relative after a popd", "popd && cat deploy.env", "changes directory first"},
+		// The moves the tracker cannot follow. A literal target is followed
+		// now -- TestARelativeOperandAfterALiteralCdIsResolved -- so these are
+		// the shapes with nothing to follow: bash's `cd -` reads OLDPWD, and
+		// the directory stack `pushd` and `popd` rotate is not tracked here,
+		// as it is not upstream.
+		{"relative after cd -", "cd - && cat deploy.env", "cannot follow"},
+		{"relative after a bare pushd", "pushd && cat deploy.env", "cannot follow"},
+		{"relative after a popd", "popd && cat deploy.env", "cannot follow"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
@@ -429,4 +430,217 @@ func TestAProcessSubstitutionIsNotAnInput(t *testing.T) {
 	if code != 0 || stdout != "" {
 		t.Errorf("exit %d, stdout %q, want a silent 0 (stderr: %q)", code, stdout, stderr)
 	}
+}
+
+// A literal `cd` target is a path this process can compute, so the relative
+// operand after it gets a verdict instead of a coverage record. The key is
+// planted in a directory the payload's cwd is not, so each arm blocks only if
+// the tracker followed the move: resolved against the payload's cwd the file
+// is absent, which allows silently.
+func TestARelativeOperandAfterALiteralCdIsResolved(t *testing.T) {
+	dir, name := planted(t)
+	parent, base := filepath.Dir(dir), filepath.Base(dir)
+	for _, command := range []string{
+		"cd " + base + " && cat " + name,
+		"cd " + dir + " && cat " + name,
+		"cd -- " + base + " && cat " + name,
+		"cd -L " + base + " && cat " + name,
+		"pushd " + base + " && cat " + name,
+		"cd " + base + "; cat " + name,
+		"cd ./" + base + "/. && cat " + name,
+		// An absolute target is followed even after a move that lost the
+		// directory, which is what `cd -` does.
+		"cd - && cd " + dir + " && cat " + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, parent))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file under the cd target", reason)
+			}
+		})
+	}
+}
+
+// A quoted target is one token to the lexer, and the space is the case that
+// tells a tracker reading tokens from one re-splitting the string.
+func TestACdToAQuotedTargetIsFollowed(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "my dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "my dir", "deploy.env"),
+		[]byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "cd 'my dir' && cat deploy.env", root))
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "deploy.env") {
+		t.Errorf("reason = %q, want the file under the quoted target", reason)
+	}
+}
+
+// The directory advances through the segments in order, so two operands with
+// the same name resolve against two directories. The key is in one of them
+// and the other holds a clean file of the same name; a tracker stuck on the
+// first move would read the clean file twice and allow.
+func TestEachSegmentResolvesAgainstItsOwnDirectory(t *testing.T) {
+	for _, planted := range []string{"a", "b"} {
+		t.Run("key in "+planted, func(t *testing.T) {
+			root := t.TempDir()
+			for _, sub := range []string{"a", "b"} {
+				if err := os.Mkdir(filepath.Join(root, sub), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				body := "nothing here\n"
+				if sub == planted {
+					body = "AWS_ACCESS_KEY_ID=" + secret + "\n"
+				}
+				if err := os.WriteFile(filepath.Join(root, sub, "deploy.env"), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			command := "cd a && cat deploy.env && cd ../b && cat deploy.env"
+			code, stdout, stderr := drive(t, bashCall(t, command, root))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, filepath.Join(planted, "deploy.env")) {
+				t.Errorf("reason = %q, want the file under %s", reason, planted)
+			}
+		})
+	}
+}
+
+// The two substitutions a target may carry and still be followed, because
+// their value is computable here without running anything: `$(pwd)` is the
+// tracked directory and `$(git rev-parse --show-toplevel)` is its nearest
+// ancestor holding a `.git` entry. The quoted form is the one the global
+// working agreement tells sessions to write, and it is the one that arrives
+// as a single token -- unquoted, Segments splits the body out and the target
+// is `$(`, which stays unfollowed.
+func TestAWhitelistedSubstitutionCdIsFollowed(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{".git", "sub"} {
+		if err := os.Mkdir(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "deploy.env"),
+		[]byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(root, "sub")
+	for _, command := range []string{
+		`cd "$(git rev-parse --show-toplevel)" && cat deploy.env`,
+		`cd "$( git  rev-parse   --show-toplevel )" && cat deploy.env`,
+		`pushd "$(git rev-parse --show-toplevel)" && cat deploy.env`,
+		`cd "$(pwd)" && cat ../deploy.env`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, sub))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, "deploy.env") {
+				t.Errorf("reason = %q, want the file at the toplevel", reason)
+			}
+		})
+	}
+	// Two ways the toplevel is not computable here: no `.git` boundary above
+	// the cwd, and a git-discovery variable that would move git's own answer.
+	// Either way the move is unfollowed rather than guessed at.
+	t.Run("no .git boundary", func(t *testing.T) {
+		if err := os.Remove(filepath.Join(root, ".git")); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr := drive(t, bashCall(t,
+			`cd "$(git rev-parse --show-toplevel)" && cat deploy.env`, sub))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+			t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+		}
+	})
+	t.Run("GIT_DIR set", func(t *testing.T) {
+		if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("GIT_DIR", filepath.Join(root, "elsewhere.git"))
+		code, stdout, stderr := drive(t, bashCall(t,
+			`cd "$(git rev-parse --show-toplevel)" && cat deploy.env`, sub))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+			t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+		}
+	})
+}
+
+// The moves whose destination is not the literal, or not a literal at all.
+// Each leaves the directory unknown and the relative operand after it
+// recorded rather than resolved -- which is also what every one of them did
+// before the tracker, so this is the arm that has to stay where it is.
+//
+// The first five are upstream's own "unknown" answers. The rest are this
+// port's, each in the direction that records: a move in a subshell or a
+// pipeline stage does not reach the commands after it; `-P` resolves `..`
+// through symlinks where the tracker reads it lexically; `pushd -n` rotates
+// the stack without moving; a target that is not a directory leaves the shell
+// where it was under `;`; a CDPATH turns a relative target into a search; a
+// relative target after a lost directory has nothing to join to; and a
+// substitution body is queued with no position relative to the cd, so after
+// any move it inherits a lost directory rather than the payload's cwd.
+//
+// The last of those covers the `$(…)` body too, and that one is the arm with
+// a cost. Segments flattens it into the in-order pass, where the tracker
+// resolves its operand correctly, and then the recursion queues the same body
+// and refuses the same operand -- so `cd sub && echo $(cat x)` is recorded
+// today as it was before the tracker, where a backtick body after a move was
+// resolved against the payload's cwd and allowed. Telling the two bodies
+// apart needs CommandSubstitutions to report each body's kind or offset,
+// which is a change to the port, and Q147 carries it.
+func TestACdThisCannotFollowLeavesTheOperandUnsettled(t *testing.T) {
+	dir, name := planted(t)
+	parent, base := filepath.Dir(dir), filepath.Base(dir)
+	for _, tc := range []struct{ name, command string }{
+		{"bare cd", "cd && cat " + name},
+		{"cd -", "cd - && cat " + name},
+		{"a $ target", "cd $D && cat " + name},
+		{"another user's home", "cd ~someone && cat " + name},
+		{"pushd +N", "pushd +1 && cat " + name},
+		{"a move in a subshell", "(cd " + base + ") && cat " + name},
+		{"a move in a pipeline stage", "cd " + base + " | cat " + name},
+		{"a physical cd", "cd -P " + base + " && cat " + name},
+		{"pushd -n", "pushd -n " + base + " && cat " + name},
+		{"a target that is not there", "cd nowhere; cat " + name},
+		{"a target that is a file", "cd " + base + "/" + name + "; cat " + name},
+		{"a CDPATH in the same segment", "CDPATH=/tmp cd " + base + " && cat " + name},
+		{"a relative target after a lost directory", "cd - && cd " + base + " && cat " + name},
+		{"a backtick body after a move", "cd " + base + " && echo `cat " + name + "`"},
+		{"a $(…) body after a move", "cd " + base + " && echo $(cat " + name + ")"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, parent))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+				t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+			}
+		})
+	}
+	// CDPATH from the environment reaches every relative target, and an
+	// absolute one is what it does not reach.
+	t.Run("a CDPATH in the environment", func(t *testing.T) {
+		t.Setenv("CDPATH", "/tmp")
+		code, stdout, stderr := drive(t, bashCall(t, "cd "+base+" && cat "+name, parent))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+			t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+		}
+		code, stdout, stderr = drive(t, bashCall(t, "cd "+dir+" && cat "+name, parent))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the absolute move followed", reason)
+		}
+	})
 }
