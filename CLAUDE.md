@@ -243,8 +243,13 @@ the segments after it are not; upstream binds through the last of those,
 because a candidate bash never took only adds a prompt there. A queued
 substitution body starts with an empty map, which is Q147's class; a
 quoted assignment `'SP=/x'` is read as one here where bash runs a command,
-which is Q92's class; a `case` arm is read as unconditional, which is Q151's.
-All three are pinned.
+which is Q92's class. Both are pinned. A `case` arm is not one of them any
+more: everything from a pattern's `)` to its `esac` is reached through a match
+nothing here evaluates, so an assignment there does not persist past the arm, a
+`cd` there is not followed, a loop header there binds nothing, and the arm
+leaves what comes after it unsettled the way a command does. `Segment.CaseArm`
+in `internal/bash` is the reading, and upstream has neither the field nor the
+rule, since it never opens the file.
 A literal `cd` target is followed, per segment in order, so `cd sub && cat x`
 resolves `x` under `sub` and gets a verdict; what is not followed is bare `cd`,
 `cd -`, `popd`, a `$`-bearing target other than the quoted `"$(git rev-parse

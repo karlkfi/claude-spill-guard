@@ -893,3 +893,76 @@ func TestALoopOverTheCandidateCapIsNotEnumerated(t *testing.T) {
 		}
 	})
 }
+
+// A `case` arm runs only if a pattern matched, and nothing here evaluates a
+// pattern (Q151). So what an arm assigns and where it moves are both dropped:
+// the operand that used to resolve against them is a coverage record instead.
+//
+// bash 5.3.15, driven 2026-09-07 over the same tree: `x` matches no pattern in
+// any of these, so the assignment never happened, the `cd` never happened, and
+// the reader after the `esac` read the environment's path or the payload's own
+// directory. Before this the port read the arm's path -- `case x in y)
+// P=/case;; esac; cat $P/f` opened `/case/f`.
+func TestACaseArmDoesNotSettleWhatComesAfterIt(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct{ name, command string }{
+		{"an assignment in an arm", "case x in y) SP=" + dir + ";; esac; cat $SP/" + name},
+		{"in a later arm", "case x in y) :;; z) SP=" + dir + ";; esac; cat $SP/" + name},
+		{"under bash's optional pattern opener", "case x in (y) SP=" + dir + ";; esac; cat $SP/" + name},
+		{"in an alternation's arm", "case x in y|z) SP=" + dir + ";; esac; cat $SP/" + name},
+		{"in a nested arm", "case x in y) case q in r) SP=" + dir + ";; esac;; esac; cat $SP/" + name},
+		{"reached through && inside an arm", "case x in y) true && SP=" + dir + ";; esac; cat $SP/" + name},
+		{"an unterminated case", "case x in y) SP=" + dir + "; cat $SP/" + name},
+		{"a cd in an arm", "case x in y) cd " + dir + ";; esac; cat " + name},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, t.TempDir()))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "not settled here") &&
+				!strings.Contains(reason, "expands at run time") {
+				t.Errorf("coverage reason = %q, want the operand unresolved", reason)
+			}
+		})
+	}
+}
+
+// The arm is what the port refuses, not the statement around it and not every
+// `)` at paren depth 0. A process substitution reaches the segmenter as a
+// redirect target that never incremented the depth, so its close is the shape
+// anything keying on a bare `)` would read as a pattern end -- and everything
+// after it would stop resolving. Each of these must still open the file.
+func TestWhatIsNotACaseArmStillResolves(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct{ name, command string }{
+		{"after a process substitution", "cat <(echo x) >/dev/null; SP=" + dir + "; cat $SP/" + name},
+		{"after a subshell", "(cd /tmp); SP=" + dir + "; cat $SP/" + name},
+		{"after a function definition", "f() { echo hi; }; SP=" + dir + "; cat $SP/" + name},
+		{"after a substitution", "echo $(echo x); SP=" + dir + "; cat $SP/" + name},
+		{"after the whole case", "case x in y) Q=1;; esac; SP=" + dir + "; cat $SP/" + name},
+		{"before the case", "SP=" + dir + "; case x in y) Q=1;; esac; cat $SP/" + name},
+		{"the word as an operand", "echo case; SP=" + dir + "; cat $SP/" + name},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, t.TempDir()))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file the variable names", reason)
+			}
+		})
+	}
+}
+
+// A `for` header inside an arm binds nothing, and it needs no case of its own
+// in vars.go to do so: andOr.binds is `segment.Persists && l.settled`, and
+// enter has already unsettled the list for the arm. Pinned because that is a
+// property of two rules meeting rather than of either, so a change to enter
+// could take it away without touching anything that names loops.
+func TestALoopHeaderInsideACaseArmBindsNothing(t *testing.T) {
+	dir := loopFixture(t)
+	command := `case x in y) for f in deploy.env; do :; done;; esac; cat "$f"`
+	code, stdout, stderr := drive(t, bashCall(t, command, dir))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "expands at run time") {
+		t.Errorf("coverage reason = %q, want the operand unresolved", reason)
+	}
+}

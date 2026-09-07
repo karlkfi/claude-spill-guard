@@ -2274,6 +2274,50 @@ done; cat "$f"` scans `a` as well. Every such file is one the same call already
 read inside the loop, which is what bounds it; 95 of that pass's 1,465
 loop-variable uses sit after a `done`.
 
+### A `case` arm is conditional, and the segmenter had no word for it
+
+`case $v in 1) P=/a;; 2) P=/b;; esac; cat "$P/f"` runs at most one of those
+assignments and this cannot say which, so `$P` is a coverage record. Before
+this, both arms were read as ordinary segments and the last one seen won: the
+resolver scanned `/b/f`, a path bash reaches only when `$v` is 2. The same
+reading made a `cd` in an arm move the working directory for everything after
+`esac`, and made a `for` header there bind its name.
+
+`internal/bash` marks it now. `Segment.CaseArm` is true for every segment from
+a pattern's `)` to the matching `esac`, tracked by a `case`/`in`/`)`/`esac`
+state machine in `Segments`, nested, with the `case` word taken only in command
+position. `internal/hook` reads the flag in three places, each the arm of a
+rule that already existed: `persists` refuses to carry an assignment past the
+segment, `follow` refuses the `cd`, and `enter` leaves the and-or list
+unsettled, which is what stops a header in an arm binding.
+
+`;;` needs no handling. It lexes to two `;` separators, which the and-or list
+already treats as statement boundaries, and every segment between the first
+`)` and `esac` is marked regardless of where the arms divide.
+
+**The row proposed a different rule, and driving it is what rejected it.** It
+asserted that a `)` at paren depth 0 with no `(` open is a case pattern's
+close. Driven on the segmenter, `cat <(grep foo bar); P=/after` flushes exactly
+that: `<` consumes the `(` as a redirect target without incrementing the depth
+counter, so the closing paren arrives at depth 0 and the rule would have marked
+`P=/after` as an arm and dropped a resolvable assignment. A precision loss, in
+the direction this repo calls the product. Reading the keywords costs a
+five-line state machine and cannot confuse the two.
+
+**Measured 2026-09-07**, in its own pass over a week of this machine's
+transcripts: 26 of 26,855 Bash calls carry a `case` in command position once
+heredoc bodies are stripped, and 5 of those assign a name inside an arm — all
+five read by hand, all five real, and none of them a `cd`. Counts from this
+pass and not the loop section's; the corpus grows between passes and two
+denominators presented as one measurement are not one. Whether a reader is then
+pointed at one of those names is a further condition and was not measured, so
+5 is a ceiling on the calls this changes rather than a count of them. Small
+either way, which is the argument for a rule this narrow rather than against
+having one: an arm assignment is where a wrong branch's path comes from.
+
+Upstream has neither the field nor the reading. It asks where a path lands, so
+an arm it never enters costs a prompt; this opens the file.
+
 ### A refusal is whole-call, and the reason names one segment of it
 
 A `PreToolUse` deny refuses the tool call. It does not refuse the segment the

@@ -453,6 +453,8 @@ func classifyCd(tokens []string) (kind, arg string) {
 // records the operand after it rather than resolving it against a directory
 // the shell may not be in:
 //
+//   - a move inside a `case` arm, which ran only on a pattern match. Upstream
+//     does not read arms at all; Segment.CaseArm carries why this does.
 //   - a move in a subshell, a pipeline stage or a background job (Persists
 //     false) reaches the commands inside that subshell and not the ones after
 //     it, and which later segments are inside is not in the segment model.
@@ -471,9 +473,7 @@ func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, 
 	switch {
 	case !segment.Persists:
 		return dir, true
-	case segment.Conditional == "||":
-		// Ran only if what came before failed, which nothing here can know;
-		// the `&&` arm is the list's to settle, in andOr.
+	case segment.Conditional == "||", segment.CaseArm:
 		return dir, true
 	case kind == "arg":
 		if !filepath.IsAbs(arg) {

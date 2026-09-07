@@ -16,14 +16,14 @@ import (
 // literal bash would not have used. Rows the port declines are allowed to keep
 // their `$`; rows in `resolves` must not.
 //
-// Four rows are the exception and are pinned as such. A quoted or escaped
+// Three rows are the exception and are pinned as such: a quoted or escaped
 // assignment is a command to bash and an assignment to this lexer, which is
-// the Q92 divergence arriving in the resolver, three spellings; and a `case`
-// arm is conditional to bash and a plain segment to the segmenter, which is
-// Q151's. Each is asserted rather than tolerated so a fix upstream of the
-// resolver is a decision here too. Outside those four the property holds on
-// every row, and it is a property of the rows rather than a law: the next
-// shape bash evaluates conditionally is a drive away.
+// the Q92 divergence arriving in the resolver, in three spellings. Each is
+// asserted rather than tolerated so a fix upstream of the resolver is a
+// decision here too. Outside those three the property holds on every row, and
+// it is a property of the rows rather than a law: the next shape bash
+// evaluates conditionally is a drive away, which is how the `case` arm below
+// stopped being a fourth.
 func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 	t.Setenv("HOME", "/home/me")
 	rows := []struct{ setup, probe, want string }{
@@ -144,13 +144,51 @@ func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 			}
 		})
 	}
-	// A case arm. bash 5.3.15 ran none of it; the segmenter sees `)` at paren
-	// depth 0 and a plain segment after it, so the port assigns. Q151's
-	// class, pinned so a segmenter that learns case bodies is a decision here.
-	t.Run("Q151: case x in y) P=/case;; esac", func(t *testing.T) {
-		if got := probeVars(t, "case x in y) P=/case;; esac", "$P/f"); got != "/case/f" {
-			t.Errorf("got %q, want the pinned divergence to resolve /case/f -- if the "+
-				"segmenter now reads case arms, this pin and Q151 are the ones to revisit", got)
+	// The case arms, which the segmenter reads now (Q151). bash 5.3.15 ran none
+	// of these -- `x` matches no pattern in any of them, so P stays at the
+	// environment's /env -- and the port declines rather than resolving, which
+	// is the property the table asserts rather than an exception to it. The
+	// rows are here beside the Q92 ones because this was the fourth exception
+	// until the segmenter learned arms, and the shapes are what a reader
+	// checking that will look for.
+	for _, setup := range []string{
+		"case x in y) P=/case;; esac",
+		"case x in y) P=/case;; z) P=/z;; esac",
+		"case $x in (y) P=/case;; esac",
+		"case x in y|z) P=/case;; esac",
+		"case x in y) cd /tmp && P=/case;; esac",
+		"case x in y) case q in r) P=/case;; esac;; esac",
+		"case x in y) P=/case",
+	} {
+		t.Run("Q151: "+setup, func(t *testing.T) {
+			if got := probeVars(t, setup, "$P/f"); !strings.Contains(got, "$") {
+				t.Errorf("port resolved %q; bash ran no arm here, so the operand must "+
+					"stay unresolved", got)
+			}
+		})
+	}
+	// The arm is what decides, not the statement: a name it does not touch is
+	// untouched, and an assignment after `esac` runs unconditionally.
+	for _, row := range []struct{ setup, want string }{
+		{"P=/lit; case x in y) Q=/case;; esac", "/lit/f"},
+		{"case x in y) Q=/case;; esac; P=/after", "/after/f"},
+	} {
+		t.Run("Q151 boundary: "+row.setup, func(t *testing.T) {
+			if got := probeVars(t, row.setup, "$P/f"); got != row.want {
+				t.Errorf("got %q, want %q -- an arm reaches what it assigns and "+
+					"nothing else", got, row.want)
+			}
+		})
+	}
+	// A name the arm reassigns is dropped rather than left at what it held
+	// before, which is the fail-closed direction and not new: an assignment
+	// reached through `&&` after a command does the same, and the row
+	// `P=/lit; false && P=/other` above is tolerated for it. bash keeps /lit
+	// here, so the port under-resolves.
+	t.Run("Q151: an arm reassigning a live name drops it", func(t *testing.T) {
+		if got := probeVars(t, "P=/lit; case x in y) P=/case;; esac", "$P/f"); !strings.Contains(got, "$") {
+			t.Errorf("got %q, want the name dropped -- resolving it to /case/f is "+
+				"the divergence Q151 closed, and to /lit/f is a hold this does not model", got)
 		}
 	})
 }
