@@ -123,7 +123,9 @@ func TestAnOperandThatCannotBeResolvedDefers(t *testing.T) {
 		// with a substitution among its arguments has an operand that expands
 		// -- which is the same refusal a `$VAR` gets, reached differently.
 		{"a substitution among the operands", "cat $(echo hi) f", "expands at run time"},
-		{"a glob", "cat *.env", "is a glob"},
+		// A pattern expands now -- glob_test.go -- so what is left on this
+		// arm is one filepath.Glob cannot compile.
+		{"a glob this cannot expand", "cat *.[env", "cannot expand"},
 		{"another user's home", "cat ~someone/.aws/credentials", "another user's home"},
 		// The moves the tracker cannot follow. A literal target is followed
 		// now -- TestARelativeOperandAfterALiteralCdIsResolved -- so these are
@@ -351,7 +353,7 @@ func TestADrivenRefusalDoesNotNameTheOverride(t *testing.T) {
 	payloads := map[string]string{
 		"a directory operand": bashCall(t, "grep -rn pat sub", dir),
 		"an unresolvable var": bashCall(t, "cat $HOME/x.env", dir),
-		"a glob":              bashCall(t, "cat *.env", dir),
+		"a glob":              bashCall(t, "cat *.[env", dir),
 		"a Read of a directory": `{"hook_event_name":"PreToolUse","tool_name":"Read",` +
 			`"tool_input":{"file_path":` + quote(t, dir) + `}}`,
 	}

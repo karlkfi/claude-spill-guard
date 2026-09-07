@@ -71,14 +71,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 	// A body queued for a later pass starts from the directory its parent
 	// ended in, or from none if the parent moved at all: a backtick or heredoc
 	// body has no position relative to the cd, so it cannot be told whether it
-	// runs before or after the move.
+	// runs before or after the move. The glob options are carried the same
+	// way, for the same reason.
 	type job struct {
-		text       string
-		depth      int
-		dir        string
-		dirUnknown bool
+		text         string
+		depth        int
+		dir          string
+		dirUnknown   bool
+		globsAltered bool
 	}
-	queue := []job{{command, 0, cwd, false}}
+	queue := []job{{command, 0, cwd, false, false}}
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
@@ -110,6 +112,10 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// says so at the arm.
 		dir, dirUnknown := cur.dir, cur.dirUnknown
 		moved := false
+		// Whether a pattern still expands under the options the shell started
+		// with. glob.go says what changes them; once one has, every later
+		// pattern in the string is a set this cannot compute.
+		globsAltered := cur.globsAltered
 		// The variables the string assigns, substituted into each segment
 		// before anything reads it, as bash expands before it runs. vars.go
 		// is the port and carries what it declines to resolve.
@@ -121,6 +127,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 			list.enter(segment, v, &dirUnknown)
 			sub := v.expand(segment.Tokens)
 			inputs := v.expand(segment.Inputs)
+			if altersGlobbing(sub) {
+				globsAltered = true
+			}
 			if names, only := v.observe(segment.Tokens, sub, list.persists(segment)); only {
 				list.assigned(segment, names)
 				continue
@@ -164,12 +173,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// The directories above it never reach here: measured, a `cat`
 			// invoked as /tmp/<a key>/cat reports `cat`.
 			command := filepath.Base(tokens[0])
+			var paths []string
 			for _, operand := range operands {
-				path, err := resolve(operand, dir, dirUnknown)
+				expanded, err := expand(operand, dir, dirUnknown, globsAltered)
 				if err != nil {
 					return nil, fmt.Errorf("in the %q here, %w", command, err)
 				}
-				if path == "" || seen[path] {
+				paths = append(paths, expanded...)
+			}
+			for _, path := range paths {
+				if seen[path] {
 					continue
 				}
 				seen[path] = true
@@ -291,7 +304,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			bodies = append(bodies, bash.CommandSubstitutions(body, false)...)
 		}
 		for _, body := range bodies {
-			queue = append(queue, job{body, cur.depth + 1, cur.dir, cur.dirUnknown || moved})
+			queue = append(queue, job{body, cur.depth + 1, cur.dir, cur.dirUnknown || moved, globsAltered})
 		}
 	}
 	return targets, nil
@@ -333,9 +346,9 @@ func resolve(operand, cwd string, cwdUnknown bool) (string, error) {
 	case strings.ContainsAny(operand, "$`"):
 		return "", errors.New("a file operand expands at run time, so what this " +
 			"command would read cannot be known before it runs")
-	case strings.ContainsAny(operand, "*?["):
-		return "", errors.New("a file operand is a glob, so which files this " +
-			"command would read is not settled here")
+	case braceExpansion.MatchString(operand):
+		return "", errors.New("a file operand is a brace expansion, so which " +
+			"files this command would read is not settled here")
 	case strings.HasPrefix(operand, "~"):
 		// A bare `~` or `~/…` is the home directory, which is resolvable; a
 		// `~user` prefix is not, and neither is a `~` with no HOME.

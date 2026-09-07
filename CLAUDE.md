@@ -207,10 +207,17 @@ carries the manual check that closes the rest, after a draft is published.
 The `Bash` surface is now whole: the command string is scanned and so are the
 files its readers are pointed at, `internal/readers` being what decides which
 token is a path. An operand of a known reader that cannot be resolved — a
-`$VAR` the string never assigned a literal, a glob, a relative path after a
-`cd` this cannot follow — is a coverage failure: the call defers and the
-operand is recorded, because a scanner that skipped one and allowed would
-report a clean result for a file nothing opened. A variable the same command
+`$VAR` the string never assigned a literal, a glob this cannot expand, a
+relative path after a `cd` this cannot follow — is a coverage failure: the call
+defers and the operand is recorded, because a scanner that skipped one and
+allowed would report a clean result for a file nothing opened. A glob is
+expanded to the files bash would hand the command under its default options,
+which 22 of 22 shell snapshots on this machine restore, with a leading `.`
+matched only by a literal `.`; anything earlier in the string that could change
+those options — `shopt`, `set -f`, a `GLOBIGNORE` assignment, `eval`, `source`
+— puts it back on the record, and a brace expansion is recorded rather than
+passed through as a file that does not exist. `internal/hook/glob.go` carries
+it and the bash 5.3.15 table is in its test. A variable the same command
 string assigns a plain literal is substituted before anything reads the
 segment, so `SP=/x; tail "$SP/unit.log"` resolves; `internal/hook/vars.go` is
 the port of workspace-guard's propagation and poisons rather than guesses at
