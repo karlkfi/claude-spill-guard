@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 )
 
 func TestEntropyCeiling(t *testing.T) {
@@ -134,13 +136,15 @@ func TestMaxCaptureBytesFailsClosed(t *testing.T) {
 // comparison is against a string the compiled regex really captures, rather
 // than against a second reading of the pattern by hand.
 func TestMaxCaptureBytesNeverUnderEstimatesARealCapture(t *testing.T) {
+	vectors := testvec.Load(t)
+
 	for _, tc := range []struct {
 		pattern string
 		in      string
 	}{
 		{`([A-Za-z0-9]{8})`, "abcdefgh"},
 		{`([A-Za-z0-9]{8,64})`, strings.Repeat("abcdefgh", 8)},
-		{`\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\b`, "AKIA0123456789ABCDEF"},
+		{`\b((?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16})\b`, vectors.Get(t, "aws-access-key-id")},
 		{`\b(\d{3}-?\d{2}-?\d{4})\b`, "123-45-6789"},
 		{`(?i)(k)`, "\u212a"},
 		{`((?:ab){1,3})`, "ababab"},
