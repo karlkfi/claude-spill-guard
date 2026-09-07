@@ -130,8 +130,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 			if altersGlobbing(sub) {
 				globsAltered = true
 			}
-			if names, only := v.observe(segment.Tokens, sub, list.persists(segment)); only {
+			switch names, observed := v.observe(segment.Tokens, sub, list.persists(segment),
+				list.binds(segment)); observed {
+			case observedAssignments:
 				list.assigned(segment, names)
+				continue
+			case observedLoopHeader:
+				// A loop exits with its body's status, or 0 on an empty list,
+				// and nothing here knows either -- so the list is unsettled the
+				// way any other command unsettles it.
+				list.ran()
 				continue
 			}
 			tokens := bash.StripEnvPrefix(bash.StripShKeywords(sub))
@@ -175,11 +183,26 @@ func bashTargets(command, cwd string) ([]target, error) {
 			command := filepath.Base(tokens[0])
 			var paths []string
 			for _, operand := range operands {
-				expanded, err := expand(operand, dir, dirUnknown, globsAltered)
-				if err != nil {
-					return nil, fmt.Errorf("in the %q here, %w", command, err)
+				// A `$f` bound to a `for f in <list>` stands for one path per
+				// value bash iterates, and the loop body reads every one of
+				// them, so every one is scanned. vars.go carries why that is
+				// the file set the command sends rather than a walk of
+				// anything, which is the reading the directory refusal below
+				// turns on.
+				cands, ok := v.candidates(operand)
+				if !ok {
+					return nil, fmt.Errorf("in the %q here, a file operand names loop "+
+						"variables standing for more than %d paths, so which files this "+
+						"command would read was not enumerated here", command,
+						maxLoopCandidates)
 				}
-				paths = append(paths, expanded...)
+				for _, cand := range cands {
+					expanded, err := expand(cand, dir, dirUnknown, globsAltered)
+					if err != nil {
+						return nil, fmt.Errorf("in the %q here, %w", command, err)
+					}
+					paths = append(paths, expanded...)
+				}
 			}
 			for _, path := range paths {
 				if seen[path] {

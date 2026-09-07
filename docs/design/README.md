@@ -2209,6 +2209,71 @@ filter here drops them: a gap of exactly the hidden files, on exactly the
 machines that opted into them. Nothing at `PreToolUse` reads that shell's
 options today, and Q150 is whether the snapshots are the instrument that could.
 
+### A loop variable is one operand per value bash iterates
+
+`for f in a.env b.env; do cat "$f"; done` reads both files, so both are
+scanned. That is the same reading the directory refusal above turns on, pointed
+the other way: a candidate set is the file set the command sends, computed from
+the list the string carries rather than from a walk of a tree, and no reader
+flag alters it.
+
+The binding is a port of `bash-workspace-guard.py`'s `for_loop_binding`,
+`literal_for_item` and `expand_loop_candidates` (its issues 70 and 99), in
+`internal/hook/vars.go`. A list of literals and globs is recorded; anything
+else poisons the name, which is the coverage record the operand had before any
+of this, so nothing here is a new refusal. Poisoned by an item carrying a `$`
+or a backtick, a brace item — bash brace-expands a for-list item where it does
+not an assignment value — a `for NAME` over `"$@"`, an empty list, and the
+`for ((…))` arithmetic form, which lexes a `(` where the name would be.
+
+**Measured 2026-09-07** over a week of this machine's transcripts, in one
+pass: 28,763 Bash calls, of which 3,351 carry a `for NAME in`, 746 of those
+point a command in the reader table at `$NAME`, and 464 of those 746 have a
+list this binds. So about 1.6% of Bash calls move from a coverage record to a
+scan.
+
+Read the ratio rather than the counts. The corpus is this machine's live
+session transcripts, so it grows while the sweep runs — three passes within
+the hour put the denominator at 28,265, 28,276 and 28,763 — and every figure
+in this section is from the last of them, because figures from two passes read
+as one measurement and are not. The census is also a regex over the command
+strings rather than a run of the resolver, so it is the shape of the traffic
+and not a verdict count.
+
+**Three things diverge from upstream, and each is the same difference: it asks
+where a path lands and this opens the file.**
+
+A glob item is kept as the pattern, and for a different reason. There a pattern
+proxies its whole expansion because `*`, `?` and `[…]` never match `/`, so
+every path it expands to resolves in the same directory. Here a proxy settles
+nothing — what makes it sound is that the candidate goes on to the expansion
+above, which globs it into the files bash would hand the command. A token built
+around the candidate keeps that: `cat "$f".bak` over `docs/*.md` reaches the
+expansion as `docs/*.md.bak`, which matches every file bash reads that exists,
+and one that does not exist sends nothing either way.
+
+A header the shell may not have reached, or whose loop runs where the segments
+after it are not, poisons the name where upstream binds it — a subshell, a
+pipeline stage, a background job, a `||`, an `&&` after a command whose status
+nothing here knows. `follow` refuses a `cd` on the same reading. Upstream can
+bind through all five because a candidate bash never took only adds a prompt
+there.
+
+And the cap stays at upstream's 256 rather than deferring to the scanner's own
+budget. The budget bounds how much time there is; the cap bounds where it goes.
+Three nested loops over 256 literals each make `cat $a/$b/$c` 16.7M tokens to
+build before a byte is read, so the budget would be spent producing paths and
+the verdict at the end of it is the coverage record the cap reaches at once.
+The product is known before any expansion happens, so nothing is materialised
+to find out, and over the cap it poisons rather than truncating — checking a
+prefix of the candidates would report a clean scan for the files after it.
+
+**What it over-scans is a use after `done`.** bash leaves the variable at the
+last item and the candidate set holds all of them, so `for f in a b; do :;
+done; cat "$f"` scans `a` as well. Every such file is one the same call already
+read inside the loop, which is what bounds it; 95 of that pass's 1,465
+loop-variable uses sit after a `done`.
+
 ### A refusal is whole-call, and the reason names one segment of it
 
 A `PreToolUse` deny refuses the tool call. It does not refuse the segment the

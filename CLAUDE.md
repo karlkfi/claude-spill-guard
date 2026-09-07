@@ -233,7 +233,15 @@ when the statement ends, so `cd "$(git rev-parse --show-toplevel)" && SP=/x;
 tail "$SP/f"` resolves (220 of the week's 655 conditional assignments take
 that shape) and `mkdir -p x && SP=/x; tail "$SP/f"` records; `andOr` in
 `vars.go` is the rule and upstream has none, since it never opens the file. A
-queued substitution body starts with an empty map, which is Q147's class; a
+`for NAME in <list>` binds NAME to its items rather than poisoning it, so `for
+f in a.env b.env; do cat "$f"; done` scans both — the body reads every value
+bash iterates, which is the file set the command sends rather than a walk, and
+a glob item is kept as the pattern for `glob.go` to expand. What poisons the
+name instead is an item that is not a literal, a brace item, more than 256
+values, and a header the shell may not have reached or whose loop runs where
+the segments after it are not; upstream binds through the last of those,
+because a candidate bash never took only adds a prompt there. A queued
+substitution body starts with an empty map, which is Q147's class; a
 quoted assignment `'SP=/x'` is read as one here where bash runs a command,
 which is Q92's class; a `case` arm is read as unconditional, which is Q151's.
 All three are pinned.
