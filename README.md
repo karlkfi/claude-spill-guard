@@ -209,6 +209,13 @@ canary published in this repository, so if the hook is *not* live the only
 thing that reaches the API is text that is already public — which is the whole
 reason the check is safe to run.
 
+That string is also *in this file*, so a session running spill-guard is refused
+when it reads this page — `git show HEAD:README.md` is the way past it. Masking
+the canary would have bought the read back and left the check above telling you
+to paste something this page no longer contains, so the friction is the choice
+rather than an oversight. `make self-scan` is where the tracked files that trip
+the scanner are named, this one among them.
+
 ## The shape of it
 
 A static Go binary, run as a Claude Code hook. Zero third-party dependencies —
