@@ -1082,7 +1082,12 @@ not need to do.
    An extent may refuse, and does for about 95% of what the pattern matches:
    measured over 0.46 GB in 60,000 files of this tree and Go's module cache,
    554 `eyJ` keyword hits and 27 reaching a second `eyJ` segment past a dot.
-   Refusing is what lets the pattern be eleven bytes. **And a refusal
+   Refusing is what lets the pattern be eleven bytes. The walk's only exit
+   is a byte test against a `len(buf)`-bounded index, so the end of the
+   buffer is the *same* terminator as a byte outside the class rather than
+   a missing one — a property of the loop rather than of today's callers,
+   and worth saying because a scan that never returned would surface as a
+   blocking verdict on the budget rather than as a crash. **And a refusal
    reports how far it settled**, which is load-bearing rather than tidy:
    every start inside one segment run reaches the same end of that run and
    so meets the same byte after it, so a refusal there is a refusal for all

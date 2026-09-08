@@ -118,6 +118,16 @@ func JWTToken(buf []byte, lo int) (int, bool) {
 }
 
 // jwtRun is where the run of segment bytes starting at at ends.
+//
+// Its only exit is a byte test against a len(buf)-bounded index, which is what
+// makes the end of the buffer the *same* terminator as a byte outside the
+// class rather than a missing one. A walk with no ceiling is the shape that
+// runs off the end of a buffer if its terminator can go absent, and this one's
+// cannot -- so the property is about the loop rather than about today's
+// callers, and a caller reaching it with a token that runs to EOF gets an end
+// at len(buf) instead of a scan that never returns. That distinction is worth
+// the sentence here because this scanner's budget blocks on expiry: a hang
+// would surface as a verdict, not as a crash.
 func jwtRun(buf []byte, at int) int {
 	end := at
 	for end < len(buf) && jwtSegmentBase64URL(buf[end]) {
