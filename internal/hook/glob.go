@@ -141,11 +141,17 @@ func expandable(operand string) bool {
 }
 
 // globFiles is filepath.Glob under bash's default options, which is what the
-// Bash tool's shell runs with here: 22 of 22 shell snapshots restore dotglob,
-// nullglob, failglob, globstar, nocaseglob and extglob unset. Where the two
-// disagree under those options the pattern is translated, its matches are
-// filtered, or it is refused. Driven on bash 5.3.15, 2026-09-06;
+// Bash tool's shell runs with here: 62 of 62 bash shell snapshots restore
+// dotglob, nullglob, failglob, globstar, nocaseglob and extglob unset, and
+// Claude Code 2.1.260 unsets extglob itself after sourcing one. Where the two disagree
+// under those options the pattern is translated, its matches are filtered, or
+// it is refused. Driven on bash 5.3.15, 2026-09-06;
 // TestTheExpansionAgreesWithBash carries the table.
+//
+// It stays an assumption because nothing at PreToolUse can read the snapshot
+// the session sources: neither the payload nor the environment names one, and
+// the filename carries no session id. Driven 2026-09-07, and the residual is
+// in docs/design/README.md under "A glob operand is expanded".
 func globFiles(pattern string) ([]string, error) {
 	sep := string(filepath.Separator)
 	elems := strings.Split(pattern, sep)
