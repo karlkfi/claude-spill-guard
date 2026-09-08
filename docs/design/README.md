@@ -55,12 +55,13 @@ and the model's context.
   measured — a `Read` path, a `Bash` reader's resolved operands, and an
   `@path` in a prompt. The class is
   [wider than those](#what-gets-scanned-is-the-crossing-not-the-hop), and
-  [driving the rest of it](#the-rest-of-the-class-driven) leaves two members
-  out for two different reasons. A search tool returns lines from files it
+  [driving the rest of it](#the-rest-of-the-class-driven) leaves three members
+  out, for two reasons between them. A search tool returns lines from files it
   chooses, so nothing a `PreToolUse` hook opens can bound it. A skill load
   carries a name rather than a path, so nothing here can resolve what it would
-  read. An MCP server's file reader is the shape most likely to be a third and
-  has not been driven.
+  read. An MCP server's file reader is out on both at once: the hook sees the
+  call and a deny stops it, and which of a server's tools is bounded, and which
+  key of its payload is a path, are the server's own choices.
 
   **A subagent load is not one of them.** It was named here as an uncovered
   member and it is covered: a subagent's own tool calls fire the same hooks
@@ -335,9 +336,10 @@ which is why the reason recommends it.
 **It reaches the readers `internal/readers` knows and no others, and the reason
 says so.** `python3 -c "print(open('~/.aws/credentials').read())"` names no
 operand this package can see and is not refused — driven, and pinned by a test.
-Q87 drove the reader class and no new member landed, so the table is not about
-to grow into the hole. A reader who takes the deny for path protection will
-trust it further than it goes, so the reason calls itself a net for the
+Q87 and Q127 drove the reader class between them, and nothing either found is a
+command carrying file operands, so the table is not about to grow into the
+hole. A reader who takes the deny for path protection will trust it further
+than it goes, so the reason calls itself a net for the
 accident rather than a claim that the path is guarded, exactly as the
 environment one does.
 
@@ -466,7 +468,9 @@ class. The class is *any hook input naming a filesystem path whose result comes
 back as content*, and an installed MCP file or transcript reader is a member of
 it that no rule here mentions. Under the old axis those were runtime output and
 excluded with `PostToolUse`; under this one they are uncrossed hops where a deny
-works, so the axis opens that obligation rather than discharging it. Enumerating
+works, so the axis opens that obligation rather than discharging it — and the
+MCP reader is [driven](#the-rest-of-the-class-driven) now, where the deny does
+work and the member stays out anyway. Enumerating
 the readers is backlog work, not something this section settles.
 
 Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, by logging the
@@ -825,10 +829,9 @@ all: a session asked to search file contents reached `ToolSearch` for
 affordance that is present is the `Explore` subagent, which is the paragraph
 above.
 
-**What a fourth member has to establish.** An MCP server's file reader is
-undriven and is the shape most likely to be one. Three readings settle a
-candidate, in this order, because each is cheap only where the one before it
-came back yes:
+**The fourth member is driven, and it splits inside one server.** Three
+readings settle a candidate, in this order, because each is cheap only where
+the one before it came back yes:
 
 1. **Does the hook see the call at all?** A matcher of `*` and a stdin log.
 2. **Has the content crossed already?** Only what the hook can open for itself
@@ -837,6 +840,68 @@ came back yes:
 3. **Can the hook bound what the call would return?** One file is bounded. A
    tree walk is not, and neither is a name the harness resolves by a rule
    nobody here has driven.
+
+Measured 2026-09-07 against Claude Code 2.1.261 on darwin/arm64. `~/.claude.json`
+declared no MCP server, for any project, and there is no `node` here to run the
+published ones — so the server is 89 lines of stdlib Python speaking JSON-RPC
+over stdio, loaded with `--mcp-config` and `--strict-mcp-config` so it was the
+only one in the session. It declares two tools over that one transport:
+`read_file`, taking a `path`, and `search_tree`, taking a `root` and a
+`pattern`. Five `claude -p` runs over the three arms below, the `read_file`
+pair driven twice — the second time with the server logging the requests it
+received. Every verdict is read from the transcript the payload's own
+`transcript_path` names rather than from what the run printed:
+
+| Arm | The hook saw | `tools/call` reached the server | Planted marker in the transcript |
+|---|---|---|---|
+| `read_file`, hook allows | `mcp__q127fs__read_file`, `tool_input` `{"path": …}` | yes | 3 |
+| `read_file`, hook denies | the same call | **no** | **0** |
+| `search_tree`, hook allows | `mcp__q127fs__search_tree`, `tool_input` `{"root": …, "pattern": …}` | yes | 3, and 3 for a second marker |
+
+**Readings 1 and 2 come back yes, and both are facts about the harness rather
+than about this server.** The call arrives under a `*` matcher as
+`mcp__<server>__<tool>`, carrying the arguments object verbatim, and a deny
+stops it before dispatch: on the denied run the server logged `initialize`,
+`notifications/initialized` and `tools/list` and no `tools/call` at all, so the
+file was never opened. That is a stronger reading than the marker count, which
+would also be zero if the call had run and its result been discarded. Same
+prompt, same directory, only the hook's verdict differing.
+
+**Reading 3 comes back per tool, which is what keeps the member out.**
+`read_file` names one file in one key and is bounded. `search_tree`, on the
+same server over the same transport, names a directory and a pattern, and its
+result carried a line from `nested/deeper/buried.txt` — a file no operand
+named. That is the tree-walk argument above, arriving inside a member that had
+just passed the same reading for its other tool.
+
+**The split is inside one server, and that is the transferable half.** Not
+between servers, and not between protocols — the same server over the same
+transport served a bounded tool and an unbounded one, so membership cannot be
+decided per server or per protocol any more than it can be decided per payload
+shape. A rule per server would not have helped: it would have had to answer for
+both of these tools at once, and they need opposite answers. The key holding a
+path was `path` on one and `root` on the other, both the server's own schema,
+passed through unchanged — so the thing a resolver would have to key on is the
+one thing the call does not carry. This is the section's opening rejection
+arriving from a new direction: a payload-shape test fails here for exactly the
+reason it failed on `Skill`, which is that the shape is not what decides.
+
+Both tools carry the same `mcp__q127fs__` prefix, so any matcher written
+against a server admits the unbounded one with the bounded one, and failing
+closed over that prefix blocks every MCP tool in every session, which is the
+skill load's objection. **The member stays out, and the reason is both of the
+other two at once**: it fails reading 3 for the same cause the search tool
+does, and it fails resolution for the same cause the skill load does, with
+nothing in the payload to tell one of its tools from the other.
+
+**Stoppable and scanned are two claims, and this member is the first to
+separate them.** The deny works — reading 2 — so a hook wired to these calls
+could stop one. Nothing here is wired to them: `hooks/hooks.json` matches
+`Read|Bash`, which no `mcp__…` name matches, so a file an MCP server reads is
+not scanned and a session that installs one has a reader this scanner does not
+cover. The consequence is stated rather than fixed, and reading only the second
+half of it gets the posture backwards: the hook is not powerless on that
+surface, it is not pointed at it.
 
 ## Pipeline
 
