@@ -2161,7 +2161,7 @@ the arm two days earlier, the same shape throughout.
 
 **What the expansion assumes is the shell's options, and they were read rather
 than assumed.** The Bash tool's shell restores the options of the shell it was
-snapshotted from, and 22 of 22 snapshots under `~/.claude/shell-snapshots/`
+snapshotted from, and 62 of 62 bash snapshots under `~/.claude/shell-snapshots/`
 restore `dotglob`, `nullglob`, `failglob`, `globstar`, `nocaseglob` and
 `extglob` unset, which are the defaults. So `filepath.Glob` runs under those,
 and where bash 5.3.15 and Go disagree under them the pattern is translated, its
@@ -2204,12 +2204,49 @@ session typed the name: `grep -rn pat docs/*` expands to `docs/design`, and
 that is the walk this design refuses. The measured population has no such call
 in it.
 
-**What this machine cannot show is another machine's rc file.** The snapshot
+**What this machine cannot show is another machine's rc file, and the
+instrument that might have was driven and does not reach.** The snapshot
 restores whatever the user's shell had, so on a machine whose `.bashrc` sets
 `dotglob`, every pattern in the tool's shell reaches hidden files and the
 filter here drops them: a gap of exactly the hidden files, on exactly the
-machines that opted into them. Nothing at `PreToolUse` reads that shell's
-options today, and Q150 is whether the snapshots are the instrument that could.
+machines that opted into them. `nocaseglob` and `globstar` widen the set the
+same way; `nullglob` and `failglob` narrow it, which is the harmless direction.
+
+**Measured 2026-09-07** on Claude Code 2.1.260, over the 63 snapshots there:
+3,720 `shopt` lines across the 62 bash ones, where 15 options come back `-s` in
+every snapshot and all six globbing options come back `-u` in every snapshot --
+so the probe can report a set option, and reports none of these set. That an rc file's
+option would reach the snapshot at all is driven rather than read off the
+file's shape: bash 5.3.15 started on an rc file holding `shopt -s dotglob`
+reports `-s` for it, and the same shell on an rc file setting nothing reports
+`-u`. The snapshot's block is that shell's own `shopt -p`, differing from a
+non-interactive shell's in `login_shell` and `expand_aliases` alone. The 63rd
+file is a zsh snapshot carrying no `shopt` line at all, which is Q163's class
+rather than this one. Claude Code narrows one option itself: every Bash tool
+call runs `source <snapshot> ... && shopt -u extglob`, so `extglob` cannot be
+on for a tool shell whatever the rc file says.
+
+**The hook cannot find its own session's snapshot, so reading one is not a fix
+that can be built.** Driven by installing a probe hook and reading what Claude
+Code hands one. The payload carries `session_id`, `transcript_path`, `cwd`,
+`scratchpad_dir`, `permission_mode` and the tool input, and no shell state. The
+environment carries 55 variables, none naming a snapshot and no `BASH_ENV` or
+`ENV`; the hook is a child of the `claude` process rather than of the tool
+shell, and at `PreToolUse` that shell does not exist yet. The filename is a
+millisecond timestamp and six random characters, so there is no session id to
+match on, and newest-by-mtime is not a fallback -- this session's snapshot was
+4th of 63 by mtime, five seconds behind a newer one, within a minute of the
+session opening. The transcript the payload does name is no route either: 18 of
+the 200 most recent transcripts mention a snapshot path, every mention is
+command output a session happened to print, against a positive control of 168
+carrying `toolUseResult`.
+
+So the gap is stated rather than closed, and it is bounded to a machine whose
+rc file sets one of the five options Claude Code does not unset. Scanning the
+superset instead -- dropping the hidden-file filter so nothing is missed -- is
+the direction this design refuses: a block on a file the command never sends is
+a false positive, and precision is the product. Nothing here reads a snapshot,
+so `PRIVACY.md` is unchanged.
 
 ### A loop variable is one operand per value bash iterates
 

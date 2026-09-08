@@ -212,14 +212,19 @@ relative path after a `cd` this cannot follow — is a coverage failure: the cal
 defers and the operand is recorded, because a scanner that skipped one and
 allowed would report a clean result for a file nothing opened. A glob is
 expanded to the files bash would hand the command under its default options,
-which 22 of 22 shell snapshots on this machine restore, with a leading `.`
+which 62 of 62 bash shell snapshots on this machine restore, with a leading `.`
 matched only by a literal `.` and the literal word itself included whenever a
 file by that name exists, since bash passes an unmatched pattern through and
 `app/[id]/page.tsx` is an ordinary filename; anything earlier in the string that could change
 those options — `shopt`, `set -f`, a `GLOBIGNORE` assignment, `eval`, `source`
 — puts it back on the record, and a brace expansion is recorded rather than
 passed through as a file that does not exist. `internal/hook/glob.go` carries
-it and the bash 5.3.15 table is in its test. A variable the same command
+it and the bash 5.3.15 table is in its test. That the options are the
+defaults stays an assumption about the machine rather than a reading of it:
+driven 2026-09-07, nothing at `PreToolUse` can find the snapshot its own
+session sources — not the payload, not the environment, and the filename
+carries no session id — so the residual is bounded and stated in
+`docs/design/README.md` rather than closed. A variable the same command
 string assigns a plain literal is substituted before anything reads the
 segment, so `SP=/x; tail "$SP/unit.log"` resolves; `internal/hook/vars.go` is
 the port of workspace-guard's propagation and poisons rather than guesses at
