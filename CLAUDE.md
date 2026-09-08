@@ -346,14 +346,23 @@ than a `make` gate because Claude Code is not in the tier `make doctor`
 requires. That job is the only thing here that can tell the census apart from
 the harness it stands in for, so read its floor before trusting a green run:
 ten of the twenty-four cases expect an empty splice, and a replay that drove
-nothing agrees with all ten. The rest of the class is driven now, and
-three of its four members are settled. A **subagent** load is covered and needs
+nothing agrees with all ten. The rest of the class is driven now, all four
+members of it. A **subagent** load is covered and needs
 nothing: the subagent's own tool calls fire the same hooks the parent's do. A
 **search** tool stays out, because nothing a `PreToolUse` hook opens can bound
 a walk over a tree. A **skill** load stays out for a different reason — the
 payload is `{"skill": "<name>"}` and names no file, though a deny on it does
 stop the body crossing, so it is a member this cannot resolve rather than one
-that is not there. An **MCP** file reader is the one still undriven.
+that is not there. An **MCP** file reader stays out on both of those reasons at
+once, and driving it is what says so: the hook sees the call as
+`mcp__<server>__<tool>` and a deny stops it before the server is asked, so it
+is stoppable — and then one server's two tools split, `read_file` bounded on a
+`path` and `search_tree` unbounded on a `root`, with nothing in the payload
+saying which shape arrived. So any matcher written against a server admits the
+unbounded tool with the bounded one, and resolving the operand needs a rule per
+server, which is the payload-shape test this repo already rejected. `hooks.json` matches
+`Read|Bash`, so an MCP server's reads are uncovered and the design says so
+rather than fixing it.
 
 **And one route into the context is not a reader at all: `!` bash mode.** Typing
 `!cat ~/.aws/credentials` runs the command locally and puts the output in front
