@@ -43,8 +43,9 @@ and the model's context.
 ## What it is not
 
 - **Not a git scanner.** The commit boundary already has good tools.
-- **Not a defense against a user who means it.** The escape hatch is one env
-  var. This is a net for the accident, not a wall against intent.
+- **Not a defense against a user who means it.** The escape hatch is one
+  inline `SPILL_GUARD_OVERRIDE=` prefix on a `Bash` command. This is a net for
+  the accident, not a wall against intent.
 - **Not remote anything.** No telemetry, no update check, no shared rule
   source, no daemon.
 - **Not a recall play.** Ten precise rules beat seventy noisy ones. The
