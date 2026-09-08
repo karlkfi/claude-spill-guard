@@ -217,10 +217,11 @@ func BenchmarkRule(b *testing.B) {
 // code on both sides of a change to the anchored path, so it is what says a
 // difference in the other two arms is the change rather than the machine --
 // which is not a formality on a workstation. Measured 2026-09-07, two runs
-// fifteen minutes apart on this machine reported 7.4 MB/s and 3.1 MB/s for it,
-// and BenchmarkOneAttempt's aws-access-key-id -- a rule untouched by any of
-// this -- doubled from 73ns to 144ns across the same pair. Read the arms
-// against each other within one run, never across two.
+// fifteen minutes apart on this machine: 7.12-7.40 MB/s for this arm and then
+// 3.31-3.42, with BenchmarkOneAttempt's aws-access-key-id -- a rule untouched
+// by any of this -- going 67.6-79.9 ns to 124.9-158.8 across the same pair,
+// 1.85x on the minima. Read the arms against each other within one run, never
+// across two.
 func BenchmarkRuleset(b *testing.B) {
 	shipped := loadShipped(b)
 	bounded := rewrittenSet(b, q133JWT, false)
