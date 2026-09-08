@@ -343,7 +343,7 @@ func matchRule(path string, text []byte, source func(int) int, rule rules.Rule) 
 	// empty-width op at the head of the compiled program, so regexp derives no
 	// literal prefix, has nothing to skip towards, and runs the NFA over every
 	// byte of the buffer to arrive back at the positions this already holds.
-	// Seven of the eight get here; anchor.go says what the eighth fails.
+	// All eight get here; anchor.go says what a rule has to satisfy to.
 	if rule.Anchor != nil && boundedKeywords(rule.Keywords) {
 		if at, ok := keywordPositions(text, rule.Keywords, budget(len(text), rule.Reach)); ok {
 			return matchAt(path, text, source, rule, at)

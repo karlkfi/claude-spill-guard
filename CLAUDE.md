@@ -584,8 +584,14 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
   `\b` is not the alternative — it is what keeps `ghp_` out of `xghp_`. The
   five conditions that make the two paths identical are in
   [`internal/rules/anchor.go`](internal/rules/anchor.go), four in the loader
-  and one beside the boundary in `internal/scan/prefilter.go`; `jwt` fails the
-  last of them, an unbounded repeat, at a measured 2,451x.
+  and one beside the boundary in `internal/scan/prefilter.go`. `jwt` failed the
+  last of them, an unbounded repeat, at a measured 2,451x; bounding its three
+  repeats at RE2's own cap of 1000 bought it the anchored arm and took the
+  shipped set from 35.14–35.51 MB/s to 77.66–77.80 MB/s over this repo's text.
+  A bound is a recall ceiling — a header or payload segment past 1,003 bytes
+  goes unmatched — and the signature bound is the one that reads free and is
+  not, because `jwt-sample-key` recomputes the HMAC over the capture and a
+  bound under 86 bytes turns a published sample into a finding.
 - **RE2 has no lookaround and caps bounded repetition at 1000.** Nine inherited
   rules need rewriting; `{1,1024}` becomes `{1,1000}`.
 - **Skip binaries.** NUL in the first 8 KiB. One PNG was 55% of the benchmark

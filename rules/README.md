@@ -37,7 +37,7 @@ carried by a planted fixture in
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
 | `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not |
-| `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, floor 3.5, and no published sample signature |
+| `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, each capped at 1,003 bytes, floor 3.5, and no published sample signature |
 
 **The entropy floors are what make a *padded* placeholder quiet.** A repository
 holds far more `AKIAXXXXXXXXXXXXXXXX` than it holds keys, and the two are the
@@ -362,6 +362,16 @@ edited in the debugger before pasting the result — which a token list cannot
 reach. What it costs is a real token whose owner signed it with a copied sample
 secret. That is a false negative on a dangerous file, and not one this tool can
 help with: a token anyone can forge is not protected by stopping the paste.
+
+**It is coupled to the pattern's third bound, which is the one that reads
+free.** Nothing follows the signature, so bounding it truncates the capture
+rather than refusing the token — and this check is handed that capture. Below
+the longest HMAC signature it recomputes against a truncated one, the
+comparison fails, and a published sample is reported as a credential. HS512 is
+the longest at 86 bytes; the bound is 1,000. Read off the two corpus tokens
+instead, both HS256, a bound would have landed on 43.
+[`internal/scan/jwt_bound_test.go`](../internal/scan/jwt_bound_test.go) drives
+both arms.
 
 ## The numeric PII family ships disabled
 
