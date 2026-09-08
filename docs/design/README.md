@@ -592,7 +592,9 @@ A spliced file arrives in the transcript as an attachment whose
 harness itself resolved the token to. So the resolver does not have to be
 validated by reading that field and agreeing with it: the census is kept in
 `internal/hook/testdata/prompt-oracle.json` and a test compares against it on
-every run.
+every run. What re-takes the census itself, against a pinned harness and
+without a credential, is
+[the job over that surface](#two-of-the-three-surfaces-cannot-be-driven-by-a-gate).
 
 **Take the census on `attachment.type == "file"`, never on a raw count of
 `"type":"attachment"`.** Skill listings, token reminders, deferred-tool deltas
@@ -2591,9 +2593,43 @@ whole time, in which the recording hook fired `UserPromptSubmit` 25 times and
 `PreToolUse` **0** times. Neither alone would settle it; together they do.
 
 **So the prompt surface can be gated and the other two cannot**, and the
-reason is the credential boundary rather than a shortage of effort. The gate
-for the one surface is [Q109](../queue/Q109.md), not landed as of this
-writing. For `Read` and `Bash`, what stands in:
+reason is the credential boundary rather than a shortage of effort. The job
+over the one surface is `.github/workflows/prompt-oracle.yml`, which downloads
+a pinned `claude`, replays every case in the census over the fixture's own
+tree, and compares what the harness spliced against what the census says it
+splices. It is a workflow rather than a `make` gate: the gates run on a fresh
+clone against the tool tier `make doctor` requires, and Claude Code is not in
+it.
+
+Three things it carries that the drive above did not, all of them there so a
+run that established nothing cannot read as a run that found no drift.
+
+- **The census names the harness it was confirmed against.** `harness.version`
+  in the fixture, and the job asserts the binary it downloaded reports that
+  same version — so moving the pin without re-taking the census fails rather
+  than confirming nothing under a version nobody checked. Re-taking it is
+  `--record` against the new binary, `--compare --allow-version-drift` to read
+  what moved, then both numbers in one commit.
+- **A floor on what was observed, not on what the fixture holds.** Ten of the
+  twenty-four cases expect an empty splice, so a replay that drove nothing at
+  all — a binary that failed to download, a `HOME` the harness would not write
+  under — agrees with ten of them and reports green. The job requires the
+  replay to have seen the census's own 14 non-empty cases and 33 files.
+- **A mutation control, over the recording rather than a second drive.**
+  Observing and comparing are separate invocations, so the control mutates the
+  census and holds it against the run that already happened: a moved
+  expectation and a recording that spliced nothing, both of which must go red.
+
+The tree the probes run in lives in the census beside the cases, because this
+and the Go test build it separately and a tree written twice drifts — which
+reads exactly like the grammar having drifted.
+
+Re-taken 2026-09-07 against 2.1.261 on darwin/arm64: 24 of 24 cases agree with
+the recording taken 2026-08-28 against 2.1.238, so the `@` grammar did not move
+across those twenty-three releases. The job runs on `ubuntu-latest`, which is
+the second platform the census has been confirmed on and the only one CI reads.
+
+For `Read` and `Bash`, what stands in:
 
 - `spill-guard selftest` drives canary payloads through `hook.Run` in-process
   on every surface. It proves the binary scans and blocks; it cannot prove

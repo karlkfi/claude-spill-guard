@@ -28,7 +28,7 @@ measured.
 | `internal/testvec/` | The loader for `testdata/corpus/vectors/`. Test-only, linked into no binary, and it takes a `TB` rather than `*testing.T` so nothing outside a test imports `testing`. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. The JSON is data; `embed.go` beside it is the `go:embed` that compiles it in, which has to live here because the directive reaches only its own directory. |
 | `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. `vectors/` is neither: it is the credential-shaped strings the unit tests read. `.github/secret_scanning.yml` is what keeps the whole corpus out of GitHub's push protection; spill-guard has no path arm and refuses these files like any other, which is what `self-scan` accounts for. |
-| `scripts/` | The gate scripts CI runs, `check-install-scripts.py` which only the release workflow can run, and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
+| `scripts/` | The gate scripts CI runs, the two only a workflow can run -- `check-install-scripts.py` in the release workflow, `check-prompt-oracle.py` which re-takes the harness census -- and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
 | `hooks/` | Not those. `hooks.json`, the wiring Claude Code reads, and the launcher it names — which resolves the binary and denies when it cannot find one. |
@@ -340,7 +340,13 @@ reasoned about, and the harness publishes its own answer: a splice arrives in
 the transcript as an attachment whose `attachment.type` is `file` and whose
 `filename` is the path it resolved. That census is
 `internal/hook/testdata/prompt-oracle.json`, compared against on every run
-rather than read once and agreed with. The rest of the class is driven now, and
+rather than read once and agreed with -- and re-taken against a pinned
+`claude` by `.github/workflows/prompt-oracle.yml`, which is a workflow rather
+than a `make` gate because Claude Code is not in the tier `make doctor`
+requires. That job is the only thing here that can tell the census apart from
+the harness it stands in for, so read its floor before trusting a green run:
+ten of the twenty-four cases expect an empty splice, and a replay that drove
+nothing agrees with all ten. The rest of the class is driven now, and
 three of its four members are settled. A **subagent** load is covered and needs
 nothing: the subagent's own tool calls fire the same hooks the parent's do. A
 **search** tool stays out, because nothing a `PreToolUse` hook opens can bound

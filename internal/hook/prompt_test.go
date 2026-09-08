@@ -17,6 +17,21 @@ import (
 // declared divergence was read out of a transcript rather than written: the
 // prompt as the harness received it, and the `filename` of every attachment
 // whose `attachment.type` is `file`.
+// oracle is the fixture's envelope. The tree the probes ran in is data rather
+// than Go, because scripts/check-prompt-oracle.py rebuilds the same tree to
+// re-take the census against a live harness -- and a tree written twice drifts,
+// which reads exactly like the grammar having drifted.
+type oracle struct {
+	Harness struct {
+		Version string `json:"version"`
+		Driven  string `json:"driven"`
+	} `json:"harness"`
+	// Relative path within the probe root to its contents, with a `~/` prefix
+	// for the one file that has to sit in the home directory instead.
+	Tree  map[string]string `json:"tree"`
+	Cases []oracleCase      `json:"cases"`
+}
+
 type oracleCase struct {
 	Name         string   `json:"name"`
 	Prompt       string   `json:"prompt"`
@@ -49,8 +64,9 @@ type oracleCase struct {
 // which is the argument against a threshold made by the fixture itself. This
 // compares identities instead.
 func TestThePromptResolverAgreesWithTheHarnessOracle(t *testing.T) {
-	cases := loadOracle(t)
-	root, home := oracleTree(t)
+	census := loadOracle(t)
+	cases := census.Cases
+	root, home := oracleTree(t, census.Tree)
 
 	// The subject has to exist for the agreement to mean anything: a loader
 	// that returned no cases, or cases in which the harness spliced nothing,
@@ -394,56 +410,57 @@ func TestABinaryTokenIsStillOpenedAndHandedOn(t *testing.T) {
 // loadOracle reads the fixture, failing rather than skipping if it is gone --
 // a suite that quietly stops comparing against the harness reads exactly like
 // one that agrees with it.
-func loadOracle(t *testing.T) []oracleCase {
+func loadOracle(t *testing.T) oracle {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "prompt-oracle.json"))
 	if err != nil {
 		t.Fatalf("the harness census is not readable, so nothing here compares "+
 			"against it: %v", err)
 	}
-	var cases []oracleCase
-	if err := json.Unmarshal(raw, &cases); err != nil {
+	var loaded oracle
+	if err := json.Unmarshal(raw, &loaded); err != nil {
 		t.Fatalf("the harness census does not decode: %v", err)
 	}
-	return cases
+	// The version is what lets a disagreement say which two harnesses it is
+	// between, and the tree is what both this and the replay script build from.
+	// Either one missing makes every assertion below unattributable.
+	if loaded.Harness.Version == "" || len(loaded.Tree) == 0 {
+		t.Fatalf("the census names harness version %q over a tree of %d files, "+
+			"so a disagreement could not say what it is between",
+			loaded.Harness.Version, len(loaded.Tree))
+	}
+	return loaded
 }
 
 // oracleTree rebuilds the directory the probes ran in, and a home directory to
 // resolve the one home-relative case against. The root is named `probe`
 // because a case reaches out of it and back in by name.
-func oracleTree(t *testing.T) (root, home string) {
+//
+// The file list is the census's own, so this and the replay script that
+// re-takes it build one tree rather than two. Several of the files are meant
+// NOT to be reached -- `@u1.txtZZZ` and `@u3` splice nothing -- so they have to
+// be on disk for those arms to assert anything, and `...` is a legal filename
+// rather than a dot segment, which is what the dot-run case measures the skip's
+// width against.
+func oracleTree(t *testing.T, tree map[string]string) (root, home string) {
 	t.Helper()
 	base := t.TempDir()
 	root = filepath.Join(base, "probe")
 	home = filepath.Join(base, "home")
-	for _, dir := range []string{root, home, filepath.Join(root, "nested", "deep")} {
+	for _, dir := range []string{root, home} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for path, body := range map[string]string{
-		filepath.Join(root, "secret.txt"):                 "MARKER_ALPHA\n",
-		filepath.Join(root, "plain"):                      "MARKER_EPS\n",
-		filepath.Join(root, "big.txt"):                    "MARKER_OMEGA\n",
-		filepath.Join(root, "with space.txt"):             "MARKER_DELTA\n",
-		filepath.Join(root, "nested", "inner.txt"):        "MARKER_BETA\n",
-		filepath.Join(root, "nested", "deep", "deep.txt"): "MARKER_GAMMA\n",
-		filepath.Join(home, ".zshrc"):                     "export PATH=$PATH\n",
-	} {
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	for path, body := range tree {
+		target := filepath.Join(root, filepath.FromSlash(path))
+		if rest, ok := strings.CutPrefix(path, "~/"); ok {
+			target = filepath.Join(home, filepath.FromSlash(rest))
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			t.Fatal(err)
 		}
-	}
-	// The trailing-punctuation and NBSP cases name these. u1 and u3 exist and
-	// are meant NOT to be reached -- `@u1.txtZZZ` and `@u3` splice nothing --
-	// so they have to be on disk for those arms to assert anything.
-	for _, name := range []string{"ok.txt", "u1.txt", "u2.txt", "u3.txt",
-		"t1.txt", "t2.txt", "t3.txt", "t4.txt", "t5.txt", "t6.txt", "t7.txt", "t8.txt",
-		"w1.txt", "w2.txt", "w3.txt", "w4.txt", "x1.txt", "x2.txt",
-		// A legal filename, not a dot segment. The dot-run case asserts the
-		// skip's width against a directory where `...` really exists.
-		"..."} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte("MARKER_"+name+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(target, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
