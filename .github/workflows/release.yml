@@ -757,20 +757,32 @@ jobs:
           # as an archive -- measured against this block on 2026-08-25.
           shopt -s nullglob
           verified=0
+          # Both copies of the provenance, and the identity each one carries.
+          #
+          # The two calls this replaces asserted their exit status and nothing
+          # else -- `gh attestation verify` prints nothing at all once its
+          # output is redirected, so a successful run left an empty log and the
+          # only evidence was the archive count below. `--format=json` gives it
+          # a value, and check-attestation-identity.py compares that value to
+          # the same string cosign's --certificate-identity is pinned to.
+          #
+          # The second copy is read out of the attached asset rather than the
+          # attestations API, because that is the only copy a consumer with no
+          # network path to the API has. A bundle uploaded truncated, or from
+          # the wrong run, passes the API call and fails this one. The Sigstore
+          # trust root is fetched either way -- driven 2026-09-07 behind a dead
+          # proxy, where both forms fail identically on `no valid Sigstore
+          # verifiers could be initialized` -- so the asset is offline in the
+          # attestation and not in every byte it needs.
+          # An absolute path: this loop runs inside `published/`, and a relative
+          # one would be read against whichever directory the block last
+          # entered.
           for f in *.tar.gz *.zip; do
-            gh attestation verify "$f" \
-              --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
-            # The same claim read out of the attached asset rather than out of
-            # the attestations API, because that is the only copy a consumer
-            # with no network path to the API has. A bundle uploaded truncated,
-            # or from the wrong run, passes the call above and fails this one.
-            # The Sigstore trust root is still fetched, so this is offline in
-            # the attestation rather than in every byte it needs.
-            gh attestation verify "$f" \
+            python3 "$GITHUB_WORKSPACE/scripts/check-attestation-identity.py" \
+              --artifact "$f" \
               --bundle "$bundle" \
-              --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+              --repository "$GITHUB_REPOSITORY" \
+              --ref "$GITHUB_REF"
             verified=$((verified + 1))
           done
           if [ "$verified" -ne "$expected" ]; then

@@ -158,8 +158,11 @@ sha256sum --ignore-missing -c checksums.txt
 archives you did not download, which reads as a verification failure.
 
 The install has to name a verifier and say which — `cosign verified
-checksums.txt against karlkfi/claude-spill-guard at vX.Y.Z`, or `gh verified
-the build provenance of ...`. A run that installed and said neither took a path nobody
+checksums.txt against karlkfi/claude-spill-guard at vX.Y.Z`, or `gh verified the
+build provenance of ... against karlkfi/claude-spill-guard at vX.Y.Z`. Both name
+the tag, because both now pin it: `--signer-workflow` matches the certificate
+subject as a prefix, so the bare value the `gh` branch used to pass accepted that
+workflow at any ref. A run that installed and said neither took a path nobody
 intended, and the sha256 line above it is not a substitute: `checksums.txt`
 comes from the same place the archive did. `sh install.sh --verifier` answers
 which tool the machine has without downloading anything.
