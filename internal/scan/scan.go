@@ -360,13 +360,27 @@ func matchRule(path string, text []byte, source func(int) int, rule rules.Rule) 
 }
 
 // matchAll scans the whole buffer for the rule.
+//
+// The non-overlap rule is FindAll's own -- it resumes at the end of each match
+// -- except where an extent has widened one past where the pattern stopped.
+// Then the thing that was found is longer than the match that found it, and the
+// next match inside it is a second reading of one token: the `eyJ` a JWT's
+// payload opens on is a hit like any other. So resume tracks what accept
+// returns rather than what the pattern matched, which is a no-op for every rule
+// with no extent and is what keeps the two arms agreeing for the one that has
+// one.
 func matchAll(path string, text []byte, source func(int) int, rule rules.Rule) ([]Finding, error) {
 	var findings []Finding
+	next := 0
 	for _, m := range rule.Regex.FindAllSubmatchIndex(text, -1) {
-		found, ok, err := accept(path, text, source, rule, m)
+		if m[0] < next {
+			continue
+		}
+		found, resume, ok, err := accept(path, text, source, rule, m)
 		if err != nil {
 			return nil, err
 		}
+		next = resume
 		if ok {
 			findings = append(findings, found)
 		}
@@ -381,7 +395,8 @@ func matchAll(path string, text []byte, source func(int) int, rule rules.Rule) (
 // them, so the non-overlap rule comes with it: FindAll resumes at the end of
 // each match, and next is that. A hit inside a match already taken is skipped
 // whether or not the checks kept the finding, because it is the match and not
-// the finding that FindAll steps over.
+// the finding that FindAll steps over -- or, where an extent widened it, the
+// end the extent reported, which matchAll now steps over too.
 func matchAt(path string, text []byte, source func(int) int, rule rules.Rule, at []int) ([]Finding, error) {
 	var findings []Finding
 	next := 0
@@ -398,11 +413,11 @@ func matchAt(path string, text []byte, source func(int) int, rule rules.Rule, at
 				m[i] = v + hit
 			}
 		}
-		next = m[1]
-		found, ok, err := accept(path, text, source, rule, m)
+		found, resume, ok, err := accept(path, text, source, rule, m)
 		if err != nil {
 			return nil, err
 		}
+		next = resume
 		if ok {
 			findings = append(findings, found)
 		}
@@ -410,17 +425,23 @@ func matchAt(path string, text []byte, source func(int) int, rule rules.Rule, at
 	return findings, nil
 }
 
-// accept turns one match into a finding, or reports that a check dropped it.
-func accept(path string, text []byte, source func(int) int, rule rules.Rule, m []int) (Finding, bool, error) {
+// accept turns one match into a finding, or reports that a check dropped it. It
+// also returns where the caller's loop resumes, which is not always the end of
+// the match: see extend.
+func accept(path string, text []byte, source func(int) int, rule rules.Rule, m []int) (Finding, int, bool, error) {
 	lo, hi := m[2*rule.Group], m[2*rule.Group+1]
 	if lo < 0 {
 		// The group is in the pattern but took part in no match, which an
 		// alternation makes ordinary.
-		return Finding{}, false, nil
+		return Finding{}, m[1], false, nil
 	}
-	ok, err := passes(rule, text, lo, hi)
+	hi, resume, ok, err := extend(rule, text, lo, hi, m[1])
 	if err != nil || !ok {
-		return Finding{}, false, err
+		return Finding{}, resume, false, err
+	}
+	ok, err = passes(rule, text, lo, hi)
+	if err != nil || !ok {
+		return Finding{}, resume, false, err
 	}
 	return Finding{
 		RuleID: rule.ID,
@@ -431,7 +452,62 @@ func accept(path string, text []byte, source func(int) int, rule rules.Rule, m [
 		// is what maps it back.
 		Offset: source(lo),
 		Digest: digest(rule.ID, text[lo:hi]),
-	}, true, nil
+	}, resume, true, nil
+}
+
+// extend runs the rule's extent over the match at text[lo:hi] and returns the
+// capture the checks should see, where the caller's loop resumes, and whether
+// there is a candidate here at all.
+//
+// This is the phase between matching and validating, and it exists because
+// neither of those can do the job. A pattern says where a thing ends only
+// within RE2's cap of 1000 on a bounded repeat, which is Go's number rather
+// than the secret's; a validator returns a bool over bytes it was handed and
+// cannot ask for more of them. So the extent walks forward from the match start
+// with no ceiling on it, and the widened capture is what every check below
+// reads -- one call site, before passes, which is what makes it impossible to
+// hand a check a prefix of what was found.
+//
+// A refusal is an ordinary answer. The pattern is small enough to be cheap,
+// which means it is small enough to be wrong: `eyJ` heads any base64-encoded
+// JSON object, and 95% of the ones in a real tree are not the head of a token.
+// The walk is what settles that -- and it settles more than the one position,
+// so a refusal carries its own resume rather than leaving the loop to step one
+// match forward. See validate.JWTToken for why that is not an optimisation the
+// caller could make for itself.
+//
+// Where the rule names no extent this is the identity, and the caller's resume
+// is the match end FindAll would have used.
+func extend(rule rules.Rule, text []byte, lo, hi, matchEnd int) (int, int, bool, error) {
+	if rule.Extent == "" {
+		return hi, matchEnd, true, nil
+	}
+	var end int
+	var ok bool
+	switch rule.Extent {
+	case rules.JWTToken:
+		end, ok = validate.JWTToken(text, lo)
+	default:
+		// The loader refuses a name it does not know, so arriving here means
+		// internal/rules grew an extent and this switch did not. An error
+		// rather than a dropped candidate, for the reason passes gives: the
+		// alternative is a rule that runs on every file and reports nothing,
+		// which reads exactly like a rule that found nothing.
+		return hi, matchEnd, false, fmt.Errorf(
+			"rule %q names extent %q, which the pipeline does not run",
+			rule.ID, rule.Extent)
+	}
+	if !ok {
+		// A refused extent still reports how far it settled, and it is
+		// routinely past the match: no start before it can produce a candidate
+		// either, so resuming at the match end would walk the same run again at
+		// every hit inside it. See validate.JWTToken.
+		return hi, max(matchEnd, end), false, nil
+	}
+	// The extent is what the checks and the digest read, and it is also what
+	// the loop steps over: a token found here is one finding, not one per `eyJ`
+	// inside it.
+	return end, end, true, nil
 }
 
 // gates reports whether a keyword list can gate anything, which is not the

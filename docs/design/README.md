@@ -1041,51 +1041,88 @@ not need to do.
    byte in the class — running it at each hit took 29.8 s against 12.2 ms for
    one whole-buffer pass.
 
-   **So the rule was bounded rather than the loop.** Each of its three repeats
-   now reads `{8,1000}` or `{10,1000}`, RE2's own cap, which gives the rule a
-   reach of 3,008 and the anchored arm with it. It is the largest single change
-   the pipeline has taken: `eyJ` heads any base64-encoded JSON object, so the
-   keyword is one ordinary content carries — lock files, JWKS documents, CI
-   configuration, anything embedding a token by example — and the rule was
-   paying a whole-buffer NFA pass for each of them. Measured 2026-09-07 by
-   `BenchmarkRule` and `BenchmarkRuleset` over the corpus above, three counts
-   each, one machine, the pattern the only difference: the rule alone goes from
-   61.1–62.9 MB/s to 757–764 MB/s, and the shipped set from 35.14–35.51 MB/s to
-   77.66–77.80 MB/s.
+   **So `jwt` was bounded rather than the loop, and then split rather than
+   bounded.** Q133 rewrote its three repeats as `{8,1000}` and `{10,1000}`,
+   RE2's own cap, which gave the rule a reach of 3,008 and the anchored arm
+   with it — the largest single change the pipeline has taken, because `eyJ`
+   heads any base64-encoded JSON object and so turns up in lock files, JWKS
+   documents and CI configuration, each of which was buying a whole-buffer
+   NFA pass. Measured 2026-09-07 over the corpus above: the rule alone went
+   from 61.1–62.9 MB/s to 757–764, and the shipped set from 35.14–35.51 to
+   77.66–77.80.
 
-   A bound is a recall ceiling and this one is stated rather than assumed
-   harmless. The `eyJ` in front of each repeat is written out, so a header or
-   payload segment may reach 1,003 bytes and a token carrying a longer one goes
-   unmatched — the signature is bounded too and costs nothing, because nothing
-   follows it and the bound truncates the capture instead of refusing the
-   token. Two populations were read for what a real token reaches, both of them
-   examples and fixtures rather than production traffic, so both are a floor:
-   4.66 GB in 244,089 files under Go's module cache held 118 JWT-shaped runs,
-   every one decoding to a JSON header, with a header of at most 102 bytes and
-   a payload of at most 883; 2.28 GB in 2,338 session transcripts held 31, at
-   36 and 222. `internal/scan/jwt_bound_test.go` drives both edges.
+   It also bought a recall ceiling. The `eyJ` in front of each repeat is
+   written out, so a header or payload segment could reach 1,003 bytes and a
+   token carrying a longer one went unmatched — and 1,000 is what compiles
+   rather than a measurement of how long a token gets. Two populations were
+   read and neither reached it, which is why nothing here noticed: 4.66 GB
+   in 244,089 files under Go's module cache held 118 JWT-shaped runs, header
+   at most 102 and payload at most 883; 2.28 GB in 2,338 session transcripts
+   held 31, at 36 and 222. Both are corpora of documentation samples, so
+   both are a floor on what a live token can be, and a production access
+   token with many claims is past the ceiling.
 
-   The third bound is the one that reads free and is not.
-   `jwt-sample-key` recomputes the HMAC over `header.payload` and compares it
-   with the decoded signature, so a signature bound below the longest HMAC
-   signature — HS512, at 86 bytes — hands that check a truncated one, the
-   comparison fails, and a *published sample* stops being suppressed and is
-   reported as a credential. A bound read off the corpus fixtures would have
-   landed on 43, the HS256 length both of them carry. The same test drives it.
+   **Q164 removed it by splitting the two jobs the pattern was doing,
+   because only one of them has to span the secret.** Detection is
+   `\b(eyJ[A-Za-z0-9_-]{8})` — a base64url-encoded JSON object starts here —
+   bounded by construction, reach 11, the smallest in the set. Extent is a
+   forward walk over the segment class: three runs, two dots, the first two
+   opening on `eyJ`, and no ceiling, because a loop has none. The pipeline
+   runs the extent between the match and the validators and widens the
+   capture to what it returned.
 
-   **The bound costs throughput on one class of buffer, and that is what keeps
-   the bounds where they are.** `{8,1000}` compiles to a thousand states where
-   `{8,}` compiles to a loop, so wherever the class covers the text and no `.`
-   arrives to kill the threads, the whole-buffer pass carries them all. On the
-   64 KiB `-eyJ` fixture above — every byte in the class, no dot anywhere — the
-   pass went from 3.9 ms to 199 ms. Nothing realistic reproduces it: 1 MiB of
-   unbroken random base64 read at 1,282 MB/s against 29.9 before, and 1 MiB of
-   back-to-back JWTs at 18.1 MB/s against 18.5, because a `.` every few dozen
-   bytes retires the threads. It is bounded above by the scanner's own 45-second
-   budget, which blocks rather than allows. Variants reaching further — a second
-   chained repeat to carry a 2,000-byte payload — were measured and dropped:
-   they cost 3.76 MB/s against 18.5 on that back-to-back buffer, which is a
-   realistic shape rather than an adversarial one.
+   That is one call site, ahead of every check, which is what makes it
+   structurally impossible to hand a check a prefix of what was found — the
+   failure `jwt-sample-key` used to be one bound away from, where a
+   truncated signature makes the HMAC comparison fail and a *published
+   sample* is reported as a credential. What can still go wrong is a walk
+   that stops in the wrong place, so `internal/validate/extent_test.go`
+   drives the end against every byte class that can follow a token.
+
+   An extent may refuse, and does for about 95% of what the pattern matches:
+   measured over 0.46 GB in 60,000 files of this tree and Go's module cache,
+   554 `eyJ` keyword hits and 27 reaching a second `eyJ` segment past a dot.
+   Refusing is what lets the pattern be eleven bytes. The walk's only exit
+   is a byte test against a `len(buf)`-bounded index, so the end of the
+   buffer is the *same* terminator as a byte outside the class rather than
+   a missing one — a property of the loop rather than of today's callers,
+   and worth saying because a scan that never returned would surface as a
+   blocking verdict on the budget rather than as a crash. **And a refusal
+   reports how far it settled**, which is load-bearing rather than tidy:
+   every start inside one segment run reaches the same end of that run and
+   so meets the same byte after it, so a refusal there is a refusal for all
+   of them. Without that skip a buffer of unbroken segment bytes carrying a
+   hit every few bytes walks the whole run once per hit — quadratic, where a
+   bounded pattern is linear with a large constant, so the extent would lose
+   to the thing it replaced at four times the size having beaten it at 64
+   KiB.
+
+   Measured 2026-09-07, both rulesets in one process, minimum of three,
+   against the ruleset exactly as Q133 shipped it:
+
+   | Buffer | Q133 bounded | With the extent |
+   |---|---|---|
+   | The shipped set over this repository's text, 1.76 MB | 37.93–39.04 MB/s | 37.55–39.58 MB/s |
+   | `jwt` alone over the same, anchored | 349.97–376.81 MB/s | 383.64–400.31 MB/s |
+   | 1 MiB of back-to-back JWTs, anchored, 6,721 findings both | 13.8 MB/s | 56.9 MB/s |
+   | 1 MiB of `-eyJ` repeated, anchored | 16,733 ms | 2.4 ms |
+
+   **Read the first row as the answer to "is it faster".** It is not: on
+   ordinary text the shipped set does not move, because `jwt` was already
+   anchored and the other nine rules are what the time goes on. What the
+   split buys is recall, which the ceiling was costing silently, and it buys
+   it for nothing. The rows under it are where the cost went instead — the
+   realistic worst case, a buffer that is mostly tokens, is 4.1x faster and
+   reports the same findings, and the adversarial buffer the 45-second
+   budget was the backstop for is no longer a class this rule has.
+
+   Those absolutes are below the Q133 figures above because the machine was
+   loaded when they were taken: the control arm — every `Anchor` cleared,
+   the same patterns through the same code — read 7.12–7.40 MB/s at the
+   start of that session and 3.31–3.42 MB/s at the end, and an untouched
+   rule's fixed cost doubled across the same pair. That is why all four rows
+   are two rulesets in one process. Read the columns against each other,
+   never against another run.
 
    A bounded rule can still be handed more hits than they are worth, so the
    loop counts them first. One attempt reads at most the rule's reach and the
@@ -1161,8 +1198,9 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `group` | Which capture group holds the candidate. Lets a rule capture a wider window than it reports. |
 | `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. A keyword at the head of every match the rule can produce is what lets [the pipeline](#pipeline) run the rule at those positions instead of over the buffer; one further in still gates, and pays a full pass. |
 | `labels` | Word-boundary literals the candidate has to sit near, for the context-proximity check. Read after the match, so unlike `keywords` it gates nothing. |
-| `entropy` | Minimum Shannon bits per character over the captured group. Omitted means no floor. A floor above what the group can reach is a startup failure, not a quiet rule. |
+| `entropy` | Minimum Shannon bits per character over the captured group — over what the `extent` returned, where a rule names one. Omitted means no floor. A floor above what the group can reach is a startup failure, not a quiet rule. |
 | `validators` | Names from the validator table above, all of which must pass. |
+| `extent` | Names a walk that says where the match really ends, run before the validators and widening the group they read. Omitted for every rule but `jwt`; see [Pipeline](#pipeline), step 4. |
 | `enabled` | Ships `false` for every `pii` rule. |
 
 `labels` and `keywords` are both word-boundary literal lists and they are not

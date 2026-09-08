@@ -49,6 +49,39 @@ const (
 	ContextLabel    Validator = "context-label"
 )
 
+// Extent names a function in internal/validate that says where the thing a
+// rule matched actually ends.
+//
+// It exists because a validator cannot. A check returns a bool over the bytes
+// it was handed, so it can drop a candidate and never widen one -- and a rule
+// whose secret runs past what RE2 can express in a bounded repeat needs the
+// second of those. The pattern detects; the extent measures. internal/validate,
+// extent.go, carries the argument.
+//
+// A rule names at most one, and naming none is the ordinary case: every shipped
+// rule but jwt matches the whole of what it is about.
+type Extent string
+
+const (
+	// JWTToken walks the three base64url segments of a JSON Web Token.
+	JWTToken Extent = "jwt-token"
+)
+
+// extentSymbols is how many distinct byte values each extent's result can be
+// drawn from, which is the one thing the loader still needs about a candidate
+// it can no longer measure the length of.
+//
+// The entropy ceiling is over min(length, alphabet), and an extent removes the
+// first of those: the walk has no upper bound, so the pattern's capture length
+// is a floor on the candidate rather than a ceiling, and reading it as a
+// ceiling refuses a rule that works. The alphabet survives, because the extent
+// walks one class and knows which.
+//
+// jwt-token: the sixty-four base64url bytes, plus the `.` between the segments.
+var extentSymbols = map[Extent]int{
+	JWTToken: 65,
+}
+
 var validators = map[Validator]bool{
 	Luhn:            true,
 	CardPlaceholder: true,
@@ -75,6 +108,12 @@ type Rule struct {
 	Entropy     float64
 	Validators  []Validator
 	Enabled     bool
+
+	// Extent is the check that widens a match to the whole of what it found,
+	// or "" where the pattern already matches all of it. internal/scan runs it
+	// between the match and the validators, so every check sees what it
+	// returned.
+	Extent Extent
 
 	// Anchor is Regex with \A in front, or nil where the pipeline may not run
 	// the rule once at each prefilter hit instead of scanning the whole buffer

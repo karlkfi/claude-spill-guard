@@ -26,6 +26,7 @@ type entry struct {
 	Labels      *[]string `json:"labels"`
 	Entropy     *float64  `json:"entropy"`
 	Validators  *[]string `json:"validators"`
+	Extent      *string   `json:"extent"`
 	Enabled     *bool     `json:"enabled"`
 }
 
@@ -168,6 +169,11 @@ func compile(e entry) (Rule, error) {
 		checks = append(checks, v)
 	}
 
+	extent := Extent(derefString(e.Extent))
+	if _, known := extentSymbols[extent]; extent != "" && !known {
+		return fail("names an extent that does not exist: %q", *e.Extent)
+	}
+
 	rule := Rule{
 		ID:          e.ID,
 		Family:      family,
@@ -178,6 +184,7 @@ func compile(e entry) (Rule, error) {
 		Labels:      deref(e.Labels),
 		Entropy:     entropy,
 		Validators:  checks,
+		Extent:      extent,
 		Enabled:     *e.Enabled,
 	}
 	rule.Anchor, rule.Reach = anchor(*e.Regex, keywords)
@@ -203,23 +210,40 @@ func compile(e entry) (Rule, error) {
 		return fail("names %q with no label to look for, so it reports nothing", ContextLabel)
 	}
 	if rule.Uses(Entropy) {
-		reach, err := maxCaptureBytes(*e.Regex, group)
-		if err != nil {
-			return fail("%s", err)
-		}
-		symbols, err := captureSymbols(*e.Regex, group)
-		if err != nil {
-			return fail("%s", err)
-		}
-		// Length and alphabet each bound the distinct byte count, so the
-		// smaller is the one that binds: a 32-byte hex capture reaches log2(16)
-		// and not log2(32). The message names both, because which of the two
-		// refused the rule is what its author has to change.
-		if ceiling := entropyCeiling(min(reach, symbols)); rule.Entropy > ceiling {
-			return fail("entropy floor %v over a group of at most %d byte(s) drawn from "+
-				"%d distinct byte value(s), which cannot carry more than %.4g bits, "+
-				"so it reports nothing",
-				rule.Entropy, reach, symbols, ceiling)
+		if extent != "" {
+			// An extent widens the capture before any check reads it, and it
+			// walks to the end of a class rather than to a bound -- so the
+			// pattern's capture length is a floor on what entropy will be
+			// measured over, not a ceiling, and reading it as one refuses a
+			// rule that works. That is the direction maxCaptureBytes exists to
+			// avoid. The alphabet is what still binds, and the extent declares
+			// it.
+			symbols := extentSymbols[extent]
+			if ceiling := entropyCeiling(symbols); rule.Entropy > ceiling {
+				return fail("entropy floor %v over a candidate the %q extent draws from "+
+					"%d distinct byte value(s), which cannot carry more than %.4g bits, "+
+					"so it reports nothing",
+					rule.Entropy, extent, symbols, ceiling)
+			}
+		} else {
+			reach, err := maxCaptureBytes(*e.Regex, group)
+			if err != nil {
+				return fail("%s", err)
+			}
+			symbols, err := captureSymbols(*e.Regex, group)
+			if err != nil {
+				return fail("%s", err)
+			}
+			// Length and alphabet each bound the distinct byte count, so the
+			// smaller is the one that binds: a 32-byte hex capture reaches
+			// log2(16) and not log2(32). The message names both, because which
+			// of the two refused the rule is what its author has to change.
+			if ceiling := entropyCeiling(min(reach, symbols)); rule.Entropy > ceiling {
+				return fail("entropy floor %v over a group of at most %d byte(s) drawn from "+
+					"%d distinct byte value(s), which cannot carry more than %.4g bits, "+
+					"so it reports nothing",
+					rule.Entropy, reach, symbols, ceiling)
+			}
 		}
 	}
 	return rule, nil
@@ -242,6 +266,13 @@ func hasLabel(labels []string) bool {
 func deref(p *[]string) []string {
 	if p == nil {
 		return nil
+	}
+	return *p
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
 	}
 	return *p
 }

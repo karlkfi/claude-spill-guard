@@ -159,6 +159,10 @@ func BenchmarkRule(b *testing.B) {
 	planted := append(append([]byte(nil), corpus...),
 		"\nAKIA ghp_ github_pat_ xoxb- sk_live_ sk- AIza eyJ\n"...)
 
+	var arms []struct {
+		name string
+		rule rules.Rule
+	}
 	for _, id := range []string{
 		"aws-access-key-id", "github-token", "github-fine-grained-pat",
 		"slack-token", "stripe-live-secret-key", "openai-api-key", "google-api-key",
@@ -167,13 +171,28 @@ func BenchmarkRule(b *testing.B) {
 		// JSON object and so turns up in ordinary content.
 		"jwt",
 	} {
-		rule := benchRule(b, ruleset, id)
+		arms = append(arms, struct {
+			name string
+			rule rules.Rule
+		}{id, benchRule(b, ruleset, id)})
+	}
+	// The jwt rule as Q133 shipped it, beside the rule as it is now, in this
+	// process and over this buffer. Q164 split the pattern from the extent, and
+	// the only way to say what that cost or bought is to run both here: the
+	// same reading taken in two runs is a reading of the machine as much as of
+	// the rule.
+	arms = append(arms, struct {
+		name string
+		rule rules.Rule
+	}{"jwt-q133-bounded", rewrittenJWT(b, q133JWT, false)})
+
+	for _, arm := range arms {
 		for _, corpus := range []struct {
 			name string
 			buf  []byte
 		}{{"as-is", corpus}, {"one-keyword-each", planted}} {
-			b.Run(fmt.Sprintf("%s/%s", id, corpus.name), func(b *testing.B) {
-				benchArms(b, rule, corpus.buf)
+			b.Run(fmt.Sprintf("%s/%s", arm.name, corpus.name), func(b *testing.B) {
+				benchArms(b, arm.rule, corpus.buf)
 			})
 		}
 	}
@@ -183,12 +202,29 @@ func BenchmarkRule(b *testing.B) {
 // the entry point the hook uses. The per-rule numbers say where the time goes;
 // this one says what a caller gets.
 //
-// The second arm is what the pipeline did before any rule had an Anchor:
-// clearing the field sends every rule down the whole-buffer pass behind the
-// prefilter's yes-or-no, which is the shape this replaced. Same binary and same
-// buffer, so the pair is a comparison rather than two readings from two builds.
+// Three arms, all in one process over one buffer, which is what makes the
+// differences between them attributable. Two of them are history:
+//
+//   - q133-bounded is the ruleset as it shipped between Q133 and Q164, where
+//     jwt carried the whole three-segment structure in one pattern with every
+//     repeat at RE2's cap of 1000. That is the arm the extent is measured
+//     against.
+//   - whole-buffer is what the pipeline did before any rule had an Anchor:
+//     clearing the field sends every rule down the whole-buffer pass behind the
+//     prefilter's yes-or-no.
+//
+// whole-buffer is also the control. It runs the same patterns through the same
+// code on both sides of a change to the anchored path, so it is what says a
+// difference in the other two arms is the change rather than the machine --
+// which is not a formality on a workstation. Measured 2026-09-07, two runs
+// fifteen minutes apart on this machine: 7.12-7.40 MB/s for this arm and then
+// 3.31-3.42, with BenchmarkOneAttempt's aws-access-key-id -- a rule untouched
+// by any of this -- going 67.6-79.9 ns to 124.9-158.8 across the same pair,
+// 1.85x on the minima. Read the arms against each other within one run, never
+// across two.
 func BenchmarkRuleset(b *testing.B) {
 	shipped := loadShipped(b)
+	bounded := rewrittenSet(b, q133JWT, false)
 	whole := append([]rules.Rule(nil), shipped...)
 	anchors := 0
 	for i := range whole {
@@ -199,6 +235,15 @@ func BenchmarkRuleset(b *testing.B) {
 	}
 	if anchors == 0 {
 		b.Fatal("no shipped rule has an Anchor, so both arms here are the same one")
+	}
+	for _, rule := range bounded {
+		if rule.ID != "jwt" {
+			continue
+		}
+		if rule.Extent != "" || rule.Anchor == nil {
+			b.Fatalf("the q133-bounded arm has extent %q and anchored = %v, so "+
+				"it is not the rule Q133 shipped", rule.Extent, rule.Anchor != nil)
+		}
 	}
 
 	corpus, _ := benchCorpus(b)
@@ -213,17 +258,23 @@ func BenchmarkRuleset(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		after, err := Buffer("b", c.buf, shipped)
-		if err != nil {
-			b.Fatal(err)
-		}
-		if !reflect.DeepEqual(before, after) {
-			b.Fatalf("%s: the two arms disagree, so their times are not comparable", c.name)
+		for _, other := range []struct {
+			name string
+			set  []rules.Rule
+		}{{"as-shipped", shipped}, {"q133-bounded", bounded}} {
+			got, err := Buffer("b", c.buf, other.set)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, got) {
+				b.Fatalf("%s: %s and whole-buffer disagree, so their times are "+
+					"not comparable", c.name, other.name)
+			}
 		}
 		for _, arm := range []struct {
 			name string
 			set  []rules.Rule
-		}{{"as-shipped", shipped}, {"whole-buffer", whole}} {
+		}{{"as-shipped", shipped}, {"q133-bounded", bounded}, {"whole-buffer", whole}} {
 			b.Run(fmt.Sprintf("%s/%s", c.name, arm.name), func(b *testing.B) {
 				b.SetBytes(int64(len(c.buf)))
 				b.ReportMetric(float64(len(before.Findings)), "findings")

@@ -190,7 +190,14 @@ var planted = map[string]string{
 	// rule matches five prefixes and the two files above are both AKIA, so
 	// until this one landed a walk over the corpus could not tell ASIA from
 	// absent -- and neither could anything else in the tree.
-	"aws-access-key-id-asia.env":  "aws-access-key-id",
+	"aws-access-key-id-asia.env": "aws-access-key-id",
+	// Two files for jwt, and the second is about the ceiling rather than the
+	// rule. Its payload segment is 2,647 bytes, which no bounded RE2 repeat
+	// reaches -- the cap is 1000 -- so before the extent it went unmatched, and
+	// a corpus holding only documentation-sized tokens could not tell that from
+	// a rule that works. It is the recall half of what Q164 changed, pinned
+	// where the precision half already was.
+	"jwt-long-payload.txt":        "jwt",
 	"github-token.sh":             "github-token",
 	"github-fine-grained-pat.txt": "github-fine-grained-pat",
 	"slack-token.json":            "slack-token",
