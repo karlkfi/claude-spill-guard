@@ -98,11 +98,44 @@ jobs:
           observed["cases"] = {name: [] for name in observed["cases"]}
           (temp / "silent.json").write_text(json.dumps(observed))
           PY
-          for mutant in "--fixture $RUNNER_TEMP/moved.json --compare $RUNNER_TEMP/observed.json" \
-                        "--compare $RUNNER_TEMP/silent.json"; do
-            # shellcheck disable=SC2086
-            if python3 scripts/check-prompt-oracle.py $mutant; then
-              echo "the comparison passed over a mutated census, so it checks nothing: $mutant" >&2
-              exit 1
-            fi
-          done
+          if python3 scripts/check-prompt-oracle.py \
+               --fixture "$RUNNER_TEMP/moved.json" --compare "$RUNNER_TEMP/observed.json" \
+               > "$RUNNER_TEMP/moved.log" 2>&1; then
+            cat "$RUNNER_TEMP/moved.log"
+            echo "a moved expectation was not refuted, so the comparison checks nothing" >&2
+            exit 1
+          fi
+
+          if python3 scripts/check-prompt-oracle.py \
+               --compare "$RUNNER_TEMP/silent.json" > "$RUNNER_TEMP/silent.log" 2>&1; then
+            cat "$RUNNER_TEMP/silent.log"
+            echo "a replay that observed nothing was not refuted, so the floor checks nothing" >&2
+            exit 1
+          fi
+
+          # What each mutant said, not just that it said something. The moved
+          # expectation must still name the case -- that is the drift this job
+          # exists to report, and the assertion below greps for the sentence it
+          # is written in, so this run is what proves the sentence exists.
+          if ! grep -q "grammar moved" "$RUNNER_TEMP/moved.log"; then
+            cat "$RUNNER_TEMP/moved.log"
+            echo "a moved expectation no longer names the case, so the check below greps for nothing" >&2
+            exit 1
+          fi
+
+          # And the emptied recording must say only that it observed nothing.
+          # The first grep is what makes the second one mean something: it
+          # asserts the floor is the failure, so the absence below is the
+          # per-case lines being withheld rather than the recording being
+          # healthy. A line per non-empty case saying the grammar moved would
+          # send a reader to internal/hook for a harness that produced nothing.
+          if ! grep -q "the replay saw 0 cases splice something" "$RUNNER_TEMP/silent.log"; then
+            cat "$RUNNER_TEMP/silent.log"
+            echo "the emptied recording did not fail on the floor, so the check below tests nothing" >&2
+            exit 1
+          fi
+          if grep -q "grammar moved" "$RUNNER_TEMP/silent.log"; then
+            cat "$RUNNER_TEMP/silent.log"
+            echo "the floor failed and the per-case lines were printed under it anyway" >&2
+            exit 1
+          fi
