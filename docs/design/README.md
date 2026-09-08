@@ -1015,15 +1015,16 @@ not need to do.
    `\b` is not the repair — it is what keeps `ghp_` from matching inside
    `xghp_`, and precision is the product. Keeping the positions is.
 
-   Measured 2026-09-04 over this repository's own text, about 1.36 MB in 174
-   text files, which names every keyword the ruleset gates on and so clears
-   every prefilter: the shipped set goes from 7.12 MB/s to 32.09 MB/s, and per
-   rule from 49.8–62.7 MB/s to 181–4,790 MB/s. Both arms are in
-   `internal/scan/bench_test.go`, one binary over one buffer, and it refuses to
-   time them until they report the same findings. The size is approximate
-   because `docs/` is in the corpus, so this paragraph is one of the files it
-   measures and an exact figure falsifies itself on the commit that writes it.
-   The test's floors are what pin the corpus; the rates are what to read.
+   All eight take that arm. Measured 2026-09-07 over this repository's own
+   text, about 1.73 MB in 196 text files, which names every keyword the ruleset
+   gates on and so clears every prefilter: the shipped set goes from 7.36–7.39
+   MB/s to 77.66–77.80 MB/s, and per rule from 51.3–63.0 MB/s to 243–4,383.
+   Both arms are in `internal/scan/bench_test.go`, one binary over one buffer,
+   and it refuses to time them until they report the same findings. The size is
+   approximate because `docs/` is in the corpus, so this paragraph is one of
+   the files it measures and an exact figure falsifies itself on the commit
+   that writes it. The test's floors are what pin the
+   corpus; the rates are what to read.
 
    Five conditions decide it and none is about speed. Four belong to the loader
    (`internal/rules/anchor.go`): the pattern opens on `\b`, nothing in it asks
@@ -1033,12 +1034,58 @@ not need to do.
    checks — every keyword opens on a word byte, without which a hit and the
    pattern's own `\b` are different predicates in both directions.
 
-   The bound is what excludes `jwt`, and it is a cost condition rather than a
-   correctness one. `eyJ[A-Za-z0-9_-]{8,}` keeps the engine's threads alive for
-   as long as the class matches, so one attempt reads to the end of the buffer:
-   on 64 KiB of `-eyJ` repeated — a hit every four bytes, and every byte in the
-   class — running it at each hit took 29.8 s against 12.2 ms for one
-   whole-buffer pass.
+   The bound is a cost condition rather than a correctness one, and `jwt` is
+   what it was written about. `eyJ[A-Za-z0-9_-]{8,}` keeps the engine's threads
+   alive for as long as the class matches, so one attempt reads to the end of
+   the buffer: on 64 KiB of `-eyJ` repeated — a hit every four bytes, and every
+   byte in the class — running it at each hit took 29.8 s against 12.2 ms for
+   one whole-buffer pass.
+
+   **So the rule was bounded rather than the loop.** Each of its three repeats
+   now reads `{8,1000}` or `{10,1000}`, RE2's own cap, which gives the rule a
+   reach of 3,008 and the anchored arm with it. It is the largest single change
+   the pipeline has taken: `eyJ` heads any base64-encoded JSON object, so the
+   keyword is one ordinary content carries — lock files, JWKS documents, CI
+   configuration, anything embedding a token by example — and the rule was
+   paying a whole-buffer NFA pass for each of them. Measured 2026-09-07 by
+   `BenchmarkRule` and `BenchmarkRuleset` over the corpus above, three counts
+   each, one machine, the pattern the only difference: the rule alone goes from
+   61.1–62.9 MB/s to 757–764 MB/s, and the shipped set from 35.14–35.51 MB/s to
+   77.66–77.80 MB/s.
+
+   A bound is a recall ceiling and this one is stated rather than assumed
+   harmless. The `eyJ` in front of each repeat is written out, so a header or
+   payload segment may reach 1,003 bytes and a token carrying a longer one goes
+   unmatched — the signature is bounded too and costs nothing, because nothing
+   follows it and the bound truncates the capture instead of refusing the
+   token. Two populations were read for what a real token reaches, both of them
+   examples and fixtures rather than production traffic, so both are a floor:
+   4.66 GB in 244,089 files under Go's module cache held 118 JWT-shaped runs,
+   every one decoding to a JSON header, with a header of at most 102 bytes and
+   a payload of at most 883; 2.28 GB in 2,338 session transcripts held 31, at
+   36 and 222. `internal/scan/jwt_bound_test.go` drives both edges.
+
+   The third bound is the one that reads free and is not.
+   `jwt-sample-key` recomputes the HMAC over `header.payload` and compares it
+   with the decoded signature, so a signature bound below the longest HMAC
+   signature — HS512, at 86 bytes — hands that check a truncated one, the
+   comparison fails, and a *published sample* stops being suppressed and is
+   reported as a credential. A bound read off the corpus fixtures would have
+   landed on 43, the HS256 length both of them carry. The same test drives it.
+
+   **The bound costs throughput on one class of buffer, and that is what keeps
+   the bounds where they are.** `{8,1000}` compiles to a thousand states where
+   `{8,}` compiles to a loop, so wherever the class covers the text and no `.`
+   arrives to kill the threads, the whole-buffer pass carries them all. On the
+   64 KiB `-eyJ` fixture above — every byte in the class, no dot anywhere — the
+   pass went from 3.9 ms to 199 ms. Nothing realistic reproduces it: 1 MiB of
+   unbroken random base64 read at 1,282 MB/s against 29.9 before, and 1 MiB of
+   back-to-back JWTs at 18.1 MB/s against 18.5, because a `.` every few dozen
+   bytes retires the threads. It is bounded above by the scanner's own 45-second
+   budget, which blocks rather than allows. Variants reaching further — a second
+   chained repeat to carry a 2,000-byte payload — were measured and dropped:
+   they cost 3.76 MB/s against 18.5 on that back-to-back buffer, which is a
+   realistic shape rather than an adversarial one.
 
    A bounded rule can still be handed more hits than they are worth, so the
    loop counts them first. One attempt reads at most the rule's reach and the

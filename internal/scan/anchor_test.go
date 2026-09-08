@@ -336,12 +336,13 @@ func TestWhichShippedRulesRunFromTheirKeywordPositions(t *testing.T) {
 		// derives a literal prefix from each, so there is nothing to win.
 		"slack-webhook-url": {false, 0},
 		"private-key-block": {false, 0},
-		// Unbounded: `eyJ[A-Za-z0-9_-]{8,}` keeps the engine's threads alive
-		// for as long as the class matches, so one attempt reads to the end of
-		// the buffer. Measured on a 64 KiB buffer of `-eyJ` repeated -- every
-		// four bytes a hit, and every byte in the class -- the anchored path
-		// took 29.8s against 12.2ms for one whole-buffer pass.
-		"jwt": {false, 0},
+		// Bounded at RE2's own cap of 1000 per repeat, which is what buys jwt
+		// the anchored path. Unbounded it kept the engine's threads alive for
+		// as long as the class matched, so one attempt read to the end of the
+		// buffer. The bound is a stated recall ceiling rather than a free
+		// win -- jwt_bound_test.go carries both edges and the two population
+		// readings the number came from.
+		"jwt": {true, 3008},
 
 		// The pii family is not gated on keywords at all.
 		"payment-card":   {false, 0},
