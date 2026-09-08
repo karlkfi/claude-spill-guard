@@ -39,6 +39,12 @@ write under -- agrees with all ten of the cases that expect an empty splice and
 reports green. So a recording that observed fewer than the fixture's own
 non-empty cases, or fewer than its files, is a failure rather than a pass. The
 Go test carries the same floor for the same reason.
+
+A failed floor is also the whole report. With nothing observed, every case the
+census holds files for disagrees, and each of those lines says the grammar
+moved -- one per non-empty case, fourteen on the census as it stands, all of
+them sending a reader to `internal/hook` and to re-taking the census for a
+harness that produced nothing. The floor has already said so once.
 """
 
 import argparse
@@ -199,6 +205,13 @@ def compare(fixture, recording, expect_version):
             f"{want_files}. A run that drove nothing agrees with every case "
             f"that expects an empty splice, so a shortfall is a failure rather "
             f"than a pass.")
+        # And nothing else, because there is no observation left to disagree
+        # with. Every per-case line below reads "the grammar moved", which
+        # sends a reader to internal/hook and to re-taking the census when what
+        # broke is the replay -- the absence the floor has already reported
+        # once. The other direction stays independent: with the floor met, a
+        # per-case disagreement is real drift and must still name every case.
+        return failures
 
     for case in fixture["cases"]:
         want = sorted(set(case["harness_files"]))
