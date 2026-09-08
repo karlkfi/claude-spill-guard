@@ -178,6 +178,14 @@ gate from either side.
 for an issued credential. `minVectors` in `internal/testvec` is a floor at the
 file's current size, so removing an entry means lowering it in the same edit.
 
+`jwt-long-payload.txt` is the other file carrying a rule a second time, and it
+is about a ceiling rather than the rule or the encoding. Its payload segment is
+2,647 bytes, which no bounded RE2 repeat reaches — the cap is 1000 — so before
+the extent landed it went unmatched, and a corpus holding only
+documentation-sized tokens could not tell that from a rule that works. Its
+signature is fabricated rather than a real HMAC, so `jwt-sample-key` has
+nothing to recompute and nothing to suppress.
+
 `aws-access-key-id-utf16le.env` is the one file here that is not testing a
 rule. It tests an encoding: UTF-16LE with a byte-order mark, which is what
 Windows PowerShell 5.1 writes through `>`. It sits in the corpus rather than in

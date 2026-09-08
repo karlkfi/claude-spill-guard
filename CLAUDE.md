@@ -18,7 +18,7 @@ measured.
 | `docs/design/brief.md` | The origin brief, as written. |
 | `docs/development/release-process.md` | Cutting a release: what a person does, and what the tag does. |
 | `cmd/spill-guard/` | The entry point. `hook`, `selftest`, `coverage` and `version`; the rest land with the rows that specify them. |
-| `internal/validate/` | The eight validators. Precision lives here, not in the regex. |
+| `internal/validate/` | The eight validators, and the one extent. Precision lives here, not in the regex — and so does the only answer to *how far does this run*, which a bounded repeat cannot give past 1,003 bytes. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
 | `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. `coverage.go` is the other half: what to do when there is no verdict to reach, and where the gap gets recorded. |
 | `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it could not read the text. |
@@ -604,10 +604,21 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
   last of them, an unbounded repeat, at a measured 2,451x; bounding its three
   repeats at RE2's own cap of 1000 bought it the anchored arm and took the
   shipped set from 35.14–35.51 MB/s to 77.66–77.80 MB/s over this repo's text.
-  A bound is a recall ceiling — a header or payload segment past 1,003 bytes
-  goes unmatched — and the signature bound is the one that reads free and is
-  not, because `jwt-sample-key` recomputes the HMAC over the capture and a
-  bound under 86 bytes turns a published sample into a finding.
+  A bound is a recall ceiling, and that one is gone: `jwt` now detects with
+  `\b(eyJ[A-Za-z0-9_-]{8})` and measures with an **extent**, a named walk the
+  pipeline runs between the match and the validators, widening the capture the
+  checks read. That is the one place a rule may be longer than its pattern, and
+  the schema field is where a rule says so. **It is not a speedup and should
+  not be sold as one** — the shipped set does not move, 37.93–39.04 MB/s
+  against 37.55–39.58 in one process — what it buys is the recall the ceiling
+  was costing silently, for nothing, plus 4.1x on a buffer that is mostly
+  tokens. Two things about it are settled. A refused extent reports how far it
+  settled and the loop skips there, without which the walk is quadratic and
+  loses to the bound it replaced at four times the size. And the rule's entropy
+  floor is only meetable because the extent widens the capture — eleven bytes
+  cannot carry more than log2(11) = 3.459 bits — so the loader checks that
+  floor against the extent's alphabet and not the pattern's capture, which is
+  the one direction that would refuse a rule that works.
 - **RE2 has no lookaround and caps bounded repetition at 1000.** Nine inherited
   rules need rewriting; `{1,1024}` becomes `{1,1000}`.
 - **Skip binaries.** NUL in the first 8 KiB. One PNG was 55% of the benchmark

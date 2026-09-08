@@ -485,3 +485,58 @@ func TestDecodeErrorsEscapeControlCharacters(t *testing.T) {
 		})
 	}
 }
+
+// The jwt rule's entropy floor is only meetable because the extent widens the
+// capture, and the loader has to know that or it refuses the rule that ships.
+//
+// This is the coupling the extent introduced. Detection matches `eyJ` and eight
+// more bytes -- eleven, which cannot carry more than log2(11) = 3.459 bits
+// against a floor of 3.5 -- so the pattern's capture is not what entropy is
+// measured over any more. The extent's is, and it has no upper bound, so the
+// length half of the ceiling stops binding and the alphabet half is what is
+// left. Reading the pattern's capture as a ceiling here would refuse a rule
+// that works, which is the direction maxCaptureBytes exists to avoid.
+//
+// Both arms, because only the pair says the check is still live: the first is
+// the rule as shipped and the second is the same rule with the extent taken
+// away, which the loader has to refuse for exactly the reason above.
+func TestTheFloorIsOnlyMeetableBecauseOfTheExtent(t *testing.T) {
+	const pattern = `\\b(eyJ[A-Za-z0-9_-]{8})`
+	entry := func(extent string) string {
+		return `{"rules":[{"id":"jwt","family":"credential","description":"d",` +
+			`"regex":"` + pattern + `","group":1,"keywords":["eyJ"],` +
+			`"entropy":3.5,"validators":["entropy"],` + extent + `"enabled":true}]}`
+	}
+
+	set, err := Load([]byte(entry(`"extent":"jwt-token",`)))
+	if err != nil {
+		t.Fatalf("with the extent: %v", err)
+	}
+	if len(set) != 1 || set[0].Extent != JWTToken {
+		t.Fatalf("loaded %d rule(s) with extent %q", len(set), set[0].Extent)
+	}
+
+	_, err = Load([]byte(entry("")))
+	if err == nil {
+		t.Fatal("without the extent the rule loaded, so nothing stops an " +
+			"entropy floor no capture can reach")
+	}
+	if !strings.Contains(err.Error(), "reports nothing") {
+		t.Errorf("refused with %q, want the unmeetable-floor message", err)
+	}
+}
+
+// An extent name the pipeline does not run is a startup error, on the same
+// argument every other name in the schema is checked on: the alternative is a
+// rule that loads, runs on every file, and reports nothing.
+func TestARuleNamingAnExtentThatDoesNotExistIsRefused(t *testing.T) {
+	_, err := Load([]byte(`{"rules":[{"id":"r","family":"credential","description":"d",` +
+		`"regex":"\\b(eyJ[A-Za-z0-9_-]{8})","group":1,"keywords":["eyJ"],` +
+		`"extent":"not-an-extent","enabled":true}]}`))
+	if err == nil {
+		t.Fatal("the rule loaded")
+	}
+	if !strings.Contains(err.Error(), "not-an-extent") {
+		t.Errorf("refused with %q, which does not name the extent", err)
+	}
+}

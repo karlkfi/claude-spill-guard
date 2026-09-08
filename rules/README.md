@@ -37,7 +37,7 @@ carried by a planted fixture in
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
 | `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not |
-| `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, each capped at 1,003 bytes, floor 3.5, and no published sample signature |
+| `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, measured by an extent rather than capped, floor 3.5, and no published sample signature |
 
 **The entropy floors are what make a *padded* placeholder quiet.** A repository
 holds far more `AKIAXXXXXXXXXXXXXXXX` than it holds keys, and the two are the
@@ -363,15 +363,54 @@ reach. What it costs is a real token whose owner signed it with a copied sample
 secret. That is a false negative on a dangerous file, and not one this tool can
 help with: a token anyone can forge is not protected by stopping the paste.
 
-**It is coupled to the pattern's third bound, which is the one that reads
-free.** Nothing follows the signature, so bounding it truncates the capture
-rather than refusing the token — and this check is handed that capture. Below
-the longest HMAC signature it recomputes against a truncated one, the
-comparison fails, and a published sample is reported as a credential. HS512 is
-the longest at 86 bytes; the bound is 1,000. Read off the two corpus tokens
-instead, both HS256, a bound would have landed on 43.
-[`internal/scan/jwt_bound_test.go`](../internal/scan/jwt_bound_test.go) drives
-both arms.
+**It is coupled to where the token ends, and that is no longer a bound.** The
+check recomputes over the capture it is handed, so a capture ending one byte
+early makes the comparison fail and a published sample gets reported as a
+credential. Between Q133 and Q164 the capture's end came from the pattern's
+third repeat — the bound that reads free, because nothing follows the signature,
+so a short one truncated the capture rather than refusing the token. HS512 is
+the longest HMAC signature at 86 bytes; the bound was 1,000, and read off the
+two corpus tokens, both HS256, a bound would have landed on 43.
+
+`jwt` is the one rule that names an **extent**, and that is what replaced the
+bound.
+
+## `extent`: where the thing ends, when the pattern cannot say
+
+A validator answers yes or no about the bytes it was handed. It cannot ask for
+more of them, and for one rule that is the wrong shape: RE2 caps a bounded
+repeat at 1000 — driven, `{8,1000}` compiles and `{8,1001}` returns `invalid
+repeat count` — so a pattern that has to cross one segment of a JWT to reach the
+next cannot cross more than 1,003 bytes of it. That is Go's ceiling and not the
+format's, and a production access token with many claims is past it. It went
+unmatched, in silence.
+
+So the rule detects with a pattern and measures with an extent:
+
+| | |
+|---|---|
+| `regex` | `\b(eyJ[A-Za-z0-9_-]{8})` — a base64url-encoded JSON object starts here |
+| `extent` | `jwt-token` — three segments, two dots, no ceiling |
+
+The pipeline runs the extent between the match and the checks and widens the
+capture to what it returned, at one call site, so every check sees the whole
+token rather than a prefix of it. An extent may refuse, and does for about 95%
+of what the pattern matches: `eyJ` heads any encoded JSON object, and the walk
+is the whole of what separates one from a token.
+
+Two things follow that are worth stating rather than rediscovering. The
+truncation above is now unreachable through a bound, because no repeat in the
+pattern reaches the capture — the failure mode is a walk that stops in the wrong
+place, which
+[`internal/validate/extent_test.go`](../internal/validate/extent_test.go) drives
+against every byte class that can follow a token. And the rule's entropy floor
+of 3.5 is only meetable because of the extent: the pattern captures eleven
+bytes, which cannot carry more than log2(11) = 3.459 bits, so the loader reads
+the extent's alphabet rather than the pattern's capture when it checks that a
+floor is reachable at all.
+
+[`internal/scan/jwt_extent_test.go`](../internal/scan/jwt_extent_test.go)
+carries the end-to-end arms, against the ruleset as Q133 shipped it.
 
 ## The numeric PII family ships disabled
 

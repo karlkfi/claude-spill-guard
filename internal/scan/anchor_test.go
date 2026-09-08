@@ -252,7 +252,7 @@ func TestTheDifferentialCatchesAWrongCandidateLoop(t *testing.T) {
 							m[i] = v + hit
 						}
 					}
-					found, keep, err := accept(path, text, source, rule, m)
+					found, _, keep, err := accept(path, text, source, rule, m)
 					if err != nil {
 						return nil, err
 					}
@@ -284,7 +284,7 @@ func TestTheDifferentialCatchesAWrongCandidateLoop(t *testing.T) {
 							m[i] = v + hit
 						}
 					}
-					found, keep, err := accept(path, text, source, rule, m)
+					found, _, keep, err := accept(path, text, source, rule, m)
 					if err != nil {
 						return nil, err
 					}
@@ -336,13 +336,13 @@ func TestWhichShippedRulesRunFromTheirKeywordPositions(t *testing.T) {
 		// derives a literal prefix from each, so there is nothing to win.
 		"slack-webhook-url": {false, 0},
 		"private-key-block": {false, 0},
-		// Bounded at RE2's own cap of 1000 per repeat, which is what buys jwt
-		// the anchored path. Unbounded it kept the engine's threads alive for
-		// as long as the class matched, so one attempt read to the end of the
-		// buffer. The bound is a stated recall ceiling rather than a free
-		// win -- jwt_bound_test.go carries both edges and the two population
-		// readings the number came from.
-		"jwt": {true, 3008},
+		// The smallest reach in the set, and the only one that is not the
+		// length of what the rule finds. jwt detects with `eyJ` plus eight
+		// bytes and measures the rest with an extent, so an attempt reads
+		// eleven bytes where the bounded three-segment pattern read up to
+		// 3,008 -- and the token it reports is as long as the token is.
+		// jwt_extent_test.go carries what that costs and what it buys.
+		"jwt": {true, 11},
 
 		// The pii family is not gated on keywords at all.
 		"payment-card":   {false, 0},

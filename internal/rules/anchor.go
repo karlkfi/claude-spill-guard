@@ -14,12 +14,13 @@ import (
 // same number, which is what the caller refuses on. A rule that did reach it
 // would be refused the anchored path rather than mismatched.
 //
-// The longest bounded pattern in the shipped set is jwt at 3,008 bytes, from
-// three repeats at RE2's own cap of 1000. That is close enough to this ceiling
-// that a fourth such repeat would cross it -- and crossing costs the rule the
-// anchored arm silently, so anchor_test.go pins every shipped rule's reach
-// rather than only the boolean beside it. The runner-up is openai-api-key at
-// 171.
+// No shipped rule comes near it now. The longest is openai-api-key at 171, and
+// jwt -- which used to be 3,008, from three repeats at RE2's own cap of 1000 --
+// is the shortest at 11, having moved everything past its first eleven bytes
+// into an extent. Three such repeats in one pattern still nearly reach this
+// ceiling, and crossing it costs the rule the anchored arm silently, so
+// anchor_test.go pins every shipped rule's reach rather than only the boolean
+// beside it.
 const anchorReach = 4096
 
 // anchor returns pattern compiled with \A in front and the longest match it can
@@ -55,9 +56,11 @@ const anchorReach = 4096
 //   - The longest match is bounded. One attempt costs whatever the engine reads
 //     before its threads die, and an unbounded repeat over a class that covers
 //     the text reads to the end of the buffer -- once per hit. jwt is the rule
-//     this was written about; it was rewritten to `{8,1000}` rather than
-//     excluded, and no shipped rule fails this now. docs/design/README.md,
-//     "Pipeline", carries what that bound cost and what it bought.
+//     this was written about, and it is now bounded at eleven: what the pattern
+//     cannot say about how far a token runs is said by an extent instead, which
+//     is a walk rather than a repeat and so is not this condition's business.
+//     docs/design/README.md, "Pipeline", carries both changes and their
+//     measurements.
 func anchor(pattern string, keywords []string) (*regexp.Regexp, int) {
 	if len(keywords) == 0 {
 		return nil, 0
