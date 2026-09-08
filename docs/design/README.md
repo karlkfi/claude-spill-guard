@@ -874,22 +874,34 @@ result carried a line from `nested/deeper/buried.txt` — a file no operand
 named. That is the tree-walk argument above, arriving inside a member that had
 just passed the same reading for its other tool.
 
-So an MCP file reader is not one tool but a per-server set, and the call says
-nothing about which shape it is. The key holding a path was `path` on one of
-these tools and `root` on the other; the schema is the server's own and the
-harness passed both through unchanged, so a resolver would need a rule per
-server, which is the payload test this section opened by rejecting. Both tools
-carry the same `mcp__q127fs__` prefix, so any matcher written against a server
-admits the unbounded one with the bounded one, and failing closed over that
-prefix blocks every MCP tool in every session, which is the skill load's
-objection. **The member stays out, and the reason is both of the
+**The split is inside one server, and that is the transferable half.** Not
+between servers, and not between protocols — the same server over the same
+transport served a bounded tool and an unbounded one, so membership cannot be
+decided per server or per protocol any more than it can be decided per payload
+shape. A rule per server would not have helped: it would have had to answer for
+both of these tools at once, and they need opposite answers. The key holding a
+path was `path` on one and `root` on the other, both the server's own schema,
+passed through unchanged — so the thing a resolver would have to key on is the
+one thing the call does not carry. This is the section's opening rejection
+arriving from a new direction: a payload-shape test fails here for exactly the
+reason it failed on `Skill`, which is that the shape is not what decides.
+
+Both tools carry the same `mcp__q127fs__` prefix, so any matcher written
+against a server admits the unbounded one with the bounded one, and failing
+closed over that prefix blocks every MCP tool in every session, which is the
+skill load's objection. **The member stays out, and the reason is both of the
 other two at once**: it fails reading 3 for the same cause the search tool
 does, and it fails resolution for the same cause the skill load does, with
 nothing in the payload to tell one of its tools from the other.
 
-The consequence for a user is stated rather than fixed. `hooks/hooks.json`
-matches `Read|Bash`, so a file an MCP server reads is not scanned, and a
-session that installs one has a reader this scanner does not cover.
+**Stoppable and scanned are two claims, and this member is the first to
+separate them.** The deny works — reading 2 — so a hook wired to these calls
+could stop one. Nothing here is wired to them: `hooks/hooks.json` matches
+`Read|Bash`, which no `mcp__…` name matches, so a file an MCP server reads is
+not scanned and a session that installs one has a reader this scanner does not
+cover. The consequence is stated rather than fixed, and reading only the second
+half of it gets the posture backwards: the hook is not powerless on that
+surface, it is not pointed at it.
 
 ## Pipeline
 

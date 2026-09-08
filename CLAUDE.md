@@ -358,11 +358,13 @@ once, and driving it is what says so: the hook sees the call as
 `mcp__<server>__<tool>` and a deny stops it before the server is asked, so it
 is stoppable — and then one server's two tools split, `read_file` bounded on a
 `path` and `search_tree` unbounded on a `root`, with nothing in the payload
-saying which shape arrived. So any matcher written against a server admits the
-unbounded tool with the bounded one, and resolving the operand needs a rule per
-server, which is the payload-shape test this repo already rejected. `hooks.json` matches
-`Read|Bash`, so an MCP server's reads are uncovered and the design says so
-rather than fixing it.
+saying which shape arrived. The split is *inside* one server, so membership
+cannot be decided per server or per protocol either — a per-server rule would
+owe these two tools opposite answers — which is this repo's rejection of the
+payload-shape test arriving from a new direction. And stoppable is not scanned:
+`hooks.json` matches `Read|Bash`, which no `mcp__…` name matches, so the hook
+is not powerless on that surface, it is not pointed at it. The design states
+that rather than fixing it.
 
 **And one route into the context is not a reader at all: `!` bash mode.** Typing
 `!cat ~/.aws/credentials` runs the command locally and puts the output in front
