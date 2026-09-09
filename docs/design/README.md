@@ -2560,7 +2560,7 @@ which is the positive control that says an answer of 0 is a reading and not an
 empty probe. A string carrying one anyway is left unmarked rather than
 mismarked, which is the fallback below and not a refusal.
 
-**Four things fall back to what every body inherited before this** -- the
+**Four cases fall back to what every body inherited before this** -- the
 parent's directory and none of it if the parent moved, an empty map, and the
 glob options settled over the whole string: the sentinel case above, a span set
 that does not run forward, a marked string the segmenter cannot read, and a
