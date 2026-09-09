@@ -104,8 +104,16 @@ var argAssignerCmds = map[string]bool{
 // names holding one literal at every point in the string, folded in as its walk
 // passes each assignment -- because its substitution walk carries no value map
 // of its own. This one does, since Q147 gave it the tracker, so the snapshot is
-// the state itself rather than a proxy for it: strictly narrower than stable,
-// and positional by construction rather than by a second set.
+// the state itself rather than a proxy for it, and it differs in both
+// directions: narrower on value, since upstream may substitute a name's only
+// literal from anywhere in the string, and WIDER on membership, since
+// `stable_vars` drops a name assigned twice outright where this holds it at the
+// value bash had where the body sits: a reassignment after the body resolves
+// here and does not upstream, which is bash's own reading, since the body ran
+// before the second assignment. That is the widening direction, so it is
+// pinned rather than argued -- TestAnOperandFromALiteralAssignmentIsResolved
+// carries the case, beside the row that keeps the value from AFTER the body
+// out of it.
 type vars struct {
 	m map[string]string
 	// loops is the candidate set each `for` variable stands for, kept apart

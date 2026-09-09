@@ -247,11 +247,11 @@ values, and a header the shell may not have reached or whose loop runs where
 the segments after it are not; upstream binds through the last of those,
 because a candidate bash never took only adds a prompt there. A queued
 substitution body starts from the map, the directory and the glob options in
-force where it was **written**, which one marked walk records together;
-consuming the end of the string instead opens a file an assignment after the
-body named, which bash never did -- 2,204 bodies in 1,405 of 163,719 real
-commands, against 1 for the glob half.
-A quoted assignment is no longer one: bash settles what a word is
+force where it was **written**, one marked walk recording all three -- 2,204
+bodies in 1,405 of 163,719 real commands gain coverage that way, against 1 for
+the glob half. The end-of-string map is the direction refused rather than a
+defect anything shipped: it would open a file an assignment after the body
+named. A quoted assignment is no longer one: bash settles what a word is
 before it removes the quotes, so `'SP=/x'` names a program it cannot find, and
 `lex` now carries each token's quote provenance beside it -- the offset at
 which quoting or escaping first appeared -- so the resolver reads the word the
@@ -274,7 +274,7 @@ workspace-guard's tracker and say at each arm where this one loses the
 directory and upstream does not. A command-substitution body is resolved
 where it was **written** rather than where the string ended, so `cd sub &&
 echo $(cat x)` reads `x` under `sub` like the plain spelling beside it:
-`substDirs` marks each substitution in the string with a `\x1e`-bracketed
+`substStates` marks each substitution in the string with a `\x1e`-bracketed
 word — 0 of 161,818 real `Bash` commands carry that byte, against 1 carrying
 a `U+0007` — and lets the same tracker answer for the marker. Upstream's
 Q169, ported rather than invented, which is what the row waited for. An

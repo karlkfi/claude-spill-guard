@@ -356,7 +356,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 		}
 		// A heredoc body is not quoted text, so a substitution in one is live
 		// whatever apostrophes the body carries -- which is why the scan over
-		// it runs with quoting off. These are the bodies substDirs cannot place:
+		// it runs with quoting off. These are the bodies substStates cannot place:
 		// the strip lifted them out of the string before it was marked, so there
 		// is no marker left to sit anywhere, and they keep the inheritance every
 		// body had before the marking.
