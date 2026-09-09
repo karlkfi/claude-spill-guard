@@ -2578,9 +2578,19 @@ bash is not in. Driven on the marked ordering, with a backtick body after
 `cd a; SP=$(pwd); cd ../b; cd $SP`: exit 0 and nothing on stderr, having read
 the clean file in `b` where bash reads the key in `a`. Restored first, the same
 call records the move it cannot follow, which
-`TestASubstitutionBodyResolvesWhereItWasWritten` holds. What
-upstream's ordering buys it is Q170's quote provenance, which this repo does not
-have either way (Q92).
+`TestASubstitutionBodyResolvesWhereItWasWritten` holds.
+
+**What upstream's ordering buys it is quote provenance, and this repo has that
+now.** Q92 ported it — `Segment.QuotedFrom`, one offset per token — after this
+walk was written, so restoring first has to say what it does to the provenance
+rather than being silent about it. It rides along unchanged. The restore rebuilds
+token for token, so the two stay index-aligned; and a marker's provenance is the
+provenance of the **word** the substitution was written in, which is bash's own
+reading, since it settles whether a word is an assignment or a keyword before it
+removes the quotes. Putting the substitution's text back cannot move where
+quoting appeared in that word. So `"$(pwd)"` reads as a word quoted from offset
+0 whether it is marked or restored, and `SP=$(pwd)` as one quoted nowhere — which
+is what makes the first not an assignment and the second one.
 
 **Restoring is per segment and not per rule, because a marker is dangerous by
 looking like ordinary text.** It carries neither a `$` nor a backtick, so a rule
