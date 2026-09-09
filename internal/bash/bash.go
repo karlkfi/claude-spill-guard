@@ -31,11 +31,13 @@
 // number are kept, and every place Go forced a difference says so at the site:
 // lex (no shlex in the standard library), matchWord (no anchored-at-offset
 // regexp match), Heredocs (no default-None list argument), CommandSubstitutions
-// (no default argument), Segment.QuotedFrom and the two Peel functions beside
-// the strips (no attribute on a Go string, so a token's quote provenance
-// travels beside it rather than on it), and isDigits below. One difference is
-// this repo's rather than Go's: Segment.Inputs records which of the redirects
-// were `<`, and the field's comment carries why upstream has no need of it.
+// and SegmentsOfStripped (no default argument -- upstream reads each as a
+// keyword on one function), Segment.QuotedFrom and the two Peel functions
+// beside the strips (no attribute on a Go string, so a token's quote
+// provenance travels beside it rather than on it), and isDigits below. One
+// difference is this repo's rather than Go's: Segment.Inputs records which of
+// the redirects were `<`, and the field's comment carries why upstream has no
+// need of it.
 //
 // The layers, in the order a command passes through them:
 //
@@ -148,11 +150,29 @@ func conditional(sep string) string {
 //
 // An error means the command could not be read, and every caller treats that as
 // "do not judge this string".
-func Segments(cmd string) ([]Segment, error) {
+func Segments(cmd string) ([]Segment, error) { return segments(cmd, true) }
+
+// SegmentsOfStripped is Segments for a string whose heredoc bodies have already
+// been taken out. Upstream's tokenize_command takes a `heredocs` flag for the
+// same caller; Go has no default argument, so it is a second name.
+//
+// Stripping twice is not idempotent, which is why the flag exists rather than
+// the second pass simply finding nothing to do: the first pass leaves the
+// `<<WORD` operator behind with its body and terminator gone, and a second one
+// re-arms that operator and swallows everything after it as an unterminated
+// body. Driven on this segmenter -- `cat <<EOF\nbody\nEOF\ncd sub && cat x`
+// stripped own-level and re-stripped comes back as `cat` alone, with the `cd`
+// and the read after it gone.
+func SegmentsOfStripped(cmd string) ([]Segment, error) { return segments(cmd, false) }
+
+func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	if strings.TrimSpace(cmd) == "" {
 		return nil, nil
 	}
-	tokens, quotedFrom, err := lex(StripComments(StripHeredocBodies(cmd, nil, false)))
+	if stripHeredocs {
+		cmd = StripHeredocBodies(cmd, nil, false)
+	}
+	tokens, quotedFrom, err := lex(StripComments(cmd))
 	if err != nil {
 		return nil, err
 	}

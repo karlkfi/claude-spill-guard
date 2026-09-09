@@ -320,9 +320,46 @@ func scanBackticks(text string, start int) (string, int, bool) {
 // `$`, backtick, backslash, or newline.
 //
 // The Python defaults quotes to true. Go has no default argument, so every
-// caller says which reading it wants.
+// caller says which reading it wants. It takes a `spans` list to fill as well,
+// which is the second thing Go has no idiom for; CommandSubstitutionSpans is
+// that reading and this is the scan, so the two cannot disagree about what they
+// found.
 func CommandSubstitutions(text string, quotes bool) []string {
-	var bodies []string
+	subs := CommandSubstitutionSpans(text, quotes)
+	if len(subs) == 0 {
+		return nil
+	}
+	bodies := make([]string, len(subs))
+	for i, sub := range subs {
+		bodies[i] = sub.Body
+	}
+	return bodies
+}
+
+// A Substitution is one command substitution: the inner command bash would run,
+// and the half-open [Start, End) span the WHOLE construct occupies in the text
+// that was scanned -- the `$` or the opening backtick through the closing `)`
+// or backtick.
+//
+// The span covers the construct and not the body so a caller can replace the
+// whole thing, which is what keeps a body out of a tokenizer that would
+// otherwise read its text as the enclosing command's own.
+type Substitution struct {
+	Body  string
+	Start int
+	End   int
+}
+
+// CommandSubstitutionSpans is CommandSubstitutions with each body's position,
+// and carries that function's whole reading -- what counts as a substitution,
+// which contexts they are live in, and what an unterminated one contributes.
+//
+// A caller that must know which directory was in force where a body sat needs a
+// position and cannot get one from the body: the text alone cannot say, and two
+// identical bodies written at different points in one string are
+// indistinguishable without it (Q147, upstream's Q169).
+func CommandSubstitutionSpans(text string, quotes bool) []Substitution {
+	var bodies []Substitution
 	inSingle, inDouble := false, false
 	for i, n := 0, len(text); i < n; {
 		c := text[i]
@@ -356,7 +393,7 @@ func CommandSubstitutions(text string, quotes bool) []string {
 			if !ok {
 				break // unterminated -> stop
 			}
-			bodies = append(bodies, body)
+			bodies = append(bodies, Substitution{body, i, end})
 			i = end
 			continue
 		}
@@ -365,7 +402,7 @@ func CommandSubstitutions(text string, quotes bool) []string {
 			if !ok {
 				break // unterminated -> stop
 			}
-			bodies = append(bodies, body)
+			bodies = append(bodies, Substitution{body, i, end})
 			i = end
 			continue
 		}

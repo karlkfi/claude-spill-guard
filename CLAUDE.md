@@ -246,7 +246,7 @@ name instead is an item that is not a literal, a brace item, more than 256
 values, and a header the shell may not have reached or whose loop runs where
 the segments after it are not; upstream binds through the last of those,
 because a candidate bash never took only adds a prompt there. A queued
-substitution body starts with an empty map, which is Q147's class and is
+substitution body starts with an empty map, which is Q165's class and is
 pinned. A quoted assignment is no longer one: bash settles what a word is
 before it removes the quotes, so `'SP=/x'` names a program it cannot find, and
 `lex` now carries each token's quote provenance beside it -- the offset at
@@ -267,8 +267,15 @@ resolves `x` under `sub` and gets a verdict; what is not followed is bare `cd`,
 --show-toplevel)"` and `"$(pwd)"`, and a move inside a subshell or a pipeline
 stage. `classifyCd` and `follow` in `internal/hook/bash.go` are the port of
 workspace-guard's tracker and say at each arm where this one loses the
-directory and upstream does not. An operand that resolves to something other
-than a regular file is a coverage failure as well, and so is a `Read` call's
+directory and upstream does not. A command-substitution body is resolved
+where it was **written** rather than where the string ended, so `cd sub &&
+echo $(cat x)` reads `x` under `sub` like the plain spelling beside it:
+`substDirs` marks each substitution in the string with a `\x1e`-bracketed
+word — 0 of 161,818 real `Bash` commands carry that byte, against 1 carrying
+a `U+0007` — and lets the same tracker answer for the marker. Upstream's
+Q169, ported rather than invented, which is what the row waited for. An
+operand that resolves to something other than a regular file is a coverage
+failure as well, and so is a `Read` call's
 `file_path`: opening a fifo waits for a writer that never comes,
 which hangs the call instead of deciding it, and neither answer this project
 chooses between is reached. A device is refused with it rather than skipped,
