@@ -2532,7 +2532,8 @@ differ. `substDirs` in `internal/hook/bash.go` is the walk and
 `bash.CommandSubstitutionSpans` is what gives it the positions.
 
 **The marker is `\x1e<n>\x1e`, and the sentinel is a measurement rather than a
-convention.** Over 1,962 of this machine's session transcripts, 0 of 161,818
+convention.** Measured 2026-09-09, over 1,962 of this machine's session
+transcripts, 0 of 161,818
 `Bash` commands carry a `U+001E`; the same sweep found one carrying a `U+0007`,
 which is the positive control that says an answer of 0 is a reading and not an
 empty probe. A string carrying one anyway is left unmarked rather than
@@ -2579,7 +2580,36 @@ the clean file in `b` where bash reads the key in `a`. Restored first, the same
 call records the move it cannot follow, which
 `TestASubstitutionBodyResolvesWhereItWasWritten` holds. What
 upstream's ordering buys it is Q170's quote provenance, which this repo does not
-have either way (Q92), so the two walks agreeing is the property worth having.
+have either way (Q92).
+
+**Restoring is per segment and not per rule, because a marker is dangerous by
+looking like ordinary text.** It carries neither a `$` nor a backtick, so a rule
+that looks for either answers as though the substitution were not there, and
+that is not a rule failing to fire -- it is a rule firing on the wrong reading.
+Two such rules exist and the second was found in review of #153, after the first
+had been fixed by hand: `andOr.assigned` unsettles the and-or list for an
+assignment whose value runs a command, and against a marked ``SP=`false` `` it
+found nothing, so the `cd` after the `&&` stayed certain where the other walk
+made it tentative and the statement end dropped it. Driven at that head, with
+the key in the payload's own directory and a clean file of the same name under
+`sub`: ``SP=`false` && cd sub ; echo "$(cat q)"`` exits 0 with an empty stderr,
+having read the clean file where bash reads the key. So the whole segment is
+restored once, ahead of every consumer, rather than each site being repaired as
+it is noticed. The two spellings that can show it are the two `Segments` does
+not flatten -- a quoted `"$(…)"` and a backtick -- and both are pinned in
+`TestACdThisCannotFollowLeavesTheOperandUnsettled`.
+
+**The two walks are deliberately not identical, and only one direction is a
+defect.** Marking removes the `(` and `)` that `Segments` inserts when it
+flattens an unquoted `$(…)`, so `Persists`, `Conditional`, `CaseArm` and `Pipe`
+all differ for the same point in the same string: a `case` or a subshell written
+inside a body no longer reaches the top-level clause stack, and a segment the
+main loop reads through `""` this one reads through `&&`. Traced rather than
+proved exhaustively, every such difference leaves `substDirs` equal to or **less**
+certain than the main loop, which is bash-correct, since a substitution body is
+a subshell and its `cd`, its `case` and its assignments never reach the parent.
+More certain is the direction that scans the wrong file and reports clean, and
+it is the one the paragraph above closed.
 
 **`SegmentsOfStripped` exists because stripping twice is not idempotent.** The
 first pass leaves the `<<WORD` operator behind with its body and terminator

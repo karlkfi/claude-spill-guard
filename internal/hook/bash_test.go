@@ -753,6 +753,20 @@ func TestACdThisCannotFollowLeavesTheOperandUnsettled(t *testing.T) {
 		// tracker cannot follow is what still leaves one unsettled.
 		{"a $(…) body after a move this cannot follow", "cd $D && echo $(cat " + name + ")"},
 		{"a backtick body after a move this cannot follow", "cd $D && echo `cat " + name + "`"},
+		// And a move the shell may never have reached, with a substitution
+		// body after it. The value runs a command, so the `&&` is tentative
+		// and the statement end drops the move -- which the walk that places
+		// the body has to see too. It reads a marked string, where the
+		// backtick that unsettles the list has been replaced by a bare word,
+		// so this is the one rule a marker reaches by looking like ordinary
+		// text rather than by being missed. Found in review of #153. Only the
+		// two spellings Segments does not flatten can show it: an unquoted
+		// `$(…)` is resolved by the in-order pass as well, which is right
+		// about the move.
+		{"a value that runs a command, before a move, then a quoted body",
+			"SP=`false` && cd " + base + " ; echo \"$(cat " + name + ")\""},
+		{"a value that runs a command, before a move, then a backtick body",
+			"SP=`false` && cd " + base + " ; echo `cat " + name + "`"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, parent))

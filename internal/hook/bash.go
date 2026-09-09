@@ -418,8 +418,30 @@ func substDirs(text string, subs []bash.Substitution, entry, fallback substDir) 
 	v := newVars()
 	list := andOr{settled: true}
 	for _, segment := range segments {
-		list.enter(segment, v, &unknown)
-		// Read the positions before this segment's own `cd` applies. A
+		// A restored copy, and everything below reads it rather than the marked
+		// segment: every rule here is written for shell text, and a marker is a
+		// bare word carrying neither a `$` nor a backtick, so one reaching a
+		// rule that looks for either answers as though the substitution were not
+		// there. Two of them do look: `v.observe` would read `SP=$(pwd)` as a
+		// literal assignment where the walk in bashTargets poisons the name, and
+		// `andOr.assigned` would not unsettle the list for a value that runs a
+		// command -- which leaves a `cd` after it certain where bash may never
+		// reach it. Restoring is also what keeps a whitelisted
+		// `cd "$(git rev-parse --show-toplevel)"` recognisable to classifyCd.
+		//
+		// QuotedFrom rides along unchanged, which is the point rather than an
+		// omission: restoreAll rebuilds token for token, so the two stay
+		// aligned, and a marker's provenance is the provenance of the WORD the
+		// substitution was written in. That is bash's own reading -- it settles
+		// whether a word is an assignment or a keyword before it removes the
+		// quotes -- and putting the substitution's text back cannot move where
+		// quoting appeared in that word.
+		seg := segment
+		seg.Tokens = restoreAll(segment.Tokens, text, subs)
+		seg.Redirects = restoreAll(segment.Redirects, text, subs)
+		list.enter(seg, v, &unknown)
+		// Read the positions before this segment's own `cd` applies, off the
+		// MARKED tokens, which are the only ones a marker survives in. A
 		// substitution is expanded to build the command line the `cd` then runs
 		// on, so `cd $(dirname x)` resolves `x` where the string started rather
 		// than where it lands.
@@ -429,44 +451,24 @@ func substDirs(text string, subs []bash.Substitution, entry, fallback substDir) 
 		for _, tok := range segment.Redirects {
 			recordMarks(out, tok, dir, unknown)
 		}
-		// Restore ahead of everything that reads the tokens, which is upstream's
-		// ordering and is what keeps this walk agreeing with the one in
-		// bashTargets. A marker is a bare word with no `$` in it, so a variable
-		// map built over the marked tokens would read `SP=$(pwd)` as a literal
-		// assignment where the other walk poisons the name -- and `cd $SP` after
-		// a move would then resolve against the wrong directory with no sign of
-		// it. It is also what keeps a whitelisted
-		// `cd "$(git rev-parse --show-toplevel)"` recognisable to classifyCd.
-		//
-		// segment.QuotedFrom reads the restored copy unchanged, which is the
-		// point rather than an omission: the restore rebuilds token for token,
-		// so the two stay aligned, and a marker's provenance is the provenance
-		// of the WORD the substitution was written in. That is bash's own
-		// reading -- it settles whether a word is an assignment or a keyword
-		// before it removes the quotes -- and putting the substitution's text
-		// back cannot move where quoting appeared in that word.
-		raw := make([]string, len(segment.Tokens))
-		for i, tok := range segment.Tokens {
-			raw[i] = restoreMarks(tok, text, subs)
-		}
-		sub := v.expand(raw)
-		switch names, observed := v.observe(raw, sub, segment.QuotedFrom,
-			list.persists(segment), list.binds(segment)); observed {
+		sub := v.expand(seg.Tokens)
+		switch names, observed := v.observe(seg.Tokens, sub, seg.QuotedFrom,
+			list.persists(seg), list.binds(seg)); observed {
 		case observedAssignments:
-			list.assigned(segment, names)
+			list.assigned(seg, names)
 			continue
 		case observedLoopHeader:
 			list.ran()
 			continue
 		}
-		k := bash.ShKeywordPeel(sub, segment.QuotedFrom)
-		tokens := bash.StripEnvPrefix(sub[k:], segment.QuotedFrom[k:])
+		k := bash.ShKeywordPeel(sub, seg.QuotedFrom)
+		tokens := bash.StripEnvPrefix(sub[k:], seg.QuotedFrom[k:])
 		if len(tokens) == 0 {
 			continue
 		}
 		if kind, arg := classifyCd(tokens); kind != "" {
-			dir, unknown = follow(kind, arg, dir, unknown, segment)
-			list.moved(segment, unknown)
+			dir, unknown = follow(kind, arg, dir, unknown, seg)
+			list.moved(seg, unknown)
 			continue
 		}
 		list.ran()
@@ -504,8 +506,18 @@ func recordMarks(out []substDir, tok, dir string, unknown bool) {
 	}
 }
 
+// restoreAll is restoreMarks over a token list, returning a new slice: the
+// caller's own is the marked one and recordMarks still reads it.
+func restoreAll(tokens []string, text string, subs []bash.Substitution) []string {
+	out := make([]string, len(tokens))
+	for i, tok := range tokens {
+		out[i] = restoreMarks(tok, text, subs)
+	}
+	return out
+}
+
 // restoreMarks puts each marker in tok back to the substitution text it stands
-// for, so classifyCd reads the target the session wrote.
+// for, so every rule below reads the text the session wrote.
 func restoreMarks(tok, text string, subs []bash.Substitution) string {
 	return substMarkRE.ReplaceAllStringFunc(tok, func(m string) string {
 		i, err := strconv.Atoi(m[1 : len(m)-1])
