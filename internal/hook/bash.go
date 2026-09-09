@@ -70,22 +70,25 @@ func bashTargets(command, cwd string) ([]target, error) {
 	targets := []target{{commandLabel, []byte(command)}}
 	seen := make(map[string]bool)
 
-	// A body queued for a later pass runs in the directory that was in force
-	// where it was WRITTEN, which substDirs reads by marking each substitution
-	// in the string and letting the tracker below answer for the marker. A body
-	// it could not place -- one found inside a heredoc body, which the strip has
-	// already taken out of the string -- starts from the directory its parent
-	// ended in, or from none if the parent moved at all. The glob options are
-	// still carried that second way for every body, which is the same position
-	// problem left standing on the flag it did not measure (Q165).
+	// A body queued for a later pass runs in the state that was in force where
+	// it was WRITTEN -- the directory, the variables assigned by then, and the
+	// glob options in effect -- which substStates reads by marking each
+	// substitution in the string and letting the tracker below answer for the
+	// marker. All three are one walk's state at one position, so they are
+	// carried together rather than each on its own footing.
+	//
+	// A body it could not place -- one found inside a heredoc body, which the
+	// strip has already taken out of the string -- keeps what every body
+	// inherited before the marking: the directory its parent ended in, or none
+	// if the parent moved at all, an empty map, and the glob options the whole
+	// segment loop settled on. Each of those is the conservative side, so an
+	// unplaced body is answered no worse than it was.
 	type job struct {
-		text         string
-		depth        int
-		dir          string
-		dirUnknown   bool
-		globsAltered bool
+		text  string
+		depth int
+		state substState
 	}
-	queue := []job{{command, 0, cwd, false, false}}
+	queue := []job{{command, 0, substState{cwd, false, newVars(), false}}}
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
@@ -115,16 +118,18 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// operand after that is a path this cannot settle rather than one it
 		// guesses at. Where this port loses it and upstream does not, follow
 		// says so at the arm.
-		dir, dirUnknown := cur.dir, cur.dirUnknown
+		dir, dirUnknown := cur.state.dir, cur.state.unknown
 		moved := false
 		// Whether a pattern still expands under the options the shell started
 		// with. glob.go says what changes them; once one has, every later
 		// pattern in the string is a set this cannot compute.
-		globsAltered := cur.globsAltered
+		globsAltered := cur.state.globsAltered
 		// The variables the string assigns, substituted into each segment
 		// before anything reads it, as bash expands before it runs. vars.go
-		// is the port and carries what it declines to resolve.
-		v := newVars()
+		// is the port and carries what it declines to resolve. A queued body
+		// starts from the map its own position was reached with, cloned so this
+		// pass's own assignments stay inside it.
+		v := cur.state.vars.clone()
 		// The and-or list, which says whether a conditional assignment or
 		// move had run by the time a later segment does; vars.go has the rule.
 		list := andOr{settled: true}
@@ -337,13 +342,17 @@ func bashTargets(command, cwd string) ([]target, error) {
 		for i, sub := range subs {
 			bodies[i] = sub.Body
 		}
-		// The walk starts where this pass started; a body it cannot place keeps
-		// the inheritance every body had before the marking, which is the
-		// parent's directory and none of it if the parent moved at all.
-		dirs := substDirs(stripped, subs, substDir{cur.dir, cur.dirUnknown},
-			substDir{cur.dir, cur.dirUnknown || moved})
+		// The walk starts where this pass started, which for a nested body is
+		// the state its own marker was recorded with -- upstream's `inherited`,
+		// whose argument is that those names were assigned before this string
+		// ran and so are usable from its first segment. A body it cannot place
+		// keeps the inheritance every body had before the marking: the parent's
+		// directory and none of it if the parent moved at all, an empty map,
+		// and the glob options settled over the whole string.
+		states := substStates(stripped, subs, cur.state,
+			substState{cur.state.dir, cur.state.unknown || moved, newVars(), globsAltered})
 		for i, body := range bash.UnstrippedSubstBodies(cur.text, bodies) {
-			queue = append(queue, job{body, cur.depth + 1, dirs[i].dir, dirs[i].unknown, globsAltered})
+			queue = append(queue, job{body, cur.depth + 1, states[i]})
 		}
 		// A heredoc body is not quoted text, so a substitution in one is live
 		// whatever apostrophes the body carries -- which is why the scan over
@@ -353,7 +362,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// body had before the marking.
 		for _, doc := range append(docs.Expanded, docs.Unterminated...) {
 			for _, body := range bash.CommandSubstitutions(doc, false) {
-				queue = append(queue, job{body, cur.depth + 1, cur.dir, cur.dirUnknown || moved, globsAltered})
+				queue = append(queue, job{body, cur.depth + 1,
+					substState{cur.state.dir, cur.state.unknown || moved, newVars(), globsAltered}})
 			}
 		}
 	}
@@ -371,15 +381,27 @@ const substMark = '\x1e'
 
 var substMarkRE = regexp.MustCompile("\x1e([0-9]+)\x1e")
 
-// A substDir is the directory one queued body runs in.
-type substDir struct {
-	dir     string
-	unknown bool
+// A substState is what one queued body runs with: the directory, the variable
+// map, and whether the glob options still hold. One position, three pieces of
+// the same walk's state, so nothing here can carry one of them from a different
+// point in the string than the others.
+type substState struct {
+	dir          string
+	unknown      bool
+	vars         *vars
+	globsAltered bool
 }
 
-// substDirs says, for each substitution in subs, which directory was in force
-// where it sits in text -- entry for one written before any `cd`, and the moved
-// directory for one written after. A substitution it cannot place gets fallback.
+// substStates says, for each substitution in subs, what was in force where it
+// sits in text -- entry for one written before anything moved, assigned or
+// altered globbing, and the advanced state for one written after. A
+// substitution it cannot place gets fallback.
+//
+// All three travel together because all three are read at the same instant: the
+// directory a relative operand joins to, the names an operand's `$NAME` stands
+// for, and the options its pattern expands under are one shell state, and
+// splitting them is how the glob flag came to be taken from the end of the
+// string while the directory was taken from the marker (Q165).
 //
 // Neither half of the parse can name the other's place. The tracker in
 // bashTargets walks post-lex tokens, which carry no position, and the scan that
@@ -395,8 +417,8 @@ type substDir struct {
 // marking, so none of them is a new refusal: a string already carrying the
 // sentinel, a span set that does not run forward, and a marked string the
 // segmenter cannot read.
-func substDirs(text string, subs []bash.Substitution, entry, fallback substDir) []substDir {
-	out := make([]substDir, len(subs))
+func substStates(text string, subs []bash.Substitution, entry, fallback substState) []substState {
+	out := make([]substState, len(subs))
 	for i := range out {
 		out[i] = fallback
 	}
@@ -408,6 +430,7 @@ func substDirs(text string, subs []bash.Substitution, entry, fallback substDir) 
 		return out
 	}
 	dir, unknown := entry.dir, entry.unknown
+	globsAltered := entry.globsAltered
 	// SegmentsOfStripped, because text has had its own-level heredoc bodies
 	// taken out already and a second strip would re-arm the `<<WORD` left
 	// behind and swallow the rest of the string.
@@ -415,7 +438,7 @@ func substDirs(text string, subs []bash.Substitution, entry, fallback substDir) 
 	if err != nil {
 		return out
 	}
-	v := newVars()
+	v := entry.vars.clone()
 	list := andOr{settled: true}
 	for _, segment := range segments {
 		// A restored copy, and everything below reads it rather than the marked
@@ -440,18 +463,27 @@ func substDirs(text string, subs []bash.Substitution, entry, fallback substDir) 
 		seg.Tokens = restoreAll(segment.Tokens, text, subs)
 		seg.Redirects = restoreAll(segment.Redirects, text, subs)
 		list.enter(seg, v, &unknown)
-		// Read the positions before this segment's own `cd` applies, off the
-		// MARKED tokens, which are the only ones a marker survives in. A
-		// substitution is expanded to build the command line the `cd` then runs
-		// on, so `cd $(dirname x)` resolves `x` where the string started rather
-		// than where it lands.
+		// Read the positions before this segment's own `cd`, assignments and
+		// glob change apply, off the MARKED tokens, which are the only ones a
+		// marker survives in. A substitution is expanded to build the command
+		// line the segment then runs, so `cd $(dirname x)` resolves `x` where
+		// the string started rather than where it lands -- and `SP=/x cat
+		// "$(cat $SP/f)"` expands the body before the prefix assignment takes
+		// effect, which is the same reading applied to the map.
+		//
+		// One clone per segment, shared by every marker in it and never
+		// mutated afterwards: the pass that consumes it clones again.
+		here := substState{dir, unknown, v.clone(), globsAltered}
 		for _, tok := range segment.Tokens {
-			recordMarks(out, tok, dir, unknown)
+			recordMarks(out, tok, here)
 		}
 		for _, tok := range segment.Redirects {
-			recordMarks(out, tok, dir, unknown)
+			recordMarks(out, tok, here)
 		}
 		sub := v.expand(seg.Tokens)
+		if altersGlobbing(sub, seg.QuotedFrom) {
+			globsAltered = true
+		}
 		switch names, observed := v.observe(seg.Tokens, sub, seg.QuotedFrom,
 			list.persists(seg), list.binds(seg)); observed {
 		case observedAssignments:
@@ -495,13 +527,13 @@ func markSubstitutions(text string, subs []bash.Substitution) (string, bool) {
 	return b.String(), true
 }
 
-// recordMarks writes dir against every substitution one token stands for. A
+// recordMarks writes here against every substitution one token stands for. A
 // token can carry more than one -- `cat $(a)/$(b)` glues two into one word --
 // and a marker outside the set is left alone rather than guessed at.
-func recordMarks(out []substDir, tok, dir string, unknown bool) {
+func recordMarks(out []substState, tok string, here substState) {
 	for _, m := range substMarkRE.FindAllStringSubmatch(tok, -1) {
 		if i, err := strconv.Atoi(m[1]); err == nil && i < len(out) {
-			out[i] = substDir{dir, unknown}
+			out[i] = here
 		}
 	}
 }

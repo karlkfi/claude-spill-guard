@@ -2339,10 +2339,11 @@ Two shapes were driven and left alone because they do not change the set: a
 prefix assignment on the reading command, since bash expands the operands
 before `GLOBIGNORE=x cat *` assigns, and the environment, which bash 5.3.15
 ignores for that variable -- so nothing here reads one, and `PRIVACY.md` is
-unchanged. A queued substitution body inherits the flag from the
-end of the string, where it now inherits its directory from the point it was
-written -- the same position problem left standing on the flag, which is
-[Q165](../queue/Q165.md).
+unchanged. A queued substitution body reads the flag at the point it was
+written, as it reads its directory and its variable map there: a pattern
+written before a `shopt` in the same string expands under the options bash
+actually had, where inheriting the end of the string recorded it on a change
+that had not happened yet.
 
 **A quoted pattern is the same boundary, in the precision direction, and it is
 the half still open.** Quoting decides what a word is, and the assignment and

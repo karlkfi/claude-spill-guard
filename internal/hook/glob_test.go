@@ -58,6 +58,14 @@ func TestAGlobOperandIsExpandedToTheFilesBashWouldSend(t *testing.T) {
 		`cat x\[1\].env`,
 		"cat app/[id]/page.env",
 		"cat 'app/[id]/page.env'",
+		// A queued body written BEFORE the shopt. It expands under the options
+		// bash had when it ran the body, which the segment loop's end-of-string
+		// flag cannot say -- the flag is the OR over the whole string, so a
+		// pattern written first was recorded on a change that had not happened
+		// yet (Q165). The two spellings Segments does not flatten, since an
+		// unquoted `$(…)` is resolved by the in-order pass and never asks.
+		"echo `cat *.env`; shopt -s dotglob",
+		"echo \"$(cat *.env)\"; shopt -s dotglob",
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
@@ -131,6 +139,7 @@ func TestAGlobBashWouldExpandDifferentlyIsRecorded(t *testing.T) {
 		{"after an eval", "eval x=1; cat *.env", "changes how the shell expands"},
 		{"after a source", "source rc; cat *.env", "changes how the shell expands"},
 		{"in a backtick body after a shopt", "shopt -s dotglob; echo `cat *.env`", "changes how the shell expands"},
+		{"in a quoted body after a shopt", "shopt -s dotglob; echo \"$(cat *.env)\"", "changes how the shell expands"},
 		{"a class Go cannot compile", "cat *.[env", "cannot expand"},
 		{"a POSIX class", "cat [[:alpha:]]*.env", "cannot expand"},
 		{"a step up after a wildcard", "cat */../" + name, "cannot expand"},

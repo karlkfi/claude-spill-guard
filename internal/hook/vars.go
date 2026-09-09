@@ -24,8 +24,10 @@ import (
 // the unresolved operand. Nothing here guesses.
 //
 // What is not ported, and why, is at each site: the Windows drive-prefix
-// exemption (Q79's class), the stable subset the upstream recursion starts from
-// (Q165), and the loop bindings that subset seeds, which are the same argument.
+// exemption (Q79's class). The stable subset upstream's recursion starts from,
+// and the loop bindings that subset seeds, are reached here by a different
+// route rather than left out -- a snapshot of this walk's own map at the
+// position the body was written, which `clone` takes and substStates records.
 
 // varUseRE is a plain `$NAME` or `${NAME}`. A parameter-expansion operator
 // (`${f:-x}`, `${f%.*}`) deliberately does not match, so its `$` stays and the
@@ -92,13 +94,18 @@ var argAssignerCmds = map[string]bool{
 }
 
 // vars is the live map for one command string, advanced a segment at a time.
-// A queued substitution body starts a map of its own, empty. Its position in
-// the string is known now (substDirs, which is what settles its directory), and
-// the seed upstream starts its recursion from is still not ported, because that
-// map is the state at the END of the string: a value assigned after the body
-// would be substituted into text bash expanded with the environment's, which is
-// the direction this resolver must not take. Consuming it positionally is
-// Q165.
+// A queued substitution body starts from the map in force WHERE IT WAS WRITTEN,
+// which substStates reads off the same marked walk that settles its directory.
+// Consuming the end-of-string map instead would substitute a value assigned
+// after the body into text bash expanded with the environment's, which is the
+// direction this resolver must not take.
+//
+// Upstream reaches the same position with a `stable_vars`/`usable` pair -- the
+// names holding one literal at every point in the string, folded in as its walk
+// passes each assignment -- because its substitution walk carries no value map
+// of its own. This one does, since Q147 gave it the tracker, so the snapshot is
+// the state itself rather than a proxy for it: strictly narrower than stable,
+// and positional by construction rather than by a second set.
 type vars struct {
 	m map[string]string
 	// loops is the candidate set each `for` variable stands for, kept apart
@@ -111,6 +118,24 @@ type vars struct {
 
 func newVars() *vars {
 	return &vars{m: map[string]string{}, loops: map[string][]string{}, propagate: true}
+}
+
+// clone is the map as it stands, for a queued body to start from. A snapshot
+// and not an alias: the body's own walk folds its own assignments in, and the
+// enclosing walk goes on past the point the body was written at.
+func (v *vars) clone() *vars {
+	c := &vars{
+		m:         make(map[string]string, len(v.m)),
+		loops:     make(map[string][]string, len(v.loops)),
+		propagate: v.propagate,
+	}
+	for name, val := range v.m {
+		c.m[name] = val
+	}
+	for name, values := range v.loops {
+		c.loops[name] = slices.Clone(values)
+	}
+	return c
 }
 
 // expand substitutes what the map holds into tokens, so the readers and the

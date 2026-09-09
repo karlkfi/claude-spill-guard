@@ -821,6 +821,15 @@ func TestAnOperandFromALiteralAssignmentIsResolved(t *testing.T) {
 		// And within its own list after a command: the cat runs only if the
 		// assignment did.
 		"true && SP=" + dir + " && cat $SP/" + name,
+		// A queued body, which is the only shape that reads the map by
+		// position rather than in order (Q165). Backticks and a quoted `$(…)`
+		// are the two spellings Segments does not flatten into this pass, so
+		// they are the two that exercise the seed at all.
+		"SP=" + dir + "; echo `cat $SP/" + name + "`",
+		"SP=" + dir + "; echo \"$(cat $SP/" + name + ")\"",
+		// A body inside a body: the seed the outer marker was recorded with is
+		// what the inner walk starts from, which is upstream's `inherited`.
+		"SP=" + dir + "; echo \"$(echo `cat $SP/" + name + "`)\"",
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
@@ -861,7 +870,12 @@ func TestAnAssignmentThePortCannotTrustLeavesTheOperandUnresolved(t *testing.T) 
 		{"appended to", "SP=" + dir + "; SP+=/x; cat $SP/" + name},
 		{"after an IFS change", "SP=" + dir + "; IFS=/; cat $SP/" + name},
 		{"an expansion operator", "SP=" + dir + "; cat ${SP%/}/" + name},
-		{"in a queued body", "SP=" + dir + "; echo `cat $SP/" + name + "`"},
+		// A queued body reads the map its own position was reached with, so
+		// an assignment written AFTER it is one bash had not run when it
+		// expanded the body. The direction that must stay unresolved, and the
+		// one an end-of-string map gets wrong: this is Q165's defect inverted.
+		{"assigned after a queued backtick body", "echo `cat $SP/" + name + "`; SP=" + dir},
+		{"assigned after a queued quoted body", "echo \"$(cat $SP/" + name + ")\"; SP=" + dir},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, t.TempDir()))

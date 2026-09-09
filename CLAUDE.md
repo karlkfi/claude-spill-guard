@@ -246,8 +246,12 @@ name instead is an item that is not a literal, a brace item, more than 256
 values, and a header the shell may not have reached or whose loop runs where
 the segments after it are not; upstream binds through the last of those,
 because a candidate bash never took only adds a prompt there. A queued
-substitution body starts with an empty map, which is Q165's class and is
-pinned. A quoted assignment is no longer one: bash settles what a word is
+substitution body starts from the map, the directory and the glob options in
+force where it was **written**, which one marked walk records together;
+consuming the end of the string instead opens a file an assignment after the
+body named, which bash never did -- 2,204 bodies in 1,405 of 163,719 real
+commands, against 1 for the glob half.
+A quoted assignment is no longer one: bash settles what a word is
 before it removes the quotes, so `'SP=/x'` names a program it cannot find, and
 `lex` now carries each token's quote provenance beside it -- the offset at
 which quoting or escaping first appeared -- so the resolver reads the word the
