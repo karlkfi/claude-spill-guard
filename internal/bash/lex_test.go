@@ -6,11 +6,13 @@ import "testing"
 // upstream suite's own helper does.
 func tokenize(t *testing.T, cmd string) []string {
 	t.Helper()
-	toks, err := lex(cmd)
+	toks, qf, err := lex(cmd)
 	if err != nil {
 		t.Fatalf("lex(%q): %v", cmd, err)
 	}
-	return glueDollarParen(splitOperatorRuns(toks))
+	toks, qf = splitOperatorRuns(toks, qf)
+	toks, _ = glueDollarParen(toks, qf)
+	return toks
 }
 
 func TestLex(t *testing.T) {
@@ -80,9 +82,105 @@ func TestLexUnbalanced(t *testing.T) {
 		// `'` after it closes and the final `'` opens a quote nothing shuts.
 		`echo 'x\'y'`,
 	} {
-		if _, err := lex(in); err == nil {
+		if _, _, err := lex(in); err == nil {
 			t.Errorf("lex(%q) succeeded, want an error", in)
 		}
+	}
+}
+
+// lexOne is the lexer's answer for a single word: the stripped token and where
+// quoting first appeared in it.
+func lexOne(t *testing.T, word string) (string, int) {
+	t.Helper()
+	toks, qf, err := lex(word)
+	if err != nil {
+		t.Fatalf("lex(%q): %v", word, err)
+	}
+	if len(toks) != 1 {
+		t.Fatalf("lex(%q) gave %d tokens, want 1: %q", word, len(toks), toks)
+	}
+	return toks[0], qf[0]
+}
+
+// Bash settles what a word IS before it removes the quotes, so quoting decides
+// whether a word assigns a variable or names a program to run.
+//
+// The table is bash 5.3.15's own answer, driven 2026-09-09 rather than reasoned
+// about, with `bash -c "<word>; printf '[%s]' \"${SP-UNSET}\""` -- the `${SP-}`
+// form rather than a bare `$SP`, because `SP=”` assigns and prints nothing, so
+// a bare probe cannot tell it from the ten words that assign nothing at all. Six
+// rows set the variable and ten leave it unset, which is what says the drive can
+// print either answer.
+//
+// The rule it establishes: quoting or escaping any character up to and including
+// the `=` makes the word a command; quoting inside the VALUE leaves it an
+// assignment. Escaping is the half a pass over `'` and `"` never reaches, and
+// `SP\=/x` is the row that breaks a rule written as "quoting the name" -- the
+// escaped character is the `=` itself, which is neither name nor value.
+func TestQuotingDecidesWhetherAWordAssigns(t *testing.T) {
+	for _, tc := range []struct {
+		word string
+		want bool // bash set SP
+	}{
+		{`SP=/x`, true},
+		{`SP="/x"`, true},
+		{`SP='/x'`, true},
+		{`SP=x"y"`, true},
+		{`SP='a b'`, true},
+		{`SP=''`, true},
+
+		{`'SP=/x'`, false},
+		{`"SP=/x"`, false},
+		{`S'P'=/x`, false},
+		{`S"P"=/x`, false},
+		{`S''P=/x`, false},
+		{`SP""=x`, false},
+		{`SP"="/x`, false},
+		{`SP\=/x`, false},
+		{`\SP=/x`, false},
+		{`S\P=/x`, false},
+	} {
+		t.Run(tc.word, func(t *testing.T) {
+			tok, qf := lexOne(t, tc.word)
+			if got := isAssignment(tok, qf); got != tc.want {
+				t.Errorf("isAssignment(%q, %d) = %v, want %v (bash: %v)",
+					tok, qf, got, tc.want, tc.want)
+			}
+		})
+	}
+}
+
+// The same boundary at the neighbouring predicate, and blunter: a keyword has no
+// `=` for the quoting to sit after, so quoting any part of it is enough.
+//
+// Driven the same day on 5.3.15 as `cd <dir> && bash -c "<word> cd sub; basename
+// $PWD"`. `time` and `!` are the controls that make the table readable: written
+// plainly they are reserved words whose `cd` really does persist -- neither
+// forks -- and every quoted spelling of them runs a program bash cannot find, so
+// the shell never leaves the directory it started in. `if` and `while` are not
+// controls here: written plainly they are a syntax error without their `then` or
+// `do`, which is why upstream reaches for `time` too.
+func TestQuotingDecidesWhetherAWordIsAKeyword(t *testing.T) {
+	for _, tc := range []struct {
+		word string
+		want bool // bash honoured the reserved word
+	}{
+		{`time`, true},
+		{`!`, true},
+
+		{`'time'`, false},
+		{`'if'`, false},
+		{`"if"`, false},
+		{`i"f"`, false},
+		{`\if`, false},
+		{`'while'`, false},
+	} {
+		t.Run(tc.word, func(t *testing.T) {
+			tok, qf := lexOne(t, tc.word)
+			if got := isReservedWord(tok, qf); got != tc.want {
+				t.Errorf("isReservedWord(%q, %d) = %v, want %v", tok, qf, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -99,7 +197,7 @@ func TestStripEnvPrefix(t *testing.T) {
 		{"nothing to peel", []string{"cmd", "A=1"}, []string{"cmd", "A=1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := StripEnvPrefix(tc.in); !equalStrings(got, tc.want) {
+			if got := StripEnvPrefix(tc.in, Unquoted(len(tc.in))); !equalStrings(got, tc.want) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
@@ -121,7 +219,9 @@ func TestStripShKeywords(t *testing.T) {
 			[]string{"grep"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := StripEnvPrefix(StripShKeywords(tc.in))
+			qf := Unquoted(len(tc.in))
+			k := ShKeywordPeel(tc.in, qf)
+			got := StripEnvPrefix(tc.in[k:], qf[k:])
 			if !equalStrings(got, tc.want) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}

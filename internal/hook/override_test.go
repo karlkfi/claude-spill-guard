@@ -295,17 +295,16 @@ func TestTheOverrideDoesNotDowngradeWhereNobodyCanAnswer(t *testing.T) {
 }
 
 // bash reads a quoted word in command position as a command NAME and never
-// sets the variable, so `'SPILL_GUARD_OVERRIDE=x' cat f` runs a command with
-// that name. The lexer strips quotes before the assignment shape is matched,
-// so the hook sees a prefix where the shell would not, and the hatch arms on a
-// spelling no reader would call an override.
+// sets the variable, so `'SPILL_GUARD_OVERRIDE=x' cmd` runs a program with that
+// name. Since the lexer keeps quote provenance the hook reads it the same way,
+// and the hatch no longer arms on a spelling no reader would call an override.
 //
-// Pinned rather than fixed because the quoting is gone by the time this layer
-// sees a token, and recovering it is a change to internal/bash -- which is a
-// port kept structurally identical to its upstream. Bounded: the destination
-// is a confirmation, so the worst case is a prompt where there should have
-// been a block, never an allow. Q92 carries the fix.
-func TestAQuotedAssignmentInCommandPositionArmsTheHatchToo(t *testing.T) {
+// The probe puts the prefix on its own segment. A prefix arms the whole call,
+// so before the fix the `cat` after it was downgraded to a confirmation; the
+// inline form `'…=x' cat f` cannot show it, because there the quoted word takes
+// the command head, internal/readers has no row for it, and bash runs no cat
+// either -- asserted below as its own arm rather than folded in here.
+func TestAQuotedAssignmentDoesNotArmTheHatch(t *testing.T) {
 	dir, name := planted(t)
 	// The rule, driven on bash 5.3.15 rather than reasoned about: quoting OR
 	// ESCAPING any character up to and including the `=` makes the word a
@@ -321,22 +320,79 @@ func TestAQuotedAssignmentInCommandPositionArmsTheHatchToo(t *testing.T) {
 	//
 	// So the list below is nine, and it is a floor rather than a census. Every
 	// one arms here and none is an assignment to bash.
-	for _, command := range []string{
-		`'SPILL_GUARD_OVERRIDE=x' cat ` + name,
-		`"SPILL_GUARD_OVERRIDE=x" cat ` + name,
-		`'SPILL'_GUARD_OVERRIDE=x cat ` + name,
-		`"SPILL"_GUARD_OVERRIDE=x cat ` + name,
-		`SPILL_GUARD_OVER''RIDE=x cat ` + name,
-		`SPILL_GUARD_OVERRIDE""=x cat ` + name,
-		`\SPILL_GUARD_OVERRIDE=x cat ` + name,
-		`S\PILL_GUARD_OVERRIDE=x cat ` + name,
-		`SPILL_GUARD_OVERRIDE\=x cat ` + name,
+	for _, prefix := range []string{
+		`'SPILL_GUARD_OVERRIDE=x'`,
+		`"SPILL_GUARD_OVERRIDE=x"`,
+		`'SPILL'_GUARD_OVERRIDE=x`,
+		`"SPILL"_GUARD_OVERRIDE=x`,
+		`SPILL_GUARD_OVER''RIDE=x`,
+		`SPILL_GUARD_OVERRIDE""=x`,
+		`\SPILL_GUARD_OVERRIDE=x`,
+		`S\PILL_GUARD_OVERRIDE=x`,
+		`SPILL_GUARD_OVERRIDE\=x`,
 	} {
-		t.Run(command, func(t *testing.T) {
+		t.Run(prefix, func(t *testing.T) {
+			command := prefix + ` :; cat ` + name
 			_, stdout, _ := drive(t, bashCall(t, command, dir))
-			if got := verdictOf(t, stdout); got != "ask" {
-				t.Errorf("permissionDecision = %q, want ask -- this is the known "+
-					"divergence Q92 tracks, so a change here is a decision", got)
+			if got := verdictOf(t, stdout); got != "deny" {
+				t.Errorf("permissionDecision = %q, want deny -- bash assigns nothing "+
+					"here, so the hatch must not arm", got)
+			}
+		})
+	}
+}
+
+// The same nine spellings written inline, where the quoted word takes the
+// command head. bash looks for a program of that name and finds none, so it
+// runs no `cat` and opens no file; internal/readers has no row for the word
+// either, so the segment contributes no operands and the call goes through
+// with nothing scanned. That is agreement with the shell rather than a gap --
+// the file the command names is one bash never reads.
+//
+// Asserted as "not ask", which is the whole of what this arm can say: the
+// absence of a verdict is consistent with more than one reading, and the
+// segment-per-prefix arm above is what discriminates.
+func TestAQuotedAssignmentInlineRunsNothing(t *testing.T) {
+	dir, name := planted(t)
+	for _, prefix := range []string{
+		`'SPILL_GUARD_OVERRIDE=x'`,
+		`"SPILL_GUARD_OVERRIDE=x"`,
+		`SPILL_GUARD_OVERRIDE\=x`,
+	} {
+		t.Run(prefix, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, prefix+` cat `+name, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if strings.Contains(stdout, `"permissionDecision":"ask"`) {
+				t.Errorf("the hatch armed on a word bash runs as a command: %q", stdout)
+			}
+		})
+	}
+}
+
+// The keyword axis of the same boundary, and it reaches the hatch the same way:
+// a reserved word is peeled to find the command behind it, so a quoted one used
+// to let the prefix after it arm. bash runs a program named `if` and fails.
+//
+// `time` unquoted is the control that moves -- it is a real reserved word bash
+// honours, so the prefix behind it really is a prefix and the hatch really does
+// arm.
+func TestAQuotedKeywordDoesNotReachTheHatch(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct{ word, want string }{
+		{`time`, "ask"},
+		{`'time'`, "deny"},
+		{`'if'`, "deny"},
+		{`"if"`, "deny"},
+		{`i"f"`, "deny"},
+		{`\if`, "deny"},
+	} {
+		t.Run(tc.word, func(t *testing.T) {
+			command := tc.word + ` SPILL_GUARD_OVERRIDE=x :; cat ` + name
+			_, stdout, _ := drive(t, bashCall(t, command, dir))
+			if got := verdictOf(t, stdout); got != tc.want {
+				t.Errorf("permissionDecision = %q, want %q", got, tc.want)
 			}
 		})
 	}

@@ -46,7 +46,7 @@ func override(call payload, event Event) (why string, present bool) {
 		return "", false
 	}
 	for _, segment := range segments {
-		for _, assignment := range envPrefix(segment.Tokens) {
+		for _, assignment := range envPrefix(segment.Tokens, segment.QuotedFrom) {
 			name, value, _ := strings.Cut(assignment, "=")
 			if name == overrideVar {
 				return value, true

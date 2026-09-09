@@ -42,9 +42,10 @@ func isGlob(operand string) bool { return strings.ContainsAny(operand, "*?[") }
 // printf '%s\n' d/*` prints the default set -- and neither is the environment,
 // which bash 5.3.15 ignores for this variable. It runs whether or not the
 // segment persists: `(shopt -s dotglob; cat *)` applies to the cat beside it.
-func altersGlobbing(tokens []string) bool {
-	head := bash.StripShKeywords(tokens)
-	rest := bash.StripEnvPrefix(head)
+func altersGlobbing(tokens []string, quotedFrom []int) bool {
+	k := bash.ShKeywordPeel(tokens, quotedFrom)
+	head, headQF := tokens[k:], quotedFrom[k:]
+	rest := bash.StripEnvPrefix(head, headQF)
 	if len(rest) == 0 {
 		for _, a := range head {
 			if strings.HasPrefix(a, "GLOBIGNORE=") {

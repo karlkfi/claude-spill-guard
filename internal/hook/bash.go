@@ -127,11 +127,18 @@ func bashTargets(command, cwd string) ([]target, error) {
 			list.enter(segment, v, &dirUnknown)
 			sub := v.expand(segment.Tokens)
 			inputs := v.expand(segment.Inputs)
-			if altersGlobbing(sub) {
+			// The segment's own provenance reads the substituted copy too:
+			// expand rebuilds token for token, so the two stay aligned, and no
+			// substitution can move where quoting appeared in the word bash
+			// lexed. What it does not cover is a word that becomes
+			// assignment-shaped only after expansion -- `n=LC_ALL; $n=C cat f`
+			// -- which is a second reading of the same head and a defect of its
+			// own rather than this one seen from another side.
+			if altersGlobbing(sub, segment.QuotedFrom) {
 				globsAltered = true
 			}
-			switch names, observed := v.observe(segment.Tokens, sub, list.persists(segment),
-				list.binds(segment)); observed {
+			switch names, observed := v.observe(segment.Tokens, sub, segment.QuotedFrom,
+				list.persists(segment), list.binds(segment)); observed {
 			case observedAssignments:
 				list.assigned(segment, names)
 				continue
@@ -142,7 +149,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 				list.ran()
 				continue
 			}
-			tokens := bash.StripEnvPrefix(bash.StripShKeywords(sub))
+			k := bash.ShKeywordPeel(sub, segment.QuotedFrom)
+			tokens := bash.StripEnvPrefix(sub[k:], segment.QuotedFrom[k:])
 			if len(tokens) == 0 {
 				continue
 			}
@@ -477,7 +485,7 @@ func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, 
 		return dir, true
 	case kind == "arg":
 		if !filepath.IsAbs(arg) {
-			if unknown || dir == "" || os.Getenv("CDPATH") != "" || assigns(segment.Tokens, "CDPATH") {
+			if unknown || dir == "" || os.Getenv("CDPATH") != "" || assigns(segment.Tokens, segment.QuotedFrom, "CDPATH") {
 				return dir, true
 			}
 			arg = filepath.Join(dir, arg)
@@ -498,8 +506,8 @@ func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, 
 }
 
 // assigns reports whether the segment's inline prefix assigns name.
-func assigns(tokens []string, name string) bool {
-	for _, assignment := range envPrefix(tokens) {
+func assigns(tokens []string, quotedFrom []int, name string) bool {
+	for _, assignment := range envPrefix(tokens, quotedFrom) {
 		if strings.HasPrefix(assignment, name+"=") {
 			return true
 		}
@@ -511,11 +519,15 @@ func assigns(tokens []string, name string) bool {
 // They are what StripEnvPrefix drops, so they are the head it did not return.
 // Taking them by difference rather than by matching the shape again keeps the
 // one assignment regex in internal/bash, which is a port and is not diverged
-// from here.
-func envPrefix(tokens []string) []string {
-	head := bash.StripShKeywords(tokens)
-	rest := bash.StripEnvPrefix(head)
-	return head[:len(head)-len(rest)]
+// from here -- and now the one reading of what a quoted word is, which is the
+// whole of why `'SPILL_GUARD_OVERRIDE=x' cat f` no longer arms the hatch.
+//
+// Counted rather than sliced twice, because quotedFrom has to be cut by the
+// same amount as tokens at each step and Go slicing carries neither along.
+func envPrefix(tokens []string, quotedFrom []int) []string {
+	k := bash.ShKeywordPeel(tokens, quotedFrom)
+	head, headQF := tokens[k:], quotedFrom[k:]
+	return head[:bash.EnvPrefixPeel(head, headQF)]
 }
 
 // expandTilde is upstream's expand_tilde: a leading `~` or `~/…` becomes the

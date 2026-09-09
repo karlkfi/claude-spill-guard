@@ -22,9 +22,11 @@
 // number are kept, and every place Go forced a difference says so at the site:
 // lex (no shlex in the standard library), matchWord (no anchored-at-offset
 // regexp match), Heredocs (no default-None list argument), CommandSubstitutions
-// (no default argument), and isDigits below. One difference is this repo's
-// rather than Go's: Segment.Inputs records which of the redirects were `<`,
-// and the field's comment carries why upstream has no need of it.
+// (no default argument), Segment.QuotedFrom and the two Peel functions beside
+// the strips (no attribute on a Go string, so a token's quote provenance
+// travels beside it rather than on it), and isDigits below. One difference is
+// this repo's rather than Go's: Segment.Inputs records which of the redirects
+// were `<`, and the field's comment carries why upstream has no need of it.
 //
 // The layers, in the order a command passes through them:
 //
@@ -56,7 +58,8 @@ import "strings"
 // chain's original one -- which is what lets `cd /tmp && cat /dev/null > evil`
 // name `/tmp/evil`.
 type Segment struct {
-	// Tokens is the command and its operands, redirects removed.
+	// Tokens is the command and its operands, redirects removed. QuotedFrom,
+	// the last field, says where quoting first appeared in each of them.
 	Tokens []string
 	// Redirects is every redirect target written in this segment. A heredoc
 	// delimiter and a here-string's content are not paths and are not here.
@@ -103,6 +106,14 @@ type Segment struct {
 	// `grep` filtering another command's output apart from a `grep` reading
 	// ordinary files.
 	Pipe int
+	// QuotedFrom is Tokens' provenance, index for index: for each token, the
+	// offset into it at which quoting or escaping first appeared, or NotQuoted.
+	// Bash settles what a word is before removing its quotes, so this is what
+	// separates the `SP=/x` that assigns from the `'SP=/x'` that names a
+	// program bash cannot find, and the `if` that opens a compound statement
+	// from the `'if'` that does not. Upstream keeps it on the token itself;
+	// lex.go's NotQuoted has why Go cannot.
+	QuotedFrom []int
 }
 
 // conditional is the Conditional field for a segment reached through sep.
@@ -132,15 +143,17 @@ func Segments(cmd string) ([]Segment, error) {
 	if strings.TrimSpace(cmd) == "" {
 		return nil, nil
 	}
-	tokens, err := lex(StripComments(StripHeredocBodies(cmd, nil, false)))
+	tokens, quotedFrom, err := lex(StripComments(StripHeredocBodies(cmd, nil, false)))
 	if err != nil {
 		return nil, err
 	}
-	tokens = glueDollarParen(splitOperatorRuns(tokens))
+	tokens, quotedFrom = splitOperatorRuns(tokens, quotedFrom)
+	tokens, quotedFrom = glueDollarParen(tokens, quotedFrom)
 
 	var (
 		segs      []Segment
 		cur       []string
+		curQF     []int
 		curRedir  []string
 		curInputs []string
 		paren     int
@@ -165,8 +178,8 @@ func Segments(cmd string) ([]Segment, error) {
 				persists := paren == 0 && prevSep != "|" &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
 				segs = append(segs, Segment{cur, curRedir, curInputs, persists,
-					conditional(prevSep), inCaseArm(clauses), pipe})
-				cur, curRedir, curInputs = nil, nil, nil
+					conditional(prevSep), inCaseArm(clauses), pipe, curQF})
+				cur, curQF, curRedir, curInputs = nil, nil, nil, nil
 			}
 			switch t {
 			case "(":
@@ -202,7 +215,7 @@ func Segments(cmd string) ([]Segment, error) {
 			// file argument. (A literal file NAMED `2` right before a redirect
 			// is indistinguishable post-tokenization.)
 			if n := len(cur); n > 0 && isDigits(cur[n-1]) {
-				cur = cur[:n-1]
+				cur, curQF = cur[:n-1], curQF[:n-1]
 			}
 			if dup[t] {
 				// `2>&1`, `2>&-`, `<&3`: the target is a bare fd number or `-`
@@ -241,12 +254,13 @@ func Segments(cmd string) ([]Segment, error) {
 			continue
 		}
 		cur = append(cur, t)
+		curQF = append(curQF, quotedFrom[i])
 		cmdPos = trackCase(&clauses, t, cmdPos)
 		i++
 	}
 	if len(cur) > 0 || len(curRedir) > 0 {
 		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && prevSep != "|",
-			conditional(prevSep), inCaseArm(clauses), pipe})
+			conditional(prevSep), inCaseArm(clauses), pipe, curQF})
 	}
 	return segs, nil
 }
