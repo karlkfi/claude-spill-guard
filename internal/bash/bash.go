@@ -6,9 +6,18 @@
 // It is a port of the shell parsing in karlkfi/claude-bouncer: the layers below
 // Segments come from lib/bouncer_parse.py, shared by all five guards there, and
 // Segments itself from the group loop in
-// plugins/workspace-guard/scripts/bash-workspace-guard.py. Ported at tag
-// workspace-guard/v1.11.0, commit 1d09ffef33bbb9632f714bc416e627b937353826,
-// where both files also stand at that repository's main.
+// plugins/workspace-guard/scripts/bash-workspace-guard.py. First ported at tag
+// workspace-guard/v1.11.0, commit 1d09ffef33bbb9632f714bc416e627b937353826;
+// the quote provenance below tracks lib/bouncer_parse.py at
+// 6cc585b2d977cdfe396acfcf19501eef34a61491.
+//
+// The pin is a revision a reader diffs against, so what is knowingly NOT
+// ported has to be named beside it or that reader concludes the port is
+// current. Three commits have touched lib/bouncer_parse.py since the 2026-08-24
+// pin, measured 2026-09-09, and two of them are outstanding: #113 (05f69c0),
+// which reads `NAME+=value` as an assignment -- a fail-open here, filed as
+// Q168 -- and the substitution-span half of #109 (c368aca). #110's own
+// peel-before-rebuild repair is unported too, and is Q167.
 //
 // Structural identity is the point, and it is a rule this repo states rather
 // than a preference (CLAUDE.md, "Do not hand-roll shell parsing"). A segmenter

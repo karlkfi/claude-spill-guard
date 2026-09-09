@@ -78,9 +78,14 @@ const NotQuoted = math.MaxInt
 
 // Unquoted is the provenance list for a caller that holds none, reading every
 // word as though it were written without quotes -- which is what this repo did
-// before the provenance existed. A site that needs it is a site where a quoted
-// word is still read the way bash would not, so name at the site why that is
-// safe.
+// before the provenance existed.
+//
+// It is the test seam and has no shipped caller: every production path reaches
+// tokens through Segments, which carries the real provenance. Exported because
+// internal/hook's tests are another package and build token lists by hand. It
+// exists rather than letting them write make([]int, n) because that zero value
+// reads as "quoted at offset 0" -- the strictest answer there is -- so a
+// hand-built list would silently assert the opposite of what the test means.
 func Unquoted(n int) []int {
 	qf := make([]int, n)
 	for i := range qf {
@@ -374,9 +379,15 @@ func isCommentPreceder(c byte) bool {
 // the run always fully decomposes with no leftover.
 //
 // Each piece of a split run inherits the run's own provenance, so nothing
-// downstream reads a piece as a word written plainly. Whether a run that WAS
-// quoted should be split at all is a separate question and not this port's --
-// upstream splits it too.
+// downstream reads a piece as a word written plainly. Inherits, not recomputes:
+// the value is an offset into the WHOLE run and is meaningless as an offset
+// into a piece, which costs nothing while no operator is assignment- or
+// keyword-shaped, and stops being free for anything that reads the offset
+// rather than just comparing it to NotQuoted. Q166, which proposes exactly such
+// a reading, is where that bites.
+//
+// Whether a run that WAS quoted should be split at all is a separate question
+// and not this port's -- upstream splits it too. Q166 again.
 func splitOperatorRuns(tokens []string, quotedFrom []int) ([]string, []int) {
 	out := make([]string, 0, len(tokens))
 	outQF := make([]int, 0, len(tokens))
