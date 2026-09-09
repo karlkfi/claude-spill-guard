@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/karlkfi/claude-spill-guard/internal/bash"
@@ -68,11 +70,14 @@ func bashTargets(command, cwd string) ([]target, error) {
 	targets := []target{{commandLabel, []byte(command)}}
 	seen := make(map[string]bool)
 
-	// A body queued for a later pass starts from the directory its parent
-	// ended in, or from none if the parent moved at all: a backtick or heredoc
-	// body has no position relative to the cd, so it cannot be told whether it
-	// runs before or after the move. The glob options are carried the same
-	// way, for the same reason.
+	// A body queued for a later pass runs in the directory that was in force
+	// where it was WRITTEN, which substDirs reads by marking each substitution
+	// in the string and letting the tracker below answer for the marker. A body
+	// it could not place -- one found inside a heredoc body, which the strip has
+	// already taken out of the string -- starts from the directory its parent
+	// ended in, or from none if the parent moved at all. The glob options are
+	// still carried that second way for every body, which is the same position
+	// problem left standing on the flag it did not measure (Q165).
 	type job struct {
 		text         string
 		depth        int
@@ -327,18 +332,188 @@ func bashTargets(command, cwd string) ([]target, error) {
 		}
 		var docs bash.Heredocs
 		stripped := bash.StripHeredocBodies(cur.text, &docs, true)
-		bodies := bash.UnstrippedSubstBodies(cur.text, bash.CommandSubstitutions(stripped, true))
+		subs := bash.CommandSubstitutionSpans(stripped, true)
+		bodies := make([]string, len(subs))
+		for i, sub := range subs {
+			bodies[i] = sub.Body
+		}
+		// The walk starts where this pass started; a body it cannot place keeps
+		// the inheritance every body had before the marking, which is the
+		// parent's directory and none of it if the parent moved at all.
+		dirs := substDirs(stripped, subs, substDir{cur.dir, cur.dirUnknown},
+			substDir{cur.dir, cur.dirUnknown || moved})
+		for i, body := range bash.UnstrippedSubstBodies(cur.text, bodies) {
+			queue = append(queue, job{body, cur.depth + 1, dirs[i].dir, dirs[i].unknown, globsAltered})
+		}
 		// A heredoc body is not quoted text, so a substitution in one is live
 		// whatever apostrophes the body carries -- which is why the scan over
-		// it runs with quoting off.
-		for _, body := range append(docs.Expanded, docs.Unterminated...) {
-			bodies = append(bodies, bash.CommandSubstitutions(body, false)...)
-		}
-		for _, body := range bodies {
-			queue = append(queue, job{body, cur.depth + 1, cur.dir, cur.dirUnknown || moved, globsAltered})
+		// it runs with quoting off. These are the bodies substDirs cannot place:
+		// the strip lifted them out of the string before it was marked, so there
+		// is no marker left to sit anywhere, and they keep the inheritance every
+		// body had before the marking.
+		for _, doc := range append(docs.Expanded, docs.Unterminated...) {
+			for _, body := range bash.CommandSubstitutions(doc, false) {
+				queue = append(queue, job{body, cur.depth + 1, cur.dir, cur.dirUnknown || moved, globsAltered})
+			}
 		}
 	}
 	return targets, nil
+}
+
+// substMark brackets the index of a substitution lifted out of a command
+// string, so the word left behind carries the substitution's position through
+// the lexer. Upstream's SUBST_MARK, and `\x1e` for upstream's reason, measured
+// here: 0 of 161,818 `Bash` commands over 1,962 of this machine's transcripts
+// carry one, against 1 carrying a `U+0007`, which is the control that says the
+// zero is a reading. A string carrying one anyway is left unmarked rather than
+// mismarked.
+const substMark = '\x1e'
+
+var substMarkRE = regexp.MustCompile("\x1e([0-9]+)\x1e")
+
+// A substDir is the directory one queued body runs in.
+type substDir struct {
+	dir     string
+	unknown bool
+}
+
+// substDirs says, for each substitution in subs, which directory was in force
+// where it sits in text -- entry for one written before any `cd`, and the moved
+// directory for one written after. A substitution it cannot place gets fallback.
+//
+// Neither half of the parse can name the other's place. The tracker in
+// bashTargets walks post-lex tokens, which carry no position, and the scan that
+// found these bodies read the RAW string, which is what reads quoting right.
+// Marking joins them: each substitution is replaced, in the string, by a word
+// standing in for it, so the token stream itself carries the position and the
+// same `classifyCd`/`follow` pair answers for the marker. No offset arithmetic
+// to survive a strip pass, and no keying on body text, which would collapse two
+// identical bodies written at different points into one. Upstream's Q169, whose
+// mark_substitutions this is.
+//
+// Three things fall back, and fallback is what every body inherited before the
+// marking, so none of them is a new refusal: a string already carrying the
+// sentinel, a span set that does not run forward, and a marked string the
+// segmenter cannot read.
+func substDirs(text string, subs []bash.Substitution, entry, fallback substDir) []substDir {
+	out := make([]substDir, len(subs))
+	for i := range out {
+		out[i] = fallback
+	}
+	if len(subs) == 0 || strings.ContainsRune(text, substMark) {
+		return out
+	}
+	marked, ok := markSubstitutions(text, subs)
+	if !ok {
+		return out
+	}
+	dir, unknown := entry.dir, entry.unknown
+	// SegmentsOfStripped, because text has had its own-level heredoc bodies
+	// taken out already and a second strip would re-arm the `<<WORD` left
+	// behind and swallow the rest of the string.
+	segments, err := bash.SegmentsOfStripped(marked)
+	if err != nil {
+		return out
+	}
+	v := newVars()
+	list := andOr{settled: true}
+	for _, segment := range segments {
+		list.enter(segment, v, &unknown)
+		// Read the positions before this segment's own `cd` applies. A
+		// substitution is expanded to build the command line the `cd` then runs
+		// on, so `cd $(dirname x)` resolves `x` where the string started rather
+		// than where it lands.
+		for _, tok := range segment.Tokens {
+			recordMarks(out, tok, dir, unknown)
+		}
+		for _, tok := range segment.Redirects {
+			recordMarks(out, tok, dir, unknown)
+		}
+		// Restore ahead of everything that reads the tokens, which is upstream's
+		// ordering and is what keeps this walk agreeing with the one in
+		// bashTargets. A marker is a bare word with no `$` in it, so a variable
+		// map built over the marked tokens would read `SP=$(pwd)` as a literal
+		// assignment where the other walk poisons the name -- and `cd $SP` after
+		// a move would then resolve against the wrong directory with no sign of
+		// it. It is also what keeps a whitelisted
+		// `cd "$(git rev-parse --show-toplevel)"` recognisable to classifyCd.
+		//
+		// segment.QuotedFrom reads the restored copy unchanged, which is the
+		// point rather than an omission: the restore rebuilds token for token,
+		// so the two stay aligned, and a marker's provenance is the provenance
+		// of the WORD the substitution was written in. That is bash's own
+		// reading -- it settles whether a word is an assignment or a keyword
+		// before it removes the quotes -- and putting the substitution's text
+		// back cannot move where quoting appeared in that word.
+		raw := make([]string, len(segment.Tokens))
+		for i, tok := range segment.Tokens {
+			raw[i] = restoreMarks(tok, text, subs)
+		}
+		sub := v.expand(raw)
+		switch names, observed := v.observe(raw, sub, segment.QuotedFrom,
+			list.persists(segment), list.binds(segment)); observed {
+		case observedAssignments:
+			list.assigned(segment, names)
+			continue
+		case observedLoopHeader:
+			list.ran()
+			continue
+		}
+		k := bash.ShKeywordPeel(sub, segment.QuotedFrom)
+		tokens := bash.StripEnvPrefix(sub[k:], segment.QuotedFrom[k:])
+		if len(tokens) == 0 {
+			continue
+		}
+		if kind, arg := classifyCd(tokens); kind != "" {
+			dir, unknown = follow(kind, arg, dir, unknown, segment)
+			list.moved(segment, unknown)
+			continue
+		}
+		list.ran()
+	}
+	return out
+}
+
+// markSubstitutions replaces each substitution in text with its marker, in
+// order. It reports false for a span set that does not run forward inside the
+// text, which nothing produces today and which would otherwise be a silent
+// mis-slice.
+func markSubstitutions(text string, subs []bash.Substitution) (string, bool) {
+	var b strings.Builder
+	last := 0
+	for i, sub := range subs {
+		if sub.Start < last || sub.End > len(text) || sub.End < sub.Start {
+			return "", false
+		}
+		b.WriteString(text[last:sub.Start])
+		fmt.Fprintf(&b, "%c%d%c", substMark, i, substMark)
+		last = sub.End
+	}
+	b.WriteString(text[last:])
+	return b.String(), true
+}
+
+// recordMarks writes dir against every substitution one token stands for. A
+// token can carry more than one -- `cat $(a)/$(b)` glues two into one word --
+// and a marker outside the set is left alone rather than guessed at.
+func recordMarks(out []substDir, tok, dir string, unknown bool) {
+	for _, m := range substMarkRE.FindAllStringSubmatch(tok, -1) {
+		if i, err := strconv.Atoi(m[1]); err == nil && i < len(out) {
+			out[i] = substDir{dir, unknown}
+		}
+	}
+}
+
+// restoreMarks puts each marker in tok back to the substitution text it stands
+// for, so classifyCd reads the target the session wrote.
+func restoreMarks(tok, text string, subs []bash.Substitution) string {
+	return substMarkRE.ReplaceAllStringFunc(tok, func(m string) string {
+		i, err := strconv.Atoi(m[1 : len(m)-1])
+		if err != nil || i >= len(subs) {
+			return m
+		}
+		return text[subs[i].Start:subs[i].End]
+	})
 }
 
 // resolve turns one operand into a path this process can open, or says why it

@@ -2339,8 +2339,10 @@ Two shapes were driven and left alone because they do not change the set: a
 prefix assignment on the reading command, since bash expands the operands
 before `GLOBIGNORE=x cat *` assigns, and the environment, which bash 5.3.15
 ignores for that variable -- so nothing here reads one, and `PRIVACY.md` is
-unchanged. A queued substitution body inherits the flag the way it inherits the
-directory, which is Q147's position problem again.
+unchanged. A queued substitution body inherits the flag from the
+end of the string, where it now inherits its directory from the point it was
+written -- the same position problem left standing on the flag, which is
+[Q165](../queue/Q165.md).
 
 **A quoted pattern is the same boundary, in the precision direction, and it is
 the half still open.** Quoting decides what a word is, and the assignment and
@@ -2510,6 +2512,81 @@ having one: an arm assignment is where a wrong branch's path comes from.
 
 Upstream has neither the field nor the reading. It asks where a path lands, so
 an arm it never enters costs a prompt; this opens the file.
+
+### A substitution body is resolved where it was written
+
+`cd sub && echo $(cat x)` reads `x` under `sub`, and it was a coverage record
+while `cd sub && cat x` beside it got a verdict. A body queued for a pass of its
+own inherited the directory its parent ended in, and none of it if the parent
+had moved at all, because neither half of the parse could name the other's
+place: the tracker walks post-lex tokens, which carry no position, and the scan
+that finds the bodies reads the raw string, which is what reads quoting right.
+
+Marking joins them. Each substitution is replaced, in the string, by a word
+standing in for it, so the token stream carries the position and the same
+`classifyCd`/`follow` pair answers for the marker. No offset arithmetic to
+survive a strip pass, and no keying on body text, which would collapse two
+identical bodies written at different points onto one answer -- `cd a; echo
+$(cat f); cd ../b; echo $(cat f)` writes the same body twice and the two answers
+differ. `substDirs` in `internal/hook/bash.go` is the walk and
+`bash.CommandSubstitutionSpans` is what gives it the positions.
+
+**The marker is `\x1e<n>\x1e`, and the sentinel is a measurement rather than a
+convention.** Over 1,962 of this machine's session transcripts, 0 of 161,818
+`Bash` commands carry a `U+001E`; the same sweep found one carrying a `U+0007`,
+which is the positive control that says an answer of 0 is a reading and not an
+empty probe. A string carrying one anyway is left unmarked rather than
+mismarked, which is the fallback below and not a refusal.
+
+**Two things fall back to what every body inherited before this**, the parent's
+directory and none of it if the parent moved: the sentinel case above, and a
+body found inside a heredoc body, which the own-level strip lifted out of the
+string before there was anything to mark. Neither is a new refusal.
+
+**The `$(…)` half is a cost recovered rather than a read gained**, and the
+backtick half is not. `Segments` flattens an unquoted `$(…)` into the in-order
+pass, where the tracker already resolved its operand correctly, and the queued
+pass then re-resolved the same operand against the lost directory and deferred
+the whole call on it. A backtick body reaches no flattened pass at all, so its
+operand had only ever been the queued one.
+
+**Measured 2026-09-06**, in Q147 and not re-taken for this change: 137 coverage
+records on the relative-after-`cd` arm carry a cd-family command, and 11 of them
+carry a `$(…)` or a backtick after it. Those 11 are the population this moves.
+
+**It is a port, and it did not have to be a divergence.** Q147 read the two
+readings it could see -- a kind per body, or an offset per body -- as changes to
+the shape of `internal/bash` that `CLAUDE.md` holds structurally identical to
+its upstream, and concluded the row should wait on a fix there. Upstream took
+one: `mark_substitutions` and `substitution_bodies` in `bash-workspace-guard.py`,
+its Q169, merged as `claude-bouncer` #109 on 2026-09-07, with `spans` added to
+`command_substitutions` in the shared `lib/bouncer_parse.py`. So the marking, the
+sentinel and the read-before-the-`cd` ordering are read across rather than
+invented, and the two names Go forced -- `CommandSubstitutionSpans` and
+`SegmentsOfStripped`, each a keyword argument upstream -- say so where they
+stand.
+
+**One step of it is not upstream's, and driving it is what settled that.**
+Upstream restores a marker only into the words it is about to read a `cd` from,
+and peels the command prefix off the *marked* tokens to avoid re-reading a
+quoted word; here the walk restores every token before anything reads it. A
+marker is a bare word with no `$` in it, so a variable map built over the marked
+tokens reads `SP=$(pwd)` as a literal assignment where the walk in `bashTargets`
+poisons the name -- and the `cd $SP` after it is then followed to a directory
+bash is not in. Driven on the marked ordering, with a backtick body after
+`cd a; SP=$(pwd); cd ../b; cd $SP`: exit 0 and nothing on stderr, having read
+the clean file in `b` where bash reads the key in `a`. Restored first, the same
+call records the move it cannot follow, which
+`TestASubstitutionBodyResolvesWhereItWasWritten` holds. What
+upstream's ordering buys it is Q170's quote provenance, which this repo does not
+have either way (Q92), so the two walks agreeing is the property worth having.
+
+**`SegmentsOfStripped` exists because stripping twice is not idempotent.** The
+first pass leaves the `<<WORD` operator behind with its body and terminator
+gone, and a second re-arms it and swallows everything after it. Driven on this
+segmenter: `cat <<EOF\nbody\nEOF\ncd sub && cat x`, stripped own-level and
+segmented again, comes back as `cat` alone, with the `cd` and the read after it
+gone.
 
 ### A refusal is whole-call, and the reason names one segment of it
 

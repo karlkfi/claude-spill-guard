@@ -25,7 +25,7 @@ import (
 //
 // What is not ported, and why, is at each site: the Windows drive-prefix
 // exemption (Q79's class), the stable subset the upstream recursion starts from
-// (Q147), and the loop bindings that subset seeds, which are the same argument.
+// (Q165), and the loop bindings that subset seeds, which are the same argument.
 
 // varUseRE is a plain `$NAME` or `${NAME}`. A parameter-expansion operator
 // (`${f:-x}`, `${f%.*}`) deliberately does not match, so its `$` stays and the
@@ -92,11 +92,13 @@ var argAssignerCmds = map[string]bool{
 }
 
 // vars is the live map for one command string, advanced a segment at a time.
-// A queued substitution body starts a map of its own, empty: it has no
-// position in the string, so a value assigned after it would be substituted
-// into a body bash expanded with the environment's -- the direction this
-// resolver must not take, and the reason upstream's stable-subset seed is not
-// ported (Q147).
+// A queued substitution body starts a map of its own, empty. Its position in
+// the string is known now (substDirs, which is what settles its directory), and
+// the seed upstream starts its recursion from is still not ported, because that
+// map is the state at the END of the string: a value assigned after the body
+// would be substituted into text bash expanded with the environment's, which is
+// the direction this resolver must not take. Consuming it positionally is
+// Q165.
 type vars struct {
 	m map[string]string
 	// loops is the candidate set each `for` variable stands for, kept apart

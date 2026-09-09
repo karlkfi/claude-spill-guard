@@ -467,6 +467,135 @@ func TestARelativeOperandAfterALiteralCdIsResolved(t *testing.T) {
 	}
 }
 
+// A substitution body runs in the directory in force where it was WRITTEN, so
+// the operand inside it gets a verdict for the same reason the operand beside
+// it does. Before the marking a body found in a string that moved at all
+// inherited an unknown directory, so `cd sub && echo $(cat x)` recorded where
+// `cd sub && cat x` blocked (Q147).
+//
+// Every arm plants the key where only the right directory finds it, so an arm
+// that resolved against the other one allows silently rather than failing on a
+// path.
+func TestASubstitutionBodyResolvesWhereItWasWritten(t *testing.T) {
+	dir, name := planted(t)
+	parent, base := filepath.Dir(dir), filepath.Base(dir)
+	// Written after a move the tracker followed: resolved against the payload's
+	// cwd the file is absent, so only the followed directory finds it.
+	for _, command := range []string{
+		"cd " + base + " && echo $(cat " + name + ")",
+		"cd " + base + " && echo `cat " + name + "`",
+		"cd " + base + "; echo \"$(cat " + name + ")\"",
+		// A body inside a body. The outer one is placed, and the inner is
+		// placed within it by the same walk one pass down.
+		"cd " + base + " && echo $(echo `cat " + name + "`)",
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, parent))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file under the cd target", reason)
+			}
+		})
+	}
+	// Written BEFORE the move, which is the half a body inheriting the string's
+	// end state gets wrong in the other direction: the entry directory is the
+	// one bash reads it in, and the move after it changes nothing.
+	t.Run("before the move", func(t *testing.T) {
+		code, stdout, stderr := drive(t, bashCall(t,
+			"echo $(cat "+name+") && cd "+base, dir))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the file under the entry directory", reason)
+		}
+	})
+	// Two bodies written identically at two points in one string. Keying the
+	// directory on body text would collapse them onto one answer; a position
+	// cannot. The clean file is what makes the wrong answer silent.
+	t.Run("two identical bodies", func(t *testing.T) {
+		root := t.TempDir()
+		for _, sub := range []string{"a", "b"} {
+			if err := os.Mkdir(filepath.Join(root, sub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			body := "nothing here\n"
+			if sub == "b" {
+				body = "AWS_ACCESS_KEY_ID=" + secret + "\n"
+			}
+			if err := os.WriteFile(filepath.Join(root, sub, "deploy.env"), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// `;` and not `&&`: a `cd` reached through `&&` after a command is
+		// tentative to the and-or list, and the statement end that follows
+		// drops it -- which is that rule and not this one.
+		code, stdout, stderr := drive(t, bashCall(t,
+			"cd a; echo $(cat deploy.env); cd ../b; echo $(cat deploy.env)", root))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, filepath.Join("b", "deploy.env")) {
+			t.Errorf("reason = %q, want the file under b", reason)
+		}
+	})
+	// The marker is a bare word with no `$` in it, so a variable map built over
+	// the MARKED tokens reads `SP=$(pwd)` as a literal assignment where the
+	// walk in bashTargets poisons the name -- and the `cd $SP` after it then
+	// resolves against a directory bash is not in, silently. Restoring before
+	// anything reads the tokens is what keeps the two walks agreeing. The key
+	// is in `a`, which is where bash reads it and where neither walk can say it
+	// is, so the arm that gets this wrong scans the clean file in `b` and
+	// allows.
+	t.Run("a substitution assigned to a name is poisoned in this walk too", func(t *testing.T) {
+		root := t.TempDir()
+		for _, sub := range []string{"a", "b"} {
+			if err := os.Mkdir(filepath.Join(root, sub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			body := "nothing here\n"
+			if sub == "a" {
+				body = "AWS_ACCESS_KEY_ID=" + secret + "\n"
+			}
+			if err := os.WriteFile(filepath.Join(root, sub, "deploy.env"), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// A backtick body, because a `$(…)` one is flattened into the in-order
+		// pass as well and that pass records the operand on its own.
+		code, stdout, stderr := drive(t, bashCall(t,
+			"cd a; SP=$(pwd); cd ../b; cd $SP; echo `cat deploy.env`", root))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+			t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+		}
+	})
+	// A body found inside a heredoc body is the one the marking cannot place:
+	// the strip lifted it out of the string before there was anything to mark,
+	// so it keeps the inheritance every body had before. Named here rather than
+	// beside the unfollowed moves because what leaves it unsettled is the strip
+	// and not the `cd`.
+	t.Run("a body inside a heredoc body keeps the inheritance", func(t *testing.T) {
+		code, stdout, stderr := drive(t, bashCall(t,
+			"cd "+base+" && cat <<EOF\n$(cat "+name+")\nEOF\n", parent))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+			t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+		}
+	})
+	// The sentinel the marker is built from cannot appear in a command Claude
+	// Code sends, and a string carrying one anyway is left unmarked rather than
+	// mismarked. What it falls back to is what every body inherited before the
+	// marking, so the arm is the pre-Q147 answer rather than a new one.
+	t.Run("a string carrying the sentinel is left unmarked", func(t *testing.T) {
+		code, stdout, stderr := drive(t, bashCall(t,
+			"cd "+base+" && echo \x1e && echo $(cat "+name+")", parent))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+			t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+		}
+	})
+}
+
 // A quoted target is one token to the lexer, and the space is the case that
 // tells a tracker reading tokens from one re-splitting the string.
 func TestACdToAQuotedTargetIsFollowed(t *testing.T) {
@@ -595,14 +724,11 @@ func TestAWhitelistedSubstitutionCdIsFollowed(t *testing.T) {
 // substitution body is queued with no position relative to the cd, so after
 // any move it inherits a lost directory rather than the payload's cwd.
 //
-// The last of those covers the `$(…)` body too, and that one is the arm with
-// a cost. Segments flattens it into the in-order pass, where the tracker
-// resolves its operand correctly, and then the recursion queues the same body
-// and refuses the same operand -- so `cd sub && echo $(cat x)` is recorded
-// today as it was before the tracker, where a backtick body after a move was
-// resolved against the payload's cwd and allowed. Telling the two bodies
-// apart needs CommandSubstitutions to report each body's kind or offset,
-// which is a change to the port, and Q147 carries it.
+// A substitution body is not in that class any more. It is placed where it was
+// written and gets the directory in force there, which
+// TestASubstitutionBodyResolvesWhereItWasWritten holds; what still leaves one
+// unsettled is a move the tracker could not follow, which is the last two rows
+// below and is this list's own rule rather than a second one.
 func TestACdThisCannotFollowLeavesTheOperandUnsettled(t *testing.T) {
 	dir, name := planted(t)
 	parent, base := filepath.Dir(dir), filepath.Base(dir)
@@ -622,8 +748,11 @@ func TestACdThisCannotFollowLeavesTheOperandUnsettled(t *testing.T) {
 		{"a relative target after a lost directory", "cd - && cd " + base + " && cat " + name},
 		{"a move reached through ||", "false || cd " + base + "; cat " + name},
 		{"a move reached through && after a command, in the next statement", "true && cd " + base + "; cat " + name},
-		{"a backtick body after a move", "cd " + base + " && echo `cat " + name + "`"},
-		{"a $(…) body after a move", "cd " + base + " && echo $(cat " + name + ")"},
+		// A substitution body is placed where it was written now
+		// (TestASubstitutionBodyResolvesWhereItWasWritten), so a move the
+		// tracker cannot follow is what still leaves one unsettled.
+		{"a $(…) body after a move this cannot follow", "cd $D && echo $(cat " + name + ")"},
+		{"a backtick body after a move this cannot follow", "cd $D && echo `cat " + name + "`"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, parent))
