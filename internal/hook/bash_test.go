@@ -729,33 +729,39 @@ func TestAnAssignmentThePortCannotTrustLeavesTheOperandUnresolved(t *testing.T) 
 	}
 }
 
-// The Q92 divergence, arriving in the resolver. bash reads `'SP=…'` as a
-// command name and never assigns; the lexer strips the quotes before this
-// sees the token, so the port assigns it and the operand resolves to a file
-// bash would read only if SP already held that path. Pinned as
-// TestAQuotedAssignmentInCommandPositionArmsTheHatchToo pins the hatch: the
-// behaviour is deliberate, and a lexer that keeps quote provenance makes both
-// pins a decision rather than a regression. Since #117 the unresolved form of
-// this operand proceeds unscanned with a record, so what the divergence costs
-// is the record and a scan of the wrong path, not bytes that would otherwise
-// have been stopped.
-func TestAQuotedAssignmentResolvesWhereBashWouldNotAssign(t *testing.T) {
+// The same boundary arriving in the resolver, which is where Q92's divergence
+// reached after the literal-assignment resolver landed. bash reads `'SP=…'` as a
+// command name and assigns nothing, so `$SP/f` is an operand this cannot settle
+// -- a coverage failure, which defers with a record (#117) rather than resolving
+// to a file bash would open only if SP already held that path.
+//
+// The unquoted control is what says the resolver still works: the same string
+// without the quotes resolves and denies, so the deferral above is the quoting
+// and not the resolver having stopped reading assignments.
+func TestAQuotedAssignmentDoesNotResolve(t *testing.T) {
 	dir, name := planted(t)
 	for _, command := range []string{
 		"'SP=" + dir + "'; cat $SP/" + name,
 		"\"SP=" + dir + "\"; cat $SP/" + name,
+		"SP\\=" + dir + "; cat $SP/" + name,
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
-			if code != 0 {
-				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
-			}
-			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
-				t.Errorf("reason = %q, want the known divergence to resolve the file -- if it "+
-					"no longer does, the lexer keeps quote provenance and Q92 is the row to close", reason)
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "expands at run time") {
+				t.Errorf("coverage reason = %q, want the operand unresolved", reason)
 			}
 		})
 	}
+	t.Run("the unquoted control still resolves", func(t *testing.T) {
+		command := "SP=" + dir + "; cat $SP/" + name
+		code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the resolved file named", reason)
+		}
+	})
 }
 
 // loopFixture is the tree the `for` tests iterate: a planted file, a clean one

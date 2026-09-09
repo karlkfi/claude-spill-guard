@@ -143,11 +143,11 @@ const (
 // arguments name and what a `for` list iterates. An IFS change stops
 // propagation for the rest of the string: every later expansion is re-split by
 // a value this never saw. binds is andOr's, and gates the header alone.
-func (v *vars) observe(raw, sub []string, persists, binds bool) ([]string, observation) {
+func (v *vars) observe(raw, sub []string, quotedFrom []int, persists, binds bool) ([]string, observation) {
 	if !v.propagate {
 		return nil, observedCommand
 	}
-	if names, ok := applyAssignmentGroup(raw, v.m, persists); ok {
+	if names, ok := applyAssignmentGroup(raw, quotedFrom, v.m, persists); ok {
 		for _, name := range names {
 			delete(v.loops, name) // a name set as a scalar is no longer a loop variable
 			if name == "IFS" {
@@ -156,7 +156,7 @@ func (v *vars) observe(raw, sub []string, persists, binds bool) ([]string, obser
 		}
 		return names, observedAssignments
 	}
-	if name, values, ok := forLoopBinding(bash.StripShKeywords(sub), v.loops); ok {
+	if name, values, ok := forLoopBinding(bash.StripShKeywords(sub, quotedFrom), v.loops); ok {
 		delete(v.m, name) // and a loop variable is not a scalar
 		if values == nil || !binds {
 			delete(v.loops, name)
@@ -165,11 +165,11 @@ func (v *vars) observe(raw, sub []string, persists, binds bool) ([]string, obser
 		}
 		return nil, observedLoopHeader
 	}
-	if clobbersIFS(sub) {
+	if clobbersIFS(sub, quotedFrom) {
 		v.stop()
 	} else {
-		poisonVars(sub, v.m)
-		poisonVars(sub, v.loops) // the same rules invalidate a binding
+		poisonVars(sub, quotedFrom, v.m)
+		poisonVars(sub, quotedFrom, v.loops) // the same rules invalidate a binding
 	}
 	return nil, observedCommand
 }
@@ -306,10 +306,11 @@ func (v *vars) stop() {
 	v.propagate = false
 }
 
-// isAssignment is ASSIGNMENT_RE.match, asked of internal/bash so the one
-// assignment regex stays there.
-func isAssignment(tok string) bool {
-	return len(bash.StripEnvPrefix([]string{tok})) == 0
+// isAssignment is upstream's is_assignment, asked of internal/bash so the one
+// reading of what bash treats as an assignment stays there -- the regex, and
+// the quoting that disarms it.
+func isAssignment(tok string, quotedFrom int) bool {
+	return bash.EnvPrefixPeel([]string{tok}, []int{quotedFrom}) == 1
 }
 
 // literalAssignmentValue is the literal an assignment's value resolves to, or
@@ -520,13 +521,13 @@ func substituteVars(tok string, varmap map[string]string) string {
 // subshell, a pipeline stage, a background job), or when bash treats the name
 // specially. A bare `export NAME` re-exports without changing the value, so
 // it neither sets nor drops.
-func applyAssignmentGroup(tokens []string, varmap map[string]string, persists bool) ([]string, bool) {
+func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]string, persists bool) ([]string, bool) {
 	var pairs []string
 	if len(tokens) > 0 && tokens[0] == "export" {
-		for _, t := range tokens[1:] {
+		for i, t := range tokens[1:] {
 			switch {
 			case strings.HasPrefix(t, "-"):
-			case isAssignment(t):
+			case isAssignment(t, quotedFrom[i+1]):
 				pairs = append(pairs, t)
 			case identRE.FindString(t) != t:
 				return nil, false
@@ -536,8 +537,8 @@ func applyAssignmentGroup(tokens []string, varmap map[string]string, persists bo
 		if len(tokens) == 0 {
 			return nil, false
 		}
-		for _, t := range tokens {
-			if !isAssignment(t) {
+		for i, t := range tokens {
+			if !isAssignment(t, quotedFrom[i]) {
 				return nil, false
 			}
 		}
@@ -609,12 +610,13 @@ func ungluePrintfV(t string) string {
 // Generic over the value type because upstream runs it on both maps and this
 // port has to as well: it only ever deletes keys, so what a map holds never
 // reaches it.
-func poisonVars[V any](tokens []string, varmap map[string]V) {
+func poisonVars[V any](tokens []string, quotedFrom []int, varmap map[string]V) {
 	if len(varmap) == 0 {
 		return
 	}
-	kw := bash.StripShKeywords(tokens)
-	rest := bash.StripEnvPrefix(kw)
+	k := bash.ShKeywordPeel(tokens, quotedFrom)
+	kw, kwQF := tokens[k:], quotedFrom[k:]
+	rest := bash.StripEnvPrefix(kw, kwQF)
 	for _, t := range kw[:len(kw)-len(rest)] {
 		name, _, _ := strings.Cut(t, "=")
 		delete(varmap, name)
@@ -663,8 +665,9 @@ func poisonVars[V any](tokens []string, varmap map[string]V) {
 // cannot disagree about what a segment assigns. `unset` is exempt: bash
 // word-splits on the default IFS while IFS is unset, and the default is what
 // this already models.
-func clobbersIFS(tokens []string) bool {
-	rest := bash.StripEnvPrefix(bash.StripShKeywords(tokens))
+func clobbersIFS(tokens []string, quotedFrom []int) bool {
+	k := bash.ShKeywordPeel(tokens, quotedFrom)
+	rest := bash.StripEnvPrefix(tokens[k:], quotedFrom[k:])
 	if len(rest) == 0 {
 		return false
 	}

@@ -2,6 +2,7 @@ package bash
 
 import (
 	"errors"
+	"math"
 	"regexp"
 	"strings"
 )
@@ -54,6 +55,66 @@ const commentPreceders = " \t\n;|&()<>"
 const substOpen = '('
 
 var assignmentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// NotQuoted is the QuotedFrom of a word no quoting or escaping touched.
+//
+// Bash settles what a word IS before it removes the quotes, so `'SP=/x'` is
+// not an assignment and `'if'` is not a reserved word: the shell looks for a
+// program of that name, fails to find one, and leaves the variable and the
+// keyword alone. Both predicates below therefore read a word's provenance and
+// not only its text.
+//
+// Upstream carries that provenance on the token, as a `QuotedStr` subclass of
+// `str` with a `quoted_from` attribute, which Go cannot express -- a string
+// carries no field, and putting the quotes back inside the token breaks six of
+// lex's own cases, its callers being promised quote-stripped text. So it
+// travels beside the token as a parallel list, index for index, and every
+// function that peels a head takes both. That is the divergence; the rule it
+// implements is upstream's.
+//
+// MaxInt rather than -1 so the comparison in isAssignment is total: a word
+// nothing quoted is quoted later than any offset a match can end at.
+const NotQuoted = math.MaxInt
+
+// Unquoted is the provenance list for a caller that holds none, reading every
+// word as though it were written without quotes -- which is what this repo did
+// before the provenance existed.
+//
+// It is the test seam and has no shipped caller: every production path reaches
+// tokens through Segments, which carries the real provenance. Exported because
+// internal/hook's tests are another package and build token lists by hand. It
+// exists rather than letting them write make([]int, n) because that zero value
+// reads as "quoted at offset 0" -- the strictest answer there is -- so a
+// hand-built list would silently assert the opposite of what the test means.
+func Unquoted(n int) []int {
+	qf := make([]int, n)
+	for i := range qf {
+		qf[i] = NotQuoted
+	}
+	return qf
+}
+
+// isAssignment reports whether bash would read tok as an inline assignment.
+//
+// The shape has to match AND nothing up to and including the `=` may have been
+// quoted or escaped: `SP=x"y"` assigns, where `SP""=x` and `SP\=x` run a
+// program. Comparing offsets rather than asking whether the word was quoted at
+// all is the whole of the distinction -- `SP='a reason'` is quoted and is an
+// assignment, and it is how the override's own documented form is written.
+func isAssignment(tok string, quotedFrom int) bool {
+	m := assignmentRE.FindStringIndex(tok)
+	return m != nil && quotedFrom >= m[1]
+}
+
+// isReservedWord reports whether bash would read tok as a shell keyword.
+//
+// Blunter than isAssignment on purpose: an assignment has an `=` for the
+// quoting to sit after, and a keyword has no such split, so quoting any part of
+// it is enough. It reads the offset rather than whether a quote CHARACTER
+// appeared, because `\if` carries none and is still not the keyword.
+func isReservedWord(tok string, quotedFrom int) bool {
+	return quotedFrom == NotQuoted && shKeywords[tok]
+}
 
 // Reserved words after which bash reads another command, so a `case` following
 // one is the keyword and not an argument (`if x; then case $y in ...`). Any
@@ -121,18 +182,20 @@ const (
 // matches none of them, and both paths a non-ASCII byte can take append it to
 // the current token. Invalid UTF-8 therefore survives byte for byte, where a
 // []rune conversion would substitute U+FFFD and change the token.
-func lex(text string) ([]string, error) {
+func lex(text string) ([]string, []int, error) {
 	l := &lexer{src: text, state: stateSpace}
 	var out []string
+	var quotedFrom []int
 	for {
-		token, eof, err := l.readToken()
+		token, from, eof, err := l.readToken()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if eof {
-			return out, nil
+			return out, quotedFrom, nil
 		}
 		out = append(out, token)
+		quotedFrom = append(quotedFrom, from)
 	}
 }
 
@@ -162,9 +225,20 @@ func (l *lexer) next() (byte, bool) {
 	return c, true
 }
 
-func (l *lexer) readToken() (string, bool, error) {
+func (l *lexer) readToken() (string, int, bool, error) {
 	quoted := false
 	escapedState := byte(stateSpace)
+	// Where quoting or escaping first appears in the word being built, as an
+	// offset into the STRIPPED token -- which is the text the caller receives,
+	// so the two are read against each other without the caller reconstructing
+	// anything. Taken at each transition into a quote or an escape, before the
+	// quote characters are dropped, which is the order bash decides a word in.
+	quotedFrom := NotQuoted
+	mark := func() {
+		if quotedFrom == NotQuoted {
+			quotedFrom = len(l.token)
+		}
+	}
 loop:
 	for {
 		c, ok := l.next()
@@ -184,12 +258,14 @@ loop:
 					break loop
 				}
 			case c == escapeChar:
+				mark()
 				escapedState = stateWord
 				l.state = c
 			case isPunct(c):
 				l.token = append(l.token[:0], c)
 				l.state = statePunct
 			case isQuote(c):
+				mark()
 				l.state = c
 			default:
 				l.token = append(l.token[:0], c)
@@ -199,7 +275,7 @@ loop:
 		case isQuote(l.state):
 			quoted = true
 			if !ok {
-				return "", false, errNoClosingQuote
+				return "", NotQuoted, false, errNoClosingQuote
 			}
 			switch {
 			case c == l.state:
@@ -213,7 +289,7 @@ loop:
 
 		case l.state == escapeChar:
 			if !ok {
-				return "", false, errNoEscapedChar
+				return "", NotQuoted, false, errNoEscapedChar
 			}
 			// In posix shells, only the quote itself or the escape character
 			// may be escaped within quotes.
@@ -246,8 +322,10 @@ loop:
 				l.state = stateSpace
 				break loop
 			case isQuote(c):
+				mark()
 				l.state = c
 			case c == escapeChar:
+				mark()
 				escapedState = stateWord
 				l.state = c
 			case !isPunct(c):
@@ -264,9 +342,9 @@ loop:
 	result := string(l.token)
 	l.token = l.token[:0]
 	if !quoted && result == "" {
-		return "", true, nil
+		return "", NotQuoted, true, nil
 	}
-	return result, false, nil
+	return result, quotedFrom, false, nil
 }
 
 // shlex's whitespace, with the newline removed so a newline command boundary
@@ -299,17 +377,30 @@ func isCommentPreceder(c byte) bool {
 // consumed greedily longest-first, so `&>>` wins over `&>` over `&` and `<<<`
 // over `<<`. Every single operator character is itself in the operator list, so
 // the run always fully decomposes with no leftover.
-func splitOperatorRuns(tokens []string) []string {
+//
+// Each piece of a split run inherits the run's own provenance, so nothing
+// downstream reads a piece as a word written plainly. Inherits, not recomputes:
+// the value is an offset into the WHOLE run and is meaningless as an offset
+// into a piece, which costs nothing while no operator is assignment- or
+// keyword-shaped, and stops being free for anything that reads the offset
+// rather than just comparing it to NotQuoted. Q166, which proposes exactly such
+// a reading, is where that bites.
+//
+// Whether a run that WAS quoted should be split at all is a separate question
+// and not this port's -- upstream splits it too. Q166 again.
+func splitOperatorRuns(tokens []string, quotedFrom []int) ([]string, []int) {
 	out := make([]string, 0, len(tokens))
-	for _, t := range tokens {
+	outQF := make([]int, 0, len(tokens))
+	for i, t := range tokens {
 		if t == "" || !allPunct(t) {
 			out = append(out, t)
+			outQF = append(outQF, quotedFrom[i])
 			continue
 		}
-		for i := 0; i < len(t); {
+		for j := 0; j < len(t); {
 			matched := ""
 			for _, op := range operators {
-				if strings.HasPrefix(t[i:], op) {
+				if strings.HasPrefix(t[j:], op) {
 					matched = op
 					break
 				}
@@ -320,14 +411,16 @@ func splitOperatorRuns(tokens []string) []string {
 				// drifts, emit the remainder as one token and stop rather than
 				// spin -- a merged segment defers, which is fail-safe, never a
 				// silent allow.
-				out = append(out, t[i:])
+				out = append(out, t[j:])
+				outQF = append(outQF, quotedFrom[i])
 				break
 			}
 			out = append(out, matched)
-			i += len(matched)
+			outQF = append(outQF, quotedFrom[i])
+			j += len(matched)
 		}
 	}
-	return out
+	return out, outQF
 }
 
 func allPunct(t string) bool {
@@ -348,15 +441,19 @@ func allPunct(t string) bool {
 // recognises as a runtime expansion, while the `(` is kept in the stream so
 // segmentation, and the scanning of commands inside the substitution, are
 // unchanged.
-func glueDollarParen(tokens []string) []string {
+func glueDollarParen(tokens []string, quotedFrom []int) ([]string, []int) {
 	out := make([]string, 0, len(tokens))
-	for _, t := range tokens {
+	outQF := make([]int, 0, len(tokens))
+	for i, t := range tokens {
 		if t == "(" && len(out) > 0 && strings.HasSuffix(out[len(out)-1], "$") {
+			// The `$` word keeps its own provenance: the glue lengthens it and
+			// cannot move where quoting first appeared in it.
 			out[len(out)-1] += "("
 		}
 		out = append(out, t)
+		outQF = append(outQF, quotedFrom[i])
 	}
-	return out
+	return out, outQF
 }
 
 // StripEnvPrefix drops leading POSIX `NAME=VALUE` command-prefix assignments.
@@ -365,12 +462,8 @@ func glueDollarParen(tokens []string) []string {
 // stripping, a lookup on the command name misses and the caller defers. Bash
 // treats one or more such tokens at the start of a simple command as inline env
 // exports -- the real command begins at the first non-assignment token.
-func StripEnvPrefix(tokens []string) []string {
-	i := 0
-	for i < len(tokens) && assignmentRE.MatchString(tokens[i]) {
-		i++
-	}
-	return tokens[i:]
+func StripEnvPrefix(tokens []string, quotedFrom []int) []string {
+	return tokens[EnvPrefixPeel(tokens, quotedFrom):]
 }
 
 // StripShKeywords drops leading shell reserved words that may prefix the real
@@ -385,10 +478,35 @@ func StripEnvPrefix(tokens []string) []string {
 // Strip these BEFORE StripEnvPrefix, because bash's order in a simple command
 // is reserved word(s), then inline env assignments, then the command name
 // (`until LC_ALL=C grep …`).
-func StripShKeywords(tokens []string) []string {
+func StripShKeywords(tokens []string, quotedFrom []int) []string {
+	return tokens[ShKeywordPeel(tokens, quotedFrom):]
+}
+
+// ShKeywordPeel and EnvPrefixPeel report how many leading tokens the two strips
+// above drop.
+//
+// Go's forced addition, named here rather than at one call site because three
+// callers need it. Slicing a []string leaves the parallel provenance behind, and
+// a caller holding a SECOND list aligned with tokens -- the substituted copy the
+// resolver reads, or quotedFrom itself -- has to slice both by the same count.
+// Upstream needs neither: its tokens carry their own provenance, so its strips
+// return a list and lose nothing.
+//
+// quotedFrom must be at least as long as tokens. Unquoted builds one for a
+// caller that has none; a shorter one is a construction error and panics here,
+// which is the fail-closed direction -- the hook exits non-zero and blocks.
+func ShKeywordPeel(tokens []string, quotedFrom []int) int {
 	i := 0
-	for i < len(tokens) && shKeywords[tokens[i]] {
+	for i < len(tokens) && isReservedWord(tokens[i], quotedFrom[i]) {
 		i++
 	}
-	return tokens[i:]
+	return i
+}
+
+func EnvPrefixPeel(tokens []string, quotedFrom []int) int {
+	i := 0
+	for i < len(tokens) && isAssignment(tokens[i], quotedFrom[i]) {
+		i++
+	}
+	return i
 }

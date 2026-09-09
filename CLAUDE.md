@@ -246,10 +246,16 @@ name instead is an item that is not a literal, a brace item, more than 256
 values, and a header the shell may not have reached or whose loop runs where
 the segments after it are not; upstream binds through the last of those,
 because a candidate bash never took only adds a prompt there. A queued
-substitution body starts with an empty map, which is Q147's class; a
-quoted assignment `'SP=/x'` is read as one here where bash runs a command,
-which is Q92's class. Both are pinned. A `case` arm is not one of them any
-more: everything from a pattern's `)` to its `esac` is reached through a match
+substitution body starts with an empty map, which is Q147's class and is
+pinned. A quoted assignment is no longer one: bash settles what a word is
+before it removes the quotes, so `'SP=/x'` names a program it cannot find, and
+`lex` now carries each token's quote provenance beside it -- the offset at
+which quoting or escaping first appeared -- so the resolver reads the word the
+same way and assigns nothing. That one reading also decides the override
+prefix and the reserved words `StripShKeywords` peels, which is why
+`'SPILL_GUARD_OVERRIDE=x'` and `'if'` no longer reach the hatch. Ported from
+`claude-bouncer` #110 rather than written here. A `case` arm is not one of them
+any more: everything from a pattern's `)` to its `esac` is reached through a match
 nothing here evaluates, so an assignment there does not persist past the arm, a
 `cd` there is not followed, a loop header there binds nothing, and the arm
 leaves what comes after it unsettled the way a command does. `Segment.CaseArm`

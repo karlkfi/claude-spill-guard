@@ -2342,8 +2342,11 @@ ignores for that variable -- so nothing here reads one, and `PRIVACY.md` is
 unchanged. A queued substitution body inherits the flag the way it inherits the
 directory, which is Q147's position problem again.
 
-**A quoted pattern is Q92's class, in the precision direction.** The lexer
-strips quotes and backslashes, so `cat "*.env"` and `cat \*.env` arrive as
+**A quoted pattern is the same boundary, in the precision direction, and it is
+the half still open.** Quoting decides what a word is, and the assignment and
+reserved-word readings above now honour that; a glob pattern does not, because
+the expansion runs over the stripped token. So `cat "*.env"` and `cat \*.env`
+arrive as
 `*.env` and expand, where bash would open one file named `*.env`. Every file
 bash would send is in the set and files it would not are too -- including the
 other half of the same class, `cat 'x[1].env'` beside a real `x1.env`, where
@@ -2568,6 +2571,21 @@ assignment prefix on a `Bash` command and from nowhere else — not from
 `os.Getenv`, because an exported variable and a `settings.json` `env` block are
 both durable, both silent, and both writable by the model, one of them at
 `.claude/settings.local.json`.
+
+**The prefix is one bash would call a prefix, and that took a lexer change.**
+A shell settles what a word IS before it removes the quotes, so
+`'SPILL_GUARD_OVERRIDE=x' cmd` is not an assignment at all -- bash looks for a
+program of that name, fails, and runs nothing. The lexer used to hand this
+layer a quote-stripped token with no record that a quote had been there, so
+nine spellings armed a hatch bash never applied, and `'if'` reached it too by
+being peeled as a reserved word. Both now read the word the way bash does:
+`lex` returns each token's quote provenance beside it, and quoting up to and
+including the `=` disarms the assignment where quoting inside the value
+(`SPILL_GUARD_OVERRIDE='a reason'`, the documented form) does not. What that
+cost was never an allow -- the destination is a confirmation -- but the whole
+defence of command-position-only is **legibility**, that a reader of the prompt
+can see the override in the command they are approving, and these are spellings
+no reader would have called one.
 
 **It downgrades a block to a confirmation, never to an allow.** That is the
 half of "matching those two" that decides what the hatch is worth: both of them

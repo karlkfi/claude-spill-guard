@@ -16,14 +16,10 @@ import (
 // literal bash would not have used. Rows the port declines are allowed to keep
 // their `$`; rows in `resolves` must not.
 //
-// Three rows are the exception and are pinned as such: a quoted or escaped
-// assignment is a command to bash and an assignment to this lexer, which is
-// the Q92 divergence arriving in the resolver, in three spellings. Each is
-// asserted rather than tolerated so a fix upstream of the resolver is a
-// decision here too. Outside those three the property holds on every row, and
-// it is a property of the rows rather than a law: the next shape bash
-// evaluates conditionally is a drive away, which is how the `case` arm below
-// stopped being a fourth.
+// The property holds on every row, and it is a property of the rows rather than
+// a law: the next shape bash evaluates conditionally is a drive away, which is
+// how the `case` arm below stopped being an exception, and the quoted assignment
+// below it stopped being one when the lexer began keeping quote provenance.
 func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 	t.Setenv("HOME", "/home/me")
 	rows := []struct{ setup, probe, want string }{
@@ -132,15 +128,17 @@ func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 			}
 		})
 	}
-	// The three Q92 spellings. bash ran a command it could not find and left P
-	// at the environment's /env; the lexer handed the port `P=/lit` with its
-	// quotes gone, and the port assigned it. Pinned so a lexer fix that keeps
-	// quote provenance is a decision here, as it is in override_test.go.
+	// The three Q92 spellings, this table's exception until the lexer kept quote
+	// provenance. bash runs a command it cannot find and leaves P at the
+	// environment's /env; the port reads the word the same way now and declines,
+	// so these assert the table's own property rather than standing outside it.
+	// Kept as their own block because the shapes are what a reader checking that
+	// claim comes looking for.
 	for _, setup := range []string{`'P=/lit'`, `"P=/lit"`, `P\=/lit`} {
 		t.Run("Q92: "+setup, func(t *testing.T) {
-			if got := probeVars(t, setup, "$P/f"); got != "/lit/f" {
-				t.Errorf("got %q, want the inherited divergence to resolve /lit/f -- if the "+
-					"lexer now keeps quote provenance, this pin and Q92's are the ones to revisit", got)
+			if got := probeVars(t, setup, "$P/f"); !strings.Contains(got, "$") {
+				t.Errorf("port resolved %q; bash assigned nothing here, so the operand "+
+					"must stay unresolved", got)
 			}
 		})
 	}
@@ -207,7 +205,7 @@ func probeVars(t *testing.T, setup, probe string) string {
 	for _, segment := range segments {
 		list.enter(segment, v, &dirUnknown)
 		switch names, observed := v.observe(segment.Tokens, v.expand(segment.Tokens),
-			list.persists(segment), list.binds(segment)); observed {
+			segment.QuotedFrom, list.persists(segment), list.binds(segment)); observed {
 		case observedAssignments:
 			list.assigned(segment, names)
 			continue
@@ -215,7 +213,9 @@ func probeVars(t *testing.T, setup, probe string) string {
 			list.ran()
 			continue
 		}
-		if kind, arg := classifyCd(bash.StripEnvPrefix(bash.StripShKeywords(segment.Tokens))); kind != "" {
+		k := bash.ShKeywordPeel(segment.Tokens, segment.QuotedFrom)
+		if kind, arg := classifyCd(bash.StripEnvPrefix(segment.Tokens[k:],
+			segment.QuotedFrom[k:])); kind != "" {
 			var dir string
 			dir, dirUnknown = follow(kind, arg, "/", dirUnknown, segment)
 			_ = dir
@@ -282,7 +282,7 @@ func TestApplyAssignmentGroup(t *testing.T) {
 			for k, v := range c.before {
 				m[k] = v
 			}
-			names, ok := applyAssignmentGroup(c.tokens, m, c.persists)
+			names, ok := applyAssignmentGroup(c.tokens, bash.Unquoted(len(c.tokens)), m, c.persists)
 			if ok != c.ok {
 				t.Fatalf("ok = %v, want %v", ok, c.ok)
 			}
@@ -330,7 +330,7 @@ func TestPoisonVars(t *testing.T) {
 			for k, v := range c.before {
 				m[k] = v
 			}
-			poisonVars(c.tokens, m)
+			poisonVars(c.tokens, bash.Unquoted(len(c.tokens)), m)
 			if !mapsEqual(m, c.after) {
 				t.Errorf("map = %v, want %v", m, c.after)
 			}
@@ -353,7 +353,7 @@ func TestClobbersIFS(t *testing.T) {
 		{[]string{"cat", "IFS"}, false},
 		{[]string{"IFS=x", "cat", "f"}, false},
 	} {
-		if got := clobbersIFS(c.tokens); got != c.want {
+		if got := clobbersIFS(c.tokens, bash.Unquoted(len(c.tokens))); got != c.want {
 			t.Errorf("clobbersIFS(%q) = %v, want %v", c.tokens, got, c.want)
 		}
 	}
