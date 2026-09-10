@@ -821,6 +821,23 @@ func TestAnOperandFromALiteralAssignmentIsResolved(t *testing.T) {
 		// And within its own list after a command: the cat runs only if the
 		// assignment did.
 		"true && SP=" + dir + " && cat $SP/" + name,
+		// A queued body, which is the only shape that reads the map by
+		// position rather than in order (Q165). Backticks and a quoted `$(…)`
+		// are the two spellings Segments does not flatten into this pass, so
+		// they are the two that exercise the seed at all.
+		"SP=" + dir + "; echo `cat $SP/" + name + "`",
+		"SP=" + dir + "; echo \"$(cat $SP/" + name + ")\"",
+		// A body inside a body: the seed the outer marker was recorded with is
+		// what the inner walk starts from, which is upstream's `inherited`.
+		"SP=" + dir + "; echo \"$(echo `cat $SP/" + name + "`)\"",
+		// Reassigned AFTER the body. This is where the port is wider than
+		// upstream rather than narrower: `stable_vars` drops a name assigned
+		// twice anywhere in the string, so upstream resolves nothing here,
+		// while the snapshot holds the value bash had where the body sits --
+		// and bash ran the body before the second assignment. The row in the
+		// unresolved test beside it is the same string with the FIRST
+		// assignment removed, which is what keeps this from resolving to /b.
+		"SP=" + dir + "; echo `cat $SP/" + name + "`; SP=/b",
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
@@ -861,7 +878,20 @@ func TestAnAssignmentThePortCannotTrustLeavesTheOperandUnresolved(t *testing.T) 
 		{"appended to", "SP=" + dir + "; SP+=/x; cat $SP/" + name},
 		{"after an IFS change", "SP=" + dir + "; IFS=/; cat $SP/" + name},
 		{"an expansion operator", "SP=" + dir + "; cat ${SP%/}/" + name},
-		{"in a queued body", "SP=" + dir + "; echo `cat $SP/" + name + "`"},
+		// A queued body reads the map its own position was reached with, so
+		// an assignment written AFTER it is one bash had not run when it
+		// expanded the body. The direction that must stay unresolved, and the
+		// one an end-of-string map gets wrong: this is Q165's defect inverted.
+		{"assigned after a queued backtick body", "echo `cat $SP/" + name + "`; SP=" + dir},
+		{"assigned after a queued quoted body", "echo \"$(cat $SP/" + name + ")\"; SP=" + dir},
+		// A substitution runs in a subshell, so an assignment inside one does
+		// not reach the parent -- driven on 5.3.15, `echo "$(SP2=/leak)"`
+		// leaves SP2 unset. The seeded map must not learn it either. It holds
+		// because marking replaces the body with a bare word, so this segment
+		// is an `echo` command and never an assignment group; nothing else
+		// asserts that, and the seed is what made it load-bearing.
+		{"assigned inside a substitution", "echo $(SP=" + dir + "); cat $SP/" + name},
+		{"assigned inside a backtick substitution", "echo `SP=" + dir + "`; cat $SP/" + name},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, t.TempDir()))

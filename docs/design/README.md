@@ -2339,10 +2339,11 @@ Two shapes were driven and left alone because they do not change the set: a
 prefix assignment on the reading command, since bash expands the operands
 before `GLOBIGNORE=x cat *` assigns, and the environment, which bash 5.3.15
 ignores for that variable -- so nothing here reads one, and `PRIVACY.md` is
-unchanged. A queued substitution body inherits the flag from the
-end of the string, where it now inherits its directory from the point it was
-written -- the same position problem left standing on the flag, which is
-[Q165](../queue/Q165.md).
+unchanged. A queued substitution body reads the flag at the point it was
+written, as it reads its directory and its variable map there: a pattern
+written before a `shopt` in the same string expands under the options bash
+actually had, where inheriting the end of the string recorded it on a change
+that had not happened yet.
 
 **A quoted pattern is the same boundary, in the precision direction, and it is
 the half still open.** Quoting decides what a word is, and the assignment and
@@ -2528,8 +2529,28 @@ standing in for it, so the token stream carries the position and the same
 survive a strip pass, and no keying on body text, which would collapse two
 identical bodies written at different points onto one answer -- `cd a; echo
 $(cat f); cd ../b; echo $(cat f)` writes the same body twice and the two answers
-differ. `substDirs` in `internal/hook/bash.go` is the walk and
+differ. `substStates` in `internal/hook/bash.go` is the walk and
 `bash.CommandSubstitutionSpans` is what gives it the positions.
+
+**The directory is not the only thing read there.** A body runs with the
+variables the string had assigned by that point and the glob options in force
+there, and those are one shell state with the directory rather than three
+facts. So the marker records a `substState` carrying all four, and a body
+starts its own pass from a snapshot of it: `SP=/x; echo "$(cat $SP/f)"`
+resolves where `SP=/x; cat $SP/f` does, and `echo "$(cat *.env)"; shopt -s
+dotglob` expands its pattern under the options bash actually had.
+
+Positionally, and never whole. The end-of-string map is the direction this must
+not take -- it would substitute a value assigned *after* the body, opening a
+file bash never opened, where an unresolved operand merely defers. Upstream
+reaches the same position with a `stable_vars`/`usable` pair, because its
+substitution walk carries no value map of its own; this one has carried the
+real map since marking arrived, so the snapshot is the state rather than a
+proxy for it. The two differ in both directions: narrower on value, since
+upstream may substitute a name's only literal from anywhere in the string,
+and wider on membership, since a name assigned twice is dropped by
+`stable_vars` outright and is held here at the value bash had where the body
+sits.
 
 **The marker is `\x1e<n>\x1e`, and the sentinel is a measurement rather than a
 convention.** Measured 2026-09-09, over 1,962 of this machine's session
@@ -2539,10 +2560,13 @@ which is the positive control that says an answer of 0 is a reading and not an
 empty probe. A string carrying one anyway is left unmarked rather than
 mismarked, which is the fallback below and not a refusal.
 
-**Two things fall back to what every body inherited before this**, the parent's
-directory and none of it if the parent moved: the sentinel case above, and a
+**Four cases fall back to what every body inherited before this** -- the
+parent's directory and none of it if the parent moved, an empty map, and the
+glob options settled over the whole string: the sentinel case above, a span set
+that does not run forward, a marked string the segmenter cannot read, and a
 body found inside a heredoc body, which the own-level strip lifted out of the
-string before there was anything to mark. Neither is a new refusal.
+string before there was anything to mark. Each of those is the conservative
+side of its own axis, so none is a new refusal.
 
 **The `$(…)` half is a cost recovered rather than a read gained**, and the
 backtick half is not. `Segments` flattens an unquoted `$(…)` into the in-order
@@ -2615,7 +2639,7 @@ flattens an unquoted `$(…)`, so `Persists`, `Conditional`, `CaseArm` and `Pipe
 all differ for the same point in the same string: a `case` or a subshell written
 inside a body no longer reaches the top-level clause stack, and a segment the
 main loop reads through `""` this one reads through `&&`. Traced rather than
-proved exhaustively, every such difference leaves `substDirs` equal to or **less**
+proved exhaustively, every such difference leaves `substStates` equal to or **less**
 certain than the main loop, which is bash-correct, since a substitution body is
 a subshell and its `cd`, its `case` and its assignments never reach the parent.
 More certain is the direction that scans the wrong file and reports clean, and
