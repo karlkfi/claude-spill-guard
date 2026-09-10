@@ -258,8 +258,17 @@ which quoting or escaping first appeared -- so the resolver reads the word the
 same way and assigns nothing. That one reading also decides the override
 prefix and the reserved words `StripShKeywords` peels, which is why
 `'SPILL_GUARD_OVERRIDE=x'` and `'if'` no longer reach the hatch. Ported from
-`claude-bouncer` #110 rather than written here. A `case` arm is not one of them
-any more: everything from a pattern's `)` to its `esac` is reached through a match
+`claude-bouncer` #110 rather than written here. A quoted **operator** is not one
+either, on the same reading and ported the same way from #138: `cat ';' f` hands
+`;` to `cat`, and splitting there left `cat` no operands and read `f` as a
+command name -- a silent allow on a file the command opens, with no file named
+`;` needing to exist. The reading is inlined in `splitOperatorRuns`, which has
+no vocabulary to look a whole run up in, and asked as `isOperator` at both of
+`Segments`' own vocabulary checks; a test made *after* that decision -- which
+separator this is, whether a redirect is a dup -- goes on reading the text.
+Neither of the two sites suffices alone, which is why both take it. A `case`
+arm is not one of them any more: everything from a pattern's `)` to its `esac`
+is reached through a match
 nothing here evaluates, so an assignment there does not persist past the arm, a
 `cd` there is not followed, a loop header there binds nothing, and the arm
 leaves what comes after it unsettled the way a command does. `Segment.CaseArm`

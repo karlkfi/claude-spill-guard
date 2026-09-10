@@ -116,6 +116,28 @@ func isReservedWord(tok string, quotedFrom int) bool {
 	return quotedFrom == NotQuoted && shKeywords[tok]
 }
 
+// isOperator reports whether bash would read tok as an operator drawn from
+// vocab.
+//
+// Blunt like isReservedWord and for the same reason: an operator has no split
+// for the quoting to sit after, so quoting any part of it makes the word a
+// word. `cat ';' f` hands `;` to cat, and a caller that reads it as a separator
+// cuts the command there -- cat keeps no operands and `f` is read as a command
+// name, so neither file is scanned.
+//
+// Use it for the vocab test that decides whether a token IS an operator. A test
+// made after that decision -- which separator this is, whether a redirect is a
+// dup -- reads the text, because the quoting question is settled by then.
+//
+// Upstream converts three membership tests in workspace-guard and this port
+// takes two. The third is its `command_override`, which re-scans a raw token
+// list against the separator vocabulary to find the hatch; override() here
+// reads the hatch off a Segment instead, so there is no third site to convert
+// and the two below cover it transitively.
+func isOperator(tok string, quotedFrom int, vocab map[string]bool) bool {
+	return quotedFrom == NotQuoted && vocab[tok]
+}
+
 // Reserved words after which bash reads another command, so a `case` following
 // one is the keyword and not an argument (`if x; then case $y in ...`). Any
 // other word ends command position: in `echo case`, `case` is a plain operand.
@@ -371,28 +393,33 @@ func isCommentPreceder(c byte) bool {
 // string defers (Q27), or (for newlines, Q18) the next line's tokens are read
 // as file arguments.
 //
-// Splitting is applied ONLY to pure operator runs (every byte in punctChars); a
-// quoted filename that happens to contain an operator character (or a newline)
-// is a word token with non-punctuation bytes and is left intact. Each run is
-// consumed greedily longest-first, so `&>>` wins over `&>` over `&` and `<<<`
-// over `<<`. Every single operator character is itself in the operator list, so
-// the run always fully decomposes with no leftover.
+// Splitting is applied ONLY to runs bash itself read as operators. Every byte
+// being in punctChars is not enough -- `cat ';;' f` is a word, and decomposing
+// it costs cat its operands -- so a quoted run is returned whole. That is
+// isOperator's quoting half and not a call to it: a run's operator-ness is
+// settled by decomposing it, not by a vocabulary lookup, so there is no vocab
+// to pass. A quoted filename holding an operator character (or a newline) is
+// left intact either way, since a token with non-punctuation bytes was never a
+// candidate. Each run is consumed
+// greedily longest-first, so `&>>` wins over `&>` over `&` and `<<<` over
+// `<<`. Every single operator character is itself in the operator list, so the
+// run always fully decomposes with no leftover.
 //
-// Each piece of a split run inherits the run's own provenance, so nothing
-// downstream reads a piece as a word written plainly. Inherits, not recomputes:
-// the value is an offset into the WHOLE run and is meaningless as an offset
-// into a piece, which costs nothing while no operator is assignment- or
-// keyword-shaped, and stops being free for anything that reads the offset
-// rather than just comparing it to NotQuoted. Q166, which proposes exactly such
-// a reading, is where that bites.
+// Each piece of a split run inherits the run's provenance, which is NotQuoted
+// for every run that now reaches the loop -- a quoted one is returned whole
+// above. So the old caveat is gone: there is no longer an offset into a WHOLE
+// run being handed to a piece it does not describe.
 //
-// Whether a run that WAS quoted should be split at all is a separate question
-// and not this port's -- upstream splits it too. Q166 again.
+// This is half the rule. A single-character run leaves this function
+// byte-identical whether it was skipped or decomposed, so `cat ';'` is not
+// fixed here at all: the quoted `;` reaches Segments' own vocabulary tests
+// intact, and those ask isOperator too. Splitting covers only the
+// multi-character runs.
 func splitOperatorRuns(tokens []string, quotedFrom []int) ([]string, []int) {
 	out := make([]string, 0, len(tokens))
 	outQF := make([]int, 0, len(tokens))
 	for i, t := range tokens {
-		if t == "" || !allPunct(t) {
+		if t == "" || quotedFrom[i] != NotQuoted || !allPunct(t) {
 			out = append(out, t)
 			outQF = append(outQF, quotedFrom[i])
 			continue

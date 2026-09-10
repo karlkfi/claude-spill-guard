@@ -435,3 +435,31 @@ func TestQuotingInsideTheValueIsAnOrdinaryAssignment(t *testing.T) {
 		})
 	}
 }
+
+// A quoted operator opened a segment, and a token after it fell into env-prefix
+// position -- so `cat <file> ';' SPILL_GUARD_OVERRIDE=x` armed the hatch from a
+// word bash hands to `cat` as a plain operand. That is the in-band bypass the
+// design rules out by name: the hatch is command position only, because that is
+// the one place the model cannot reach from inside a file it is scanning.
+//
+// Driven on built binaries either side of the Q166 fix. The two controls move
+// in opposite directions, which is what makes the middle arm mean anything: a
+// trailing assignment never armed, and a real command-position prefix still
+// does.
+func TestAnOverrideAfterAQuotedOperatorDoesNotArmTheHatch(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct {
+		name, command, want string
+	}{
+		{"after a quoted operator", "cat " + name + " ';' SPILL_GUARD_OVERRIDE=x", "deny"},
+		{"trailing, control", "cat " + name + " SPILL_GUARD_OVERRIDE=x", "deny"},
+		{"command position, control", "SPILL_GUARD_OVERRIDE=x cat " + name, "ask"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stdout, _ := drive(t, bashCall(t, tc.command, dir))
+			if got := verdictOf(t, stdout); got != tc.want {
+				t.Errorf("permissionDecision = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -202,7 +202,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	)
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
-		if separators[t] {
+		if isOperator(t, quotedFrom[i], separators) {
 			if len(cur) > 0 || len(curRedir) > 0 {
 				persists := paren == 0 && prevSep != "|" &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
@@ -236,7 +236,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			i++
 			continue
 		}
-		if redir[t] || dup[t] {
+		if isOperator(t, quotedFrom[i], redir) || isOperator(t, quotedFrom[i], dup) {
 			// An fd number written immediately before a redirect or dup
 			// operator (`2>file`, `2>&1`) tokenizes as a bare digit token
 			// glued to the operator. The lexer drops the adjacency, so it lands
