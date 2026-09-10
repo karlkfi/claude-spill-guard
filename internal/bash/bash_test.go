@@ -294,3 +294,82 @@ func TestIsDigits(t *testing.T) {
 		}
 	}
 }
+
+// A word made entirely of punctuation has the TEXT of an operator and is not
+// one. Reading it as a separator cuts the command there, so the reader keeps no
+// operands and every later operand is read as a command name -- for this repo a
+// silent allow on a file the command really does open.
+//
+// Measured on bash 5.3.15 in a directory holding only `f`: `cat ';' f` prints
+// `cat: ;: No such file or directory` and then the contents of `f`, rc=1. So no
+// file named `;` has to exist -- cat reports the missing operand and reads the
+// rest.
+func TestSegmentsReadsAQuotedOperatorAsAWord(t *testing.T) {
+	for _, tc := range []struct {
+		name, in string
+		want     [][]string // tokens per segment, in order
+	}{
+		// A single-character run is byte-identical either side of
+		// splitOperatorRuns, so these are the arms only the vocabulary tests
+		// in Segments can fix.
+		{"a quoted separator", "cat ';' f", [][]string{{"cat", ";", "f"}}},
+		{"a quoted redirect", "cat '>' f", [][]string{{"cat", ">", "f"}}},
+		{"a quoted pipe", "cat '|' f", [][]string{{"cat", "|", "f"}}},
+		{"a double-quoted separator", `cat ";" f`, [][]string{{"cat", ";", "f"}}},
+		{"an escaped separator", `cat \; f`, [][]string{{"cat", ";", "f"}}},
+
+		// A multi-character run is the half splitOperatorRuns decides.
+		{"a quoted operator run", "cat ';;' f", [][]string{{"cat", ";;", "f"}}},
+		{"a quoted and-list operator", "cat '&&' f", [][]string{{"cat", "&&", "f"}}},
+
+		// Controls: the plain spellings must still segment and redirect.
+		{"a plain separator still splits", "cat ; f",
+			[][]string{{"cat"}, {"f"}}},
+		{"a plain and-list still splits", "cat a && cat b",
+			[][]string{{"cat", "a"}, {"cat", "b"}}},
+		{"a token holding non-punctuation was never a candidate", "cat 'x;y' f",
+			[][]string{{"cat", "x;y", "f"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			segs, err := Segments(tc.in)
+			if err != nil {
+				t.Fatalf("Segments(%q) = error %v", tc.in, err)
+			}
+			if len(segs) != len(tc.want) {
+				t.Fatalf("Segments(%q) gave %d segment(s), want %d: %v",
+					tc.in, len(segs), len(tc.want), segs)
+			}
+			for i, want := range tc.want {
+				if got := segs[i].Tokens; !equalStrings(got, want) {
+					t.Errorf("Segments(%q) segment %d tokens = %q, want %q",
+						tc.in, i, got, want)
+				}
+			}
+		})
+	}
+}
+
+// A quoted redirect operator is a word, so it names no target: `cat '>' f`
+// reads two files where `cat > f` reads none and writes one.
+func TestSegmentsRecordsNoTargetForAQuotedRedirect(t *testing.T) {
+	segs, err := Segments("cat '>' f")
+	if err != nil {
+		t.Fatalf("Segments = error %v", err)
+	}
+	if len(segs) != 1 {
+		t.Fatalf("got %d segment(s), want 1: %v", len(segs), segs)
+	}
+	if len(segs[0].Redirects) != 0 {
+		t.Errorf("Redirects = %q, want none", segs[0].Redirects)
+	}
+
+	// Control: the plain spelling still records the target, so the assertion
+	// above is about the quoting rather than about redirects being unread.
+	plain, err := Segments("cat > f")
+	if err != nil {
+		t.Fatalf("Segments = error %v", err)
+	}
+	if len(plain) != 1 || !equalStrings(plain[0].Redirects, []string{"f"}) {
+		t.Errorf("plain redirect: Redirects = %q, want [f]", plain[0].Redirects)
+	}
+}
