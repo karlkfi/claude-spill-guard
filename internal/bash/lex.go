@@ -128,6 +128,12 @@ func isReservedWord(tok string, quotedFrom int) bool {
 // Use it for the vocab test that decides whether a token IS an operator. A test
 // made after that decision -- which separator this is, whether a redirect is a
 // dup -- reads the text, because the quoting question is settled by then.
+//
+// Upstream converts three membership tests in workspace-guard and this port
+// takes two. The third is its `command_override`, which re-scans a raw token
+// list against the separator vocabulary to find the hatch; override() here
+// reads the hatch off a Segment instead, so there is no third site to convert
+// and the two below cover it transitively.
 func isOperator(tok string, quotedFrom int, vocab map[string]bool) bool {
 	return quotedFrom == NotQuoted && vocab[tok]
 }
