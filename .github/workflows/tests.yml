@@ -1701,12 +1701,19 @@ jobs:
       # entirely between one plan doc and the next -- an arm resting on a file
       # somebody else's PR is free to delete is a control that measures the
       # calendar. release-claims learned that on this repository.
+      #
+      # `mkdir -p` for the same reason one level down: git materialises no
+      # empty directory, so the retirement that empties docs/plan/ takes the
+      # directory with it and the plant fails on the redirect. Driven when
+      # v0.4.0's record was retired -- the first retirement that left the
+      # directory with nothing in it.
       - name: A plan doc for a released version must fail the gate
         run: |
           gh release view v0.1.0 --json tagName > /dev/null 2>&1 || {
             echo "::error::v0.1.0 does not read as released, so planting a plan doc for it tests nothing" >&2
             exit 1
           }
+          mkdir -p docs/plan
           printf '# What v0.1.0 was for\n\nPlanted by the mutation control.\n' > docs/plan/v0.1.0.md
           git add docs/plan/v0.1.0.md
           if ! git ls-files --error-unmatch docs/plan/v0.1.0.md > /dev/null 2>&1; then
@@ -1767,6 +1774,7 @@ jobs:
             echo "::error::v99.0.0 reads as released, so this arm is no longer the unreleased case" >&2
             exit 1
           fi
+          mkdir -p docs/plan
           printf '# What v99.0.0 is for\n\nPlanted by the mutation control.\n' > docs/plan/v99.0.0.md
           git add docs/plan/v99.0.0.md
           if ! git ls-files --error-unmatch docs/plan/v99.0.0.md > /dev/null 2>&1; then
@@ -1793,6 +1801,7 @@ jobs:
             echo "::error::v0.1.0 does not read as released before the readers are broken, so a red below says nothing about breaking them" >&2
             exit 1
           }
+          mkdir -p docs/plan
           printf '# What v0.1.0 was for\n\nPlanted by the mutation control.\n' > docs/plan/v0.1.0.md
           git add docs/plan/v0.1.0.md
           git remote set-url origin https://127.0.0.1:1/nothing.git
