@@ -1663,17 +1663,28 @@ jobs:
       # above was written after this one and failed on exactly that, its own
       # attribution precondition refusing rather than reporting a false red.
       # Ordering is what fixed that instance; this is what stops the next one.
+      #
+      # It drives `make release-claims` rather than the checker directly, and
+      # that is what pins the real-state arm into the target. This is the only
+      # arm whose red depends on that arm running: the forced two take no
+      # reading, so with the real one deleted the target still exits 0 here and
+      # every other control in this job stays green. Driven both ways against
+      # a clone with a working remote -- through the checker, deleting the real
+      # arm leaves this arm at exit 0; through `make`, it exits 1 on the branch
+      # below. The three assertions are unchanged and all three still hold with
+      # the arm present, since the forced arms judge the prose and find nothing
+      # to say.
       - name: A release state that cannot be read must not read as an answer
         run: |
           origin_url=$(git remote get-url origin)
           git remote set-url origin https://127.0.0.1:1/nothing.git
           GH_TOKEN=not-a-token GH_CONFIG_DIR=/nonexistent \
-            python3 scripts/check-release-claims.py > mutant.log 2>&1 && rc=0 || rc=$?
+            make release-claims > mutant.log 2>&1 && rc=0 || rc=$?
           git remote set-url origin "$origin_url"
-          echo "check exit: $rc"
+          echo "make release-claims exit: $rc"
           cat mutant.log
           if [ "$rc" -eq 0 ]; then
-            echo "::error::the check reported a verdict about the prose with neither reader able to say whether a release exists" >&2
+            echo "::error::the target reported a verdict about the prose with neither reader able to say whether a release exists -- either the check assumed a direction, or the real-state arm is no longer in the target" >&2
             exit 1
           fi
           if ! grep -q 'the release state could not be read' mutant.log; then
