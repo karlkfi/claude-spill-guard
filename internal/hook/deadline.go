@@ -72,7 +72,8 @@ type scanned struct {
 	err      error
 }
 
-// within runs scanCall under a deadline and reports whether it reached one.
+// within runs scanCall under a deadline and reports whether it reached one. A
+// budget already spent does not reach scanCall at all, for the reason below.
 //
 // Nothing here interrupts the work. os.ReadFile takes no context and neither
 // does the match loop, which is why the goroutine is left running rather than
@@ -88,6 +89,22 @@ type scanned struct {
 // caller that outlives a verdict, the goroutine finishes the buffer it was
 // given and exits on its own.
 func within(call payload, event Event, left time.Duration) (scanned, bool) {
+	// A budget already spent is answered here rather than below, because the
+	// select cannot answer it twice the same way. Both of its cases are ready
+	// at once in that case -- the timer from the first instant, the scan as
+	// soon as a six-byte file is through the match loop -- and Go chooses
+	// among ready cases uniformly at random, so the same call could defer on
+	// one invocation and decide on the next. Measured at 50.2% once the scan
+	// reaches the channel first, and 0% otherwise.
+	//
+	// It is also the answer on the merits, which is what makes it a rule
+	// rather than a coin weighted towards the reading a test wanted. The
+	// margin past the budget is sized to write one verdict and nothing else,
+	// so a scan started inside it runs against a kill and not against a
+	// clock. Nothing was read, and that is what gets reported.
+	if left <= 0 {
+		return scanned{}, false
+	}
 	done := make(chan scanned, 1)
 	go func() {
 		findings, skips, err := scanCall(call, event)
