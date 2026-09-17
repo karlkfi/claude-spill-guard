@@ -44,7 +44,13 @@ const relPath = "testdata/corpus/vectors/credentials.json"
 // minVectors is a floor. A decode returning an empty map fails no assertion by
 // itself: every table reading it reports zero cases, and a table test with no
 // cases reports the same green as one with all of them.
-const minVectors = 11
+//
+// It sits far below the population on purpose and is not maintained in step
+// with the file. A floor level with the count is an equality assertion nobody
+// wrote down: the next removal fails here, naming the floor rather than the
+// deletion that caused it. The file has held 8, 9, 11 and 12 vectors; 4 is
+// under all of them.
+const minVectors = 4
 
 // Load reads the vectors file, failing the test rather than returning an
 // error, since every caller is a table that has nothing to assert without it.

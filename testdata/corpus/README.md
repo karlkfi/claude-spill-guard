@@ -175,8 +175,9 @@ gate from either side.
 
 **A vector** is a `value` and a `note` under a new id in
 `vectors/credentials.json`, added when a test needs a string that could pass
-for an issued credential. `minVectors` in `internal/testvec` is a floor at the
-file's current size, so removing an entry means lowering it in the same edit.
+for an issued credential. `minVectors` in `internal/testvec` is a floor well
+under the file's size, there to catch a decode that returned nothing, so
+adding or removing an entry does not touch it.
 
 `jwt-long-payload.txt` is the other file carrying a rule a second time, and it
 is about a ceiling rather than the rule or the encoding. Its payload segment is
