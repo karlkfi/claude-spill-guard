@@ -31,6 +31,18 @@ A workflow this has never heard of is refused rather than skipped. That is the
 direction a declared list fails in silently: a fourth file lands, nothing here
 names it, and a check whose whole subject is "is every job accounted for"
 accounts for none of that file's and still exits 0.
+
+**The unit is the job key, and a matrix leg is not one.** Five of the eight
+check runs release.yml posts are legs, and a leg's rendered name is not its YAML
+key -- `install-dry-run (windows-latest)` is one job here and three check runs
+there. So narrowing `os: [ubuntu-latest, macos-latest, windows-latest]` to one
+entry deletes the macOS and Windows exercise of the install scripts and this
+still exits 0, which is this gate's own symptom one level down. It is a gap
+rather than a decision: `tools/cmd/workflow`'s job model is `{Name, Runs}` and
+carries no matrix, so closing it means extending the Go parser, and Q174 holds
+it. Read a declared reason as describing what the job is *for*, not as a claim
+about which legs run -- `install-dry-run` says "on Linux, macOS and Windows"
+and nothing here holds that half.
 """
 
 import sys
@@ -85,8 +97,10 @@ def main():
 
     findings = []
     checked = 0
+    derived_seen = []
     for path, entry in sorted(files.items()):
         if path in DERIVED:
+            derived_seen.append(path)
             continue
         declared = DECLARED.get(path)
         if declared is None:
@@ -110,6 +124,12 @@ def main():
             continue
 
         checked += len(found)
+        for name in sorted(n for n in declared if not declared[n].strip()):
+            findings.append(
+                f"{path} declares `{name}` with an empty reason, so the "
+                f"declaration is a name list after all. The reason is what "
+                f"makes a deletion a decision -- write one line saying what "
+                f"the job is for, so removing it means removing that line")
         for name in sorted(set(declared) - set(found)):
             findings.append(
                 f"{path} no longer runs `{name}`, which is declared as: "
@@ -123,6 +143,12 @@ def main():
                 f"DECLARED in scripts/check-workflow-jobs.py with one line "
                 f"saying what it is for, so its deletion later is a decision "
                 f"rather than an accident")
+
+    for path in sorted(set(DERIVED) - set(files)):
+        findings.append(
+            f"{path} is left to another gate in scripts/check-workflow-jobs.py "
+            f"and is not a workflow file any more, so this is crediting "
+            f"coverage that does not exist: {DERIVED[path]}")
 
     for path in sorted(set(DECLARED) - set(files)):
         findings.append(
@@ -144,8 +170,9 @@ def main():
         return 1
 
     print(f"job-drift: {checked} job(s) across "
-          f"{len(files) - len(DERIVED)} workflow(s), every one declared; "
-          f"{len(DERIVED)} left to the gate that derives it")
+          f"{len(files) - len(derived_seen)} workflow(s), every one declared; "
+          f"{len(derived_seen)} left to the gate that derives it. A matrix "
+          f"leg is not a job here -- see the module docstring")
     return 0
 
 
