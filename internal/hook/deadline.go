@@ -102,8 +102,9 @@ func within(call payload, event Event, left time.Duration) (scanned, bool) {
 	// margin past the budget is sized to write one verdict and nothing else,
 	// so time past the budget is not scanning time: the only clock such a
 	// scan could race is one that expired before it began, and the process is
-	// killed fifteen seconds later whatever it found. Nothing was read, and
-	// that is what gets reported.
+	// killed at most fifteen seconds later whatever it found -- fifteen is the
+	// margin, so a budget spent by more than nothing leaves less. Nothing was
+	// read, and that is what gets reported.
 	if left <= 0 {
 		return scanned{}, false
 	}
