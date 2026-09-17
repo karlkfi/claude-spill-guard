@@ -1,10 +1,6 @@
 package hook
 
-import (
-	"strings"
-
-	"github.com/karlkfi/claude-spill-guard/internal/bash"
-)
+import "github.com/karlkfi/claude-spill-guard/internal/bash"
 
 // overrideVar is the escape hatch the design names, and an inline assignment
 // prefix on the Bash command is the only place it is read from.
@@ -47,7 +43,12 @@ func override(call payload, event Event) (why string, present bool) {
 	}
 	for _, segment := range segments {
 		for _, assignment := range envPrefix(segment.Tokens, segment.QuotedFrom) {
-			name, value, _ := strings.Cut(assignment, "=")
+			// `SPILL_GUARD_OVERRIDE+=r` is an assignment in command
+			// position exactly as the plain spelling is, so it arms too. Its
+			// value is the suffix alone: bash would prepend whatever the
+			// environment holds, and reading that is the one thing this hatch
+			// refuses to do.
+			name, _, value := bash.SplitAssignment(assignment)
 			if name == overrideVar {
 				return value, true
 			}

@@ -54,7 +54,7 @@ const commentPreceders = " \t\n;|&()<>"
 // starts a comment -- what bash sees just inside a `$(` or a backtick.
 const substOpen = '('
 
-var assignmentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+var assignmentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\+?=`)
 
 // NotQuoted is the QuotedFrom of a word no quoting or escaping touched.
 //
@@ -104,6 +104,38 @@ func Unquoted(n int) []int {
 func isAssignment(tok string, quotedFrom int) bool {
 	m := assignmentRE.FindStringIndex(tok)
 	return m != nil && quotedFrom >= m[1]
+}
+
+// SplitAssignment reads an assignment token as bash reads it: `NAME=v` gives
+// ("NAME", false, "v") and `NAME+=v` gives ("NAME", true, "v").
+//
+// The `+` belongs to the operator, so a caller reaching for a Cut on "=" holds
+// a name of `NAME+` -- it then tracks a variable no read of `NAME` will find,
+// and poisons `NAME+` while leaving `NAME` on the map at a stale value. Every
+// site recovering a name from an assignment goes through here for that reason.
+//
+// Ask it only of a token isAssignment accepts. A word with no `=` comes back
+// whole as the name, so `SplitAssignment("CDPATH")` is ("CDPATH", false, "")
+// and a caller comparing names would match a bare `CDPATH` that assigns
+// nothing. Every caller here reaches it through envPrefix, which yields only
+// assignments, so nothing reaches that arm today.
+//
+// What an append MEANS is the caller's: bash resolves it against the value the
+// segment inherits, which this cannot see, so dropping the name is the answer
+// wherever a value is being tracked.
+//
+// `env(1)` is the exception and has no site here. It is an external program
+// with no append semantics -- driven on bash 5.3.15, `env FOO+=bar env` exports
+// a variable literally called `FOO+` and leaves `FOO` at its old value, where
+// the `export` builtin beside it appends. internal/readers carries no env row,
+// so nothing in this build looks through an env prefix to the command behind
+// it; a reader that did would need the name split the other way.
+func SplitAssignment(tok string) (name string, appends bool, value string) {
+	name, value, _ = strings.Cut(tok, "=")
+	if rest, ok := strings.CutSuffix(name, "+"); ok {
+		return rest, true, value
+	}
+	return name, false, value
 }
 
 // isReservedWord reports whether bash would read tok as a shell keyword.

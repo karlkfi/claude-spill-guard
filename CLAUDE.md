@@ -258,7 +258,25 @@ which quoting or escaping first appeared -- so the resolver reads the word the
 same way and assigns nothing. That one reading also decides the override
 prefix and the reserved words `StripShKeywords` peels, which is why
 `'SPILL_GUARD_OVERRIDE=x'` and `'if'` no longer reach the hatch. Ported from
-`claude-bouncer` #110 rather than written here. A quoted **operator** is not one
+`claude-bouncer` #110 rather than written here. `NAME+=value` is an assignment
+on the same reading and was not one until Q168: the regex wanted the `=` to
+follow the name directly, so `LC_ALL+=C cat <key>` put the prefix in the
+command head, found no reader row for it, contributed no operands and allowed
+the file unread. `SplitAssignment` in `internal/bash` is now the one place a
+name comes off such a token, because a `Cut` on `=` yields `NAME+` -- a name
+nothing reads, which poisons the wrong key and leaves the real one at a stale
+value. Two things about it are settled. An append's value is the old value
+plus the new, so a tracked name is **dropped** rather than set to the suffix --
+recording the suffix would resolve an operand to a path the command never
+opens. Dropped whether or not the old value is reachable: it is unreachable
+when the segment inherits it, and on the map when the same string assigned it,
+and only the first is an argument from ignorance. Concatenating the second is
+available and unmeasured. And `env` is the
+exception, which upstream's own row had backwards: driven on bash 5.3.15,
+`env FOO+=bar env` exports a variable literally called `FOO+` and leaves `FOO`
+alone, where the `export` builtin beside it appends. No site here reads through
+an `env` prefix, so nothing needs the other split; a reader row for `env` would.
+A quoted **operator** is not one
 either, on the same reading and ported the same way from #138: `cat ';' f` hands
 `;` to `cat`, and splitting there left `cat` no operands and read `f` as a
 command name -- a silent allow on a file the command opens, with no file named
