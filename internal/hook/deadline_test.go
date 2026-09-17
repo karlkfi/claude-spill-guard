@@ -108,10 +108,10 @@ func TestAScanThatOverrunsItsBudgetDefers(t *testing.T) {
 			`,"prompt":"look at @clean.txt"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// A budget already spent when run is entered, which reaches the
-			// deadline without waiting for one. What it cannot show is that the
-			// deadline fires once the match loop has started, which is the arm
-			// below.
+			// A budget already spent when run is entered, which within
+			// answers without offering the scan a case to win. What it
+			// cannot show is that the deadline fires once the match loop
+			// has started, which is the arm below.
 			code, stdout, stderr := driveWithin(t, 0, tc.payload)
 			reason := deferred(t, code, stdout, stderr)
 			if !strings.Contains(reason, "did not finish inside its") {
@@ -229,5 +229,47 @@ func TestThePreludeIsChargedAgainstTheBudget(t *testing.T) {
 	reason := deferred(t, code, out.String(), errs.String())
 	if !strings.Contains(reason, "did not finish inside its") {
 		t.Errorf("coverage reason = %q, want the budget already spent when the scan was reached", reason)
+	}
+}
+
+// A spent budget is a verdict and not a coin flip.
+//
+// Every arm above that wants a coverage failure manufactures one by handing
+// run a budget of zero, and until within answered that case up front it was a
+// race: the timer is ready from the first instant, the scan is ready as soon
+// as a few bytes are through the match loop, and a select among ready cases
+// picks uniformly at random. It failed in CI once, on the fastest scan in the
+// suite, and 800 repeats on an idle machine never reproduced it -- so a repeat
+// count is not what closes this, and neither is a budget the scan merely
+// usually loses.
+//
+// The file here is one a scan would decide on rather than a clean one, which
+// is what makes the assertion about the race and not about the plumbing: if
+// the scan is ever allowed to win this, the verdict is a deny naming a rule,
+// which deferred() reports rather than absorbs. The control underneath proves
+// that is the verdict on the table.
+func TestASpentBudgetIsNotRacedByTheScan(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "planted.log")
+	if err := os.WriteFile(path, []byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Read",` +
+		`"tool_input":{"file_path":` + quote(t, path) + `}}`
+
+	code, stdout, stderr := driveWithin(t, 0, payload)
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "did not finish inside its") {
+		t.Errorf("coverage reason = %q, want the spent budget recorded", reason)
+	}
+
+	// The positive control, and the reason the arm above is worth running: the
+	// same file through an unhurried budget is a finding, so a defer over it is
+	// the clock refusing to look and not a buffer with nothing in it.
+	code, stdout, stderr = driveWithin(t, unhurried, payload)
+	if code != 0 {
+		t.Fatalf("the control exited %d (stderr %q)", code, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+		t.Fatalf("the control reason = %q, want the planted key found", reason)
 	}
 }
