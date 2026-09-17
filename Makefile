@@ -22,7 +22,7 @@ hooks-check.desc    := every tracked git hook is executable, so none is silently
 launcher.desc       := the hook launcher is executable in the index, resolves a binary, and denies when it cannot
 vendor.desc         := every vendored copy still hashes to the digest scripts/README.md declares
 docs.desc           := every relative link in the repo markdown resolves
-release-claims.desc := the prose agrees with whether a release exists
+release-claims.desc := the prose holds whether or not a release exists, and the state is readable
 release-scope.desc  := no release-scope record survives the release it was written for
 release-notes.desc  := every published release body is still the notes file it came from
 channel-claims.desc := no message names an install channel that does not exist
@@ -177,8 +177,34 @@ docs:
 # The second gate whose oracle is off this machine. `gh release list` is the
 # only reader that sees a draft, and a draft publishes no assets, so a tag
 # alone is the wrong answer for prose about what a user can download.
+#
+# Three arms, because the property is that the prose is true in *either* state
+# and the real-state arm can only ever read one of them. Reading the state the
+# machine happens to be in is what let a sentence pass every local gate and
+# redden CI on push: `already` beside `shipped` is a completed-aspect claim
+# with no release, and a release exists, so the real-state arm called it
+# true. The forced arms take no reading at all -- 0.248s and 0.249s here
+# against 0.913s for the one that goes to the network -- so what this costs is
+# half a second and nothing off the machine.
+#
+# Not a MERGED-shaped opt-in, which is the other shape this repository has for
+# a gate that is weaker locally. That split exists for a class a branch cannot
+# settle: `queue` tolerates a link to a row a sibling is still filing, and
+# `release-notes` cannot repair a divergence from a pull request either way.
+# Nothing here is event-dependent -- a branch failing a forced arm fails it on
+# `main` too -- so there is no weaker answer for the default to be.
+#
+# The real-state arm's verdict on the prose is implied by the other two, since
+# the state it reads is one of them. What it uniquely covers is that the state
+# can be read at all -- the arm of the mutation control that breaks both
+# readers and requires the check to say so rather than assume a direction. Do
+# not drop it as redundant.
 release-claims:
-	$(PYTHON) scripts/check-release-claims.py
+	@rc=0; \
+	$(PYTHON) scripts/check-release-claims.py || rc=1; \
+	$(PYTHON) scripts/check-release-claims.py --assume-release none || rc=1; \
+	$(PYTHON) scripts/check-release-claims.py --assume-release released || rc=1; \
+	exit "$$rc"
 
 # The same two facts release-claims reads, one join further on: which versions
 # a release exists for, and what the tree still carries for each. A plan doc or

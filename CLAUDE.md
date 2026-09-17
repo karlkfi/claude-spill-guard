@@ -777,7 +777,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `launcher` | the hook launcher is executable in the index, resolves a binary, and denies when it cannot |
 | `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
 | `docs` | every relative link in the repo markdown resolves |
-| `release-claims` | the prose agrees with whether a release exists |
+| `release-claims` | the prose holds whether or not a release exists, and the state is readable |
 | `release-scope` | no release-scope record survives the release it was written for |
 | `release-notes` | every published release body is still the notes file it came from |
 | `channel-claims` | no message names an install channel that does not exist |

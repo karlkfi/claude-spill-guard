@@ -1486,11 +1486,16 @@ jobs:
   # anything here mutates it. Without the second, every red below could be
   # something else.
   #
-  # Then four arms. Two are the directions the gate decides in, one is the
-  # precision case a red-only control cannot reach, and the last is the failure
-  # this design is most likely to hide -- a read that did not happen, reported
-  # as an answer about the prose. `vulns` carries the same split for the same
-  # reason.
+  # Then five arms. Three drive the checker: two are the directions the gate
+  # decides in, and one is the precision case a red-only control cannot reach.
+  # The fourth drives the gate target instead, because whether `make
+  # release-claims` runs the forced arms is a property none of the others can
+  # see. The last is the failure this design is most likely to hide -- a read
+  # that did not happen, reported as an answer about the prose; `vulns` carries
+  # the same split for the same reason.
+  #
+  # That one is last because it breaks the checkout's remote, and an arm after
+  # it would read an unreadable release state as its own mutation.
   release-claims-mutation-control:
     runs-on: ubuntu-latest
     permissions:
@@ -1529,13 +1534,12 @@ jobs:
       # still say there was no release. Publishing broke both, which is a
       # control that measured the calendar rather than the property.
       #
-      # The prose is now written to be true in either state, so all three
-      # baselines are green and each arm's red is its own mutation's.
+      # The prose is now written to be true in either state, and the gate
+      # target is the three arms rather than the real state alone, so this one
+      # line is all three baselines and each arm's red below is its own
+      # mutation's.
       - name: The tree is green before anything below mutates it
-        run: |
-          make release-claims
-          python3 scripts/check-release-claims.py --assume-release none
-          python3 scripts/check-release-claims.py --assume-release released
+        run: make release-claims
 
       # The defect the gate exists for, verbatim from 793abbe, where it was live
       # on main and every one of the gates was green over it. Appended rather
@@ -1608,15 +1612,64 @@ jobs:
             exit 1
           fi
 
+      # The three above drive the checker. This one drives the gate target, and
+      # it is the property the local/CI gap was: `make release-claims` used to
+      # read the real state alone, so prose passing every local gate reddened
+      # CI on push. The same appended claim as the first arm, and the same red
+      # -- what makes it a different measurement is that the real-state arm
+      # returns 0 over it, a release existing, so a red from `make` can
+      # only have come from the forced arm the target now also runs.
+      #
+      # Only the `none` arm is isolable this way. A stale claim reddens the
+      # real-state arm and the `--assume-release released` arm alike while a
+      # release exists (driven 2026-09-17: exits 1, 0, 1 for real, none,
+      # released), so no mutation attributes a red to that third arm until the
+      # real read answers "none" again.
+      - name: The gate target must run the forced arms, not the real state alone
+        run: |
+          printf '\nBoth artifacts are already published by the release workflow, so this asks it for nothing new.\n' >> docs/design/distribution.md
+          if git diff --quiet -- docs/design/distribution.md; then
+            echo "::error::the mutation changed nothing -- the claim was not appended" >&2
+            exit 1
+          fi
+          python3 scripts/check-release-claims.py > real.log 2>&1 && real_rc=0 || real_rc=$?
+          echo "real-state arm exit: $real_rc"
+          make release-claims > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "make release-claims exit: $rc"
+          cat mutant.log
+          git checkout -- docs/design/distribution.md
+          if [ "$real_rc" -ne 0 ]; then
+            echo "::error::the real-state arm failed over this claim, so a red from make attributes to nothing -- this arm can no longer tell the target apart from the real state alone" >&2
+            exit 1
+          fi
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::make release-claims passed over a claim the --assume-release none arm rejects, so the target is not running it" >&2
+            exit 1
+          fi
+          if ! grep -q '^unbuilt claim: docs/design/distribution\.md:[0-9]*: Both artifacts are already published' mutant.log; then
+            echo "::error::make release-claims failed, but not on the appended claim" >&2
+            exit 1
+          fi
+
       # The silent direction. A read that failed and was taken for "no release"
       # would run the unbuilt-claim arm over prose it cannot judge and report
       # green. Both readers are broken here: an unusable token for `gh`, and a
       # remote that resolves to nothing for `git ls-remote`.
+      #
+      # It restores the remote afterwards, and that is not tidiness. The break
+      # outlives the step, so every arm added below it inherits a checkout
+      # whose release state cannot be read -- which is indistinguishable, from
+      # inside such an arm, from the mutation that arm is testing. The arm
+      # above was written after this one and failed on exactly that, its own
+      # attribution precondition refusing rather than reporting a false red.
+      # Ordering is what fixed that instance; this is what stops the next one.
       - name: A release state that cannot be read must not read as an answer
         run: |
+          origin_url=$(git remote get-url origin)
           git remote set-url origin https://127.0.0.1:1/nothing.git
           GH_TOKEN=not-a-token GH_CONFIG_DIR=/nonexistent \
             python3 scripts/check-release-claims.py > mutant.log 2>&1 && rc=0 || rc=$?
+          git remote set-url origin "$origin_url"
           echo "check exit: $rc"
           cat mutant.log
           if [ "$rc" -eq 0 ]; then
