@@ -100,8 +100,10 @@ func within(call payload, event Event, left time.Duration) (scanned, bool) {
 	// It is also the answer on the merits, which is what makes it a rule
 	// rather than a coin weighted towards the reading a test wanted. The
 	// margin past the budget is sized to write one verdict and nothing else,
-	// so a scan started inside it runs against a kill and not against a
-	// clock. Nothing was read, and that is what gets reported.
+	// so time past the budget is not scanning time: the only clock such a
+	// scan could race is one that expired before it began, and the process is
+	// killed fifteen seconds later whatever it found. Nothing was read, and
+	// that is what gets reported.
 	if left <= 0 {
 		return scanned{}, false
 	}
