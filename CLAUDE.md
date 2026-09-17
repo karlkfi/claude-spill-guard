@@ -776,6 +776,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `privacy-drift` | PRIVACY.md still says what the hook reads and writes, against the manifest, the source and a driven binary |
 | `hooks-check` | every tracked git hook is executable, so none is silently inert |
 | `launcher` | the hook launcher is executable in the index, resolves a binary, and denies when it cannot |
+| `script-modes` | a shebang and the executable bit travel together, in the index, both ways |
 | `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
 | `docs` | every relative link in the repo markdown resolves |
 | `release-claims` | the prose holds whether or not a release exists, and the state is readable |
