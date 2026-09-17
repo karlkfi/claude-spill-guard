@@ -463,3 +463,40 @@ func TestAnOverrideAfterAQuotedOperatorDoesNotArmTheHatch(t *testing.T) {
 		})
 	}
 }
+
+// `SPILL_GUARD_OVERRIDE+=r` assigns in command position exactly as the plain
+// spelling does, so it arms the hatch too -- driven on bash 5.3.15, where
+// `FOO+=bar env` really does put FOO in the child environment.
+//
+// What it cannot carry is the whole value. Bash prepends whatever the
+// environment already holds, and reading the environment is the one thing this
+// hatch refuses to do, so the reason is the suffix the command string shows.
+// That is a reason understated, never a hatch armed by something the string
+// does not say.
+func TestAnAppendSpelledPrefixArmsTheHatch(t *testing.T) {
+	dir, name := planted(t)
+	for _, prefix := range []string{
+		`SPILL_GUARD_OVERRIDE+=fixture`,
+		`LC_ALL=C SPILL_GUARD_OVERRIDE+=fixture`,
+		`SPILL_GUARD_OVERRIDE+='a reason'`,
+	} {
+		t.Run(prefix, func(t *testing.T) {
+			command := prefix + ` cat ` + name
+			_, stdout, _ := drive(t, bashCall(t, command, dir))
+			if got := verdictOf(t, stdout); got != "ask" {
+				t.Errorf("permissionDecision = %q, want ask -- bash assigns here, "+
+					"so the hatch arms and downgrades the block", got)
+			}
+		})
+	}
+	// The quoted spelling is not an assignment to bash, so it must not arm --
+	// the boundary the widened regex had to keep, since `m[1]` moved one byte
+	// right with the `+`.
+	t.Run("quoted, so bash assigns nothing", func(t *testing.T) {
+		command := `'SPILL_GUARD_OVERRIDE+=fixture' :; cat ` + name
+		_, stdout, _ := drive(t, bashCall(t, command, dir))
+		if got := verdictOf(t, stdout); got != "deny" {
+			t.Errorf("permissionDecision = %q, want deny", got)
+		}
+	})
+}

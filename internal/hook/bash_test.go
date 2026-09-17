@@ -1145,3 +1145,72 @@ func TestALoopHeaderInsideACaseArmBindsNothing(t *testing.T) {
 		t.Errorf("coverage reason = %q, want the operand unresolved", reason)
 	}
 }
+
+// The fail-open Q168 names. `NAME+=v` is an inline env prefix exactly as
+// `NAME=v` is -- bash peels it and runs the command behind it -- and the
+// assignment regex required the `=` to follow the name directly, so the `+`
+// ended the match. The prefix then took the command head, internal/readers had
+// no row for `LC_ALL+=C`, the segment contributed no operands, and the call
+// went through with the file unopened and no verdict at all.
+//
+// Two controls, because a silence is consistent with more than one reading:
+// the bare command says the file is found, and the plain prefix says the peel
+// works, so the append arm is testing the `+=` and not a broken probe.
+func TestAnAppendPrefixIsPeeledAndTheOperandScanned(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct{ label, command string }{
+		{"no prefix -- control", "cat " + name},
+		{"a plain prefix -- control", "LC_ALL=C cat " + name},
+		{"an append prefix", "LC_ALL+=C cat " + name},
+		{"an append after a plain one", "LANG=C LC_ALL+=C cat " + name},
+		{"an append with an empty value", "LC_ALL+= cat " + name},
+		{"an append behind a keyword", "time LC_ALL+=C cat " + name},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("reason does not name the rule: %q", reason)
+			}
+			if !strings.Contains(reason, name) {
+				t.Errorf("reason does not name the file: %q", reason)
+			}
+		})
+	}
+}
+
+// `CDPATH+=/tmp` makes a relative `cd` target a search exactly as the plain
+// spelling does, so the tracker has to lose the directory for both. Reading
+// the name with a prefix test on `CDPATH=` misses the append and follows a cd
+// bash may not have made, which resolves the operand to a file in the wrong
+// tree -- worse than the deferral it replaces, because it allows.
+//
+// The no-CDPATH control is what says the cd is followed at all here.
+func TestAnAppendToCDPATHLosesTheDirectoryToo(t *testing.T) {
+	dir, name := planted(t)
+	base := filepath.Base(dir)
+	for _, tc := range []struct{ label, command string }{
+		{"a plain CDPATH", "CDPATH=/tmp cd " + base + " && cat " + name},
+		{"an append to CDPATH", "CDPATH+=/tmp cd " + base + " && cat " + name},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, filepath.Dir(dir)))
+			if reason := deferred(t, code, stdout, stderr); reason == "" {
+				t.Error("want a coverage record -- the cd target is a search")
+			}
+		})
+	}
+	t.Run("no CDPATH -- control", func(t *testing.T) {
+		command := "cd " + base + " && cat " + name
+		code, stdout, stderr := drive(t, bashCall(t, command, filepath.Dir(dir)))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the file behind the followed cd", reason)
+		}
+	})
+}

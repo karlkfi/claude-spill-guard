@@ -727,7 +727,7 @@ func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, 
 // assigns reports whether the segment's inline prefix assigns name.
 func assigns(tokens []string, quotedFrom []int, name string) bool {
 	for _, assignment := range envPrefix(tokens, quotedFrom) {
-		if strings.HasPrefix(assignment, name+"=") {
+		if n, _, _ := bash.SplitAssignment(assignment); n == name {
 			return true
 		}
 	}

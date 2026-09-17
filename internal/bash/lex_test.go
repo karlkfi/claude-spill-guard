@@ -129,6 +129,19 @@ func TestQuotingDecidesWhetherAWordAssigns(t *testing.T) {
 		{`SP='a b'`, true},
 		{`SP=''`, true},
 
+		// The append operator, driven the same way: `+=` assigns, and the
+		// quoting boundary moves one byte right with it -- an escape ON the
+		// `+` or on the `=` is still inside the operator, so both run a
+		// program bash cannot find. `SP++=x` is not an operator at all.
+		{`SP+=/x`, true},
+		{`SP+='/x'`, true},
+		{`SP+=`, true},
+		{`SP=+x`, true},
+		{`'SP+=/x'`, false},
+		{`SP\+=/x`, false},
+		{`SP+\=/x`, false},
+		{`SP++=/x`, false},
+
 		{`'SP=/x'`, false},
 		{`"SP=/x"`, false},
 		{`S'P'=/x`, false},
@@ -224,6 +237,41 @@ func TestStripShKeywords(t *testing.T) {
 			got := StripEnvPrefix(tc.in[k:], qf[k:])
 			if !equalStrings(got, tc.want) {
 				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The name has to come off the token the way bash takes it off, because the
+// `+` belongs to the operator. Splitting on the first `=` instead yields
+// `SP+`, a name nothing ever reads -- so a tracker poisons `SP+` and leaves
+// `SP` on the map at a value bash has already appended to.
+//
+// The value rows are the ones that keep the split from being done by a trim:
+// `A+=b=c` has an `=` inside the value, and `A+=` has no value at all.
+func TestSplitAssignment(t *testing.T) {
+	for _, tc := range []struct {
+		tok     string
+		name    string
+		appends bool
+		value   string
+	}{
+		{"A=1", "A", false, "1"},
+		{"A+=1", "A", true, "1"},
+		{"A+=b=c", "A", true, "b=c"},
+		{"A=b=c", "A", false, "b=c"},
+		{"A+=", "A", true, ""},
+		{"A=", "A", false, ""},
+		{"A=+1", "A", false, "+1"},
+		// Outside the precondition, pinned rather than asserted as correct: a
+		// caller comparing names would read this as an assignment to `A`.
+		{"A", "A", false, ""},
+	} {
+		t.Run(tc.tok, func(t *testing.T) {
+			name, appends, value := SplitAssignment(tc.tok)
+			if name != tc.name || appends != tc.appends || value != tc.value {
+				t.Errorf("SplitAssignment(%q) = (%q, %v, %q), want (%q, %v, %q)",
+					tc.tok, name, appends, value, tc.name, tc.appends, tc.value)
 			}
 		})
 	}

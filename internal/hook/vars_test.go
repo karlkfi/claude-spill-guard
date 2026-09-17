@@ -271,6 +271,13 @@ func TestApplyAssignmentGroup(t *testing.T) {
 		{"export", []string{"export", "f=in.txt"}, nil, true, true, []string{"f"}, map[string]string{"f": "in.txt"}},
 		{"export bare name", []string{"export", "f"}, map[string]string{"f": "in.txt"}, true, true, []string{}, map[string]string{"f": "in.txt"}},
 		{"impure value", []string{"f=$(cmd)"}, map[string]string{"f": "in.txt"}, true, true, []string{"f"}, map[string]string{}},
+		// An append resolves against the value the segment inherits, which
+		// this cannot see, so the name is dropped -- and it is dropped under
+		// `f`, not `f+`, which is what makes the later read unresolvable
+		// rather than stale. The second row is the one a Cut on "=" passes
+		// and this does not: it would report the name as `f+`.
+		{"append", []string{"f+=x"}, map[string]string{"f": "in.txt"}, true, true, []string{"f"}, map[string]string{}},
+		{"append onto a tracked value", []string{"f=sub", "f+=/x"}, nil, true, true, []string{"f", "f"}, map[string]string{}},
 		{"non-persisting", []string{"f=new.txt"}, map[string]string{"f": "old.txt"}, false, true, []string{"f"}, map[string]string{}},
 		{"special names", []string{"RANDOM=5", "PWD=/x", "_=/y"}, nil, true, true, []string{"RANDOM", "PWD", "_"}, map[string]string{}},
 		{"prefix on a command", []string{"f=x", "cat", "y"}, nil, true, false, nil, map[string]string{}},

@@ -581,10 +581,18 @@ func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]s
 	}
 	names := []string{}
 	for _, t := range pairs {
-		name, raw, _ := strings.Cut(t, "=")
+		name, appends, raw := bash.SplitAssignment(t)
 		names = append(names, name)
 		val, ok := literalAssignmentValue(substituteVars(raw, varmap), false)
-		if !ok || !persists || neverPropagate[name] {
+		// `NAME+=v` resolves to the old value plus v, so the name is dropped
+		// -- the same answer a value this cannot prove already gets, and
+		// recording the suffix alone would resolve an operand to a path the
+		// command never opens. Dropped in both directions rather than only
+		// where the old value is unreachable: it is unreachable when the
+		// segment inherits it, and the map holds it when the string assigned
+		// it, which is the `f=sub` `f+=/x` row. The second could concatenate
+		// and does not, because nothing here measured that it should.
+		if !ok || appends || !persists || neverPropagate[name] {
 			delete(varmap, name)
 		} else {
 			varmap[name] = val
@@ -652,8 +660,11 @@ func poisonVars[V any](tokens []string, quotedFrom []int, varmap map[string]V) {
 	k := bash.ShKeywordPeel(tokens, quotedFrom)
 	kw, kwQF := tokens[k:], quotedFrom[k:]
 	rest := bash.StripEnvPrefix(kw, kwQF)
+	// StripEnvPrefix peels `NAME+=v` too, so the name comes off it the way it
+	// does everywhere else. No test discriminates: the assignish sweep at the
+	// foot of this function recovers `NAME` from an append anyway.
 	for _, t := range kw[:len(kw)-len(rest)] {
-		name, _, _ := strings.Cut(t, "=")
+		name, _, _ := bash.SplitAssignment(t)
 		delete(varmap, name)
 	}
 	if len(rest) > 0 {
