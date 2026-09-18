@@ -71,20 +71,48 @@ EXEMPT_PATHS = {
 
 
 def tracked():
-    """Every tracked path with its index mode and whether it opens with `#!`."""
+    """Every tracked path with its index mode and whether it opens with `#!`.
+
+    `core.quotePath=false` because git C-quotes any path carrying a non-ASCII
+    byte -- `"testdata/corpus/clean/\303\274n\303\257code.sh"`, quotes and
+    all -- and a quoted path starts with `"`, so every prefix test below would
+    miss it. No tracked path carries one today, which is what makes it the kind
+    of thing that lands later and looks like a real finding.
+
+    One `cat-file --batch` rather than one process per file. The gate reads the
+    index blob and not the working tree, so a mode staged without its content
+    is still read correctly, and a spawn per tracked file made this the slowest
+    thing in `make check` for no reason.
+    """
     out = subprocess.run(
-        ["git", "ls-files", "-s"],
+        ["git", "-c", "core.quotePath=false", "ls-files", "-s"],
         capture_output=True, text=True, check=True).stdout
+    entries = []
     for line in out.splitlines():
         meta, path = line.split("\t", 1)
         mode, blob, _stage = meta.split()
         if mode == SYMLINK:
             # A symlink's own bytes are its target, and the mode is the link's.
             continue
-        head = subprocess.run(
-            ["git", "cat-file", "-p", blob],
-            capture_output=True, check=True).stdout[:2]
-        yield mode, path, head == b"#!"
+        entries.append((mode, path, blob))
+
+    if not entries:
+        return []
+
+    batch = subprocess.run(
+        ["git", "cat-file", "--batch"],
+        input="\n".join(blob for _m, _p, blob in entries).encode(),
+        capture_output=True, check=True).stdout
+
+    rows = []
+    pos = 0
+    for mode, path, blob in entries:
+        nl = batch.index(b"\n", pos)
+        size = int(batch[pos:nl].split()[2])
+        body = batch[nl + 1:nl + 1 + size]
+        rows.append((mode, path, body[:2] == b"#!"))
+        pos = nl + 1 + size + 1  # the blob, then the newline after it
+    return rows
 
 
 def region_of(path):
@@ -100,7 +128,8 @@ def main():
     exempted_regions = 0
     seen_paths = {}
 
-    for mode, path, shebang in tracked():
+    entries = tracked()
+    for mode, path, shebang in entries:
         executable = mode == EXECUTABLE
         if path in EXEMPT_PATHS:
             seen_paths[path] = (shebang, executable)
@@ -143,7 +172,7 @@ def main():
                 f"{reason}")
 
     for prefix, reason in sorted(EXEMPT_REGIONS.items()):
-        if not any(p.startswith(prefix) for _m, p, _s in tracked()):
+        if not any(p.startswith(prefix) for _m, p, _s in entries):
             findings.append(
                 f"{prefix} is an exempt region in "
                 f"scripts/check-script-modes.py and holds no tracked file, so "
