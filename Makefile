@@ -176,12 +176,12 @@ hooks-check:
 # The third mode gate, and the widest. `hooks-check` asks whether git will run
 # a tracked hook and `launcher` asks whether Claude Code can run one file; this
 # asks the whole index whether a shebang and the bit agree, which is the rule
-# scripts/README.md has stated since Q56 and nothing has ever read. Of the 14
+# scripts/README.md has stated since Q56 and nothing has ever read. Of the 15
 # entry points added to scripts/ since that straightening, 3 arrived at 644 and
 # none was noticed afterwards -- so this closes the only moment the rule can be
-# got right, which is when the file is written. That count is main at d42f6d5;
-# scripts/README.md says why the revision is named and why the two scripts
-# added beside this gate are outside it.
+# got right, which is when the file is written. That count is main at 6857e68;
+# scripts/README.md says why the revision is named and why this gate's own
+# script sits outside it.
 script-modes:
 	$(PYTHON) scripts/check-script-modes.py
 

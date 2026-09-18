@@ -31,17 +31,20 @@ is executable because git skips one that is not without saying so, and from
 `launcher` gate asserts because Claude Code invokes it directly and a launcher
 at `644` never fires once.
 
-What the argument from consequence did not have is the rate. Of the **14**
+What the argument from consequence did not have is the rate. Of the **15**
 entry points added to this directory since Q56 straightened the set on
-2026-08-26, **11 arrived at `755` and 3 arrived at `644`** — and not one of the
+2026-08-26, **12 arrived at `755` and 3 arrived at `644`** — and not one of the
 three was ever noticed afterwards, the oldest standing fourteen days. None of
 them drifted: each was born wrong and stayed. A rule stated only in prose is
-applied by whoever has read the page, which is a 21% miss rate at the one
-moment it can be got right. Those figures are `main` at `d42f6d5`; the revision
-is named because a bare count goes stale as soon as anybody adds a script, and
-the two added alongside the gate itself are deliberately outside the
-denominator — they were written by somebody who had just read this rule, so
-counting them measures the author rather than the population. So the rule is the same and something reads it now:
+applied by whoever has read the page, which is a 20% miss rate at the one
+moment it can be got right.
+
+The denominator is `main` at `6857e68`. The revision is named because a bare
+count goes stale as soon as anybody adds a script — this one was already one
+behind when a reviewer checked it — and the single file left out is
+[`check-script-modes.py`](check-script-modes.py), the gate itself, which
+arrives at `755` because whoever wrote it was writing the rule down at the same
+time. The three at `644` are the same three either way. So the rule is the same and something reads it now:
 `make script-modes` asserts across the whole index that a shebang and the
 executable bit travel together, in both directions, with `testdata/corpus/`
 exempt as a region — a fixture's shebang is text — and `run-spill-guard.cmd`

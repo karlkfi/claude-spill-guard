@@ -10,18 +10,19 @@ scripts/x.py` and the workflow runs `python3 scripts/x.py` -- so a mode that
 disagrees breaks nothing.
 
 That argument is about consequence and it still holds. What it did not have is
-the rate. Of the 14 `scripts/*.py` entry points added since Q56 straightened the
-set on 2026-08-26, 11 arrived at `755` and **3 arrived at `644`**, and not one
+the rate. Of the 15 `scripts/*.py` entry points added since Q56 straightened the
+set on 2026-08-26, 12 arrived at `755` and **3 arrived at `644`**, and not one
 of the three was ever noticed afterwards -- the oldest stood fourteen days. None
 of them drifted: each was born wrong and stayed. A rule nothing reads is applied
-by whoever happens to have read the page, which is a 21% miss rate at the only
+by whoever happens to have read the page, which is a 20% miss rate at the only
 moment it can be got right.
 
-Those figures are `main` at `d42f6d5`, and the revision is named because a bare
-count goes stale the moment anybody adds a script. The two this branch's stack
-adds are both `755` and deliberately not in the denominator: they were written
-by someone who had just read this rule and was building the gate for it, so
-counting them measures the author rather than the population.
+The denominator is `main` at `6857e68`, and the revision is named because a bare
+count goes stale the moment anybody adds a script -- it was already one behind
+when a reviewer checked it. The one file left out is this gate's own, which
+arrives at `755` because the person writing it was writing the rule down at the
+same time; counting that measures the author rather than the population. The
+numerator does not move either way.
 
 So this is the smallest claim that closes it: for every tracked file, carrying a
 shebang and being executable in the **index** are the same thing. The index
