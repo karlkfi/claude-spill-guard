@@ -896,6 +896,222 @@ jobs:
       - name: Every tracked git hook would run
         run: make hooks-check
 
+  script-modes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: A shebang and the executable bit agree across the index
+        run: make script-modes
+
+  # Five arms, and the last two are a pair rather than two arms. The first
+  # three take each branch the gate can fail on: a shebang whose mode refuses
+  # it, a bit with nothing to say what runs the file, and a named exemption
+  # that has stopped disagreeing and so is excusing nothing.
+  #
+  # The pair is what says the exempt region is doing location work rather than
+  # being a blanket skip. The same file -- same bytes, same mode -- is planted
+  # inside `testdata/corpus/` and then outside it, and the gate has to pass on
+  # the first and fail on the second. Either arm alone is satisfied by a gate
+  # that checks nothing.
+  script-modes-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: The tree is green before anything below mutates it
+        run: make script-modes
+
+      # This arm is also the one that pins the gate to the *index*. The
+      # mutation demotes the index entry and leaves the working-tree bit set,
+      # so a gate rewritten to ask `os.access(path, os.X_OK)` would see an
+      # executable file, find no disagreement, and pass -- and this arm would
+      # fail. That is the discriminator, so it is asserted here rather than
+      # left as a property of how the mutation happens to be spelled.
+      - name: A shebang at 644 must fail the gate
+        run: |
+          git update-index --chmod=-x scripts/check-release-notes.py
+          if [ "$(git ls-files -s scripts/check-release-notes.py | cut -d' ' -f1)" != "100644" ]; then
+            echo "::error::the mutation did not land -- the file is still executable in the index" >&2
+            exit 1
+          fi
+          if [ ! -x scripts/check-release-notes.py ]; then
+            echo "::error::the working-tree bit came off too, so this arm no longer tells an index reading apart from a working-tree one -- the mutation must demote the index alone" >&2
+            exit 1
+          fi
+          make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
+          git update-index --chmod=+x scripts/check-release-notes.py
+          echo "exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed over a shebang the mode refuses" >&2
+            exit 1
+          fi
+          if ! grep -q 'scripts/check-release-notes\.py is 100644 and opens with a shebang' mutant.log; then
+            echo "::error::the gate failed, but not on the file this arm demoted" >&2
+            exit 1
+          fi
+
+      - name: An executable bit with no shebang must fail the gate
+        run: |
+          if head -c 2 README.md | grep -q '#!'; then
+            echo "::error::README.md now opens with a shebang, so this arm no longer tests the direction it names" >&2
+            exit 1
+          fi
+          git update-index --chmod=+x README.md
+          if [ "$(git ls-files -s README.md | cut -d' ' -f1)" != "100755" ]; then
+            echo "::error::the mutation did not land -- README.md is not executable in the index" >&2
+            exit 1
+          fi
+          make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
+          git update-index --chmod=-x README.md
+          echo "exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed over an executable file with nothing saying what runs it" >&2
+            exit 1
+          fi
+          if ! grep -q 'README\.md is 100755 and carries no shebang' mutant.log; then
+            echo "::error::the gate failed, but not on the file this arm made executable" >&2
+            exit 1
+          fi
+
+      - name: An exemption that no longer disagrees must fail the gate
+        run: |
+          git update-index --chmod=-x hooks/run-spill-guard.cmd
+          if [ "$(git ls-files -s hooks/run-spill-guard.cmd | cut -d' ' -f1)" != "100644" ]; then
+            echo "::error::the mutation did not land -- the launcher is still executable in the index" >&2
+            exit 1
+          fi
+          make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
+          git update-index --chmod=+x hooks/run-spill-guard.cmd
+          echo "exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed with a named exemption that has stopped excusing anything" >&2
+            exit 1
+          fi
+          if ! grep -q 'hooks/run-spill-guard\.cmd is exempt .* and no longer needs to be' mutant.log; then
+            echo "::error::the gate failed, but not on the exemption that outlived its reason" >&2
+            exit 1
+          fi
+
+      - name: A shebang at 644 inside the exempt region must NOT fail the gate
+        run: |
+          printf '#!/usr/bin/env bash\necho probe\n' > testdata/corpus/planted/mode-probe.sh
+          git add -f testdata/corpus/planted/mode-probe.sh
+          git update-index --chmod=-x testdata/corpus/planted/mode-probe.sh
+          if [ "$(git ls-files -s testdata/corpus/planted/mode-probe.sh | cut -d' ' -f1)" != "100644" ]; then
+            echo "::error::the probe did not land at 644, so this arm is not testing the region" >&2
+            exit 1
+          fi
+          make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
+          git rm -q -f --cached testdata/corpus/planted/mode-probe.sh
+          rm -f testdata/corpus/planted/mode-probe.sh
+          echo "exit: $rc"
+          cat mutant.log
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the gate fired inside testdata/corpus/, where a shebang is fixture text and nothing executes the file" >&2
+            exit 1
+          fi
+
+      - name: A non-ASCII path must reach the region it sits in
+        run: |
+          printf '#!/usr/bin/env bash\necho probe\n' > 'testdata/corpus/clean/ünïcode.sh'
+          git add -f 'testdata/corpus/clean/ünïcode.sh'
+          git update-index --chmod=-x 'testdata/corpus/clean/ünïcode.sh'
+          if ! git -c core.quotePath=false ls-files -s | grep -q 'testdata/corpus/clean/ünïcode\.sh'; then
+            echo "::error::the probe is not in the index under its own name, so this arm is not testing the quoting" >&2
+            exit 1
+          fi
+          if ! git ls-files -s | grep -q '303.274n.303.257code'; then
+            echo "::error::git no longer C-quotes this path, so the arm no longer reproduces the shape it was written for" >&2
+            exit 1
+          fi
+          make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
+          git rm -q -f --cached 'testdata/corpus/clean/ünïcode.sh'
+          rm -f 'testdata/corpus/clean/ünïcode.sh'
+          echo "exit: $rc"
+          cat mutant.log
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::a fixture inside testdata/corpus/ was not excused because git quoted its path, so every exemption here is defeated by a non-ASCII byte in a filename" >&2
+            exit 1
+          fi
+
+      # Two mutations, not one, and the second is what makes this arm able to
+      # fail twice over. The catch-all region drives `checked` to zero, which
+      # is the guard's own subject. Demoting the launcher alongside it puts
+      # exactly one finding in the list at the same time -- its named exemption
+      # stops disagreeing -- and that finding is the only thing that can tell
+      # the print order apart. With the findings loop below the guard's early
+      # return, as it was until this PR, the finding is computed and thrown
+      # away: same exit, same guard line, and without this second mutation the
+      # output is byte-identical either way. So the arm asserts both lines.
+      - name: A walk that covers nothing must fail, and must not eat its findings
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("scripts/check-script-modes.py")
+          t = p.read_text()
+          old = 'EXEMPT_REGIONS = {'
+          assert t.count(old) == 1, "the regions map moved"
+          p.write_text(t.replace(old, old + '\n    "": "probe: everything is exempt",', 1))
+          PY
+          if git diff --quiet -- scripts/check-script-modes.py; then
+            echo "::error::the mutation changed nothing -- no catch-all region was added" >&2
+            exit 1
+          fi
+          git update-index --chmod=-x hooks/run-spill-guard.cmd
+          if [ "$(git ls-files -s hooks/run-spill-guard.cmd | cut -d' ' -f1)" != "100644" ]; then
+            echo "::error::the second mutation did not land, so nothing would be in the findings list and this arm could not see the print order" >&2
+            exit 1
+          fi
+          make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
+          git checkout -- scripts/check-script-modes.py
+          git update-index --chmod=+x hooks/run-spill-guard.cmd
+          echo "exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::every tracked file was exempt and the gate still reported green, so a walk covering nothing reads as a walk that found nothing" >&2
+            exit 1
+          fi
+          if ! grep -q 'nothing was checked at all' mutant.log; then
+            echo "::error::the gate failed, but not by saying it had checked nothing" >&2
+            exit 1
+          fi
+          if ! grep -q 'no longer needs to be' mutant.log; then
+            echo "::error::the walk-covered-nothing verdict swallowed the finding beside it -- the findings loop must run before that early return, or a real failure reports only that the walk was empty" >&2
+            exit 1
+          fi
+
+      - name: The same file outside the region must fail it
+        run: |
+          printf '#!/usr/bin/env bash\necho probe\n' > docs/mode-probe.sh
+          git add -f docs/mode-probe.sh
+          git update-index --chmod=-x docs/mode-probe.sh
+          if [ "$(git ls-files -s docs/mode-probe.sh | cut -d' ' -f1)" != "100644" ]; then
+            echo "::error::the probe did not land at 644, so this arm is not the pair to the one above" >&2
+            exit 1
+          fi
+          make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
+          git rm -q -f --cached docs/mode-probe.sh
+          rm -f docs/mode-probe.sh
+          echo "exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the same bytes that are excused inside testdata/corpus/ were excused outside it too, so the region is a blanket skip" >&2
+            exit 1
+          fi
+          if ! grep -q 'docs/mode-probe\.sh is 100644 and opens with a shebang' mutant.log; then
+            echo "::error::the gate failed, but not on the planted probe" >&2
+            exit 1
+          fi
+
   # Four mutations: the mode bit git reads, a name git never calls, a missing
   # shebang, and an empty directory -- which is how every assertion in the gate
   # passes over nothing at all.

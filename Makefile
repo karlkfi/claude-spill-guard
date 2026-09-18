@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift job-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
+GATES := doctor gate-drift job-drift status-drift privacy-drift hooks-check launcher script-modes vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -21,6 +21,7 @@ status-drift.desc   := the README's status table still says what the tree can ac
 privacy-drift.desc  := PRIVACY.md still says what the hook reads and writes, against the manifest, the source and a driven binary
 hooks-check.desc    := every tracked git hook is executable, so none is silently inert
 launcher.desc       := the hook launcher is executable in the index, resolves a binary, and denies when it cannot
+script-modes.desc   := a shebang and the executable bit travel together, in the index, both ways
 vendor.desc         := every vendored copy still hashes to the digest scripts/README.md declares
 docs.desc           := every relative link in the repo markdown resolves
 release-claims.desc := the prose holds whether or not a release exists, and the state is readable
@@ -171,6 +172,18 @@ privacy-drift:
 
 hooks-check:
 	$(PYTHON) scripts/check-githooks.py
+
+# The third mode gate, and the widest. `hooks-check` asks whether git will run
+# a tracked hook and `launcher` asks whether Claude Code can run one file; this
+# asks the whole index whether a shebang and the bit agree, which is the rule
+# scripts/README.md has stated since Q56 and nothing has ever read. Of the 15
+# entry points added to scripts/ since that straightening, 3 arrived at 644 and
+# none was noticed afterwards -- so this closes the only moment the rule can be
+# got right, which is when the file is written. That count is main at 6857e68;
+# scripts/README.md says why the revision is named and why this gate's own
+# script sits outside it.
+script-modes:
+	$(PYTHON) scripts/check-script-modes.py
 
 # Not covered by hooks-check, which scopes to .githooks and asks what git will
 # run. This file is invoked by Claude Code, and a launcher at mode 644 passes

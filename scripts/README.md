@@ -19,16 +19,43 @@ The rule is that a file advertises exactly the way it can be run. A shebang on a
 file at `644` names an interpreter the mode refuses, and the bit on a file
 nothing executes invites a reading that does not hold.
 
-**No gate asserts any of this, on purpose.** None of the nineteen is invoked by
-path: the eighteen entry points run as `$(PYTHON) scripts/x.py` from the
-Makefile and `python3 scripts/x.py` from the workflow, and the library is
-imported by an interpreter already running a different file. So a mode that
-drifts breaks nothing. That is the whole difference from [`.githooks/`](../.githooks), where
-`hooks-check` fails until every tracked hook is executable because git skips
-one that is not without saying so, and from
+**Nothing here breaks when a mode is wrong, and the `script-modes` gate asserts
+it anyway.** The first half is why it went ungated until 2026-09-17, and it is
+still true: none of these is invoked by path — the entry points run as
+`$(PYTHON) scripts/x.py` from the Makefile and `python3 scripts/x.py` from the
+workflow, and the library is imported by an interpreter already running a
+different file. That is the whole difference from
+[`.githooks/`](../.githooks), where `hooks-check` fails until every tracked hook
+is executable because git skips one that is not without saying so, and from
 [`run-spill-guard.cmd`](../hooks/run-spill-guard.cmd), whose index mode the
 `launcher` gate asserts because Claude Code invokes it directly and a launcher
 at `644` never fires once.
+
+What the argument from consequence did not have is the rate. Of the **15**
+entry points added to this directory since Q56 straightened the set on
+2026-08-26, **12 arrived at `755` and 3 arrived at `644`** — and not one of the
+three was ever noticed afterwards, the oldest standing fourteen days. None of
+them drifted: each was born wrong and stayed. A rule stated only in prose is
+applied by whoever has read the page, which is a 20% miss rate at the one
+moment it can be got right.
+
+The denominator is `main` at `6857e68`. The revision is named because a bare
+count goes stale as soon as anybody adds a script — this one was already one
+behind when a reviewer checked it — and the single file left out is
+[`check-script-modes.py`](check-script-modes.py), the gate itself, which
+arrives at `755` because whoever wrote it was writing the rule down at the same
+time. The three at `644` are the same three either way. So the rule is the same and something reads it now:
+`make script-modes` asserts across the whole index that a shebang and the
+executable bit travel together, in both directions, with `testdata/corpus/`
+exempt as a region — a fixture's shebang is text — and `run-spill-guard.cmd`
+exempt by name, that one asserted both ways so it fails if it ever stops
+needing to be excused.
+
+`vendor/` is checked like everything else, which is a decision rather than an
+oversight: its two files agree today, this page says a copy keeps whatever mode
+upstream shipped, and if one ever disagrees that should be somebody's call at
+the update rather than a silent skip. `make vendor` pins content, and a mode is
+not content, so `git update-index --chmod` costs a digest nothing.
 
 Until Q56 the split tracked nothing but the order the files were added — eight
 at `755`, five at `644`, every one of them with a shebang. Its row is gone, so
