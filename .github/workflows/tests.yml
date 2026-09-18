@@ -1043,7 +1043,16 @@ jobs:
             exit 1
           fi
 
-      - name: A walk that covers nothing must fail rather than report green
+      # Two mutations, not one, and the second is what makes this arm able to
+      # fail twice over. The catch-all region drives `checked` to zero, which
+      # is the guard's own subject. Demoting the launcher alongside it puts
+      # exactly one finding in the list at the same time -- its named exemption
+      # stops disagreeing -- and that finding is the only thing that can tell
+      # the print order apart. With the findings loop below the guard's early
+      # return, as it was until this PR, the finding is computed and thrown
+      # away: same exit, same guard line, and without this second mutation the
+      # output is byte-identical either way. So the arm asserts both lines.
+      - name: A walk that covers nothing must fail, and must not eat its findings
         run: |
           python3 - <<'PY'
           import pathlib
@@ -1057,8 +1066,14 @@ jobs:
             echo "::error::the mutation changed nothing -- no catch-all region was added" >&2
             exit 1
           fi
+          git update-index --chmod=-x hooks/run-spill-guard.cmd
+          if [ "$(git ls-files -s hooks/run-spill-guard.cmd | cut -d' ' -f1)" != "100644" ]; then
+            echo "::error::the second mutation did not land, so nothing would be in the findings list and this arm could not see the print order" >&2
+            exit 1
+          fi
           make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
           git checkout -- scripts/check-script-modes.py
+          git update-index --chmod=+x hooks/run-spill-guard.cmd
           echo "exit: $rc"
           cat mutant.log
           if [ "$rc" -eq 0 ]; then
@@ -1067,6 +1082,10 @@ jobs:
           fi
           if ! grep -q 'nothing was checked at all' mutant.log; then
             echo "::error::the gate failed, but not by saying it had checked nothing" >&2
+            exit 1
+          fi
+          if ! grep -q 'no longer needs to be' mutant.log; then
+            echo "::error::the walk-covered-nothing verdict swallowed the finding beside it -- the findings loop must run before that early return, or a real failure reports only that the walk was empty" >&2
             exit 1
           fi
 
