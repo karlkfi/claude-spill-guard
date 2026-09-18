@@ -37,7 +37,11 @@ entry points added to this directory since Q56 straightened the set on
 three was ever noticed afterwards, the oldest standing fourteen days. None of
 them drifted: each was born wrong and stayed. A rule stated only in prose is
 applied by whoever has read the page, which is a 21% miss rate at the one
-moment it can be got right. So the rule is the same and something reads it now:
+moment it can be got right. Those figures are `main` at `d42f6d5`; the revision
+is named because a bare count goes stale as soon as anybody adds a script, and
+the two added alongside the gate itself are deliberately outside the
+denominator — they were written by somebody who had just read this rule, so
+counting them measures the author rather than the population. So the rule is the same and something reads it now:
 `make script-modes` asserts across the whole index that a shebang and the
 executable bit travel together, in both directions, with `testdata/corpus/`
 exempt as a region — a fixture's shebang is text — and `run-spill-guard.cmd`

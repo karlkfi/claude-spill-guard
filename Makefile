@@ -179,7 +179,9 @@ hooks-check:
 # scripts/README.md has stated since Q56 and nothing has ever read. Of the 14
 # entry points added to scripts/ since that straightening, 3 arrived at 644 and
 # none was noticed afterwards -- so this closes the only moment the rule can be
-# got right, which is when the file is written.
+# got right, which is when the file is written. That count is main at d42f6d5;
+# scripts/README.md says why the revision is named and why the two scripts
+# added beside this gate are outside it.
 script-modes:
 	$(PYTHON) scripts/check-script-modes.py
 

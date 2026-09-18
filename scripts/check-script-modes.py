@@ -17,6 +17,12 @@ of them drifted: each was born wrong and stayed. A rule nothing reads is applied
 by whoever happens to have read the page, which is a 21% miss rate at the only
 moment it can be got right.
 
+Those figures are `main` at `d42f6d5`, and the revision is named because a bare
+count goes stale the moment anybody adds a script. The two this branch's stack
+adds are both `755` and deliberately not in the denominator: they were written
+by someone who had just read this rule and was building the gate for it, so
+counting them measures the author rather than the population.
+
 So this is the smallest claim that closes it: for every tracked file, carrying a
 shebang and being executable in the **index** are the same thing. The index
 rather than the working tree, because the index mode is what ships and what
@@ -88,16 +94,20 @@ def tracked():
         ["git", "-c", "core.quotePath=false", "ls-files", "-s"],
         capture_output=True, text=True, check=True).stdout
     entries = []
+    skipped = []
     for line in out.splitlines():
         meta, path = line.split("\t", 1)
         mode, blob, _stage = meta.split()
         if mode == SYMLINK:
-            # A symlink's own bytes are its target, and the mode is the link's.
+            # A symlink's own bytes are its target, and the mode is the link's,
+            # so neither reading means anything here. Counted rather than
+            # dropped, so the summary line still reconciles against the index.
+            skipped.append(path)
             continue
         entries.append((mode, path, blob))
 
     if not entries:
-        return []
+        return [], skipped
 
     batch = subprocess.run(
         ["git", "cat-file", "--batch"],
@@ -106,13 +116,13 @@ def tracked():
 
     rows = []
     pos = 0
-    for mode, path, blob in entries:
+    for mode, path, blob in entries:  # symlinks are already out, and counted
         nl = batch.index(b"\n", pos)
         size = int(batch[pos:nl].split()[2])
         body = batch[nl + 1:nl + 1 + size]
         rows.append((mode, path, body[:2] == b"#!"))
         pos = nl + 1 + size + 1  # the blob, then the newline after it
-    return rows
+    return rows, skipped
 
 
 def region_of(path):
@@ -128,7 +138,8 @@ def main():
     exempted_regions = 0
     seen_paths = {}
 
-    entries = tracked()
+    entries, symlinks = tracked()
+    skipped = len(symlinks)
     for mode, path, shebang in entries:
         executable = mode == EXECUTABLE
         if path in EXEMPT_PATHS:
@@ -178,23 +189,32 @@ def main():
                 f"scripts/check-script-modes.py and holds no tracked file, so "
                 f"nothing is being excused. Delete it: {reason}")
 
+    for entry in findings:
+        print(f"script-modes: {entry}", file=sys.stderr)
+
     if not checked:
+        # The walk covering nothing is the one failure every assertion above
+        # passes over quietly, so it is its own verdict rather than a silence.
         print("script-modes: nothing was checked at all, so nothing above "
               "could have failed", file=sys.stderr)
         return 1
 
-    for entry in findings:
-        print(f"script-modes: {entry}", file=sys.stderr)
     if findings:
         print(f"\n{len(findings)} file(s) whose shebang and index mode "
               f"disagree, or exemption(s) that have outlived their reason.",
               file=sys.stderr)
         return 1
 
+    # The four buckets add up to the index on purpose: a reader who cannot
+    # reconcile the line cannot tell a walk that covered everything from one
+    # that quietly skipped a class, and the `not checked` guard above exists
+    # for exactly that failure.
+    total = checked + exempted_regions + len(EXEMPT_PATHS) + skipped
     print(f"script-modes: {checked} tracked file(s), every shebang matched by "
           f"an executable bit and the reverse; {len(EXEMPT_PATHS)} named "
           f"exemption(s) still needed, {exempted_regions} file(s) in "
-          f"{len(EXEMPT_REGIONS)} exempt region(s)")
+          f"{len(EXEMPT_REGIONS)} exempt region(s), {skipped} symlink(s) "
+          f"skipped -- {total} tracked file(s) in all")
     return 0
 
 

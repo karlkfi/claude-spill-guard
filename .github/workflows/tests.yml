@@ -1033,6 +1033,33 @@ jobs:
             exit 1
           fi
 
+      - name: A walk that covers nothing must fail rather than report green
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("scripts/check-script-modes.py")
+          t = p.read_text()
+          old = 'EXEMPT_REGIONS = {'
+          assert t.count(old) == 1, "the regions map moved"
+          p.write_text(t.replace(old, old + '\n    "": "probe: everything is exempt",', 1))
+          PY
+          if git diff --quiet -- scripts/check-script-modes.py; then
+            echo "::error::the mutation changed nothing -- no catch-all region was added" >&2
+            exit 1
+          fi
+          make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
+          git checkout -- scripts/check-script-modes.py
+          echo "exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::every tracked file was exempt and the gate still reported green, so a walk covering nothing reads as a walk that found nothing" >&2
+            exit 1
+          fi
+          if ! grep -q 'nothing was checked at all' mutant.log; then
+            echo "::error::the gate failed, but not by saying it had checked nothing" >&2
+            exit 1
+          fi
+
       - name: The same file outside the region must fail it
         run: |
           printf '#!/usr/bin/env bash\necho probe\n' > docs/mode-probe.sh
