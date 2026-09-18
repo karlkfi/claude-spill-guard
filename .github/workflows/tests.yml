@@ -927,11 +927,21 @@ jobs:
       - name: The tree is green before anything below mutates it
         run: make script-modes
 
+      # This arm is also the one that pins the gate to the *index*. The
+      # mutation demotes the index entry and leaves the working-tree bit set,
+      # so a gate rewritten to ask `os.access(path, os.X_OK)` would see an
+      # executable file, find no disagreement, and pass -- and this arm would
+      # fail. That is the discriminator, so it is asserted here rather than
+      # left as a property of how the mutation happens to be spelled.
       - name: A shebang at 644 must fail the gate
         run: |
           git update-index --chmod=-x scripts/check-release-notes.py
           if [ "$(git ls-files -s scripts/check-release-notes.py | cut -d' ' -f1)" != "100644" ]; then
             echo "::error::the mutation did not land -- the file is still executable in the index" >&2
+            exit 1
+          fi
+          if [ ! -x scripts/check-release-notes.py ]; then
+            echo "::error::the working-tree bit came off too, so this arm no longer tells an index reading apart from a working-tree one -- the mutation must demote the index alone" >&2
             exit 1
           fi
           make script-modes > mutant.log 2>&1 && rc=0 || rc=$?
