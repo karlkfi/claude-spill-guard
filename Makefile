@@ -12,10 +12,11 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
+GATES := doctor gate-drift job-drift status-drift privacy-drift hooks-check launcher vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
+job-drift.desc      := every job in the workflows nothing derives is one somebody declared, with a reason
 status-drift.desc   := the README's status table still says what the tree can actually do
 privacy-drift.desc  := PRIVACY.md still says what the hook reads and writes, against the manifest, the source and a driven binary
 hooks-check.desc    := every tracked git hook is executable, so none is silently inert
@@ -152,6 +153,15 @@ doctor:
 
 gate-drift:
 	$(PYTHON) scripts/gates.py --check
+
+# gate-drift's neighbour, over the workflows it does not read. That one's list
+# is derived from GATES, so it can only disagree with a generator; release.yml
+# and prompt-oracle.yml have no generator, so their jobs are declared, with a
+# reason each. Two gates rather than one because the claims fail differently: a
+# derived list cannot go stale, and a declared one goes stale the moment
+# somebody adds a job and does not say what it is for.
+job-drift:
+	$(PYTHON) scripts/check-workflow-jobs.py
 
 status-drift:
 	$(PYTHON) scripts/check-status.py --check

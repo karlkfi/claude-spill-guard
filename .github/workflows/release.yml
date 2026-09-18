@@ -17,11 +17,13 @@ name: release
 # fresh clone. See docs/development/release-process.md.
 #
 # One consequence worth naming rather than discovering: `gate-drift` reads
-# tests.yml alone (scripts/gates.py pins it), so nothing checks this file's job
-# list against anything. A job deleted from here goes unnoticed by the check
-# that exists to catch exactly that, which is Q155 -- and it costs more now
-# than when it was written, because published-release-verify below is the only
-# coverage the signing path has outside a tag.
+# tests.yml alone, because scripts/gates.py pins it, and tests.yml's job list
+# is derived from GATES rather than declared. Nothing derives this file, so
+# every job below is declared by name in scripts/check-workflow-jobs.py with a
+# line saying what it is for, and the `job-drift` gate reconciles the two in
+# both directions. Deleting a job here means deleting that line, which is what
+# makes it a decision -- published-release-verify below is the only coverage
+# the signing path has outside a tag, and its absence would produce no red.
 on:
   push:
     tags:

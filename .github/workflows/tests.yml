@@ -286,6 +286,169 @@ jobs:
             exit 1
           fi
 
+  job-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Every job in the workflows nothing derives is one somebody declared
+        run: make job-drift
+
+  # Three mutations, one per direction the declaration can come apart from the
+  # tree. The first is the defect this gate was written for: a job deleted from
+  # release.yml reports no check, and no check reads exactly like a passing
+  # one, so nothing anywhere went red. The third is the direction a declared
+  # list fails in silently -- a new workflow lands, nothing declares it, and a
+  # check whose whole subject is "is every job accounted for" accounts for none
+  # of that file's jobs and still exits 0.
+  job-drift-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Every red below is attributable to its own mutation only if this is
+      # green, and a gate whose passing answer is "nothing disagrees" is the
+      # shape that reports green while reading nothing.
+      - name: The tree is green before anything below mutates it
+        run: make job-drift
+
+      # `published-release-verify` by name rather than any job: it is the one
+      # whose deletion takes away coverage instead of producing a red, being
+      # the only exercise the signature path gets outside a tag.
+      - name: A job deleted from release.yml must fail the check
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path(".github/workflows/release.yml")
+          t = p.read_text()
+          start = t.index("\n  published-release-verify:\n")
+          end = t.index("\n  release:\n", start)
+          p.write_text(t[:start] + t[end:])
+          PY
+          if git diff --quiet -- .github/workflows/release.yml; then
+            echo "::error::the mutation changed nothing -- the job was not removed" >&2
+            exit 1
+          fi
+          make job-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .github/workflows/release.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::job-drift passed with a declared job no longer in the workflow" >&2
+            exit 1
+          fi
+          if ! grep -q 'no longer runs `published-release-verify`' mutant.log; then
+            echo "::error::job-drift failed, but not on the deleted job" >&2
+            exit 1
+          fi
+
+      - name: A job nothing declares must fail the check
+        run: |
+          printf '\n  mutant-job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n' \
+            >> .github/workflows/release.yml
+          if git diff --quiet -- .github/workflows/release.yml; then
+            echo "::error::the mutation changed nothing -- the job was not appended" >&2
+            exit 1
+          fi
+          make job-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .github/workflows/release.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::job-drift passed with a job no declaration names" >&2
+            exit 1
+          fi
+          if ! grep -q 'runs `mutant-job` and nothing declares it' mutant.log; then
+            echo "::error::job-drift failed, but not on the undeclared job" >&2
+            exit 1
+          fi
+
+      - name: A workflow this check has never heard of must fail it
+        run: |
+          printf 'name: mutant\non:\n  pull_request:\njobs:\n  mutant:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n' \
+            > .github/workflows/zz-mutant.yml
+          if [ ! -s .github/workflows/zz-mutant.yml ]; then
+            echo "::error::the mutation changed nothing -- the workflow was not written" >&2
+            exit 1
+          fi
+          make job-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          rm -f .github/workflows/zz-mutant.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::job-drift passed over a workflow nothing declares, so its jobs are unaccounted for and a deletion there would be invisible" >&2
+            exit 1
+          fi
+          if ! grep -q 'zz-mutant.yml is a workflow this check does not know' mutant.log; then
+            echo "::error::job-drift failed, but not on the unknown workflow" >&2
+            exit 1
+          fi
+
+      - name: A declared job with no reason must fail the gate
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path("scripts/check-workflow-jobs.py")
+          t = p.read_text()
+          m = re.sub(r'("published-release-verify":\n)(\s+")[^"]*"(?:\s*\n\s*"[^"]*")*',
+                     lambda m: m.group(1) + m.group(2) + '"', t, count=1)
+          assert m != t, "the mutation did not land -- the reason was not emptied"
+          p.write_text(m)
+          PY
+          if git diff --quiet -- scripts/check-workflow-jobs.py; then
+            echo "::error::the mutation changed nothing -- the reason was not emptied" >&2
+            exit 1
+          fi
+          make job-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- scripts/check-workflow-jobs.py
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::job-drift passed with a job declared under an empty reason, so the declaration is a name list and GATES promises a reason it does not hold" >&2
+            exit 1
+          fi
+          if ! grep -q 'declares `published-release-verify` with an empty reason' mutant.log; then
+            echo "::error::job-drift failed, but not on the emptied reason" >&2
+            exit 1
+          fi
+
+      # The seam, from the other side. Every arm above asks whether a DECLARED
+      # file still matches; this asks what happens when the file left to the
+      # other gate is not there -- where the success line used to say one
+      # workflow was covered by a generator that had nothing left to generate.
+      - name: A workflow left to another gate must be there to be left
+        run: |
+          mv .github/workflows/tests.yml /tmp/tests.yml
+          if [ -e .github/workflows/tests.yml ]; then
+            echo "::error::the mutation did not land -- tests.yml is still in place" >&2
+            exit 1
+          fi
+          make job-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          mv /tmp/tests.yml .github/workflows/tests.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::job-drift credited gate-drift with a file that is gone, so every job that was in it went unchecked by both gates" >&2
+            exit 1
+          fi
+          if ! grep -q 'tests.yml is left to another gate' mutant.log; then
+            echo "::error::job-drift failed, but not on the missing derived workflow" >&2
+            exit 1
+          fi
+
   # git skips a hook that is not executable, silently and at exit 0, so a hook
   # that lost its mode bit looks exactly like a repo with no hook.
   status-drift:
