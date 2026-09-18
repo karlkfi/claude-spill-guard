@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 // recorder stands in for *testing.T so a failure is a value this test can
-// assert on. Its Fatalf does not abort, so loadFrom runs on past the first
-// failure -- harmless here, since every case below asserts that at least one
-// was recorded rather than which.
+// assert on. Its Fatalf does not abort, so loadFrom runs every check and
+// records each failure it finds, which is why the cases below match the
+// message rather than counting: a body trips checks it is not named for.
 type recorder struct{ failures []string }
 
 func (r *recorder) Helper() {}
@@ -50,7 +51,13 @@ func TestTheShippedFileLoads(t *testing.T) {
 }
 
 // Each of these drives one check in loadFrom. An assertion that has never
-// failed is not evidence that it can.
+// failed is not evidence that it can, and counting failures is not evidence of
+// which: every body here holds one vector, so the floor records a failure
+// beside whatever the case is about. `want` is what makes each case name true.
+//
+// Two of the four match encoding/json's own wording, which is the only thing
+// DisallowUnknownFields and a syntax error say about themselves. A stdlib
+// rewording fails this loudly, which is the direction to fail in.
 //
 // The values are the padded placeholder rather than anything that could pass
 // for a key. These cases are about the file's shape, so the value is not what
@@ -60,22 +67,30 @@ func TestLoadRejects(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		body string
+		want string
 	}{
 		{"a file holding fewer vectors than the floor",
-			`{"only-one": {"value": "AKIA0000000000000000", "note": "x"}}`},
+			`{"only-one": {"value": "AKIA0000000000000000", "note": "x"}}`,
+			"vector(s), want at least"},
 		{"a field the entry does not carry, which is how a typo arrives",
-			`{"id": {"value": "AKIA0000000000000000", "values": "x"}}`},
+			`{"id": {"value": "AKIA0000000000000000", "values": "x"}}`,
+			`unknown field "values"`},
 		{"an entry with no value at all",
-			`{"id": {"note": "x"}}`},
+			`{"id": {"note": "x"}}`,
+			"has no value"},
 		{"a file that is not JSON",
-			`this is not a vectors file`},
+			`this is not a vectors file`,
+			"invalid character"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var rec recorder
 			loadFrom(&rec, write(t, tc.body))
-			if len(rec.failures) == 0 {
-				t.Error("loadFrom accepted it, want a failure")
+			for _, f := range rec.failures {
+				if strings.Contains(f, tc.want) {
+					return
+				}
 			}
+			t.Errorf("no recorded failure holds %q; got %q", tc.want, rec.failures)
 		})
 	}
 }
