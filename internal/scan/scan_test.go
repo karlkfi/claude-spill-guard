@@ -135,19 +135,28 @@ func TestBufferPrefiltersTheCredentialFamily(t *testing.T) {
 	}
 }
 
-// The pii family has no literal to anchor on, so its rules are not gated on
-// keywords even when the ruleset gives them some.
+// The pii family has no literal to anchor on, so matchRule does not gate its
+// rules on keywords even when it is handed some.
+//
+// Built rather than loaded, which TestBufferFailsClosedOnAnUnusableRule below
+// already does for its own reason. No rule file can reach this branch any more
+// -- keywords on a family the prefilter does not gate are a startup error --
+// so a fixture that loads cannot hold the shape the branch is about. The
+// branch stays for the reason gates() gives for its own: a Rule arriving here
+// with keywords nothing reads must run, not be silenced, because a rule that
+// scanned nothing reports what a rule that scanned everything reports. This is
+// the only thing holding it.
 func TestBufferDoesNotPrefilterThePIIFamily(t *testing.T) {
-	ruleset := load(t, `{"rules": [{
-		"id": "public-ipv4",
-		"family": "pii",
-		"description": "public IPv4 address",
-		"regex": "\\b(\\d{1,3}(?:\\.\\d{1,3}){3})\\b",
-		"group": 1,
-		"keywords": ["nothing-in-the-buffer"],
-		"validators": ["reserved-range"],
-		"enabled": true
-	}]}`)
+	ruleset := []rules.Rule{{
+		ID:          "public-ipv4",
+		Family:      rules.PII,
+		Description: "public IPv4 address",
+		Regex:       regexp.MustCompile(`\b(\d{1,3}(?:\.\d{1,3}){3})\b`),
+		Group:       1,
+		Keywords:    []string{"nothing-in-the-buffer"},
+		Validators:  []rules.Validator{rules.ReservedRange},
+		Enabled:     true,
+	}}
 
 	findings := scan(t, "a", "peer 8.8.8.8 and 192.168.1.1\n", ruleset)
 	if len(findings) != 1 {

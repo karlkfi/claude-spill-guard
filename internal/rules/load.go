@@ -190,14 +190,26 @@ func compile(e entry) (Rule, error) {
 	rule.Anchor, rule.Reach = anchor(*e.Regex, keywords)
 
 	// Configuration with no check to read it is a setting that does nothing,
-	// and both of these settings only ever make a rule stricter -- so the rule
-	// loads, runs, and reports more than its author meant it to. That is the
-	// direction the naming split exists to catch.
+	// and every one of these only ever makes a rule stricter or cheaper -- so
+	// the rule loads, runs, and reports more than its author meant it to. That
+	// is the direction the naming split exists to catch.
+	//
+	// The third names no validator, because `keywords` is not read by one. The
+	// prefilter reads it, and the prefilter gates the credential family and
+	// nothing else, so a pii rule's keywords reach no stage at all. An author
+	// who writes them has said "gate this on a literal" and been handed the
+	// ungated full-corpus pass the prefilter exists to avoid -- the shape that
+	// produced 5,679 matches and no credentials on the inherited ruleset --
+	// with nothing in the output telling the two apart.
 	if len(rule.Labels) > 0 && !rule.Uses(ContextLabel) {
 		return fail("carries labels but does not name %q, so nothing reads them", ContextLabel)
 	}
 	if rule.Entropy > 0 && !rule.Uses(Entropy) {
 		return fail("carries an entropy floor but does not name %q, so nothing reads it", Entropy)
+	}
+	if len(rule.Keywords) > 0 && rule.Family != Credential {
+		return fail("family %q carries keywords, but the prefilter gates %q and "+
+			"nothing else, so nothing reads them", rule.Family, Credential)
 	}
 
 	// The other direction, and the worse one: a check named with configuration
