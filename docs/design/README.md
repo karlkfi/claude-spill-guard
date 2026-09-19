@@ -1196,9 +1196,9 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `description` | What the rule matches, in a few words. It reaches a terminal, so it is escaped like a path. |
 | `regex` | RE2. Compiled at startup; a rule that does not compile is a startup failure, not a skipped rule. |
 | `group` | Which capture group holds the candidate. Lets a rule capture a wider window than it reports. |
-| `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. A keyword at the head of every match the rule can produce is what lets [the pipeline](#pipeline) run the rule at those positions instead of over the buffer; one further in still gates, and pays a full pass. |
+| `keywords` | Word-boundary literals for the prefilter. A `credential` rule needs at least one that names a literal: absent, `[]` and `[""]` alike are a startup failure, because each leaves the ungated full-corpus pass this field exists to avoid. A keyword at the head of every match the rule can produce is what lets [the pipeline](#pipeline) run the rule at those positions instead of over the buffer; one further in still gates, and pays a full pass. Only the `credential` family is gated on them, so keywords on any other family are a startup failure rather than a setting nothing reads. |
 | `labels` | Word-boundary literals the candidate has to sit near, for the context-proximity check. Read after the match, so unlike `keywords` it gates nothing. |
-| `entropy` | Minimum Shannon bits per character over the captured group — over what the `extent` returned, where a rule names one. Omitted means no floor. A floor above what the group can reach is a startup failure, not a quiet rule. |
+| `entropy` | Minimum Shannon bits per character over the captured group — over what the `extent` returned, where a rule names one. Omitted means no floor, and omitting it while naming the `entropy` check is a startup failure: Shannon is never negative, so a floor of zero gates nothing. A floor above what the group can reach is a startup failure too, not a quiet rule. |
 | `validators` | Names from the validator table above, all of which must pass. |
 | `extent` | Names a walk that says where the match really ends, run before the validators and widening the group they read. Omitted for every rule but `jwt`; see [Pipeline](#pipeline), step 4. |
 | `enabled` | Ships `false` for every `pii` rule. |
@@ -1208,7 +1208,11 @@ interchangeable. `keywords` runs before the regex and gates the credential
 family; `labels` is read by the context-proximity check after a match, and
 gates nothing. Spending `keywords` on a numeric rule's labels would hand that
 rule the prefilter [the pipeline](#pipeline) says it does not have, and that
-absence is one of the reasons the family ships disabled.
+absence is one of the reasons the family ships disabled. So the loader refuses
+them there, naming the family: an author who writes keywords onto a `pii` rule
+has asked for a literal gate and would otherwise be given the ungated
+full-corpus pass the prefilter exists to avoid, with nothing in the output to
+tell a gated rule from an ungated one.
 
 **The proximity window is not per-rule.** `NearLabel` takes one and the loader
 always passes `internal/validate`'s `DefaultLabelWindow`, measured at 64 bytes.
@@ -1228,7 +1232,10 @@ labels. Presence and configuration are separate on purpose. A numeric rule
 whose author wrote the labels and left the validator off is an ungated numeric
 regex, which is the shape that produced 5,679 matches and no credentials, so
 naming the check is what turns that omission into a startup error. The loader
-rejects a rule carrying configuration no check reads.
+rejects a rule carrying configuration no check reads. `keywords` on a
+non-credential family is the same rejection reached without a validator name:
+the stage that would read it is the prefilter rather than a check, and it reads
+one family.
 
 **It rejects the mirror image too: a check named with configuration that can
 never let it pass.** `context-label` with no labels — absent, empty, or nothing
@@ -1240,6 +1247,17 @@ Either way the rule loads, compiles, runs on every file and reports nothing,
 which is exactly what a clean scan looks like from outside. That is the argument
 that already fails a rule whose regex does not compile, so it gets the same
 answer.
+
+**And a third direction, between the two: a check named with a value it can
+read and do nothing with.** `entropy` with no floor is the one that reaches a
+rule file — `EntropyAtLeast` is `Shannon(s) >= min`, Shannon is never negative,
+and so a floor of zero admits the empty string, a run of one byte and a NUL
+alike. The author who meant to write a floor and forgot gets exactly what
+leaving the check off would have given them, and no error either way. The same
+reading refuses `keywords` that name no literal: `[""]` satisfies a length test
+and gates nothing, and what that costs depends on the consumer — silence the
+rule, or spend the full pass the keyword was there to avoid — so the loader
+settles it rather than leaving every consumer to invent an answer.
 
 The bound has two terms and takes the smaller. Both come off the rule's own
 regex.
