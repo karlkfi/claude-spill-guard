@@ -96,6 +96,15 @@ func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 		{`P=/l\ it`, "$P/f", "/lit/f"},
 		{`P=/lit\$x`, "$P/f", "/lit$x/f"},
 		{"P=/lit; P[0]=/arr", "$P/f", "/arr/f"},
+		// Index 0 is the one subscript whose value `$P` reads back, so the
+		// row above cannot tell dropping the name from recording the value.
+		// These three can: bash gives the OLD value at any other index, and
+		// the old value plus the new for an append, so a port that records
+		// `/arr` resolves an operand to a path the command never opens.
+		// Driven 2026-09-19 on 5.3.15 with the same environment as the table.
+		{"P=/lit; P[1]=/arr", "$P/f", "/lit/f"},
+		{"P[1]=/arr", "$P/f", "/env/f"},
+		{"P=/lit; P[0]+=/arr", "$P/f", "/lit/arr/f"},
 		{"P=/lit; P++", "$P/f", "/lit/f"},
 		{"P=/lit; mapfile P < /dev/null", "$P/f", "/f"},
 		{"P=/lit; source /dev/null", "$P/f", "/lit/f"},

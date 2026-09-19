@@ -136,6 +136,15 @@ func TestAGlobBashWouldExpandDifferentlyIsRecorded(t *testing.T) {
 		{"noglob by name", "set -o noglob; cat *.env", "changes how the shell expands"},
 		{"GLOBIGNORE assigned", "GLOBIGNORE=x; cat *.env", "changes how the shell expands"},
 		{"GLOBIGNORE exported", "export GLOBIGNORE=x; cat *.env", "changes how the shell expands"},
+		// The subscripted spelling filters the glob exactly as the plain one
+		// does, because `$GLOBIGNORE` is `${GLOBIGNORE[0]}` -- driven
+		// 2026-09-19 on 5.3.15, where `GLOBIGNORE[0]='d/*.log'` drops
+		// `d/b.log` from `d/*` and `GLOBIGNORE[1]` leaves it in. Read by name
+		// rather than by a text prefix on `GLOBIGNORE=`, which this walks
+		// past; an index other than 0 is over-recorded, which is the side to
+		// be wrong on.
+		{"GLOBIGNORE assigned at an index", "GLOBIGNORE[0]=x; cat *.env", "changes how the shell expands"},
+		{"GLOBIGNORE assigned at another index", "GLOBIGNORE[1]=x; cat *.env", "changes how the shell expands"},
 		{"after an eval", "eval x=1; cat *.env", "changes how the shell expands"},
 		{"after a source", "source rc; cat *.env", "changes how the shell expands"},
 		{"in a backtick body after a shopt", "shopt -s dotglob; echo `cat *.env`", "changes how the shell expands"},
