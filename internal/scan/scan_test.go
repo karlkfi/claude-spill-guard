@@ -138,12 +138,12 @@ func TestBufferPrefiltersTheCredentialFamily(t *testing.T) {
 // The pii family has no literal to anchor on, so matchRule does not gate its
 // rules on keywords even when it is handed some.
 //
-// Built rather than loaded, which is the one case in this file that goes round
-// the loader deliberately. No rule file can reach this branch any more --
-// keywords on a family the prefilter does not gate are a startup error -- so a
-// fixture that loads cannot hold the shape the branch is about. The branch
-// stays for the reason gates() gives for its own: a Rule arriving here with
-// keywords nothing reads must run, not be silenced, because a rule that
+// Built rather than loaded, which TestBufferFailsClosedOnAnUnusableRule below
+// already does for its own reason. No rule file can reach this branch any more
+// -- keywords on a family the prefilter does not gate are a startup error --
+// so a fixture that loads cannot hold the shape the branch is about. The
+// branch stays for the reason gates() gives for its own: a Rule arriving here
+// with keywords nothing reads must run, not be silenced, because a rule that
 // scanned nothing reports what a rule that scanned everything reports. This is
 // the only thing holding it.
 func TestBufferDoesNotPrefilterThePIIFamily(t *testing.T) {
