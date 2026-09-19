@@ -440,9 +440,12 @@ serial; the hyphenated form is what people actually write an SSN as.
 
 Four things, and the `precision` gate fails without the last two.
 
-1. A literal anchor in `keywords`, with a word boundary the regex agrees with.
-   The prefilter requires a boundary in front of the keyword, so a regex that
-   does not open on `\b` matches text the gate will never hand it.
+1. For a `credential` rule, a literal anchor in `keywords`, with a word boundary
+   the regex agrees with. The prefilter requires a boundary in front of the
+   keyword, so a regex that does not open on `\b` matches text the gate will
+   never hand it. A `pii` rule takes none: the prefilter gates the credential
+   family and nothing else, so keywords there are a startup failure rather than
+   a field that does nothing.
 2. RE2 only: no lookaround, no backreferences, bounded repetition capped at
    1000. The loader refuses anything else at startup.
 3. A planted fixture under `testdata/corpus/planted/`, named for the rule,
