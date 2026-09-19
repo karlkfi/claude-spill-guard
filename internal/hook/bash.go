@@ -137,14 +137,23 @@ func bashTargets(command, cwd string) ([]target, error) {
 			list.enter(segment, v, &dirUnknown)
 			sub := v.expand(segment.Tokens)
 			inputs := v.expand(segment.Inputs)
-			// The segment's own provenance reads the substituted copy too:
-			// expand rebuilds token for token, so the two stay aligned, and no
-			// substitution can move where quoting appeared in the word bash
-			// lexed. What it does not cover is a word that becomes
-			// assignment-shaped only after expansion -- `n=LC_ALL; $n=C cat f`
-			// -- which is a second reading of the same head and a defect of its
-			// own rather than this one seen from another side.
-			if altersGlobbing(sub, segment.QuotedFrom) {
+			// The head is decided on the segment's own tokens and applied to
+			// the substituted copy by index. expand rebuilds token for token,
+			// so the count indexes sub exactly, and the provenance stays
+			// aligned with both -- no substitution can move where quoting
+			// appeared in the word bash lexed.
+			//
+			// Deciding it on sub reads a word that becomes assignment-shaped
+			// only after expansion, which bash never does: it settles what a
+			// word IS before it expands anything, so `n=LC_ALL; $n=C cat f`
+			// looks for a program called `LC_ALL=C`, fails, and reads no file
+			// (Q167). The reserved-word half behaves the same way -- `k=if; $k
+			// cat f` runs `if` as a program -- and one peel covers both,
+			// because both are settled at the same point in the shell's own
+			// order. Ported from claude-bouncer #110, which decides the count
+			// on `g` and applies it to `restored`; its argument is the other
+			// one, that its substituted tokens lose quote provenance entirely.
+			if altersGlobbing(segment.Tokens, sub, segment.QuotedFrom) {
 				globsAltered = true
 			}
 			switch names, observed := v.observe(segment.Tokens, sub, segment.QuotedFrom,
@@ -159,8 +168,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 				list.ran()
 				continue
 			}
-			k := bash.ShKeywordPeel(sub, segment.QuotedFrom)
-			tokens := bash.StripEnvPrefix(sub[k:], segment.QuotedFrom[k:])
+			k := bash.ShKeywordPeel(segment.Tokens, segment.QuotedFrom)
+			tokens := sub[k+bash.EnvPrefixPeel(segment.Tokens[k:], segment.QuotedFrom[k:]):]
 			if len(tokens) == 0 {
 				continue
 			}
@@ -481,7 +490,7 @@ func substStates(text string, subs []bash.Substitution, entry, fallback substSta
 			recordMarks(out, tok, here)
 		}
 		sub := v.expand(seg.Tokens)
-		if altersGlobbing(sub, seg.QuotedFrom) {
+		if altersGlobbing(seg.Tokens, sub, seg.QuotedFrom) {
 			globsAltered = true
 		}
 		switch names, observed := v.observe(seg.Tokens, sub, seg.QuotedFrom,
@@ -493,8 +502,8 @@ func substStates(text string, subs []bash.Substitution, entry, fallback substSta
 			list.ran()
 			continue
 		}
-		k := bash.ShKeywordPeel(sub, seg.QuotedFrom)
-		tokens := bash.StripEnvPrefix(sub[k:], seg.QuotedFrom[k:])
+		k := bash.ShKeywordPeel(seg.Tokens, seg.QuotedFrom)
+		tokens := sub[k+bash.EnvPrefixPeel(seg.Tokens[k:], seg.QuotedFrom[k:]):]
 		if len(tokens) == 0 {
 			continue
 		}
@@ -725,9 +734,23 @@ func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, 
 }
 
 // assigns reports whether the segment's inline prefix assigns name.
+//
+// A subscripted spelling does not, which is bash's own reading and not a
+// conservatism: a prefix assignment to `NAME[sub]` sets nothing at all, so the
+// command behind it runs with the name as it was. Driven on bash 5.3.15 with
+// the only caller's variable, `CDPATH[0]=<dir> cd target` reports `CDPATH[0]:
+// not a valid identifier` and leaves the shell where it started, while
+// `CDPATH=<dir>` and `CDPATH+=:<dir>` both find target under dir. So the
+// subscript is refused here for the reason the override hatch refuses it:
+// both ask whether bash set something by this name, and it did not.
+//
+// The standalone spelling is a different question and not this one, which no
+// caller asks for the plain spelling either: `CDPATH[0]=<dir>; cd target`
+// does search, and so does `CDPATH=<dir>; cd target`. Q186 carries it.
 func assigns(tokens []string, quotedFrom []int, name string) bool {
 	for _, assignment := range envPrefix(tokens, quotedFrom) {
-		if n, _, _ := bash.SplitAssignment(assignment); n == name {
+		if n, form, _ := bash.SplitAssignment(assignment); n == name &&
+			form != bash.AssignSubscript {
 			return true
 		}
 	}

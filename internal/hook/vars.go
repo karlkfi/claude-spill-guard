@@ -191,7 +191,11 @@ func (v *vars) observe(raw, sub []string, quotedFrom []int, persists, binds bool
 		}
 		return names, observedAssignments
 	}
-	if name, values, ok := forLoopBinding(bash.StripShKeywords(sub, quotedFrom), v.loops); ok {
+	// The keyword peel is decided on raw for the reason the assignment group
+	// above is: bash settles what a word is before it expands it, so `k=for;
+	// $k f in a; do ...` is a program bash cannot find and not a loop header
+	// (Q167). The list items still come from sub, which is what bash iterates.
+	if name, values, ok := forLoopBinding(sub[bash.ShKeywordPeel(raw, quotedFrom):], v.loops); ok {
 		delete(v.m, name) // and a loop variable is not a scalar
 		if values == nil || !binds {
 			delete(v.loops, name)
@@ -200,11 +204,11 @@ func (v *vars) observe(raw, sub []string, quotedFrom []int, persists, binds bool
 		}
 		return nil, observedLoopHeader
 	}
-	if clobbersIFS(sub, quotedFrom) {
+	if clobbersIFS(raw, sub, quotedFrom) {
 		v.stop()
 	} else {
-		poisonVars(sub, quotedFrom, v.m)
-		poisonVars(sub, quotedFrom, v.loops) // the same rules invalidate a binding
+		poisonVars(raw, sub, quotedFrom, v.m)
+		poisonVars(raw, sub, quotedFrom, v.loops) // the same rules invalidate a binding
 	}
 	return nil, observedCommand
 }
@@ -581,7 +585,7 @@ func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]s
 	}
 	names := []string{}
 	for _, t := range pairs {
-		name, appends, raw := bash.SplitAssignment(t)
+		name, form, raw := bash.SplitAssignment(t)
 		names = append(names, name)
 		val, ok := literalAssignmentValue(substituteVars(raw, varmap), false)
 		// `NAME+=v` resolves to the old value plus v, so the name is dropped
@@ -592,7 +596,15 @@ func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]s
 		// segment inherits it, and the map holds it when the string assigned
 		// it, which is the `f=sub` `f+=/x` row. The second could concatenate
 		// and does not, because nothing here measured that it should.
-		if !ok || appends || !persists || neverPropagate[name] {
+		//
+		// `NAME[sub]=v` is dropped on a stronger reading than the append's,
+		// and not on the same one: the value IS in the token, and which
+		// element it lands on is not. `$NAME` is `${NAME[0]}`, so `FOO=old;
+		// FOO[0]=x` gives `x` and `FOO=old; FOO[1]=x` gives `old` -- driven on
+		// bash 5.3.15 -- and the subscript can be arithmetic, which nothing
+		// here evaluates. Recording v would resolve an operand to a path the
+		// command opens only when the subscript happens to be 0.
+		if !ok || form != bash.AssignPlain || !persists || neverPropagate[name] {
 			delete(varmap, name)
 		} else {
 			varmap[name] = val
@@ -653,17 +665,25 @@ func ungluePrintfV(t string) string {
 // Generic over the value type because upstream runs it on both maps and this
 // port has to as well: it only ever deletes keys, so what a map holds never
 // reaches it.
-func poisonVars[V any](tokens []string, quotedFrom []int, varmap map[string]V) {
+func poisonVars[V any](raw, sub []string, quotedFrom []int, varmap map[string]V) {
 	if len(varmap) == 0 {
 		return
 	}
-	k := bash.ShKeywordPeel(tokens, quotedFrom)
-	kw, kwQF := tokens[k:], quotedFrom[k:]
-	rest := bash.StripEnvPrefix(kw, kwQF)
-	// StripEnvPrefix peels `NAME+=v` too, so the name comes off it the way it
-	// does everywhere else. No test discriminates: the assignish sweep at the
-	// foot of this function recovers `NAME` from an append anyway.
-	for _, t := range kw[:len(kw)-len(rest)] {
+	// Decided on raw and applied to sub by index (Q167). It is the command
+	// name that turns on this, and bash reads one before it expands: with the
+	// peel taken on sub, `n=LC_ALL; $n=C eval x` peels `LC_ALL=C` and finds
+	// `eval`, so the whole map dies for a command bash never runs. On raw the
+	// segment is a program named `LC_ALL=C`, which is what bash looks for and
+	// fails to find, and the assignish sweep below still poisons `LC_ALL`, so
+	// nothing that could have been assigned survives.
+	k := bash.ShKeywordPeel(raw, quotedFrom)
+	e := bash.EnvPrefixPeel(raw[k:], quotedFrom[k:])
+	kw, rest := sub[k:], sub[k+e:]
+	// StripEnvPrefix peels `NAME+=v` and `NAME[sub]=v` too, so the name comes
+	// off both the way it does everywhere else. No test discriminates: the
+	// assignish sweep at the foot of this function already recovers `NAME`
+	// from either spelling, `assignishRE` carrying the `[` for that reason.
+	for _, t := range kw[:e] {
 		name, _, _ := bash.SplitAssignment(t)
 		delete(varmap, name)
 	}
@@ -693,10 +713,15 @@ func poisonVars[V any](tokens []string, quotedFrom []int, varmap map[string]V) {
 			return
 		}
 	}
-	for j, t := range tokens {
+	// The sweep runs over sub rather than raw, and deliberately: it is the
+	// backstop for every shape the dispatch above did not name, so a word that
+	// only LOOKS assignment-shaped after expansion is one to poison rather
+	// than one to reason about. Over-poisoning restores an unresolved operand
+	// and nothing worse.
+	for j, t := range sub {
 		if m := assignishRE.FindStringSubmatch(t); m != nil {
 			delete(varmap, m[1])
-		} else if identRE.FindString(t) == t && j+1 < len(tokens) && strings.HasPrefix(tokens[j+1], "=") {
+		} else if identRE.FindString(t) == t && j+1 < len(sub) && strings.HasPrefix(sub[j+1], "=") {
 			delete(varmap, t)
 		}
 	}
@@ -711,9 +736,9 @@ func poisonVars[V any](tokens []string, quotedFrom []int, varmap map[string]V) {
 // cannot disagree about what a segment assigns. `unset` is exempt: bash
 // word-splits on the default IFS while IFS is unset, and the default is what
 // this already models.
-func clobbersIFS(tokens []string, quotedFrom []int) bool {
-	k := bash.ShKeywordPeel(tokens, quotedFrom)
-	rest := bash.StripEnvPrefix(tokens[k:], quotedFrom[k:])
+func clobbersIFS(raw, sub []string, quotedFrom []int) bool {
+	k := bash.ShKeywordPeel(raw, quotedFrom)
+	rest := sub[k+bash.EnvPrefixPeel(raw[k:], quotedFrom[k:]):]
 	if len(rest) == 0 {
 		return false
 	}

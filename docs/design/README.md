@@ -2728,6 +2728,17 @@ defence of command-position-only is **legibility**, that a reader of the prompt
 can see the override in the command they are approving, and these are spellings
 no reader would have called one.
 
+An array subscript disarms it too, and for the other reason. `FOO[0]=x cmd` is
+a prefix bash peels, so Q175 taught the scan to peel it -- and bash exports
+nothing from it, reporting `FOO[0]: not a valid identifier` and leaving the
+name alone, driven on 5.3.15. So the word is a prefix and arms no variable, and
+`SPILL_GUARD_OVERRIDE[0]=r` has to be read that way at both sites rather than
+one: peeled, so the reader behind it is found, and refused, so the hatch is
+not opened by a spelling the shell never wrote. The name comparison does not
+give this for free -- a `Cut` on `=` leaves `SPILL_GUARD_OVERRIDE[0]`, which
+compares unequal by accident and would stop doing so the moment the subscript
+moved -- so `override.go` reads the form `SplitAssignment` reports.
+
 **It downgrades a block to a confirmation, never to an allow.** That is the
 half of "matching those two" that decides what the hatch is worth: both of them
 downgrade to a prompt as well. The argument is this document's own opening —

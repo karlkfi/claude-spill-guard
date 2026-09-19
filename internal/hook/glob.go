@@ -42,13 +42,28 @@ func isGlob(operand string) bool { return strings.ContainsAny(operand, "*?[") }
 // printf '%s\n' d/*` prints the default set -- and neither is the environment,
 // which bash 5.3.15 ignores for this variable. It runs whether or not the
 // segment persists: `(shopt -s dotglob; cat *)` applies to the cat beside it.
-func altersGlobbing(tokens []string, quotedFrom []int) bool {
-	k := bash.ShKeywordPeel(tokens, quotedFrom)
-	head, headQF := tokens[k:], quotedFrom[k:]
-	rest := bash.StripEnvPrefix(head, headQF)
+// raw is the segment's own tokens and sub is raw with the map substituted.
+// The peel is decided on raw and applied to sub by index, because bash settles
+// what a word IS before it expands anything (Q167): `V=GLOBIGNORE=x; $V; cat
+// *.env` runs a program bash cannot find and leaves globbing alone, where
+// peeling sub reads `GLOBIGNORE=x` as an assignment and records the pattern
+// for nothing. expand rebuilds token for token, so the count indexes sub
+// exactly.
+func altersGlobbing(raw, sub []string, quotedFrom []int) bool {
+	k := bash.ShKeywordPeel(raw, quotedFrom)
+	e := bash.EnvPrefixPeel(raw[k:], quotedFrom[k:])
+	head, rest := sub[k:], sub[k+e:]
 	if len(rest) == 0 {
 		for _, a := range head {
-			if strings.HasPrefix(a, "GLOBIGNORE=") {
+			// By name rather than by text prefix. `$GLOBIGNORE` is
+			// `${GLOBIGNORE[0]}`, so a subscripted spelling filters the glob
+			// too -- driven on bash 5.3.15, `GLOBIGNORE[0]='d/*.log'` drops
+			// `d/b.log` from `d/*` where `GLOBIGNORE[1]` leaves it -- and a
+			// prefix test on `GLOBIGNORE=` walks past both. An index other
+			// than 0 is recorded for nothing, which is the side to be wrong
+			// on. Every token here is an assignment, rest being empty is what
+			// says so, which is what makes SplitAssignment answerable of it.
+			if n, _, _ := bash.SplitAssignment(a); n == "GLOBIGNORE" {
 				return true
 			}
 		}

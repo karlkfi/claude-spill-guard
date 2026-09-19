@@ -136,6 +136,15 @@ func TestAGlobBashWouldExpandDifferentlyIsRecorded(t *testing.T) {
 		{"noglob by name", "set -o noglob; cat *.env", "changes how the shell expands"},
 		{"GLOBIGNORE assigned", "GLOBIGNORE=x; cat *.env", "changes how the shell expands"},
 		{"GLOBIGNORE exported", "export GLOBIGNORE=x; cat *.env", "changes how the shell expands"},
+		// The subscripted spelling filters the glob exactly as the plain one
+		// does, because `$GLOBIGNORE` is `${GLOBIGNORE[0]}` -- driven
+		// 2026-09-19 on 5.3.15, where `GLOBIGNORE[0]='d/*.log'` drops
+		// `d/b.log` from `d/*` and `GLOBIGNORE[1]` leaves it in. Read by name
+		// rather than by a text prefix on `GLOBIGNORE=`, which this walks
+		// past; an index other than 0 is over-recorded, which is the side to
+		// be wrong on.
+		{"GLOBIGNORE assigned at an index", "GLOBIGNORE[0]=x; cat *.env", "changes how the shell expands"},
+		{"GLOBIGNORE assigned at another index", "GLOBIGNORE[1]=x; cat *.env", "changes how the shell expands"},
 		{"after an eval", "eval x=1; cat *.env", "changes how the shell expands"},
 		{"after a source", "source rc; cat *.env", "changes how the shell expands"},
 		{"in a backtick body after a shopt", "shopt -s dotglob; echo `cat *.env`", "changes how the shell expands"},
@@ -309,4 +318,44 @@ func TestTheExpansionAgreesWithBash(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The same peel order, at the arm that decides whether a glob is expanded at
+// all. `V=GLOBIGNORE=x; $V; cat *.env` looks for a program called
+// `GLOBIGNORE=x`, fails to find one, and leaves globbing entirely alone --
+// driven on bash 5.3.15, where the pattern expands to the default set. Read on
+// the substituted copy, `$V` becomes `GLOBIGNORE=x`, the segment is all
+// assignments, and the pattern goes on the record instead: a coverage failure
+// on a call this could have scanned (Q167).
+//
+// Two controls, because a deny and a record are each consistent with more than
+// one reading: the bare pattern says the files are found and matched, and the
+// written-out `GLOBIGNORE=x` says the recording arm still fires when bash
+// really would assign.
+func TestAGlobIsNotRecordedForAnExpandedGLOBIGNORE(t *testing.T) {
+	dir, name := planted(t)
+	t.Run("expanded, so bash assigns nothing", func(t *testing.T) {
+		code, stdout, stderr := drive(t, bashCall(t, "V=GLOBIGNORE=x; $V; cat *.env", dir))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the pattern expanded and the file named", reason)
+		}
+	})
+	t.Run("no prefix at all -- control", func(t *testing.T) {
+		code, stdout, stderr := drive(t, bashCall(t, "cat *.env", dir))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the file named", reason)
+		}
+	})
+	t.Run("written out, so it is recorded -- control", func(t *testing.T) {
+		code, stdout, stderr := drive(t, bashCall(t, "GLOBIGNORE=x; cat *.env", dir))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "changes how the shell expands") {
+			t.Errorf("reason = %q, want the record", reason)
+		}
+	})
 }
