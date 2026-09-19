@@ -258,7 +258,24 @@ which quoting or escaping first appeared -- so the resolver reads the word the
 same way and assigns nothing. That one reading also decides the override
 prefix and the reserved words `StripShKeywords` peels, which is why
 `'SPILL_GUARD_OVERRIDE=x'` and `'if'` no longer reach the hatch. Ported from
-`claude-bouncer` #110 rather than written here. `NAME+=value` is an assignment
+`claude-bouncer` #110 rather than written here. **Quoting was only half of
+what bash settles early, and the other half was wrong until Q167: so is the
+word's shape.** The head peel was decided on the segment's tokens with the
+variable map already substituted in, so `n=LC_ALL; $n=C cat <key>` peeled
+`LC_ALL=C` and blocked over a file bash never opens -- the shell looks for a
+program of that name, fails, and reads nothing, and `k=if; $k cat <key>` is
+the reserved-word half of the same peel. Both are decided at one point in the
+shell's own order, so one count covers them: the peel is taken on the
+segment's own tokens and applied to the substituted copy by index, `expand`
+being token-for-token. Six sites take it -- the two head peels, `poisonVars`,
+`clobbersIFS`, `forLoopBinding` and `altersGlobbing` -- and upstream's #110
+does the same thing for a different reason, that its substituted tokens lose
+quote provenance entirely where this port carries it alongside. It is a
+precision fix and not a fail-open: nothing crossed that should not have.
+What is still unread is the word splitting that peel rests on --
+`V="cat <key>"; $V` reads the file in bash and is allowed silently here,
+because a substituted value is one token however many words bash makes of it,
+which is Q188. `NAME+=value` is an assignment
 on the same reading and was not one until Q168: the regex wanted the `=` to
 follow the name directly, so `LC_ALL+=C cat <key>` put the prefix in the
 command head, found no reader row for it, contributed no operands and allowed
