@@ -205,6 +205,8 @@ func TestLoadRejects(t *testing.T) {
 			`"validators": ["entropy"], "labels": ["ssn"]`), "nothing reads them"},
 		{"an entropy floor nothing reads",
 			set(`"validators": ["entropy"]`, `"validators": []`), "nothing reads it"},
+		{"keywords on a family the prefilter does not gate",
+			set(`"family": "credential"`, `"family": "pii"`), "carries keywords"},
 
 		// A check named with configuration that can never let it pass. Each of
 		// these loads, compiles, runs on every file and reports nothing, which

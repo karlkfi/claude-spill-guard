@@ -332,6 +332,12 @@ func matchRule(path string, text []byte, source func(int) int, rule rules.Rule) 
 	// The prefilter gates the credential family and nothing else. A pii rule is
 	// pure-numeric with no literal to anchor on, which is one of the reasons
 	// that family ships disabled.
+	//
+	// The loader now refuses keywords on any other family, so no rule file
+	// reaches the first arm. It stays for the reason gates() gives for the
+	// second: a Rule arriving here with keywords nothing reads has to run
+	// rather than be skipped, because a rule that scanned nothing reports what
+	// a rule that scanned everything reports.
 	if rule.Family != rules.Credential || !gates(rule.Keywords) {
 		return matchAll(path, text, source, rule)
 	}

@@ -1196,7 +1196,7 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `description` | What the rule matches, in a few words. It reaches a terminal, so it is escaped like a path. |
 | `regex` | RE2. Compiled at startup; a rule that does not compile is a startup failure, not a skipped rule. |
 | `group` | Which capture group holds the candidate. Lets a rule capture a wider window than it reports. |
-| `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. A keyword at the head of every match the rule can produce is what lets [the pipeline](#pipeline) run the rule at those positions instead of over the buffer; one further in still gates, and pays a full pass. |
+| `keywords` | Word-boundary literals for the prefilter. Empty means ungated, which is expensive — say so deliberately. A keyword at the head of every match the rule can produce is what lets [the pipeline](#pipeline) run the rule at those positions instead of over the buffer; one further in still gates, and pays a full pass. Only the `credential` family is gated on them, so keywords on any other family are a startup failure rather than a setting nothing reads. |
 | `labels` | Word-boundary literals the candidate has to sit near, for the context-proximity check. Read after the match, so unlike `keywords` it gates nothing. |
 | `entropy` | Minimum Shannon bits per character over the captured group — over what the `extent` returned, where a rule names one. Omitted means no floor. A floor above what the group can reach is a startup failure, not a quiet rule. |
 | `validators` | Names from the validator table above, all of which must pass. |
@@ -1208,7 +1208,11 @@ interchangeable. `keywords` runs before the regex and gates the credential
 family; `labels` is read by the context-proximity check after a match, and
 gates nothing. Spending `keywords` on a numeric rule's labels would hand that
 rule the prefilter [the pipeline](#pipeline) says it does not have, and that
-absence is one of the reasons the family ships disabled.
+absence is one of the reasons the family ships disabled. So the loader refuses
+them there, naming the family: an author who writes keywords onto a `pii` rule
+has asked for a literal gate and would otherwise be given the ungated
+full-corpus pass the prefilter exists to avoid, with nothing in the output to
+tell a gated rule from an ungated one.
 
 **The proximity window is not per-rule.** `NearLabel` takes one and the loader
 always passes `internal/validate`'s `DefaultLabelWindow`, measured at 64 bytes.
@@ -1228,7 +1232,10 @@ labels. Presence and configuration are separate on purpose. A numeric rule
 whose author wrote the labels and left the validator off is an ungated numeric
 regex, which is the shape that produced 5,679 matches and no credentials, so
 naming the check is what turns that omission into a startup error. The loader
-rejects a rule carrying configuration no check reads.
+rejects a rule carrying configuration no check reads. `keywords` on a
+non-credential family is the same rejection reached without a validator name:
+the stage that would read it is the prefilter rather than a check, and it reads
+one family.
 
 **It rejects the mirror image too: a check named with configuration that can
 never let it pass.** `context-label` with no labels — absent, empty, or nothing
