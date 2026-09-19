@@ -1307,3 +1307,119 @@ func TestAWordBashReadsAsACommandNameIsNotPeeled(t *testing.T) {
 		})
 	}
 }
+
+// The false positive Q167 names. The head peel was decided on the substituted
+// copy, where bash settles what a word is BEFORE it expands anything -- so
+// `n=LC_ALL; $n=C cat f` peeled `LC_ALL=C` as an env prefix, found `cat`
+// behind it, and blocked over a file bash never opens. The shell looks for a
+// program called `LC_ALL=C`, fails to find one, and reads nothing.
+//
+// Driven on bash 5.3.15 as `env -i bash --norc --noprofile -c '<command>'`
+// over a one-line file: every row below prints nothing, and each of the four
+// fails for its own reason -- the first two are an assignment shape that
+// arrives too late, the third is the reserved-word half of the same peel
+// (`if` run as a program), and the fourth substitutes the whole prefix from
+// one variable.
+//
+// The controls are what make the silence readable: `d=sub; cat $d/f` still
+// denies, so an allow above is the peel order and not the resolver having
+// given up on every `$`.
+func TestAPrefixThatIsOnlyAssignmentShapedAfterExpansionIsNotPeeled(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct{ label, command string }{
+		{"an expanded assignment prefix", "n=LC_ALL; $n=C cat " + name},
+		{"the braced spelling", "n=LC_ALL; ${n}=C cat " + name},
+		{"an expanded reserved word", "k=if; $k cat " + name},
+		{"the whole prefix from one variable", "V=LC_ALL=C; $V cat " + name},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("verdict = %q, want none -- bash opens no file here", stdout)
+			}
+		})
+	}
+	// Controls. The first says the file is found at all; the second says a
+	// variable still resolves into an operand, so the rows above are not
+	// passing because every `$` defeats the resolver.
+	//
+	// What is NOT a control here is `V="cat f"; $V`, which reads the file in
+	// bash and is allowed silently both before and after this change: a
+	// substituted value is never word-split into a command plus operands.
+	// Pre-existing, a different mechanism from the peel order, and filed as
+	// Q188 rather than fixed here.
+	for _, tc := range []struct{ label, command string }{
+		{"written out -- control", "LC_ALL=C cat " + name},
+		{"an operand from a variable -- control", "d=. ; cat $d/" + name},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file named -- bash reads it here", reason)
+			}
+		})
+	}
+}
+
+// The peel order again, inside a command-substitution body. That walk is a
+// second call site with its own copy of the peel, so it can diverge from the
+// one above without any test noticing -- `echo $(n=LC_ALL; $n=C cat f)` is
+// the same word bash refuses, in the position where a second reading lives.
+//
+// The control is the same substitution with the prefix gone: it denies, so an
+// allow above is the peel order rather than the body going unread.
+func TestTheSubstitutionBodyPeelsOnItsOwnTokensToo(t *testing.T) {
+	dir, name := planted(t)
+	t.Run("an expanded prefix inside a substitution", func(t *testing.T) {
+		command := "echo $(n=LC_ALL; $n=C cat " + name + ")"
+		code, stdout, stderr := drive(t, bashCall(t, command, dir))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("verdict = %q, want none -- bash opens no file here", stdout)
+		}
+	})
+	t.Run("the same body without the prefix -- control", func(t *testing.T) {
+		command := "echo $(cat " + name + ")"
+		code, stdout, stderr := drive(t, bashCall(t, command, dir))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the file inside the substitution", reason)
+		}
+	})
+	// What the body's own peel decides that the tracker above does not: which
+	// directory the substitution was written in. A `cd` behind an expanded
+	// prefix is a `cd` bash never makes -- it runs a program called `LC_ALL=C`
+	// with `cd` and the path as its arguments -- so the body's operand must
+	// stay relative to where the string started.
+	base := filepath.Base(dir)
+	t.Run("a cd behind an expanded prefix is not followed", func(t *testing.T) {
+		command := "n=LC_ALL; $n=C cd " + base + "; echo $(cat " + name + ")"
+		code, stdout, stderr := drive(t, bashCall(t, command, filepath.Dir(dir)))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("verdict = %q, want none -- bash never leaves the directory", stdout)
+		}
+	})
+	t.Run("written out, so the cd is followed -- control", func(t *testing.T) {
+		command := "LC_ALL=C cd " + base + "; echo $(cat " + name + ")"
+		code, stdout, stderr := drive(t, bashCall(t, command, filepath.Dir(dir)))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the file under the followed cd", reason)
+		}
+	})
+}

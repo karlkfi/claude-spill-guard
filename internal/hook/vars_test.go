@@ -312,41 +312,63 @@ func TestApplyAssignmentGroup(t *testing.T) {
 	}
 }
 
+// raw is the segment's own tokens and defaults to tokens, which is every row
+// where no substitution happened. Where they differ, tokens is the substituted
+// copy and raw is the word bash actually read: the peel is decided on raw, so a
+// word that becomes assignment-shaped only after expansion cannot move where
+// the command name is (Q167).
 func TestPoisonVars(t *testing.T) {
 	for _, c := range []struct {
 		name   string
+		raw    []string
 		tokens []string
 		before map[string]string
 		after  map[string]string
 	}{
-		{"eval clears", []string{"eval", "echo"}, map[string]string{"f": "x", "g": "y"}, map[string]string{}},
-		{"source clears", []string{"source", "lib.sh"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"dot clears", []string{".", "lib.sh"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"read poisons its names", []string{"read", "-r", "f"}, map[string]string{"f": "x", "g": "y"}, map[string]string{"g": "y"}},
-		{"read with a $ arg clears", []string{"read", "$n"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"read clobbers REPLY", []string{"read"}, map[string]string{"REPLY": "x", "g": "y"}, map[string]string{"g": "y"}},
-		{"keyword prefix skipped", []string{"while", "read", "-r", "f"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"for poisons the loop var", []string{"for", "f", "in", "a", "b"}, map[string]string{"f": "x", "g": "y"}, map[string]string{"g": "y"}},
-		{"env prefix skipped before dispatch", []string{"LC_ALL=C", "read", "-r", "f"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"env prefix name still poisoned", []string{"f=/y", "read", "g"}, map[string]string{"f": "x", "g": "y"}, map[string]string{}},
-		{"prefix assignment poisons", []string{"f=/y", "cat", "z"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"append", []string{"f+=/y"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"array element", []string{"f[0]=/y"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"increment", []string{"f++"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"torn arithmetic", []string{"f", "=", "5"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"plain command leaves it", []string{"grep", "PAT", "y.txt"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
-		{"printf without -v leaves it", []string{"printf", "%s\n", "$UNSET"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
-		{"printf -- -v leaves it", []string{"printf", "--", "-v", "f"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
-		{"printf -v poisons", []string{"printf", "-v", "f", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"printf -vNAME poisons", []string{"printf", "-vf", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
-		{"printf option-region $ clears", []string{"printf", "$fmt", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"eval clears", nil, []string{"eval", "echo"}, map[string]string{"f": "x", "g": "y"}, map[string]string{}},
+		{"source clears", nil, []string{"source", "lib.sh"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"dot clears", nil, []string{".", "lib.sh"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"read poisons its names", nil, []string{"read", "-r", "f"}, map[string]string{"f": "x", "g": "y"}, map[string]string{"g": "y"}},
+		{"read with a $ arg clears", nil, []string{"read", "$n"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"read clobbers REPLY", nil, []string{"read"}, map[string]string{"REPLY": "x", "g": "y"}, map[string]string{"g": "y"}},
+		{"keyword prefix skipped", nil, []string{"while", "read", "-r", "f"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"for poisons the loop var", nil, []string{"for", "f", "in", "a", "b"}, map[string]string{"f": "x", "g": "y"}, map[string]string{"g": "y"}},
+		{"env prefix skipped before dispatch", nil, []string{"LC_ALL=C", "read", "-r", "f"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"env prefix name still poisoned", nil, []string{"f=/y", "read", "g"}, map[string]string{"f": "x", "g": "y"}, map[string]string{}},
+		{"prefix assignment poisons", nil, []string{"f=/y", "cat", "z"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"append", nil, []string{"f+=/y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"array element", nil, []string{"f[0]=/y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"increment", nil, []string{"f++"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"torn arithmetic", nil, []string{"f", "=", "5"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"plain command leaves it", nil, []string{"grep", "PAT", "y.txt"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
+		{"printf without -v leaves it", nil, []string{"printf", "%s\n", "$UNSET"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
+		{"printf -- -v leaves it", nil, []string{"printf", "--", "-v", "f"}, map[string]string{"f": "x"}, map[string]string{"f": "x"}},
+		{"printf -v poisons", nil, []string{"printf", "-v", "f", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"printf -vNAME poisons", nil, []string{"printf", "-vf", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
+		{"printf option-region $ clears", nil, []string{"printf", "$fmt", "%s", "y"}, map[string]string{"f": "x"}, map[string]string{}},
+		// A word that is assignment-shaped only after expansion. bash looks
+		// for a program called `LC_ALL=C`, fails, and never reaches `eval`, so
+		// the map must survive. Peeling the substituted copy finds `eval` and
+		// clears everything -- every resolve in the string lost to a command
+		// bash does not run. `LC_ALL` still goes, through the assignish sweep.
+		{"an expanded prefix does not move the command name",
+			[]string{"$n=C", "eval", "x"}, []string{"LC_ALL=C", "eval", "x"},
+			map[string]string{"f": "x", "LC_ALL": "C"}, map[string]string{"f": "x"}},
+		// The control: written out, bash does peel it and does reach `eval`.
+		{"a written prefix does move it -- control",
+			[]string{"LC_ALL=C", "eval", "x"}, []string{"LC_ALL=C", "eval", "x"},
+			map[string]string{"f": "x", "LC_ALL": "C"}, map[string]string{}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			m := map[string]string{}
 			for k, v := range c.before {
 				m[k] = v
 			}
-			poisonVars(c.tokens, bash.Unquoted(len(c.tokens)), m)
+			raw := c.raw
+			if raw == nil {
+				raw = c.tokens
+			}
+			poisonVars(raw, c.tokens, bash.Unquoted(len(c.tokens)), m)
 			if !mapsEqual(m, c.after) {
 				t.Errorf("map = %v, want %v", m, c.after)
 			}
@@ -354,22 +376,36 @@ func TestPoisonVars(t *testing.T) {
 	}
 }
 
+// raw defaults to tokens as in TestPoisonVars, and differs only on the two rows
+// that pin Q167's reading.
 func TestClobbersIFS(t *testing.T) {
 	for _, c := range []struct {
+		raw    []string
 		tokens []string
 		want   bool
 	}{
-		{[]string{"eval", "x"}, true},
-		{[]string{"declare", "IFS=x"}, true},
-		{[]string{"read", "IFS"}, true},
-		{[]string{"printf", "-v", "IFS", "x"}, true},
-		{[]string{"read", "$n"}, true},
-		{[]string{"unset", "IFS"}, false},
-		{[]string{"printf", "%s", "IFS"}, false},
-		{[]string{"cat", "IFS"}, false},
-		{[]string{"IFS=x", "cat", "f"}, false},
+		{nil, []string{"eval", "x"}, true},
+		{nil, []string{"declare", "IFS=x"}, true},
+		{nil, []string{"read", "IFS"}, true},
+		{nil, []string{"printf", "-v", "IFS", "x"}, true},
+		{nil, []string{"read", "$n"}, true},
+		{nil, []string{"unset", "IFS"}, false},
+		{nil, []string{"printf", "%s", "IFS"}, false},
+		{nil, []string{"cat", "IFS"}, false},
+		{nil, []string{"IFS=x", "cat", "f"}, false},
+		// bash never reaches `read`: it looks for a program named `LC_ALL=C`
+		// and fails, so IFS is not at risk. Peeling the substituted copy finds
+		// `read` and stops propagation for the rest of the string, which costs
+		// every later operand in it.
+		{[]string{"$n=C", "read", "IFS"}, []string{"LC_ALL=C", "read", "IFS"}, false},
+		// The control: written out, bash peels it and does reach `read`.
+		{[]string{"LC_ALL=C", "read", "IFS"}, []string{"LC_ALL=C", "read", "IFS"}, true},
 	} {
-		if got := clobbersIFS(c.tokens, bash.Unquoted(len(c.tokens))); got != c.want {
+		raw := c.raw
+		if raw == nil {
+			raw = c.tokens
+		}
+		if got := clobbersIFS(raw, c.tokens, bash.Unquoted(len(c.tokens))); got != c.want {
 			t.Errorf("clobbersIFS(%q) = %v, want %v", c.tokens, got, c.want)
 		}
 	}
@@ -493,4 +529,57 @@ func TestExpandLoopCandidates(t *testing.T) {
 			t.Errorf("expandLoopCandidates returned %d candidates, want the cap to refuse", len(got))
 		}
 	})
+}
+
+// The third consumer of the head, and the one no end-to-end drive can reach.
+//
+// `observe` peels reserved words before asking whether the segment is a `for`
+// header, and that peel has to be decided on the segment's own tokens like
+// every other (Q167). The shape that separates the two readings is a keyword
+// arriving by expansion -- `k=time; $k for f in a.env b.env` -- where the
+// substituted copy opens with `time` and the written word is `$k`.
+//
+// It has no `drive` test because bash rejects the string at parse time: the
+// `do` of a loop whose `for` bash never saw is a syntax error, so the command
+// never runs and no verdict exists to assert on. `Segments` has no parser and
+// hands the walk a segment list anyway, which is exactly why the reading still
+// matters -- and the unit is the only place it is observable.
+//
+// Peeled on the substituted copy, `time` comes off and `for f in a.env b.env`
+// binds f to two files, so a later `cat $f` resolves and is scanned. Peeled on
+// the segment's own tokens, `$k` is not a keyword, the header starts at `time`
+// and binds nothing -- which is bash's reading of a word it would have run as
+// a program.
+func TestAKeywordArrivingByExpansionDoesNotOpenALoopHeader(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  []string
+		sub  []string
+		want observation
+	}{
+		{"a keyword by expansion", []string{"$k", "for", "f", "in", "a.env", "b.env"},
+			[]string{"time", "for", "f", "in", "a.env", "b.env"}, observedCommand},
+		// The control: written out, `time` is the keyword bash honours and the
+		// header behind it binds.
+		{"written out -- control", []string{"time", "for", "f", "in", "a.env", "b.env"},
+			[]string{"time", "for", "f", "in", "a.env", "b.env"}, observedLoopHeader},
+		// And the header with no keyword in front of it at all, which says the
+		// binding arm works without the peel being involved.
+		{"no keyword -- control", []string{"for", "f", "in", "a.env", "b.env"},
+			[]string{"for", "f", "in", "a.env", "b.env"}, observedLoopHeader},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newVars()
+			_, got := v.observe(tc.raw, tc.sub, bash.Unquoted(len(tc.raw)), true, true)
+			if got != tc.want {
+				t.Errorf("observation = %v, want %v", got, tc.want)
+			}
+			if tc.want == observedLoopHeader && len(v.loops["f"]) != 2 {
+				t.Errorf("loops[f] = %v, want the two items bound", v.loops["f"])
+			}
+			if tc.want == observedCommand && v.loops["f"] != nil {
+				t.Errorf("loops[f] = %v, want nothing bound", v.loops["f"])
+			}
+		})
+	}
 }
