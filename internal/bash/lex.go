@@ -54,7 +54,74 @@ const commentPreceders = " \t\n;|&()<>"
 // starts a comment -- what bash sees just inside a `$(` or a backtick.
 const substOpen = '('
 
-var assignmentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\+?=`)
+// nameRE is the variable name an assignment token opens with. It is the whole
+// of what a regex can answer here: bash matches an array subscript's brackets
+// by depth, so `FOO[a[0]]=x` is one subscript and RE2 has no recursion.
+// assignmentEnd walks the rest.
+var nameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*`)
+
+// assignmentEnd reports the offset just past the `=` of an assignment token,
+// or -1 for a token bash reads as a command name.
+//
+// The three spellings, driven on bash 5.3.15: `NAME=v`, `NAME+=v`, and
+// `NAME[sub]=v` with or without the `+`. A subscripted prefix is peeled like
+// any other -- `FOO[0]=x cat f` prints f, having written `FOO[0]: not a valid
+// identifier` to stderr and left FOO alone -- so a reader behind one is a
+// reader whose operands cross.
+//
+// The offset is what isAssignment compares quoting against, so it has to be
+// the real end of the operator and not the end of a prefix of it.
+func assignmentEnd(tok string) int {
+	i := len(nameRE.FindString(tok))
+	if i == 0 {
+		return -1
+	}
+	if i < len(tok) && tok[i] == '[' {
+		j := subscriptEnd(tok, i)
+		if j < 0 {
+			return -1
+		}
+		i = j
+	}
+	if i < len(tok) && tok[i] == '+' {
+		i++
+	}
+	if i < len(tok) && tok[i] == '=' {
+		return i + 1
+	}
+	return -1
+}
+
+// subscriptEnd reports the offset just past the `]` closing the subscript that
+// opens at tok[open], or -1 when nothing closes it.
+//
+// Depth-counted, because bash's own scan is: `FOO[a[0]]=x` is an assignment
+// and `FOO[a[b]=x` is a parse error the shell dies on rather than a command it
+// runs. The first `]` at depth 0 closes, so `FOO[a]b]=x` and `FOO[]]=x` are
+// command names -- driven, both report `command not found` and read no file.
+//
+// It reads the token the lexer already stripped quotes from, which is where
+// this stops short of bash: `FOO["a]b"]=x` is an assignment to bash, whose
+// scan sees the quotes, and the `]` inside them closes the subscript here. The
+// token's quote provenance says only where quoting FIRST appeared, so it
+// cannot say which `]` was quoted, and isAssignment refuses the whole token on
+// that offset -- the under-peeling direction, which leaves such a call
+// unscanned. Q185 carries it.
+func subscriptEnd(tok string, open int) int {
+	depth := 0
+	for i := open; i < len(tok); i++ {
+		switch tok[i] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
 
 // NotQuoted is the QuotedFrom of a word no quoting or escaping touched.
 //
@@ -102,40 +169,73 @@ func Unquoted(n int) []int {
 // all is the whole of the distinction -- `SP='a reason'` is quoted and is an
 // assignment, and it is how the override's own documented form is written.
 func isAssignment(tok string, quotedFrom int) bool {
-	m := assignmentRE.FindStringIndex(tok)
-	return m != nil && quotedFrom >= m[1]
+	end := assignmentEnd(tok)
+	return end >= 0 && quotedFrom >= end
 }
 
+// AssignForm is how an assignment token spells itself, which is what decides
+// what a caller may read off it. The name is the same in all three; the value
+// and whether bash sets anything at all are not.
+type AssignForm int
+
+const (
+	// AssignPlain is `NAME=v`: bash sets NAME to v, and a prefix exports it.
+	AssignPlain AssignForm = iota
+	// AssignAppend is `NAME+=v`: bash sets NAME to its old value plus v,
+	// which this cannot see.
+	AssignAppend
+	// AssignSubscript is `NAME[sub]=v`, with or without the `+`. It wins over
+	// the append it may also be, because it is the stronger refusal: what
+	// `$NAME` reads afterwards depends on the subscript's VALUE, which can be
+	// arithmetic, and as a command prefix bash sets nothing whatever.
+	AssignSubscript
+)
+
 // SplitAssignment reads an assignment token as bash reads it: `NAME=v` gives
-// ("NAME", false, "v") and `NAME+=v` gives ("NAME", true, "v").
+// ("NAME", AssignPlain, "v"), `NAME+=v` gives ("NAME", AssignAppend, "v") and
+// `NAME[0]=v` gives ("NAME", AssignSubscript, "v").
 //
-// The `+` belongs to the operator, so a caller reaching for a Cut on "=" holds
-// a name of `NAME+` -- it then tracks a variable no read of `NAME` will find,
-// and poisons `NAME+` while leaving `NAME` on the map at a stale value. Every
-// site recovering a name from an assignment goes through here for that reason.
+// The name is what every caller wants and what none of them can Cut for. The
+// operator's `+` and the subscript both sit on the name's side of the `=`, so
+// a Cut holds `NAME+` or `NAME[0]` -- a name no read of `NAME` will find, so
+// the caller tracks a variable nothing reads and leaves the real one on the
+// map at a stale value. Every site recovering a name from an assignment goes
+// through here for that reason.
 //
 // Ask it only of a token isAssignment accepts. A word with no `=` comes back
-// whole as the name, so `SplitAssignment("CDPATH")` is ("CDPATH", false, "")
-// and a caller comparing names would match a bare `CDPATH` that assigns
+// whole as the name, so `SplitAssignment("CDPATH")` is ("CDPATH", AssignPlain,
+// "") and a caller comparing names would match a bare `CDPATH` that assigns
 // nothing. Every caller here reaches it through envPrefix, which yields only
 // assignments, so nothing reaches that arm today.
 //
-// What an append MEANS is the caller's: bash resolves it against the value the
-// segment inherits, which this cannot see, so dropping the name is the answer
-// wherever a value is being tracked.
+// What each form MEANS is the caller's, and the two non-plain forms differ.
+// An append's value is the old one plus the new, which this cannot see, so a
+// caller tracking a value drops the name. A subscript is that and more: bash
+// resolves `$NAME` as `${NAME[0]}`, so `FOO=old; FOO[1]=x` leaves `$FOO` at
+// `old` while `FOO=old; FOO[0]=x` makes it `x` -- one syntactic shape, two
+// answers, picked by a subscript this never evaluates. And as a command
+// prefix it sets nothing at all: driven on bash 5.3.15, `FOO=old; FOO[0]=x
+// cat f` runs cat, warns `FOO[0]: not a valid identifier`, and leaves `$FOO`
+// at `old`. So a caller asking whether bash armed something by this name --
+// internal/hook's override hatch is the one here -- must refuse the subscript
+// where it accepts the append.
 //
-// `env(1)` is the exception and has no site here. It is an external program
-// with no append semantics -- driven on bash 5.3.15, `env FOO+=bar env` exports
-// a variable literally called `FOO+` and leaves `FOO` at its old value, where
-// the `export` builtin beside it appends. internal/readers carries no env row,
-// so nothing in this build looks through an env prefix to the command behind
-// it; a reader that did would need the name split the other way.
-func SplitAssignment(tok string) (name string, appends bool, value string) {
+// `env(1)` is the exception on the append and has no site here. It is an
+// external program with no append semantics -- driven on bash 5.3.15, `env
+// FOO+=bar env` exports a variable literally called `FOO+` and leaves `FOO` at
+// its old value, where the `export` builtin beside it appends.
+// internal/readers carries no env row, so nothing in this build looks through
+// an env prefix to the command behind it; a reader that did would need the
+// name split the other way.
+func SplitAssignment(tok string) (name string, form AssignForm, value string) {
 	name, value, _ = strings.Cut(tok, "=")
 	if rest, ok := strings.CutSuffix(name, "+"); ok {
-		return rest, true, value
+		name, form = rest, AssignAppend
 	}
-	return name, false, value
+	if i := strings.IndexByte(name, '['); i >= 0 {
+		return name[:i], AssignSubscript, value
+	}
+	return name, form, value
 }
 
 // isReservedWord reports whether bash would read tok as a shell keyword.

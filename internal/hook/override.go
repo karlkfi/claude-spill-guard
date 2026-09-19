@@ -48,8 +48,17 @@ func override(call payload, event Event) (why string, present bool) {
 			// value is the suffix alone: bash would prepend whatever the
 			// environment holds, and reading that is the one thing this hatch
 			// refuses to do.
-			name, _, value := bash.SplitAssignment(assignment)
-			if name == overrideVar {
+			//
+			// `SPILL_GUARD_OVERRIDE[0]=r` does not arm, and the peel that now
+			// reaches it is why the line is here. Bash sets no variable of
+			// that name from a subscripted prefix -- driven on 5.3.15, it
+			// warns `not a valid identifier`, runs the command, and leaves the
+			// name alone -- so arming would hand the hatch a spelling the
+			// shell never wrote. Read off the form rather than the text: a
+			// Cut on `=` leaves `SPILL_GUARD_OVERRIDE[0]`, which compares
+			// unequal here by accident and would not if the subscript moved.
+			name, form, value := bash.SplitAssignment(assignment)
+			if name == overrideVar && form != bash.AssignSubscript {
 				return value, true
 			}
 		}

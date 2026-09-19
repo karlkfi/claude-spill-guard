@@ -725,9 +725,23 @@ func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, 
 }
 
 // assigns reports whether the segment's inline prefix assigns name.
+//
+// A subscripted spelling does not, which is bash's own reading and not a
+// conservatism: a prefix assignment to `NAME[sub]` sets nothing at all, so the
+// command behind it runs with the name as it was. Driven on bash 5.3.15 with
+// the only caller's variable, `CDPATH[0]=<dir> cd target` reports `CDPATH[0]:
+// not a valid identifier` and leaves the shell where it started, while
+// `CDPATH=<dir>` and `CDPATH+=:<dir>` both find target under dir. So the
+// subscript is refused here for the reason the override hatch refuses it:
+// both ask whether bash set something by this name, and it did not.
+//
+// The standalone spelling is a different question and not this one, which no
+// caller asks for the plain spelling either: `CDPATH[0]=<dir>; cd target`
+// does search, and so does `CDPATH=<dir>; cd target`. Q186 carries it.
 func assigns(tokens []string, quotedFrom []int, name string) bool {
 	for _, assignment := range envPrefix(tokens, quotedFrom) {
-		if n, _, _ := bash.SplitAssignment(assignment); n == name {
+		if n, form, _ := bash.SplitAssignment(assignment); n == name &&
+			form != bash.AssignSubscript {
 			return true
 		}
 	}

@@ -208,6 +208,12 @@ func TestStripEnvPrefix(t *testing.T) {
 		{"a token that only looks like one is left", []string{"1=x", "cmd"},
 			[]string{"1=x", "cmd"}},
 		{"nothing to peel", []string{"cmd", "A=1"}, []string{"cmd", "A=1"}},
+		// A subscripted prefix is peeled, because bash peels it and runs the
+		// command behind it (Q175).
+		{"a subscripted prefix is peeled", []string{"A[0]=1", "cmd", "arg"},
+			[]string{"cmd", "arg"}},
+		{"and one bash reads as a command name is not",
+			[]string{"A[0]]=1", "cmd"}, []string{"A[0]]=1", "cmd"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := StripEnvPrefix(tc.in, Unquoted(len(tc.in))); !equalStrings(got, tc.want) {
@@ -251,27 +257,155 @@ func TestStripShKeywords(t *testing.T) {
 // `A+=b=c` has an `=` inside the value, and `A+=` has no value at all.
 func TestSplitAssignment(t *testing.T) {
 	for _, tc := range []struct {
-		tok     string
-		name    string
-		appends bool
-		value   string
+		tok   string
+		name  string
+		form  AssignForm
+		value string
 	}{
-		{"A=1", "A", false, "1"},
-		{"A+=1", "A", true, "1"},
-		{"A+=b=c", "A", true, "b=c"},
-		{"A=b=c", "A", false, "b=c"},
-		{"A+=", "A", true, ""},
-		{"A=", "A", false, ""},
-		{"A=+1", "A", false, "+1"},
+		{"A=1", "A", AssignPlain, "1"},
+		{"A+=1", "A", AssignAppend, "1"},
+		{"A+=b=c", "A", AssignAppend, "b=c"},
+		{"A=b=c", "A", AssignPlain, "b=c"},
+		{"A+=", "A", AssignAppend, ""},
+		{"A=", "A", AssignPlain, ""},
+		{"A=+1", "A", AssignPlain, "+1"},
+		// The subscript sits on the name's side of the `=` exactly as the `+`
+		// does, so a Cut holds `A[0]` -- a name no read of `$A` will find.
+		{"A[0]=1", "A", AssignSubscript, "1"},
+		{"A[]=1", "A", AssignSubscript, "1"},
+		{"A[b[0]]=1", "A", AssignSubscript, "1"},
+		// A subscript whose own text holds an `=`: the Cut takes the first
+		// one, which is inside the brackets, so the name survives only
+		// because the `[` is what ends it.
+		{"A[b=c]=1", "A", AssignSubscript, "c]=1"},
+		// Subscripted AND appending. AssignSubscript wins: it is the stronger
+		// refusal, and no caller wants the weaker one here.
+		{"A[0]+=1", "A", AssignSubscript, "1"},
 		// Outside the precondition, pinned rather than asserted as correct: a
 		// caller comparing names would read this as an assignment to `A`.
-		{"A", "A", false, ""},
+		{"A", "A", AssignPlain, ""},
 	} {
 		t.Run(tc.tok, func(t *testing.T) {
-			name, appends, value := SplitAssignment(tc.tok)
-			if name != tc.name || appends != tc.appends || value != tc.value {
+			name, form, value := SplitAssignment(tc.tok)
+			if name != tc.name || form != tc.form || value != tc.value {
 				t.Errorf("SplitAssignment(%q) = (%q, %v, %q), want (%q, %v, %q)",
-					tc.tok, name, appends, value, tc.name, tc.appends, tc.value)
+					tc.tok, name, form, value, tc.name, tc.form, tc.value)
+			}
+		})
+	}
+}
+
+// An array subscript makes a word an assignment prefix, and bash runs the
+// command behind it. `FOO[0]=x cat f` prints f: the shell peels the word as a
+// prefix, fails to export it -- `FOO[0]: not a valid identifier` on stderr --
+// and runs cat anyway. So a reader behind such a prefix opens its operands,
+// and a peel that stops at the `[` reads the command name as `FOO[0]=x`,
+// finds no reader row, and lets the file cross unscanned (Q175).
+//
+// Driven 2026-09-19 on bash 5.3.15 as `env -i bash --norc --noprofile -c
+// '<word> cat f'` over a file holding one line, reading whether that line was
+// printed. Six rows peel and five do not, which is what says the drive can
+// print either answer -- and the five split three ways, so the table is not
+// one rule wearing five hats: `FOO[a]b]=x` and `FOO[]]=x` report `command not
+// found` and read nothing, `FOO[0=x` and `FOO[a[b]=x` die at parse time with
+// `unexpected EOF while looking for matching ']'`, and `0FOO[0]=x` is not a
+// name at all.
+//
+// The depth count is the half a regex cannot do, and both directions of it are
+// here: `FOO[a[0]]=x` peels, so the first `]` does not always close, and
+// `FOO[a]b]=x` does not, so the last one does not always close either.
+func TestASubscriptedAssignmentIsOneBashPeels(t *testing.T) {
+	for _, tc := range []struct {
+		word string
+		want bool // bash peeled it and ran the command behind it
+	}{
+		{`FOO[0]=x`, true},
+		{`FOO[0]+=x`, true},
+		{`FOO[]=x`, true},
+		{`FOO[a]=x`, true},
+		{`FOO[a[0]]=x`, true},
+		{`FOO[0]="a b"`, true},
+
+		{`FOO[a]b]=x`, false},
+		{`FOO[]]=x`, false},
+		{`FOO[0=x`, false},
+		{`FOO[a[b]=x`, false},
+		{`0FOO[0]=x`, false},
+	} {
+		t.Run(tc.word, func(t *testing.T) {
+			tok, qf := lexOne(t, tc.word)
+			if got := isAssignment(tok, qf); got != tc.want {
+				t.Errorf("isAssignment(%q, %d) = %v, want %v (bash: %v)",
+					tok, qf, got, tc.want, tc.want)
+			}
+		})
+	}
+}
+
+// Quoting disarms a subscripted assignment the way it disarms a plain one, and
+// the boundary is the same offset: everything up to and including the `=`.
+//
+// Driven the same day and the same way as the table above.
+func TestQuotingDisarmsASubscriptedAssignment(t *testing.T) {
+	for _, tc := range []struct {
+		word string
+		want bool // bash peeled it and ran the command behind it
+	}{
+		{`FOO[0]=x`, true},
+		{`FOO[0]="a b"`, true},
+
+		{`'FOO[0]=x'`, false},
+		{`"FOO[0]=x"`, false},
+		{`FOO\[0]=x`, false},
+		{`F'O'O[0]=x`, false},
+	} {
+		t.Run(tc.word, func(t *testing.T) {
+			tok, qf := lexOne(t, tc.word)
+			if got := isAssignment(tok, qf); got != tc.want {
+				t.Errorf("isAssignment(%q, %d) = %v, want %v (bash: %v)",
+					tok, qf, got, tc.want, tc.want)
+			}
+		})
+	}
+}
+
+// Four subscripts bash peels and this does not, all for one reason: bash scans
+// for the closing `]` over the word as WRITTEN, and this scans what the lexer
+// left of it.
+//
+// The lexer splits a word on whitespace and on shell punctuation, and removes
+// quotes before anything asks what the word is. So a subscript holding any of
+// those either arrives as several tokens, or arrives as one token whose quotes
+// are gone and whose provenance is a single offset -- which says where quoting
+// began and cannot say which `]` it covered. Each row is read as a command
+// name, and a reader behind such a prefix has its operands go unscanned:
+// under-peeling, the fail-open direction, and the one Q175 closed for the
+// ordinary spelling.
+//
+// Closing these means keeping `NAME[...]` whole in the lexer, quotes and all,
+// which closes all four at once -- one mechanism, so one row: Q185.
+//
+// Every word below peels in bash and prints the file, driven 2026-09-19 on
+// 5.3.15 the same way as the tables above. The rows are here so the gap is a
+// failing expectation somebody has to delete rather than a case nobody wrote.
+func TestASubscriptTheLexerCannotKeepWholeIsUnderPeeled(t *testing.T) {
+	for _, tc := range []struct {
+		word string
+		why  string
+	}{
+		{`FOO[$((1+1))]=x`, "the parens are punctuation, so the word lexes as five tokens"},
+		{`FOO[a b]=x`, "the space splits the word in two"},
+		{`FOO["a]b"]=x`, "the quoted `]` closes the subscript once the quotes are gone"},
+		{`FOO[a\]b]=x`, "the escaped `]` closes it the same way"},
+	} {
+		t.Run(tc.word, func(t *testing.T) {
+			toks, qf, err := lex(tc.word)
+			if err != nil {
+				t.Fatalf("lex(%q): %v", tc.word, err)
+			}
+			if len(toks) == 1 && isAssignment(toks[0], qf[0]) {
+				t.Errorf("%q now reads as an assignment, which is bash's own answer"+
+					" -- Q185 has closed, so drop this row (%s)", tc.word, tc.why)
 			}
 		})
 	}

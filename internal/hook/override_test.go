@@ -500,3 +500,36 @@ func TestAnAppendSpelledPrefixArmsTheHatch(t *testing.T) {
 		}
 	})
 }
+
+// `SPILL_GUARD_OVERRIDE[0]=r` must not arm the hatch, and Q175's peel is what
+// makes the question live: before it, the word took the command head and never
+// reached the hatch at all, so nothing had to refuse it.
+//
+// Bash sets no variable of that name from a subscripted prefix. Driven on
+// 5.3.15, `SPILL_GUARD_OVERRIDE[0]=r cat f` warns `not a valid identifier`,
+// exports nothing, and leaves the name unset -- so arming would hand the
+// escape hatch a spelling the shell never wrote, which is a wider hatch than
+// the documented one rather than a narrower scan.
+//
+// The plain and append spellings are the controls: both arm, so a deny here is
+// the subscript being refused and not the hatch being broken.
+func TestASubscriptedOverrideDoesNotArmTheHatch(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct {
+		label, prefix, want string
+	}{
+		{"plain -- control", `SPILL_GUARD_OVERRIDE=fixture`, "ask"},
+		{"append -- control", `SPILL_GUARD_OVERRIDE+=fixture`, "ask"},
+		{"subscripted", `SPILL_GUARD_OVERRIDE[0]=fixture`, "deny"},
+		{"subscripted and appending", `SPILL_GUARD_OVERRIDE[0]+=fixture`, "deny"},
+		{"subscripted behind a plain assignment", `LC_ALL=C SPILL_GUARD_OVERRIDE[0]=fixture`, "deny"},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			command := tc.prefix + ` cat ` + name
+			_, stdout, _ := drive(t, bashCall(t, command, dir))
+			if got := verdictOf(t, stdout); got != tc.want {
+				t.Errorf("permissionDecision = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
