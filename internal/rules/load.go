@@ -209,13 +209,20 @@ func compile(e entry) (Rule, error) {
 	// ungated full-corpus pass the prefilter exists to avoid -- the shape that
 	// produced 5,679 matches and no credentials on the inherited ruleset --
 	// with nothing in the output telling the two apart.
+	//
+	// It reads namesALiteral rather than a length, which is the same question
+	// the credential clause above asks of the same field. A list holding
+	// nothing but empty strings names no keyword, so there is no "gate this on
+	// a literal" for the author to have meant, and refusing it here would
+	// report a family problem where the field is simply spelled at its neutral
+	// value -- which `"keywords": []` already is, and already loads.
 	if len(rule.Labels) > 0 && !rule.Uses(ContextLabel) {
 		return fail("carries labels but does not name %q, so nothing reads them", ContextLabel)
 	}
 	if rule.Entropy > 0 && !rule.Uses(Entropy) {
 		return fail("carries an entropy floor but does not name %q, so nothing reads it", Entropy)
 	}
-	if len(rule.Keywords) > 0 && rule.Family != Credential {
+	if namesALiteral(rule.Keywords) && rule.Family != Credential {
 		return fail("family %q carries keywords, but the prefilter gates %q and "+
 			"nothing else, so nothing reads them", rule.Family, Credential)
 	}
@@ -235,9 +242,16 @@ func compile(e entry) (Rule, error) {
 	// the empty string, a run of one byte, a NUL. The rule loads, runs, and
 	// gates on nothing, which is exactly what leaving the check off would have
 	// given its author. A negative floor is refused above, so zero is the whole
-	// of what is left here. `"entropy": 0.0` without the check named is not
-	// this case: it is the value a missing field decodes to, and the clause
-	// above already covers a floor nothing reads for every value but that one.
+	// of what is left here.
+	//
+	// `"entropy": 0.0` with the check *not* named is deliberately still
+	// accepted, and not because the loader cannot tell it from an absent field
+	// -- it can, which is why every field here is a pointer. It is accepted
+	// because `"labels": []` with no `context-label` is accepted, and both are
+	// one thing: a field spelled at its neutral value with nothing reading it.
+	// Refusing one would owe the other the same answer, which is a wider
+	// change than the rule this clause came from, and no rule is harmed by
+	// either.
 	if rule.Uses(Entropy) && rule.Entropy == 0 {
 		return fail("names %q with no floor, and every candidate clears a floor of "+
 			"zero, so it gates nothing", Entropy)
