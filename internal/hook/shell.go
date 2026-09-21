@@ -13,8 +13,8 @@ import (
 // otherwise a fixed list over /bin, /usr/bin, /usr/local/bin and
 // /opt/homebrew/bin ordered zsh first unless SHELL holds `bash`. Read out of
 // the 2.1.270 CLI and the 2.1.275 the desktop app runs -- 882 bytes in each
-// and alpha-equivalent, not byte-identical, since the minifier renames every
-// identifier between builds -- and corroborated by 96 zsh tool shells in this
+// and alpha-equivalent, not byte-identical, since the minifier renames 10 of
+// its 16 identifiers between builds -- and corroborated by 96 zsh tool shells in this
 // machine's transcripts before a CLAUDE_CODE_SHELL was committed to settings.
 // Since driven, by extracting the selection function and running it under
 // jsc across nine environment arms, all nine agreeing. Q163 carries both.

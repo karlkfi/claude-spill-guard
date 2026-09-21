@@ -2437,9 +2437,9 @@ any bash path -- with the `PATH` hit for the preferred name unshifted ahead of
 it and the other pushed behind, and the whole order reverses only when `SHELL`
 holds `bash`. Read out of the shipped binary in the 2.1.270 CLI
 and in the 2.1.275 the desktop app runs -- 882 bytes in each and
-alpha-equivalent rather than byte-identical, since the minifier renames every
-identifier between builds, so the two carry the same ladder and not the same
-bytes. So a machine whose `SHELL` is unset, or names `fish` or `/bin/sh`, gets
+alpha-equivalent rather than byte-identical, since the minifier renames 10 of
+its 16 identifiers between builds, so the two carry the same ladder and not the
+same bytes. So a machine whose `SHELL` is unset, or names `fish` or `/bin/sh`, gets
 zsh.
 
 This machine ran zsh for a month and the switch is dated. Recovered from 2,232
@@ -2535,8 +2535,14 @@ real run -- that is a property of the harness here rather than of one session's
 credentials. What was done instead: the 882-byte selection function extracted
 from the 2.1.270 binary verbatim, its three externals stubbed, and the result
 run under `jsc` across nine environment arms. All nine agree with the reading
-above, including the substring trap -- `SHELL=/opt/bashful/bin/fish` selects
-bash. An authenticated drive was declined rather than unavailable for one arm
+above, including the decoy: `CLAUDE_CODE_SHELL=/opt/bashful/bin/fish` holds
+`bash` as a substring, so the harness accepts that path and **spawns fish**.
+It is the sharpest case for reading the dialect off the base name rather than
+off the path. A resolver that took the substring for the answer would report
+bash, expand the glob and allow -- over a shell that recurses `**` as zsh does,
+so the under-scan this section exists to close would have been reintroduced by
+the fix for it. Driven against the built binary: both that path and
+`/home/zshaw/bin/fish`, made executable, defer. An authenticated drive was declined rather than unavailable for one arm
 of it: writing a synthetic zsh snapshot would contaminate the population the
 96-of-212 count is drawn from.
 

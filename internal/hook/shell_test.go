@@ -60,6 +60,14 @@ func TestTheToolShellIsBashOnlyWhenSomethingNamesBash(t *testing.T) {
 		// Named by neither variable's test, so the harness falls past it --
 		// and this falls with it rather than reading the name.
 		{"a shell the ladder does not name", "", "fish", "SHELL", false, false},
+		// The decoy, and the sharpest case for reading the base name: the
+		// harness takes this path on the substring and spawns fish, which
+		// recurses `**` as zsh does. Answering bash off the substring would
+		// expand the glob and allow -- reintroducing, in the fix for it, the
+		// under-scan this whole item exists to close. Both spellings driven
+		// against the built binary.
+		{"a fish under a directory named for bash", "opt-bashful-bin", "fish", "CLAUDE_CODE_SHELL", true, false},
+		{"a fish under a directory named for zsh", "home-zshaw-bin", "fish", "CLAUDE_CODE_SHELL", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
