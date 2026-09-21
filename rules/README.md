@@ -301,20 +301,34 @@ line is a document displaying a key block, which every arm already carries.
 the one that allows whitespace on both sides of it.** Three spellings, driven
 2026-09-21 against constructed layouts:
 
-| | a diff of an indented key | `  - <body>` | `- <body>` |
-|---|---|---|---|
-| `[-+]?[ \t]*`, shipped | yes | no | yes |
-| `[ \t]*[-+]?` | no | no | no |
-| `[ \t]*[-+]?[ \t]*` | yes | yes | yes |
+| | a diff of an unindented key | a diff of an indented key | `  - <body>` | `- <body>` |
+|---|---|---|---|---|
+| `[-+]?[ \t]*`, shipped | yes | yes | no | yes |
+| `[ \t]*[-+]?` | yes | no | no | no |
+| `[ \t]*[-+]?[ \t]*` | yes | yes | yes | yes |
 
-A diff writes its marker in column one, so the middle row is not a narrower
-way to say the same thing — it stops crossing the producer this section is
-about, which is why the choice is between the first and the third. The third
-is the widening to refuse: it readmits every indented Markdown bullet whose
-first token is 32 base64 characters, and it buys nothing, because no producer
-here writes whitespace in front of the marker. The corpus and the differential
-are both empty on this axis and cannot separate the three, so this is a shape
-argument rather than a measured one. `an indented list item, which is the
+**The first column is what stops the middle row being a non-starter, and an
+earlier version of this table left it out.** Without it the middle spelling
+read as refusing the producer altogether. It does not: every unindented diff
+shape crosses it, both markers and both layouts, and what it loses is the one
+row where the two widenings meet — a key indented *inside* a diff. Driven
+2026-09-21 by the independent review of the pull request that made this change
+and re-driven here, by putting the middle spelling into all four sites of the
+shipped ruleset: all three planted patch fixtures still report, both corpus
+subtractions come back byte-identical to shipped, and exactly one of the 34
+rows in `TestPrivateKeyBlockAcrossThePEMLayouts` goes red.
+
+So the first row against the second is a trade with a named case on each side,
+not a dismissal. The middle spelling refuses all three bullet shapes, so it is
+the only one of the three that adds no false-positive surface at all; shipped
+buys back the indented-in-a-diff case — a committed Kubernetes secret is the
+producer, and plausibly the highest-traffic real spill this rule sees — and
+pays the unindented `- <body>` bullet beside it. The third spelling is the
+widening to refuse: it readmits every indented Markdown bullet whose first
+token is 32 base64 characters, and it buys nothing over shipped on any column
+here, because no producer writes whitespace in front of the marker. The corpus
+and the differential are empty on this axis and separate none of the three, so
+what prices them is this table and the producer argument above it. `an indented list item, which is the
 marker and the indentation the other way round` in
 `TestPrivateKeyBlockAcrossThePEMLayouts` is the row that holds it, and it is
 red under the third spelling and green under the other two.
