@@ -68,6 +68,10 @@ func TestTheToolShellIsBashOnlyWhenSomethingNamesBash(t *testing.T) {
 		// against the built binary.
 		{"a fish under a directory named for bash", "opt-bashful-bin", "fish", "CLAUDE_CODE_SHELL", true, false},
 		{"a fish under a directory named for zsh", "home-zshaw-bin", "fish", "CLAUDE_CODE_SHELL", true, false},
+		// And at the other rung: the substring is tested on SHELL too, and an
+		// executable hit there is unshifted ahead of every fallback candidate,
+		// so the harness spawns this one as well.
+		{"a decoy named by SHELL rather than the setting", "opt-bashful-bin", "fish", "SHELL", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()

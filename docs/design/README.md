@@ -2500,10 +2500,13 @@ substring decides whether it *accepts* a path; what the file **is** decides how
 it globs, so the base name is read for that, and a `sh` under a directory named
 `bash-builds` is spawned by the harness and is not bash here. The executable
 test asks `access(2)` rather than reading `os.Stat`'s mode bits, because the
-two disagree under an ACL and one direction of that is an under-scan: where the
+two disagree on ownership, on an ACL and on a `noexec` mount, and one direction
+of that is an under-scan: where the
 bits say executable and `access` would refuse, the harness throws, falls through
 to detection and may spawn zsh, while a reading off the bits answers *bash* and
-expands under bash's rules. The other direction costs a record. Windows has no
+expands under bash's rules. The other direction costs a record. `syscall.Access`
+is stdlib and is not portable -- it does not exist on Windows, which
+`cross-compile` gates -- so the split is by build tag rather than by choice. Windows has no
 execute bit and reads the bits instead, which is `Q192`'s platform anyway.
 
 And the third step is not reproduced. It is settled -- the expression is
@@ -2538,11 +2541,17 @@ run under `jsc` across nine environment arms. All nine agree with the reading
 above, including the decoy: `CLAUDE_CODE_SHELL=/opt/bashful/bin/fish` holds
 `bash` as a substring, so the harness accepts that path and **spawns fish**.
 It is the sharpest case for reading the dialect off the base name rather than
-off the path. A resolver that took the substring for the answer would report
-bash, expand the glob and allow -- over a shell that recurses `**` as zsh does,
-so the under-scan this section exists to close would have been reintroduced by
-the fix for it. Driven against the built binary: both that path and
-`/home/zshaw/bin/fish`, made executable, defer. An authenticated drive was declined rather than unavailable for one arm
+off the path, and it applies at **both** rungs: the substring is tested on
+`SHELL` too, and an executable hit there is unshifted ahead of every fallback
+candidate, so `SHELL=/opt/bashful/bin/fish` is spawned where that file exists
+and merely flips the step-3 ordering where it does not. A resolver that took
+the substring for the answer would report bash, expand the glob and allow --
+over a shell that recurses `**` as zsh does, so the under-scan this section
+exists to close would have been reintroduced by the fix for it. A substring hit
+means *not certainly bash*; only a base name of `bash` earns the bash answer.
+Driven against the built binary at both rungs: `/opt/bashful/bin/fish` and
+`/home/zshaw/bin/fish`, made executable, defer -- against a real bash allowing
+and a real zsh deferring in the same run. An authenticated drive was declined rather than unavailable for one arm
 of it: writing a synthetic zsh snapshot would contaminate the population the
 96-of-212 count is drawn from.
 
