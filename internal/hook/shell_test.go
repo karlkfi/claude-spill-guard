@@ -220,6 +220,15 @@ func TestAShellTheHarnessCouldNotSpawnIsNotTheShell(t *testing.T) {
 		// tries zsh first; this refuses the step instead and says so with an
 		// empty path, which is the reason's other arm.
 		{"nothing names a shell", "", "", false, ""},
+		// The base-name test belongs to the path the ladder SELECTS, not to
+		// the variable. A dead bash path falls through, and the harness then
+		// picks whatever exists -- zsh, on a machine with no bash -- so a
+		// resolver reading the variable's base name answers bash for a zsh
+		// tool shell. Unreachable on macOS, where /bin/bash ships; a minimal
+		// Linux image with zsh and no bash is where it bites, and both Linux
+		// targets ship. Driven on the built binary alongside its control, a
+		// live bash at the same rung, which expands.
+		{"a dead bash path names no shell", unreadable, "", false, ""},
 		{"a relative path is not a path the harness took", "bin/bash", "", false, ""},
 		{"a path that does not exist", filepath.Join(dir, "gone", "bash"), "", false, ""},
 	} {
