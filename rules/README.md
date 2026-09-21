@@ -347,6 +347,23 @@ arms are paid for by the producer above rather than by the sweep. The clean
 corpus is unchanged either side, for all four: 13 files, 13,360 bytes, 0
 findings.
 
+**A second population reaches the shape that one could not, and it was taken by
+the independent review of this change rather than here.** Same four arms over
+`~/workspace` on 2026-09-21: 8,514,452 files, 13,737 carrying `PRIVATE KEY`,
+and 876 patch-shaped files of which **24 do carry a key** — where the module
+cache had 302 patches and none. The arms report 718, 719, 720 and 720 matches,
+and the entire newly-admitted set across all three widenings is **this change's
+own two planted fixtures**, sitting in the branch's worktree. So the
+false-positive bound now holds over a population that contains key-bearing
+patches, which is what the paragraph above has to concede it does not, and the
+`>` refusal survives 17x the keyword traffic unchanged.
+
+It is recorded rather than re-taken, and deliberately. `~/workspace` holds live
+worktrees that move between runs, so a second pass would produce a third set of
+numbers and settle nothing; the reading above is one run of one binary over
+both populations, which is what makes the two comparable. Attributed because it
+is not this branch's measurement.
+
 `TestTheCorpusHoldsBothDiffMarkerShapes` is the guard on the corpus, and it
 takes **two** subtractions rather than one. Against a markerless clause it says
 the corpus holds the shape at all; against a `+`-only clause it says the corpus
