@@ -527,8 +527,10 @@ func extend(rule rules.Rule, text []byte, lo, hi, matchEnd int) (int, int, bool,
 // keyword list runs the regex instead, which costs a full pass and cannot
 // silence anything.
 //
-// Refusing such a list belongs in the loader, where a startup error names the
-// rule. This is the safe reading for a Rule that reaches here anyway.
+// The loader refuses such a list, so no rule file reaches this. It stays
+// because the safe reading has to be the one in front of the skip: a Rule
+// arriving here with a list nothing can gate on costs a pass, and a pass is
+// recoverable where a silence is not.
 func gates(keywords []string) bool {
 	for _, keyword := range keywords {
 		if keyword != "" {

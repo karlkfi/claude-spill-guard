@@ -196,6 +196,10 @@ func TestLoadRejects(t *testing.T) {
 			set(`"keywords": ["AKIA", "ASIA", "A3T"]`, `"keywords": []`), "ungated"},
 		{"a credential rule with the keywords left out entirely",
 			without(`"keywords": ["AKIA", "ASIA", "A3T"],`), "ungated"},
+		{"a credential rule whose only keyword is the empty string",
+			set(`"keywords": ["AKIA", "ASIA", "A3T"]`, `"keywords": [""]`), "ungated"},
+		{"a credential rule whose keywords are all empty strings",
+			set(`"keywords": ["AKIA", "ASIA", "A3T"]`, `"keywords": ["", ""]`), "ungated"},
 		{"a check that does not exist",
 			set(`"validators": ["entropy"]`, `"validators": ["luhn2"]`), "does not exist"},
 		{"a group the regex does not have", set(`"group": 1`, `"group": 4`), "capture group"},
@@ -205,6 +209,10 @@ func TestLoadRejects(t *testing.T) {
 			`"validators": ["entropy"], "labels": ["ssn"]`), "nothing reads them"},
 		{"an entropy floor nothing reads",
 			set(`"validators": ["entropy"]`, `"validators": []`), "nothing reads it"},
+		{"the entropy check named with no floor, which every candidate clears",
+			without(`"entropy": 3.0,`), "gates nothing"},
+		{"the entropy check named with a floor of zero, written out",
+			set(`"entropy": 3.0`, `"entropy": 0`), "gates nothing"},
 		{"keywords on a family the prefilter does not gate",
 			set(`"family": "credential"`, `"family": "pii"`), "carries keywords"},
 
@@ -380,6 +388,36 @@ func TestAPIIRuleNeedsNoKeywords(t *testing.T) {
 	}
 	if !got[0].Uses(ContextLabel) {
 		t.Errorf("Validators = %v", got[0].Validators)
+	}
+}
+
+// The two spellings of a keyword list that names nothing get the same answer
+// on a pii rule that `"keywords": []` already gets, because they are the same
+// thing: a field at its neutral value that no stage reads. The refusal above
+// is for a pii rule carrying a keyword somebody meant, and TestLoadRejects
+// holds that arm.
+func TestAPIIRuleMayCarryAKeywordListThatNamesNothing(t *testing.T) {
+	for _, keywords := range []string{`[]`, `[""]`, `["", ""]`} {
+		t.Run(keywords, func(t *testing.T) {
+			body := `{
+  "id": "us-ssn",
+  "family": "pii",
+  "description": "US Social Security number",
+  "regex": "\\b(\\d{3}-?\\d{2}-?\\d{4})\\b",
+  "group": 1,
+  "keywords": ` + keywords + `,
+  "labels": ["ssn"],
+  "validators": ["context-label"],
+  "enabled": false
+}`
+			got, err := load(t, one(body))
+			if err != nil {
+				t.Fatalf("Load() = %v, want no error", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("Load() returned %d rules, want 1", len(got))
+			}
+		})
 	}
 }
 

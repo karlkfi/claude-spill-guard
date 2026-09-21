@@ -153,10 +153,18 @@ func compile(e entry) (Rule, error) {
 		return fail("entropy floor %v, which no candidate can fall below", entropy)
 	}
 
+	// Read past presence into whether the list can gate. `[""]` clears a length
+	// test and names nothing, so the prefilter's hasKeyword is false for every
+	// buffer -- and the two things a consumer can do about that are opposites.
+	// Treat the list as a gate and the rule is skipped on every file; read past
+	// the length, as internal/scan's gates() does, and it costs the full pass
+	// keywords exist to avoid. Neither is what the author wrote, and neither is
+	// reachable from the rule file, so the loader settles it rather than
+	// leaving each consumer to pick.
 	keywords := deref(e.Keywords)
-	if family == Credential && len(keywords) == 0 {
-		return fail("family %q with no keywords, which is an ungated full-corpus "+
-			"regex pass -- say so deliberately or give it keywords", Credential)
+	if family == Credential && !namesALiteral(keywords) {
+		return fail("family %q with no keyword naming a literal, which is an ungated "+
+			"full-corpus regex pass -- an empty string is not a literal", Credential)
 	}
 
 	names := deref(e.Validators)
@@ -201,13 +209,20 @@ func compile(e entry) (Rule, error) {
 	// ungated full-corpus pass the prefilter exists to avoid -- the shape that
 	// produced 5,679 matches and no credentials on the inherited ruleset --
 	// with nothing in the output telling the two apart.
+	//
+	// It reads namesALiteral rather than a length, which is the same question
+	// the credential clause above asks of the same field. A list holding
+	// nothing but empty strings names no keyword, so there is no "gate this on
+	// a literal" for the author to have meant, and refusing it here would
+	// report a family problem where the field is simply spelled at its neutral
+	// value -- which `"keywords": []` already is, and already loads.
 	if len(rule.Labels) > 0 && !rule.Uses(ContextLabel) {
 		return fail("carries labels but does not name %q, so nothing reads them", ContextLabel)
 	}
 	if rule.Entropy > 0 && !rule.Uses(Entropy) {
 		return fail("carries an entropy floor but does not name %q, so nothing reads it", Entropy)
 	}
-	if len(rule.Keywords) > 0 && rule.Family != Credential {
+	if namesALiteral(rule.Keywords) && rule.Family != Credential {
 		return fail("family %q carries keywords, but the prefilter gates %q and "+
 			"nothing else, so nothing reads them", rule.Family, Credential)
 	}
@@ -218,8 +233,28 @@ func compile(e entry) (Rule, error) {
 	// nothing downstream can tell it from a rule that checked and found
 	// nothing. Neither of them is a regex that fails to compile, so the Compile
 	// call above cannot catch either.
-	if rule.Uses(ContextLabel) && !hasLabel(rule.Labels) {
+	if rule.Uses(ContextLabel) && !namesALiteral(rule.Labels) {
 		return fail("names %q with no label to look for, so it reports nothing", ContextLabel)
+	}
+	// A third direction, between the two: a check named with a value it can
+	// read and do nothing with. EntropyAtLeast is `Shannon(s) >= min` and
+	// Shannon is never negative, so a floor of zero admits every candidate --
+	// the empty string, a run of one byte, a NUL. The rule loads, runs, and
+	// gates on nothing, which is exactly what leaving the check off would have
+	// given its author. A negative floor is refused above, so zero is the whole
+	// of what is left here.
+	//
+	// `"entropy": 0.0` with the check *not* named is deliberately still
+	// accepted, and not because the loader cannot tell it from an absent field
+	// -- it can, which is why every field here is a pointer. It is accepted
+	// because `"labels": []` with no `context-label` is accepted, and both are
+	// one thing: a field spelled at its neutral value with nothing reading it.
+	// Refusing one would owe the other the same answer, which is a wider
+	// change than the rule this clause came from, and no rule is harmed by
+	// either.
+	if rule.Uses(Entropy) && rule.Entropy == 0 {
+		return fail("names %q with no floor, and every candidate clears a floor of "+
+			"zero, so it gates nothing", Entropy)
 	}
 	if rule.Uses(Entropy) {
 		if extent != "" {
@@ -261,13 +296,19 @@ func compile(e entry) (Rule, error) {
 	return rule, nil
 }
 
-// hasLabel reports whether labels holds one NearLabel would search for. An
-// empty string is not one: it matches nothing there, so a rule carrying only
-// empty labels is as quiet as a rule carrying none, and
-// validate.TestNearLabelWithNoUsableLabelsReportsNothing pins all three
-// spellings of that.
-func hasLabel(labels []string) bool {
-	for _, l := range labels {
+// namesALiteral reports whether a word-boundary literal list holds anything a
+// reader would search for. An empty string is not one, and both readers agree:
+// validate.NearLabel skips an empty label -- pinned in all three spellings by
+// TestNearLabelWithNoUsableLabelsReportsNothing -- and scan's hasKeyword skips
+// an empty keyword. So a rule carrying only empty strings is exactly as quiet
+// as one carrying none, in either field.
+//
+// One function for both because it is one question. Where they differ is the
+// consequence: labels that name nothing silence the rule, keywords that name
+// nothing leave it ungated, and the loader refuses both rather than leaving
+// each consumer to pick.
+func namesALiteral(literals []string) bool {
+	for _, l := range literals {
 		if l != "" {
 			return true
 		}
