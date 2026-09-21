@@ -379,6 +379,14 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 				pemBody + "\n", true},
 		{"a diff of an indented key, so the marker and the indentation compose",
 			"+  -----BEGIN RSA PRIVATE KEY-----\n+  " + pemBody + "\n", true},
+		// The marker sits in front of the indentation, and what this row
+		// refuses is the spelling that allows whitespace on both sides of it.
+		// `[ \t]*[-+]?[ \t]*` reports this and the row above; the shipped
+		// `[-+]?[ \t]*` reports only the row above. The corpus and the
+		// differential are empty on this axis, so this row is the whole of
+		// what holds the choice down. rules/README.md carries the table.
+		{"an indented list item, which is the marker and the indentation the other way round",
+			"-----BEGIN RSA PRIVATE KEY-----\n  - " + pemBody + "\n", false},
 
 		// One marker, not a run of them: what keeps the `-` arm off prose is
 		// that the byte after it has to be whitespace or the body itself.

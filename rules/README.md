@@ -297,6 +297,33 @@ whose text carries no 32-byte base64 run. Both are `false` rows in
 of the arm rather than a law about prose — a bullet whose text *is* a body
 line is a document displaying a key block, which every arm already carries.
 
+**The marker sits in front of the indentation, and the refused alternative is
+the one that allows whitespace on both sides of it.** Three spellings, driven
+2026-09-21 against constructed layouts:
+
+| | a diff of an indented key | `  - <body>` | `- <body>` |
+|---|---|---|---|
+| `[-+]?[ \t]*`, shipped | yes | no | yes |
+| `[ \t]*[-+]?` | no | no | no |
+| `[ \t]*[-+]?[ \t]*` | yes | yes | yes |
+
+A diff writes its marker in column one, so the middle row is not a narrower
+way to say the same thing — it stops crossing the producer this section is
+about, which is why the choice is between the first and the third. The third
+is the widening to refuse: it readmits every indented Markdown bullet whose
+first token is 32 base64 characters, and it buys nothing, because no producer
+here writes whitespace in front of the marker. The corpus and the differential
+are both empty on this axis and cannot separate the three, so this is a shape
+argument rather than a measured one. `an indented list item, which is the
+marker and the indentation the other way round` in
+`TestPrivateKeyBlockAcrossThePEMLayouts` is the row that holds it, and it is
+red under the third spelling and green under the other two.
+
+The first row's third column is not a typo. An **un**indented `- ` bullet whose
+text opens with 32 base64 characters is crossed, and always was going to be:
+that is a document displaying a key body, which every arm of this rule already
+carries. 0 instances in the 263,734-file sweep.
+
 **`>` was priced and refused.** A quoted-reply email is the other concrete
 prefix, and no population reading separates it from the shipped pair — so the
 narrower one is preferred, on the rule this section states by name. What
