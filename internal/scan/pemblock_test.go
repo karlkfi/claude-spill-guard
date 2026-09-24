@@ -168,6 +168,138 @@ func TestTheCorpusHoldsTheWhitespaceSeparatorShape(t *testing.T) {
 	}
 }
 
+// markerless is the clause as it stepped from one line to the next before the
+// diff markers were admitted: over horizontal whitespace and line endings, and
+// nothing in front of either. It ships nowhere and is compiled here for the
+// reason the three patterns above are compiled.
+var markerless = regexp.MustCompile(
+	`(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)` +
+		`(?:[ \t]*[\r\n])+(?:[ \t]*(?:Proc-Type|DEK-Info):[^\r\n]*(?:[ \t]*[\r\n])+)*` +
+		`[ \t]*[A-Za-z0-9+/=]{32,}`)
+
+// plusOnly is the half-widening: `+` admitted and `-` not. It separates the
+// two markers, which the corpus otherwise cannot -- a single subtraction
+// against markerless is satisfied by either fixture alone, so an arm could be
+// dropped with the count still moving.
+var plusOnly = regexp.MustCompile(
+	`(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)` +
+		`(?:[+]?[ \t]*[\r\n])+(?:[+]?[ \t]*(?:Proc-Type|DEK-Info):[^\r\n]*(?:[+]?[ \t]*[\r\n])+)*` +
+		`[+]?[ \t]*[A-Za-z0-9+/=]{32,}`)
+
+// What each marker newly admits, computed rather than approximated by hand,
+// for the reason TestTheCorpusHoldsTheWhitespaceSeparatorShape computes its
+// own: an approximation drifts from the two patterns it stands between and a
+// subtraction cannot.
+//
+// Two subtractions rather than one. The shipped rule minus markerless says the
+// corpus holds the shape; the shipped rule minus plusOnly says it holds the
+// `-` half of it, which is the arm with no accident behind it -- an added
+// plain key was reported before any of this, because `+` happens to be in the
+// base64 alphabet and a body line beginning `+MII...` reads as base64 that
+// starts one byte early.
+func TestTheCorpusHoldsBothDiffMarkerShapes(t *testing.T) {
+	before := []rules.Rule{{
+		ID:          "private-key-block-markerless",
+		Family:      rules.Credential,
+		Description: "the body clause before either diff marker was admitted",
+		Regex:       markerless,
+		Enabled:     true,
+	}}
+	plus := []rules.Rule{{
+		ID:          "private-key-block-plus-only",
+		Family:      rules.Credential,
+		Description: "the body clause with the added-line marker only",
+		Regex:       plusOnly,
+		Enabled:     true,
+	}}
+	shipped := privateKeyBlock(t)
+
+	for _, half := range []string{"planted", "clean"} {
+		now := walk(t, half, shipped)
+		none := walk(t, half, before)
+		onlyPlus := walk(t, half, plus)
+		newly := len(now.findings) - len(none.findings)
+		newlyMinus := len(now.findings) - len(onlyPlus.findings)
+		t.Logf("%s: %d finding(s) now, %d with no marker, %d with `+` alone -- "+
+			"%d newly admitted, %d of them by `-`",
+			half, len(now.findings), len(none.findings), len(onlyPlus.findings),
+			newly, newlyMinus)
+
+		switch half {
+		case "planted":
+			if newly < 1 {
+				t.Error("no planted file carries a key on a diff-marked line, so " +
+					"the clean corpus's zero says nothing about this axis")
+			}
+			if newlyMinus < 1 {
+				t.Error("no planted file carries a key on a removed line, so the " +
+					"`-` arm is surface with nothing that can tell it from absent")
+			}
+		case "clean":
+			if newly != 0 {
+				t.Errorf("the widening newly reports %d clean file(s):\n%s",
+					newly, report(now.findings))
+			}
+			if len(now.findings) != 0 {
+				t.Errorf("the shipped rule reports %d clean file(s):\n%s",
+					len(now.findings), report(now.findings))
+			}
+		}
+	}
+}
+
+// quotedReplyOnly is what a third marker would add and the shipped rule does
+// not: a key quoted back in an email reply, where every line opens `> `.
+var quotedReplyOnly = []struct{ name, buf string }{
+	{"an email reply quoting a key block",
+		"> " + strings.ReplaceAll(
+			"-----BEGIN RSA PRIVATE KEY-----\n"+pemBody+"\n", "\n", "\n> ")},
+	{"an email reply quoting an encrypted key block",
+		"> " + strings.ReplaceAll(
+			"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n"+
+				"DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n\n"+pemBody+"\n",
+			"\n", "\n> ")},
+}
+
+// quotedReplyStep is the widening considered beside the shipped pair and
+// refused. Over the module cache it is indistinguishable from the shipped
+// clause -- 263,734 files, 828 carrying `PRIVATE KEY`, and the set it newly
+// admits is empty -- so no population reading separates the three, and the
+// narrower one is preferred on rules/README.md's own rule. What separates them
+// is the producer: `git diff` writes `+` and `-` from one command, and nothing
+// here reads mail.
+//
+// Compiled and shipped nowhere, for the reason genericStep is: rules/README.md
+// says this arm would report something the shipped rule does not, and a claim
+// with nothing that can fail is the shape this repository refuses.
+var quotedReplyStep = regexp.MustCompile(
+	`(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)` +
+		`(?:[-+>]?[ \t]*[\r\n])+(?:[-+>]?[ \t]*(?:Proc-Type|DEK-Info):[^\r\n]*(?:[-+>]?[ \t]*[\r\n])+)*` +
+		`[-+>]?[ \t]*[A-Za-z0-9+/=]{32,}`)
+
+func TestTheQuotedReplyStepReportsWhatTheShippedMarkersDoNot(t *testing.T) {
+	set := privateKeyBlock(t)
+	for _, tc := range quotedReplyOnly {
+		t.Run(tc.name, func(t *testing.T) {
+			if !quotedReplyStep.MatchString(tc.buf) {
+				t.Errorf("the quoted-reply step does not report this, so it does " +
+					"not separate the two shapes and rules/README.md is wrong to " +
+					"say it does")
+			}
+			got, err := Buffer("t", []byte(tc.buf), set)
+			if err != nil {
+				t.Fatalf("scanning: %v", err)
+			}
+			if got.Skipped != Scanned {
+				t.Fatalf("not read: %s", got.Skipped)
+			}
+			if len(got.Findings) != 0 {
+				t.Errorf("the shipped rule reports this, so the two shapes agree here")
+			}
+		})
+	}
+}
+
 // pemCase is one layout and whether the shipped rule reports it.
 type pemCase struct {
 	name string
@@ -223,6 +355,46 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 		{"a separator line of tabs",
 			"-----BEGIN RSA PRIVATE KEY-----\n\t\t\n" + pemBody + "\n", true},
 
+		// What sits in front of every line, which a unified diff writes and the
+		// clause stepped across as whitespace only. The header needs nothing
+		// here -- it may already sit anywhere on a line -- so these rows are
+		// about the RFC 1421 fields, the separator and the body.
+		{"an added file's key, as a unified diff writes it",
+			"+-----BEGIN RSA PRIVATE KEY-----\n+" + pemBody + "\n", true},
+		{"an added file's encrypted key, so the marker falls on the RFC 1421 fields too",
+			"+-----BEGIN RSA PRIVATE KEY-----\n+Proc-Type: 4,ENCRYPTED\n" +
+				"+DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n+\n+" +
+				pemBody + "\n", true},
+		{"the same with CRLF",
+			"+-----BEGIN RSA PRIVATE KEY-----\r\n+Proc-Type: 4,ENCRYPTED\r\n" +
+				"+DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\r\n+\r\n+" +
+				pemBody + "\r\n", true},
+		// A removed line's marker lands on the header's own leading dashes, so
+		// the line opens with six of them and the capture starts at the second.
+		{"a removed file's key, whose header line carries six dashes",
+			"------BEGIN RSA PRIVATE KEY-----\n-" + pemBody + "\n", true},
+		{"a removed file's encrypted key",
+			"------BEGIN RSA PRIVATE KEY-----\n-Proc-Type: 4,ENCRYPTED\n" +
+				"-DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n-\n-" +
+				pemBody + "\n", true},
+		{"a diff of an indented key, so the marker and the indentation compose",
+			"+  -----BEGIN RSA PRIVATE KEY-----\n+  " + pemBody + "\n", true},
+		// The marker sits in front of the indentation, and what this row
+		// refuses is the spelling that allows whitespace on both sides of it.
+		// `[ \t]*[-+]?[ \t]*` reports this and the row above; the shipped
+		// `[-+]?[ \t]*` reports only the row above. The corpus and the
+		// differential are empty on this axis, so this row is the whole of
+		// what holds the choice down. rules/README.md carries the table.
+		{"an indented list item, which is the marker and the indentation the other way round",
+			"-----BEGIN RSA PRIVATE KEY-----\n  - " + pemBody + "\n", false},
+
+		// One marker, not a run of them: what keeps the `-` arm off prose is
+		// that the byte after it has to be whitespace or the body itself.
+		{"a Markdown rule between a displayed header and a body line",
+			"-----BEGIN RSA PRIVATE KEY-----\n\n---\n\n" + pemBody + "\n", false},
+		{"a displayed header with a prose bullet under it",
+			"-----BEGIN RSA PRIVATE KEY-----\n\n- the body is base64 of the DER encoding\n", false},
+
 		// The separator has to reach a line ending, which is what keeps this
 		// row false. `[ \t\r\n]+` -- the one-character widening -- admits it,
 		// and no PEM a toolchain writes puts the body on the header's line, so
@@ -255,6 +427,9 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 	// the comparison test would otherwise be gated there and absent here.
 	for _, g := range genericOnly {
 		cases = append(cases, pemCase{g.name, g.buf, false})
+	}
+	for _, q := range quotedReplyOnly {
+		cases = append(cases, pemCase{q.name, q.buf, false})
 	}
 
 	for _, tc := range cases {

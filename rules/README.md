@@ -36,7 +36,7 @@ carried by a planted fixture in
 | `stripe-live-secret-key` | `sk_live_` `rk_live_` | live keys only — see below |
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
-| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not |
+| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not, and behind a unified diff's `+` or `-` |
 | `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, measured by an extent rather than capped, floor 3.5, and no published sample signature |
 
 **The entropy floors are what make a *padded* placeholder quiet.** A repository
@@ -245,9 +245,154 @@ It does: 13 files, 13,360 bytes, 0 findings, unchanged either side.
 [`pemblock_test.go`](../internal/scan/pemblock_test.go) is the guard on the
 corpus, and it computes what the widening newly admits instead of approximating
 it — walking each half of the corpus with the shipped rule and with the
-pre-widening clause and taking the difference. 1 newly admitted planted file, 0
+pre-widening clause and taking the difference. 3 newly admitted planted files, 0
 clean. A hand-written approximation can drift from the two patterns it stands
 between; a subtraction cannot.
+
+That figure was 1 until the section below landed, and the extra 2 are not this
+widening's. A patch's added and removed lines separate a key's header from its
+body with a whitespace-only line *and* put a marker in front of every line, so
+the two fixtures that section plants need both steps and the pre-widening
+clause misses them for either reason. A subtraction says what one pattern
+admits over another, never which of two changes is responsible, which is why
+the section below takes its own.
+
+**A diff's `+` and `-` are not whitespace, and the clause could not cross
+either.** The widening above taught the step to cross a patch's *context*
+lines, which take a space. An added line takes `+` and a removed one takes `-`,
+so a key arriving in a commit went unreported — and that is the direction with
+the traffic behind it. A key shows up in a patch's context only when something
+near it changed; a key being committed shows up as added every time.
+
+**One shape was reported before this, and by accident.** `+` is in the base64
+alphabet, so a plain key's body line beginning `+MII…` reads as base64 that
+starts one byte early, and the clause matched without ever crossing anything.
+Nothing chose that, and it does not survive an encrypted key, whose
+`Proc-Type:` and `DEK-Info:` lines the step has to cross first. Driven
+2026-09-19 on `git diff --cached` output, git 2.55.0, in a scratch repository:
+
+| Where the key sits in the patch | Before | After |
+|---|---|---|
+| context lines, prefix `` (one space) | yes | yes |
+| added lines, plain layout | yes, by the alphabet | yes |
+| **added lines, encrypted layout** | **no** | yes |
+| **removed lines, either layout** | **no** | yes |
+| quoted-reply lines, prefix `> ` | no | no |
+
+**A removed key is a decision and not a consequence of admitting `+`.** A patch
+that deletes a key carries the whole key in its text, so the bytes cross
+exactly as an added one's do —
+[`docs/design/README.md`](../docs/design/README.md#what-gets-scanned-is-the-crossing-not-the-hop)
+is what settles that — and a modification hunk emits both markers from one `git
+diff`. There is no reader that produces one and not the other, so the
+asymmetry between the table's second row and its third and fourth was never
+chosen: it is the base64 alphabet happening to contain one of the two bytes.
+
+**One marker, not a run of them.** The byte after it has to be horizontal
+whitespace, a line ending, or the body itself, which is what keeps `-` off
+prose: a Markdown rule between a displayed header and a body line is not
+crossed, because the second dash is neither, and neither is a prose bullet
+whose text carries no 32-byte base64 run. Both are `false` rows in
+`TestPrivateKeyBlockAcrossThePEMLayouts`, and what they hold down is the shape
+of the arm rather than a law about prose — a bullet whose text *is* a body
+line is a document displaying a key block, which every arm already carries.
+
+**The marker sits in front of the indentation, and the refused alternative is
+the one that allows whitespace on both sides of it.** Three spellings, driven
+2026-09-21 against constructed layouts:
+
+| | a diff of an unindented key | a diff of an indented key | `  - <body>` | `- <body>` |
+|---|---|---|---|---|
+| `[-+]?[ \t]*`, shipped | yes | yes | no | yes |
+| `[ \t]*[-+]?` | yes | no | no | no |
+| `[ \t]*[-+]?[ \t]*` | yes | yes | yes | yes |
+
+**The first column is what stops the middle row being a non-starter, and an
+earlier version of this table left it out.** Without it the middle spelling
+read as refusing the producer altogether. It does not: every unindented diff
+shape crosses it, both markers and both layouts, and what it loses is the one
+row where the two widenings meet — a key indented *inside* a diff. Driven
+2026-09-21 by the independent review of the pull request that made this change
+and re-driven here, by putting the middle spelling into all four sites of the
+shipped ruleset: all three planted patch fixtures still report, both corpus
+subtractions come back byte-identical to shipped, and exactly one of the 34
+rows in `TestPrivateKeyBlockAcrossThePEMLayouts` goes red.
+
+So the first row against the second is a trade with a named case on each side,
+not a dismissal. The middle spelling refuses all three bullet shapes, so it is
+the only one of the three that adds no false-positive surface at all; shipped
+buys back the indented-in-a-diff case — a committed Kubernetes secret is the
+producer, and plausibly the highest-traffic real spill this rule sees — and
+pays the unindented `- <body>` bullet beside it. The third spelling is the
+widening to refuse: it readmits every indented Markdown bullet whose first
+token is 32 base64 characters, and it buys nothing over shipped on any column
+here, because no producer writes whitespace in front of the marker. The corpus
+and the differential are empty on this axis and separate none of the three, so
+what prices them is this table and the producer argument above it. `an indented list item, which is the
+marker and the indentation the other way round` in
+`TestPrivateKeyBlockAcrossThePEMLayouts` is the row that holds it, and it is
+red under the third spelling and green under the other two.
+
+The first row's third column is not a typo. An **un**indented `- ` bullet whose
+text opens with 32 base64 characters is crossed, and always was going to be:
+that is a document displaying a key body, which every arm of this rule already
+carries. 0 instances in the 263,734-file sweep.
+
+**`>` was priced and refused.** A quoted-reply email is the other concrete
+prefix, and no population reading separates it from the shipped pair — so the
+narrower one is preferred, on the rule this section states by name. What
+separates them is the producer: `git diff`, `git show` and `git format-patch`
+write `+` and `-` from one command, and nothing here reaches an `.eml`.
+`TestTheQuotedReplyStepReportsWhatTheShippedMarkersDoNot` compiles the arm that
+ships nowhere and holds both halves, which is why the refusal is a measurement
+rather than an omission: that arm reports two email shapes and the shipped rule
+reports neither. A nested `>>` reply is refused with it, driven.
+
+**The differential says what the markers cost, and the population cannot say
+what they buy.** All four clauses compiled and counted over `~/go/pkg/mod` —
+263,734 files on 2026-09-19, 828 of them carrying `PRIVATE KEY` — the
+pre-change clause, the `+`-only arm, the pair that now ships and the `>` arm
+all report **721 matches in 526 files**, and the set each marker newly admits
+is **empty**. Read the second half of that before drawing recall from it: 303
+files in the population are patches or hold one, and **none** of those 303
+carries `PRIVATE KEY`. So the zero bounds the false positives over published
+Go source and says nothing about recall in either direction, which is why the
+arms are paid for by the producer above rather than by the sweep. The clean
+corpus is unchanged either side, for all four: 13 files, 13,360 bytes, 0
+findings.
+
+**A second population reaches the shape that one could not, and it was taken by
+the independent review of this change rather than here.** Same four arms over
+`~/workspace` on 2026-09-21: 8,514,452 files, 13,737 carrying `PRIVATE KEY`,
+and 876 patch-shaped files of which **24 do carry a key** — where the module
+cache had 302 patches and none. The arms report 718, 719, 720 and 720 matches,
+and the entire newly-admitted set across all three widenings is **this change's
+own two planted fixtures**, sitting in the branch's worktree. So the
+false-positive bound now holds over a population that contains key-bearing
+patches, which is what the paragraph above has to concede it does not, and the
+`>` refusal survives 17x the keyword traffic unchanged.
+
+It is recorded rather than re-taken, and deliberately. `~/workspace` holds live
+worktrees that move between runs, so a second pass would produce a third set of
+numbers and settle nothing; the reading above is one run of one binary over
+both populations, which is what makes the two comparable. Attributed because it
+is not this branch's measurement.
+
+`TestTheCorpusHoldsBothDiffMarkerShapes` is the guard on the corpus, and it
+takes **two** subtractions rather than one. Against a markerless clause it says
+the corpus holds the shape at all; against a `+`-only clause it says the corpus
+holds the *removed* half, which a single subtraction cannot — either fixture
+alone satisfies that one, so the `-` arm could be dropped with the count still
+moving. 2 newly admitted planted files, 1 of them by `-`, and 0 clean either
+way.
+
+**What no marker reaches is a key a hunk header splits.** Under `git diff`'s
+default three lines of context, a change close enough to a key puts `@@ -n,m
++n,m @@` between its header and its body, and no marker crosses a whole line
+the key's own file does not contain. Driven: missed on context lines and on
+added lines alike, before this change and after it. Admitting it is the
+bounded-window shape this section already refuses by name, so it is a row
+rather than an edit, and whether it has traffic is unmeasured.
 
 **Two rules carry a second check, because their vendor publishes a realistic
 example.** An entropy floor drops a padded placeholder and admits a plausible

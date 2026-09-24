@@ -1,0 +1,28 @@
+# The same support ticket, one commit earlier: the key arriving rather than
+# being edited around. `git diff` prefixes every added line with `+`, which is
+# neither whitespace nor a line ending, so none of the three steps from the
+# header to the body could cross it -- not the separator, not the `Proc-Type:`
+# and `DEK-Info:` lines, not the body's own indentation. The encrypted layout
+# is what makes all three load-bearing at once.
+#
+# An added *plain* key was reported before this, and by accident: `+` is in the
+# base64 alphabet, so `+QUJD...` reads as a body line that starts one byte early.
+# Nothing chose that, and it does not reach the encrypted layout.
+#
+# Same fabricated body as the other five, base64 of ordinary ASCII.
+#
+# Produced by `git diff --cached`, not written by hand: git 2.55.0, 2026-09-19.
+
+diff --git a/deploy/tls.key b/deploy/tls.key
+new file mode 100644
+index 0000000..0148383
+--- /dev/null
++++ b/deploy/tls.key
+@@ -0,0 +1,7 @@
++-----BEGIN RSA PRIVATE KEY-----
++Proc-Type: 4,ENCRYPTED
++DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9
++
++QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
++bW5vcHFyc3R1dnd4eXpBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWjAxMjM0NTY3
++-----END RSA PRIVATE KEY-----

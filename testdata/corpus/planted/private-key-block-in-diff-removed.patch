@@ -1,0 +1,24 @@
+# The other half of the same command. A patch that deletes a key carries the
+# whole key in its text, so the bytes cross exactly as an added one's do -- and
+# a modification hunk emits both markers at once, from one `git diff`.
+#
+# `-` is not in the base64 alphabet, so no layout reached this one by accident.
+# The plain form is here rather than the encrypted one because the encrypted
+# layout is already carried by the added fixture beside it, and what this file
+# is for is the marker.
+#
+# Its header line opens with six dashes: the marker lands on the header's own
+# leading five, and the capture starts at the second.
+#
+# Produced by `git diff --cached`, not written by hand: git 2.55.0, 2026-09-19.
+
+diff --git a/deploy/tls.key b/deploy/tls.key
+deleted file mode 100644
+index 597d288..0000000
+--- a/deploy/tls.key
++++ /dev/null
+@@ -1,4 +0,0 @@
+------BEGIN RSA PRIVATE KEY-----
+-QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
+-bW5vcHFyc3R1dnd4eXpBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWjAxMjM0NTY3
+------END RSA PRIVATE KEY-----

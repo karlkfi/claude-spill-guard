@@ -226,7 +226,18 @@ var planted = map[string]string{
 	// output rather than a hand-written patch, because the producer is the
 	// evidence.
 	"private-key-block-in-diff.patch": "private-key-block",
-	"jwt.txt":                         "jwt",
+	// And a fifth and sixth, for the axis the fourth still holds constant:
+	// a patch's *context* lines take a space, which the clause above learned
+	// to cross, and its added and removed lines take `+` and `-`, which are
+	// neither whitespace nor a line ending. A key being committed is added
+	// every time; a key in a patch's context only when something near it
+	// changed. Both are `git diff` output, for the same reason the fourth is.
+	"private-key-block-in-diff-added.patch": "private-key-block",
+	// The removed one is the plain layout because nothing reached it by
+	// accident: `+` is in the base64 alphabet, so an added plain key was
+	// reported before any of this, and `-` is not.
+	"private-key-block-in-diff-removed.patch": "private-key-block",
+	"jwt.txt": "jwt",
 }
 
 func TestEveryPlantedSecretIsFoundExactlyOnce(t *testing.T) {
