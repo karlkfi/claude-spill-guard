@@ -96,6 +96,23 @@ func TestThePortNeverResolvesToALiteralBashWouldNotUse(t *testing.T) {
 		{`P=/l\ it`, "$P/f", "/lit/f"},
 		{`P=/lit\$x`, "$P/f", "/lit$x/f"},
 		{"P=/lit; P[0]=/arr", "$P/f", "/arr/f"},
+		// The row above cannot tell dropping the name from recording the
+		// value, because its subscript resolves to element 0, which is what
+		// `$P` reads back. Do not read that as *index 0*: bash evaluates a
+		// subscript arithmetically, so `[0+0]`, `[1-1]`, `[$((2-2))]`,
+		// `[0x0]`, `[00]`, `[+0]`, `[ 0 ]` and any unset name all land there
+		// too, and `[-1]` lands there as the last element of a one-element
+		// array. The set is open, and a row added at one of those spellings
+		// would silently be another copy of the row above.
+		// These three discriminate: bash gives the OLD value at a subscript
+		// that resolves anywhere else, and the old value plus the new for an
+		// append, so a port that records `/arr` resolves an operand to a path
+		// the command never opens.
+		// Driven 2026-09-19 on 5.3.15 with the same environment as the table,
+		// and the alias set re-driven 2026-09-21 after review.
+		{"P=/lit; P[1]=/arr", "$P/f", "/lit/f"},
+		{"P[1]=/arr", "$P/f", "/env/f"},
+		{"P=/lit; P[0]+=/arr", "$P/f", "/lit/arr/f"},
 		{"P=/lit; P++", "$P/f", "/lit/f"},
 		{"P=/lit; mapfile P < /dev/null", "$P/f", "/f"},
 		{"P=/lit; source /dev/null", "$P/f", "/lit/f"},

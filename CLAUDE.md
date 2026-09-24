@@ -276,6 +276,24 @@ exception, which upstream's own row had backwards: driven on bash 5.3.15,
 `env FOO+=bar env` exports a variable literally called `FOO+` and leaves `FOO`
 alone, where the `export` builtin beside it appends. No site here reads through
 an `env` prefix, so nothing needs the other split; a reader row for `env` would.
+`NAME[sub]=value` is one too, and was not until Q175: the scan stopped at the
+`[`, so `FOO[0]=x cat <key>` took the command head and the file crossed with no
+verdict and no coverage record -- the same silence the `+=` spelling had. Bash
+peels it and runs the command behind it, driven on 5.3.15: `FOO[0]=x cat f`
+prints f, warns `FOO[0]: not a valid identifier`, and leaves `FOO` untouched.
+The brackets are counted by depth rather than matched by a regex, because
+`FOO[a[0]]=x` is one subscript and `FOO[a]b]=x` is a command name that opens no
+file. Three consequences do not share an answer, which is why `SplitAssignment`
+now reports the form rather than a bool. The **name** is `FOO` at every site,
+as it is for an append. The **value** is dropped on a stronger reading than an
+append's -- `$NAME` is `${NAME[0]}`, so `P=/lit; P[0]=/arr` gives `/arr` and
+`P[1]=/arr` gives `/lit`, one shape with two answers picked by a subscript
+nothing here evaluates. And the **override does not arm** on it, nor does
+`assigns`, because as a prefix bash sets nothing whatever: `CDPATH[0]=<dir> cd
+target` does not search where `CDPATH=<dir>` and `CDPATH+=:<dir>` both do. What
+is left open is a subscript the lexer cannot keep whole -- one carrying
+whitespace, shell punctuation, or a quoted `]` -- which is still under-peeled
+and is Q185.
 A quoted **operator** is not one
 either, on the same reading and ported the same way from #138: `cat ';' f` hands
 `;` to `cat`, and splitting there left `cat` no operands and read `f` as a

@@ -48,7 +48,15 @@ func altersGlobbing(tokens []string, quotedFrom []int) bool {
 	rest := bash.StripEnvPrefix(head, headQF)
 	if len(rest) == 0 {
 		for _, a := range head {
-			if strings.HasPrefix(a, "GLOBIGNORE=") {
+			// By name rather than by text prefix. `$GLOBIGNORE` is
+			// `${GLOBIGNORE[0]}`, so a subscripted spelling filters the glob
+			// too -- driven on bash 5.3.15, `GLOBIGNORE[0]='d/*.log'` drops
+			// `d/b.log` from `d/*` where `GLOBIGNORE[1]` leaves it -- and a
+			// prefix test on `GLOBIGNORE=` walks past both. An index other
+			// than 0 is recorded for nothing, which is the side to be wrong
+			// on. Every token here is an assignment, rest being empty is what
+			// says so, which is what makes SplitAssignment answerable of it.
+			if n, _, _ := bash.SplitAssignment(a); n == "GLOBIGNORE" {
 				return true
 			}
 		}

@@ -1213,4 +1213,97 @@ func TestAnAppendToCDPATHLosesTheDirectoryToo(t *testing.T) {
 			t.Errorf("reason = %q, want the file behind the followed cd", reason)
 		}
 	})
+	// And the subscripted spelling goes the other way, which is bash's
+	// reading rather than a conservatism: a prefix assignment to `CDPATH[0]`
+	// sets nothing, so cd resolves its target relative and the tracker
+	// follows it. Driven on 5.3.15 -- `CDPATH[0]=<dir> cd target` reports
+	// `not a valid identifier` and leaves the shell where it started, where
+	// the two rows above both find target under dir. Refusing to follow here
+	// would cost a coverage record on every cd behind an unrelated
+	// subscripted prefix.
+	t.Run("a subscripted CDPATH does not make cd a search", func(t *testing.T) {
+		command := "CDPATH[0]=/tmp cd " + base + " && cat " + name
+		code, stdout, stderr := drive(t, bashCall(t, command, filepath.Dir(dir)))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+			t.Errorf("reason = %q, want the file behind the followed cd", reason)
+		}
+	})
+}
+
+// The fail-open Q175 names. `FOO[0]=x` is an inline env prefix to bash's
+// parser exactly as `FOO=x` is: the shell peels it, fails to export it --
+// `FOO[0]: not a valid identifier` on stderr -- and runs the command behind it
+// anyway. Driven on 5.3.15, `FOO[0]=x cat f` prints f whether or not FOO was
+// already an array, and leaves `$FOO` at whatever it held.
+//
+// The assignment scan stopped at the `[`, so the prefix took the command head,
+// internal/readers had no row for `FOO[0]=x`, the segment contributed no
+// operands, and the call went through with the file unopened and no verdict --
+// not even the coverage record a call this could not read gets.
+//
+// Two controls, because a verdict is consistent with more than one reading:
+// the bare command says the file is found, and the plain prefix says the peel
+// works, so the subscripted arms are testing the subscript and not a broken
+// probe.
+func TestASubscriptedPrefixIsPeeledAndTheOperandScanned(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct{ label, command string }{
+		{"no prefix -- control", "cat " + name},
+		{"a plain prefix -- control", "LC_ALL=C cat " + name},
+		{"a subscripted prefix", "FOO[0]=x cat " + name},
+		{"an empty subscript", "FOO[]=x cat " + name},
+		{"a nested subscript", "FOO[a[0]]=x cat " + name},
+		{"subscripted and appending", "FOO[0]+=x cat " + name},
+		{"a subscripted prefix after a plain one", "LANG=C FOO[0]=x cat " + name},
+		{"a subscripted prefix behind a keyword", "time FOO[0]=x cat " + name},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("reason does not name the rule: %q", reason)
+			}
+			if !strings.Contains(reason, name) {
+				t.Errorf("reason does not name the file: %q", reason)
+			}
+		})
+	}
+}
+
+// The other direction, which is the one a widened scan gets wrong. Each word
+// below is a command name to bash, not a prefix, so the shell never reaches
+// the `cat` behind it and no file is opened -- driven on 5.3.15, where the
+// first two report `command not found` and the last two die at parse time.
+// Allowing is the correct verdict, and a scan that peeled to the last `]`
+// instead of the first at depth zero would block a call that reads nothing,
+// which is the false positive this repo calls the product.
+//
+// The control is the row above: the same `cat` and the same file deny when the
+// prefix really is one, so an allow here is the subscript being refused rather
+// than the file being missed.
+func TestAWordBashReadsAsACommandNameIsNotPeeled(t *testing.T) {
+	dir, name := planted(t)
+	for _, tc := range []struct{ label, command string }{
+		{"the subscript does not end at the `=`", "FOO[a]b]=x cat " + name},
+		{"an empty subscript then a stray bracket", "FOO[]]=x cat " + name},
+		{"nothing closes the subscript", "FOO[0=x cat " + name},
+		{"the brackets do not balance", "FOO[a[b]=x cat " + name},
+		{"quoted, so bash assigns nothing", "'FOO[0]=x' cat " + name},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("verdict = %q, want none -- bash opens no file here", stdout)
+			}
+		})
+	}
 }

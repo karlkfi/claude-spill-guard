@@ -581,7 +581,7 @@ func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]s
 	}
 	names := []string{}
 	for _, t := range pairs {
-		name, appends, raw := bash.SplitAssignment(t)
+		name, form, raw := bash.SplitAssignment(t)
 		names = append(names, name)
 		val, ok := literalAssignmentValue(substituteVars(raw, varmap), false)
 		// `NAME+=v` resolves to the old value plus v, so the name is dropped
@@ -592,7 +592,15 @@ func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]s
 		// segment inherits it, and the map holds it when the string assigned
 		// it, which is the `f=sub` `f+=/x` row. The second could concatenate
 		// and does not, because nothing here measured that it should.
-		if !ok || appends || !persists || neverPropagate[name] {
+		//
+		// `NAME[sub]=v` is dropped on a stronger reading than the append's,
+		// and not on the same one: the value IS in the token, and which
+		// element it lands on is not. `$NAME` is `${NAME[0]}`, so `FOO=old;
+		// FOO[0]=x` gives `x` and `FOO=old; FOO[1]=x` gives `old` -- driven on
+		// bash 5.3.15 -- and the subscript can be arithmetic, which nothing
+		// here evaluates. Recording v would resolve an operand to a path the
+		// command opens only when the subscript happens to be 0.
+		if !ok || form != bash.AssignPlain || !persists || neverPropagate[name] {
 			delete(varmap, name)
 		} else {
 			varmap[name] = val
@@ -660,9 +668,10 @@ func poisonVars[V any](tokens []string, quotedFrom []int, varmap map[string]V) {
 	k := bash.ShKeywordPeel(tokens, quotedFrom)
 	kw, kwQF := tokens[k:], quotedFrom[k:]
 	rest := bash.StripEnvPrefix(kw, kwQF)
-	// StripEnvPrefix peels `NAME+=v` too, so the name comes off it the way it
-	// does everywhere else. No test discriminates: the assignish sweep at the
-	// foot of this function recovers `NAME` from an append anyway.
+	// StripEnvPrefix peels `NAME+=v` and `NAME[sub]=v` too, so the name comes
+	// off both the way it does everywhere else. No test discriminates: the
+	// assignish sweep at the foot of this function already recovers `NAME`
+	// from either spelling, `assignishRE` carrying the `[` for that reason.
 	for _, t := range kw[:len(kw)-len(rest)] {
 		name, _, _ := bash.SplitAssignment(t)
 		delete(varmap, name)
