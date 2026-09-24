@@ -2427,7 +2427,9 @@ so `PRIVACY.md` is unchanged.
 ### And the shell it is expanded by is not bash unless something names bash
 
 Everything above assumes the tool shell is bash. **Measured 2026-09-19 on
-Claude Code 2.1.275, it usually is not.** Claude Code picks the shell before it
+Claude Code 2.1.275, it is bash only where something on the machine names
+bash.** How often that holds across machines is not measured here and one
+machine cannot measure it. Claude Code picks the shell before it
 runs anything: `CLAUDE_CODE_SHELL` if its path holds `bash` or `zsh` -- a
 substring over the whole path, not a basename -- and is executable, then
 `SHELL` on the same two conditions, and otherwise `zsh` and `bash` resolved on
@@ -2453,6 +2455,16 @@ tool shell is 2026-08-24 09:17:09, a `CLAUDE_CODE_SHELL` was committed to
 14:13:07. `dscl . -read /Users/karl UserShell` still reports `/bin/zsh`, so the
 96 are what this machine does with the setting removed rather than an old
 harness.
+
+**The switch is not an exogenous event, which strengthens that reading rather
+than weakening it.** `ea91c63` records the change and not its reason. The
+reason -- from the maintainer, who made it, rather than measured here -- is
+that bash-assuming tooling was failing under zsh, and forcing bash was cheaper
+than teaching each tool to survive the difference. So the zsh count stops where
+somebody hit this class of defect and mitigated it at the config layer, one
+level above any scanner, which makes the 96 corroboration rather than
+coincidence. It also names the exposed population, which the counts do not:
+whoever has not already been bitten into making the same override.
 
 **zsh recurses `**` by default and bash does not, and that was a fail-open.**
 Over a fixture holding `top.env`, `sub/mid.env` and `sub/deep/low.env` with an
