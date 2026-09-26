@@ -164,12 +164,12 @@ def flag(name, value=None):
     return [spelling] if value is None else [spelling, value]
 
 
-def run(launch, args, env=None):
+def run(launch, args, env=None, cwd=ROOT):
     """(rc, combined output). Both streams, because a refusal goes to stderr
     and the progress that says how far it got goes to stdout -- a finding that
     quotes one of them throws away the half that says why."""
     done = subprocess.run(launch + args, capture_output=True, text=True,
-                          cwd=str(ROOT), env=env, check=False)
+                          cwd=str(cwd), env=env, check=False)
     return done.returncode, (done.stdout + done.stderr).strip()
 
 
@@ -345,6 +345,60 @@ def drive(label, launch, dist, tmp, archive, version):
                             f"for {version!r}. Those are set by -ldflags and by "
                             f"name_template, and a release whose binary and "
                             f"filename disagree is one nobody can reason about")
+
+    # What it tells the user about finding the binary. The launcher looks in
+    # one directory off PATH, so a --dir anywhere else is one every hooked call
+    # blocks on, and the script has to say so rather than that it will run.
+    # The arm above installed off PATH and off that default.
+    if rc == 0 and ("will run as a hook" in out
+                    or "SPILL_GUARD_BIN" not in out):
+        findings.append(f"[{label}] the install script put the binary where "
+                        f"the hook launcher never looks and did not say to "
+                        f"set SPILL_GUARD_BIN or PATH{evidence(rc, out)}")
+
+    # And the default, where the launcher does look. Its home is a temporary
+    # one, so the arm installs nowhere a real session would find.
+    home = where("home")
+    home.mkdir()
+    env = dict(os.environ)
+    env["LOCALAPPDATA" if WINDOWS else "HOME"] = str(home)
+    with Serving(dist) as base:
+        rc, out = run(launch, flag("version", version) + flag("rehearse", base),
+                      env)
+    default = (home / "spill-guard" / "bin" if WINDOWS
+               else home / ".local" / "bin") / binary
+    if rc != 0 or not default.is_file():
+        findings.append(f"[{label}] the install script did not install to "
+                        f"{default} when given no directory{evidence(rc, out)}")
+    elif "will run as a hook" not in out:
+        findings.append(f"[{label}] the install script installed to the "
+                        f"directory the hook launcher falls back to and did "
+                        f"not say the hook will find it{evidence(rc, out)}")
+
+    # A relative --dir under an exported CDPATH. The script resolves the
+    # directory with cd, which searches CDPATH first: a decoy of the same name
+    # there must not become the path it tells the user to set. Relative, since
+    # CDPATH is never consulted for an absolute operand; POSIX only, since
+    # install.ps1 has no cd.
+    if not WINDOWS:
+        cwd = where("cdpath-cwd")
+        decoy = where("cdpath-decoy")
+        (decoy / "dest").mkdir(parents=True)
+        cwd.mkdir()
+        env = dict(os.environ)
+        env["CDPATH"] = str(decoy)
+        with Serving(dist) as base:
+            rc, out = run(launch, flag("version", version)
+                          + flag("rehearse", base) + flag("dir", "dest"),
+                          env, cwd)
+        if rc != 0 or not (cwd / "dest" / binary).is_file():
+            findings.append(f"[{label}] with CDPATH exported the install "
+                            f"script did not install into a relative --dir"
+                            f"{evidence(rc, out)}")
+        elif str(decoy) in out or str(decoy.resolve()) in out:
+            findings.append(f"[{label}] with CDPATH exported the install "
+                            f"script named {decoy}, a directory it did not "
+                            f"install into{evidence(rc, out)}")
 
     # Which verifier it would use. The verification itself needs a signed
     # release, so this is the furthest a pull request reaches.
