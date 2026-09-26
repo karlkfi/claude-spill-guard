@@ -275,8 +275,10 @@ try {
 
 # The launcher tries SPILL_GUARD_BIN, then PATH, then %LOCALAPPDATA%\spill-guard\bin
 # and nothing else, so a -Dir off PATH is found only when it is that default.
-# Both sides go through Get-Item, because two resolvers can disagree about an
-# 8.3 short name such as RUNNER~1 and call one directory two.
+# Compared as written first: with -Dir omitted it is the default string itself,
+# and resolving the two sides separately called one directory two on a runner
+# whose path carried the 8.3 name RUNNER~1. The Get-Item comparison is for the
+# default passed explicitly, and no arm drives it.
 $full = (Get-Item -LiteralPath $Dir).FullName.TrimEnd('\')
 $isDefault = $false
 if ($env:LOCALAPPDATA) {

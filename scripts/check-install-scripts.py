@@ -164,12 +164,12 @@ def flag(name, value=None):
     return [spelling] if value is None else [spelling, value]
 
 
-def run(launch, args, env=None):
+def run(launch, args, env=None, cwd=ROOT):
     """(rc, combined output). Both streams, because a refusal goes to stderr
     and the progress that says how far it got goes to stdout -- a finding that
     quotes one of them throws away the half that says why."""
     done = subprocess.run(launch + args, capture_output=True, text=True,
-                          cwd=str(ROOT), env=env, check=False)
+                          cwd=str(cwd), env=env, check=False)
     return done.returncode, (done.stdout + done.stderr).strip()
 
 
@@ -374,6 +374,31 @@ def drive(label, launch, dist, tmp, archive, version):
         findings.append(f"[{label}] the install script installed to the "
                         f"directory the hook launcher falls back to and did "
                         f"not say the hook will find it{evidence(rc, out)}")
+
+    # A relative --dir under an exported CDPATH. The script resolves the
+    # directory with cd, which searches CDPATH first: a decoy of the same name
+    # there must not become the path it tells the user to set. Relative, since
+    # CDPATH is never consulted for an absolute operand; POSIX only, since
+    # install.ps1 has no cd.
+    if not WINDOWS:
+        cwd = where("cdpath-cwd")
+        decoy = where("cdpath-decoy")
+        (decoy / "dest").mkdir(parents=True)
+        cwd.mkdir()
+        env = dict(os.environ)
+        env["CDPATH"] = str(decoy)
+        with Serving(dist) as base:
+            rc, out = run(launch, flag("version", version)
+                          + flag("rehearse", base) + flag("dir", "dest"),
+                          env, cwd)
+        if rc != 0 or not (cwd / "dest" / binary).is_file():
+            findings.append(f"[{label}] with CDPATH exported the install "
+                            f"script did not install into a relative --dir"
+                            f"{evidence(rc, out)}")
+        elif str(decoy) in out or str(decoy.resolve()) in out:
+            findings.append(f"[{label}] with CDPATH exported the install "
+                            f"script named {decoy}, a directory it did not "
+                            f"install into{evidence(rc, out)}")
 
     # Which verifier it would use. The verification itself needs a signed
     # release, so this is the furthest a pull request reaches.

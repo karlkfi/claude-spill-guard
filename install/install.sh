@@ -56,6 +56,9 @@
 # requiring it costs nobody anything.
 
 set -eu
+# cd consults CDPATH before the current directory, so a relative --dir could
+# resolve somewhere else, or nowhere, and kill the script after the install.
+unset CDPATH
 
 REPO='karlkfi/claude-spill-guard'
 WORKFLOW='.github/workflows/release.yml'
