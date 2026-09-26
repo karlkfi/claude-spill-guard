@@ -124,9 +124,15 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// with. glob.go says what changes them; once one has, every later
 		// pattern in the string is a set this cannot compute.
 		globsAltered := cur.state.globsAltered
-		// Read off the text because Segments has already split it away;
-		// glob.go says why.
-		qualified := globQualifier.MatchString(cur.text)
+		// Two zsh readings, taken over the whole text because the shapes need
+		// not sit at a segment's head: a glob qualifier, which Segments splits
+		// off as a subshell so that `cat *(D)` reaches expand as `*`, and an
+		// option change -- `builtin setopt globdots`, `options[globdots]=on`,
+		// a `setopt` inside a function body. internal/bash/zsh.go has both.
+		qualified := bash.GluedParen(cur.text)
+		if toolShellIsZsh() && bash.ChangesZshOptions(cur.text) {
+			globsAltered = true
+		}
 		// The variables the string assigns, substituted into each segment
 		// before anything reads it, as bash expands before it runs. vars.go
 		// is the port and carries what it declines to resolve. A queued body

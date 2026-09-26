@@ -2530,8 +2530,8 @@ precision rather than recall. What disagrees on reads, and so stays refused:
 | shape | zsh 5.9 reads | why it is refused |
 |---|---|---|
 | `**` in the operand | every level below | zsh recurses it; bash, without `globstar`, does not |
-| a `(` glued to the word, `cat *(D)` | `.env` beside the rest | a qualifier: `(D)` adds dotfiles, `(P:.env:)` prepends a word, `(e:…:)` replaces the matches. `Segments` splits it off as a subshell, so it is read off the raw text |
-| `setopt globdots; cat *` | `.env` beside the rest | an option change, and so is `set -o globdots`, `set -4`, `unsetopt` and `emulate`. Every flag to `set` counts under zsh, which sets any option through it |
+| a `(` glued to the word, `cat *(D)` | `.env` beside the rest | a qualifier: `(D)` adds dotfiles, `(P:.env:)` prepends a word, `(e:…:)` replaces the matches. `Segments` splits it off as a subshell, so it is read off the lexer's own tokens, where an unquoted `(` stands alone after the word and a quoted `'docs(queue): x'` stays one token |
+| `setopt globdots; cat *` | `.env` beside the rest | an option change, and so is `set -o globdots`, `set -4`, `unsetopt`, `emulate` and an assignment to the `options` array. Read as whole tokens anywhere in the string rather than at a segment's head, because `builtin setopt globdots` and a `setopt` inside a function body change the options from a position no head peel reaches -- the review of Q194 drove four such spellings through its first head as silent allows |
 
 The one zsh snapshot on this machine sets no glob option -- its option section
 is `nohashdirs` and `login` -- so the defaults are the baseline, on the same

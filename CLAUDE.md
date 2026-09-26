@@ -231,8 +231,9 @@ zsh and is executable, and otherwise tries zsh first. zsh recurses `**` and
 bash does not, so `cat **/*.env` over a key two directories down exited 0
 silent with nothing recorded. Under zsh a glob is expanded as bash's except
 where the two disagree -- `**`, a `(` glued to a word, which zsh reads as a
-qualifier that can add files, and an earlier `setopt`, `emulate` or `set`
-flag -- and those are a **coverage failure**; any other shell refuses every
+qualifier that can add files, and an option change anywhere in the string,
+`options[globdots]=on` and a `setopt` inside a function body included -- and
+those are a **coverage failure**; any other shell refuses every
 glob. Refusing every glob under zsh too was Q163's fix and it cost the common
 case, `cat *.env` over a key going from a deny on v0.4.1 to no verdict, until
 Q194 drove 37 patterns through both shells and narrowed it. Shapes the

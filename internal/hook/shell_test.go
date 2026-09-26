@@ -330,6 +330,11 @@ func TestAGlobZshExpandsAsBashDoesIsScanned(t *testing.T) {
 		"cat ?eploy.env",
 		"cat deplo[xy].env",
 		"cat " + name,
+		// A quoted `(` is not a qualifier, and `options` as an argument
+		// assigns nothing: the review of this change measured the first
+		// deferring, which let the key cross.
+		"echo 'docs(queue): x' && cat *.env",
+		"grep -n options *.env",
 	} {
 		for _, shell := range []string{"zsh", "bash"} {
 			t.Run(command+"/"+shell, func(t *testing.T) {
@@ -371,6 +376,12 @@ func TestAGlobZshReadsDifferentlyDefers(t *testing.T) {
 		"set -4; cat *":                   "changes how the shell expands",
 		"emulate ksh; cat *":              "changes how the shell expands",
 		"cd . && unsetopt nomatch; cat *": "changes how the shell expands",
+		// Found by the review of this change, each a silent allow on its
+		// first head: none is a segment whose head reads setopt.
+		"options[globdots]=on; cat *":              "changes how the shell expands",
+		"options+=(globdots on); cat *":            "changes how the shell expands",
+		"builtin setopt globdots; cat *":           "changes how the shell expands",
+		"function f { setopt globdots }; f; cat *": "changes how the shell expands",
 	} {
 		t.Run(command, func(t *testing.T) {
 			shellNamed(t, "zsh")
