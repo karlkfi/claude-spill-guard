@@ -70,6 +70,15 @@ func altersGlobbing(raw, sub []string, quotedFrom []int) bool {
 		}
 		return false
 	}
+	// `builtin shopt` and `command shopt` run shopt, in either shell, and a
+	// flag to `command` sits between (Q195). Peeled here and not in
+	// EnvPrefixPeel, because only this reading needs the name behind them.
+	for len(rest) > 1 && (filepath.Base(rest[0]) == "builtin" || filepath.Base(rest[0]) == "command") {
+		rest = rest[1:]
+		for len(rest) > 1 && strings.HasPrefix(rest[0], "-") {
+			rest = rest[1:]
+		}
+	}
 	name := filepath.Base(rest[0])
 	zsh := !toolShellIsBash()
 	switch {

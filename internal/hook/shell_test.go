@@ -393,6 +393,9 @@ func TestAGlobZshReadsDifferentlyDefers(t *testing.T) {
 		"o=setopt; $o globdots; cat *":             "changes how the shell expands",
 		"${:-setopt} globdots; cat *":              "changes how the shell expands",
 		"cat *=(D)":                                "qualifier",
+		// Third round: the head reading saw `builtin`, the whole-text one
+		// the raw `$o`.
+		"o=setopt; builtin $o globdots; cat *": "changes how the shell expands",
 	} {
 		t.Run(command, func(t *testing.T) {
 			shellNamed(t, "zsh")
@@ -409,6 +412,20 @@ func TestAGlobZshReadsDifferentlyDefers(t *testing.T) {
 			t.Fatalf("exit %d, stdout %q, stderr %q, want a silent allow", code, stdout, stderr)
 		}
 	})
+	// The bash half of the same peel, which was Q195: a silent allow on main.
+	for _, command := range []string{
+		"builtin shopt -s dotglob; cat *",
+		"command shopt -s dotglob; cat *",
+		"command -p shopt -s dotglob; cat *",
+	} {
+		t.Run(command+"/bash", func(t *testing.T) {
+			bashShell(t)
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "changes how the shell expands") {
+				t.Errorf("coverage reason = %q, want the option change named", reason)
+			}
+		})
+	}
 	// A flag to `set` is counted under zsh alone. Under bash it changes
 	// nothing a pattern expands to unless it is -f, and `set -e` before a glob
 	// is common enough that counting it would record calls this can scan.
