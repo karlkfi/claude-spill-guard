@@ -124,6 +124,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// with. glob.go says what changes them; once one has, every later
 		// pattern in the string is a set this cannot compute.
 		globsAltered := cur.state.globsAltered
+		// Read off the text because Segments has already split it away;
+		// glob.go says why.
+		qualified := globQualifier.MatchString(cur.text)
 		// The variables the string assigns, substituted into each segment
 		// before anything reads it, as bash expands before it runs. vars.go
 		// is the port and carries what it declines to resolve. A queued body
@@ -224,7 +227,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 						maxLoopCandidates)
 				}
 				for _, cand := range cands {
-					expanded, err := expand(cand, dir, dirUnknown, globsAltered)
+					expanded, err := expand(cand, dir, dirUnknown, globsAltered, qualified)
 					if err != nil {
 						return nil, fmt.Errorf("in the %q here, %w", command, err)
 					}

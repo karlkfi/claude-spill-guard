@@ -83,3 +83,10 @@ func toolShellIsBash() bool {
 	path := toolShell()
 	return path != "" && strings.Contains(filepath.Base(path), "bash")
 }
+
+// toolShellIsZsh is the same reading for zsh, the one other shell whose
+// expansion glob.go has measured against bash's.
+func toolShellIsZsh() bool {
+	path := toolShell()
+	return path != "" && strings.Contains(filepath.Base(path), "zsh")
+}

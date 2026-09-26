@@ -294,7 +294,7 @@ func TestTheExpansionAgreesWithBash(t *testing.T) {
 	root := globFixture(t)
 	for _, row := range bashGlobRows {
 		t.Run(row.pattern, func(t *testing.T) {
-			got, err := expand(row.pattern, root, false, false)
+			got, err := expand(row.pattern, root, false, false, false)
 			if row.refused {
 				if err == nil {
 					t.Fatalf("expanded to %q, want a refusal", got)
@@ -320,6 +320,43 @@ func TestTheExpansionAgreesWithBash(t *testing.T) {
 			slices.Sort(have)
 			if !slices.Equal(have, want) {
 				t.Errorf("got %q, bash gave %q", have, want)
+			}
+		})
+	}
+}
+
+// The same rows under a zsh tool shell. Driven with the same loop under zsh
+// 5.9 with -f, over globFixture, on 2026-09-26: 30 of the 37 print what bash
+// prints. Of the other seven, `d/[` and the brace row are refused here
+// anyway; four -- `d/nomatch*`, `d/*.TXT`, `d/[.]hidden.txt`, `d/[.h]*` --
+// read nothing in either shell, bash passing through a name no file has and
+// zsh stopping on NOMATCH; and `d/x[1].txt` stops zsh too while bash reads
+// the literal file, so the bash set is a superset there and costs precision
+// rather than recall. So the property is that zsh gets bash's answer, except
+// that `**` is refused -- `d/**/*.md` agrees only because globFixture is one
+// level deep, and TestARecursiveGlobIsNotAllowedUnderAShellThatRecursesIt has
+// the tree where it does not.
+func TestTheExpansionAgreesUnderZsh(t *testing.T) {
+	root := globFixture(t)
+	for _, row := range bashGlobRows {
+		t.Run(row.pattern, func(t *testing.T) {
+			bashShell(t)
+			want, wantErr := expand(row.pattern, root, false, false, false)
+			shellNamed(t, "zsh")
+			got, err := expand(row.pattern, root, false, false, false)
+			if row.refused || strings.Contains(row.pattern, "**") {
+				if err == nil {
+					t.Fatalf("expanded to %q, want a refusal", got)
+				}
+				return
+			}
+			if err != nil || wantErr != nil {
+				t.Fatalf("refused under zsh: %v, under bash: %v", err, wantErr)
+			}
+			slices.Sort(want)
+			slices.Sort(got)
+			if !slices.Equal(got, want) {
+				t.Errorf("zsh got %q, bash got %q", got, want)
 			}
 		})
 	}

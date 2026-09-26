@@ -49,9 +49,9 @@ set, or read as a path to compare against; none is stored, logged or emitted.
 
 `CLAUDE_CODE_SHELL` and `SHELL` name the shell the `Bash` tool will run, and
 the expansion of a glob operand here is bash's: Claude Code picks zsh unless
-one of these two names bash, and zsh expands a pattern differently, so where
-they do not name bash the pattern is left unexpanded and recorded rather than
-resolved. Neither is spawned — nothing here runs a shell — and neither is
+one of these two names bash, and zsh expands some patterns differently, so
+where they name zsh those patterns, and where they name neither shell every
+pattern, are left unexpanded and recorded rather than resolved. Neither is spawned — nothing here runs a shell — and neither is
 read for anything else. These two are the exception to the sentence above: the
 path one of them holds is written into the coverage record, because a record
 saying a call went unscanned over a shell it does not name is one nobody can
