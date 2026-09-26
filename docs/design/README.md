@@ -2424,7 +2424,7 @@ the direction this design refuses: a block on a file the command never sends is
 a false positive, and precision is the product. Nothing here reads a snapshot,
 so `PRIVACY.md` is unchanged.
 
-### And the shell it is expanded by is not bash unless something names bash
+### And the shell it is expanded by is a setting, not a constant
 
 Everything above assumes the tool shell is bash. **Measured 2026-09-19 on
 Claude Code 2.1.275, it is bash only where something on the machine names
@@ -2442,7 +2442,19 @@ and in the 2.1.275 the desktop app runs -- 882 bytes in each and
 alpha-equivalent rather than byte-identical, since the minifier renames 10 of
 its 16 identifiers between builds, so the two carry the same ladder and not the
 same bytes. So a machine whose `SHELL` is unset, or names `fish` or `/bin/sh`, gets
-zsh.
+zsh. Do not read that lean as the common case: the thing that names a shell is
+almost always the login shell, and it reaches the ladder on every machine that
+has one.
+
+**That login shell is a per-account setting whose default varies by operating
+system, by version and by distribution, so it is a constant in neither
+direction.** macOS is the documented case and it is dated: macOS 10.15
+Catalina, 2019, made zsh the default for **newly created** accounts, which
+leaves an account created before it on bash through every upgrade since -- so a
+Mac running this month's release can still hand the harness `SHELL=/bin/bash`.
+[Apple's note](https://support.apple.com/102360) scopes it to newly created
+accounts; that an upgrade leaves an older account alone follows from that scope
+rather than being stated there. No other operating system is cited or measured.
 
 This machine ran zsh for a month and the switch is dated. Recovered from 2,232
 session transcripts, 1,374,388 records, 231 naming a shell snapshot: 212
@@ -2463,8 +2475,10 @@ that bash-assuming tooling was failing under zsh, and forcing bash was cheaper
 than teaching each tool to survive the difference. So the zsh count stops where
 somebody hit this class of defect and mitigated it at the config layer, one
 level above any scanner, which makes the 96 corroboration rather than
-coincidence. It also names the exposed population, which the counts do not:
-whoever has not already been bitten into making the same override.
+coincidence. What is exposed is the **zsh subset** of the machines that have not
+been bitten into making the same override -- a bash login shell is not exposed
+to this at all, because the expansion it assumes is the one it gets -- and the
+paragraph on the login shell above is why nothing here can size that subset.
 
 **zsh recurses `**` by default and bash does not, and that was a fail-open.**
 Over a fixture holding `top.env`, `sub/mid.env` and `sub/deep/low.env` with an
