@@ -47,6 +47,14 @@ The other way to a vacuous pass is the harness. A payload shape this binary
 does not decode, a build that did not happen, a `git ls-files` that came back
 empty -- each is an exit rather than a shorter list.
 
+**A binary is the third outcome, and it is not a clean one.** The hook reads
+past a file with a NUL in its first 8 KiB, lets the call through, and says so in
+a `systemMessage` -- so whatever text such a file holds, nothing here looked at
+it. Counting that as clear would let a tracked binary carry a credential past
+the gate that exists to catch one. So it is a class of its own, `UNREAD`, and
+it takes a named path and a reason exactly as a match does, asserted in both
+directions.
+
 **A block is a `deny` object on stdout at exit 0**, not a non-zero status. A
 census keyed on the exit code reports every file allowed, which is a clean
 sweep of the whole tree and completely wrong.
@@ -106,6 +114,15 @@ ALLOWED = {
         "the bytes are the assertion",
 }
 
+# Every tracked file the hook allows without reading, and why nobody needs it
+# read. A rendered image qualifies when its text lives in a master this gate
+# does read; a binary that is its own source does not.
+UNREAD = {
+    "docs/img/social-preview.png":
+        "rendered from social-preview.svg beside it, which carries every "
+        "word the image does and is scanned as text",
+}
+
 
 def run(*argv, **kw):
     return subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
@@ -133,7 +150,7 @@ def build(into):
 
 
 def verdict(binary, path):
-    """("deny"|"clear", reason). Anything else exits: a payload this binary
+    """("deny"|"unread"|"clear", reason). Anything else exits: a payload this binary
     cannot answer is a broken harness, and it would otherwise be counted as a
     file that did not match."""
     payload = json.dumps({
@@ -161,6 +178,10 @@ def verdict(binary, path):
         return "clear", ""
     if decoded.get("decision") == "block":
         return "deny", decoded.get("reason", "")
+    # A notice and no decision: the call was allowed with a buffer nothing
+    # decoded, which on a Read is a file the hook skipped as binary.
+    if set(decoded) == {"systemMessage"}:
+        return "unread", decoded["systemMessage"]
     # `ask` is the override downgrade and reaches no Read call, and a shape
     # this does not name is one whose verdict nobody here has decided how to
     # count. Both are exits rather than a default.
@@ -184,13 +205,15 @@ def reason_line(reason):
 
 def main():
     files = tracked()
-    matched = {}
+    matched, unread = {}, {}
     with tempfile.TemporaryDirectory() as tmp:
         binary = build(Path(tmp) / "spill-guard")
         for path in files:
             kind, reason = verdict(binary, path)
             if kind == "deny":
                 matched[path] = reason
+            elif kind == "unread":
+                unread[path] = reason
 
     failures = []
 
@@ -229,6 +252,24 @@ def main():
                             f"matches, so the exemption is dead -- delete the "
                             f"entry rather than leaving it to read as live")
 
+    # The same two directions for a file nothing read.
+    for path in sorted(unread):
+        if path not in UNREAD:
+            failures.append(
+                f"{path} is allowed without being read, so a credential in it "
+                f"would pass this gate. If it is rendered from a text master, "
+                f"add it to UNREAD in this file with the reason; if it is its "
+                f"own source, it does not belong in the tree. The hook said: "
+                f"{unread[path][:200]}")
+    for path in sorted(UNREAD):
+        if path not in files:
+            failures.append(f"{path} is on the unread list and is not "
+                            f"tracked, so the entry describes a file that is "
+                            f"gone")
+        elif path not in unread:
+            failures.append(f"{path} is on the unread list and the hook now "
+                            f"reads it, so the entry is dead -- delete it")
+
     for failure in failures:
         print(f"self-scan: {failure}", file=sys.stderr)
     if failures:
@@ -244,6 +285,9 @@ def main():
         print(f"self-scan:   {count:>2} in {prefix} -- {why}")
     print(f"self-scan:   {len(ALLOWED)} named, each with a reason:")
     for path, why in ALLOWED.items():
+        print(f"self-scan:      {path} -- {why}")
+    print(f"self-scan:   {len(UNREAD)} allowed unread, each with a reason:")
+    for path, why in UNREAD.items():
         print(f"self-scan:      {path} -- {why}")
     return 0
 

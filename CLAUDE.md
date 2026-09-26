@@ -17,6 +17,7 @@ measured.
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
 | `docs/development/release-process.md` | Cutting a release: what a person does, and what the tag does. |
+| `docs/img/` | The social preview and the mark, as SVG masters and the one PNG rendered from them. [`rendering-images.md`](docs/development/rendering-images.md) says how. |
 | `cmd/spill-guard/` | The entry point. `hook`, `selftest`, `coverage` and `version`; the rest land with the rows that specify them. |
 | `internal/validate/` | The eight validators, and the one extent. Precision lives here, not in the regex — and so does the only answer to *how far does this run*, which a bounded repeat cannot give past 1,003 bytes. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
