@@ -15,6 +15,7 @@ import (
 // POSIX pattern, and the re-take on 2026-09-06 found 135 glob operands behind
 // the reason and every one plain.
 func TestAGlobOperandIsExpandedToTheFilesBashWouldSend(t *testing.T) {
+	bashShell(t)
 	dir, name := planted(t)
 	sub := filepath.Join(dir, "sub")
 	if err := os.Mkdir(sub, 0o755); err != nil {
@@ -90,6 +91,7 @@ func TestAGlobOperandIsExpandedToTheFilesBashWouldSend(t *testing.T) {
 // on its content would be a block on bytes that never cross. The literal forms
 // reach it, as they do in bash.
 func TestAGlobDoesNotReachADotfileBashWouldNotSend(t *testing.T) {
+	bashShell(t)
 	dir, name := planted(t)
 	hidden := "." + name
 	if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, hidden)); err != nil {
@@ -127,6 +129,7 @@ func TestAGlobDoesNotReachADotfileBashWouldNotSend(t *testing.T) {
 // 0 `shopt`, 0 `set -f`, 0 GLOBIGNORE in 95 commands -- so the arm is a
 // guard rather than a cost.
 func TestAGlobBashWouldExpandDifferentlyIsRecorded(t *testing.T) {
+	bashShell(t)
 	dir, name := planted(t)
 	for _, tc := range []struct{ name, command, says string }{
 		{"dotglob set", "shopt -s dotglob; cat *.env", "changes how the shell expands"},
@@ -173,6 +176,7 @@ func TestAGlobBashWouldExpandDifferentlyIsRecorded(t *testing.T) {
 // send is in the set, and files it would not are too. Pinned so a lexer that
 // keeps quote provenance reddens this and decides.
 func TestAQuotedGlobExpandsWhereBashWouldNot(t *testing.T) {
+	bashShell(t)
 	dir, name := planted(t)
 	for _, command := range []string{`cat "*.env"`, `cat '*.env'`, `cat \*.env`} {
 		t.Run(command, func(t *testing.T) {
@@ -286,6 +290,7 @@ var bashGlobRows = []struct {
 // unscanned. So the sets are compared whole, after cleaning, since `d/./a.txt`
 // and `d/a.txt` are one file.
 func TestTheExpansionAgreesWithBash(t *testing.T) {
+	bashShell(t)
 	root := globFixture(t)
 	for _, row := range bashGlobRows {
 		t.Run(row.pattern, func(t *testing.T) {

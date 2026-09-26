@@ -2,6 +2,7 @@ package hook
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -100,6 +101,22 @@ func expand(operand, cwd string, cwdUnknown, globsAltered bool) ([]string, error
 	}
 	if !isGlob(operand) {
 		return []string{path}, nil
+	}
+	// Ahead of the options, because a shell that is not bash does not have
+	// them: blaming a `shopt` for a set zsh computed another way names the
+	// wrong cause. shell.go carries the ladder and why the refusal is the
+	// whole of the expansion rather than `**` alone -- `cat **/*.env` recurses
+	// under zsh's defaults and does not under bash's, and the narrower fix
+	// rests on the rest of the expansion agreeing, which is unmeasured.
+	if !toolShellIsBash() {
+		if sh := toolShell(); sh != "" {
+			return nil, fmt.Errorf("a file operand is a glob and the Bash tool's "+
+				"shell is %q rather than bash, which expands one differently, so "+
+				"which files this command would read is not settled here", sh)
+		}
+		return nil, errors.New("a file operand is a glob and nothing on this " +
+			"machine names bash as the Bash tool's shell, so which files this " +
+			"command would read is not settled here")
 	}
 	if globsAltered {
 		return nil, errors.New("a file operand is a glob and an earlier command " +

@@ -2396,8 +2396,9 @@ file's shape: bash 5.3.15 started on an rc file holding `shopt -s dotglob`
 reports `-s` for it, and the same shell on an rc file setting nothing reports
 `-u`. The snapshot's block is that shell's own `shopt -p`, differing from a
 non-interactive shell's in `login_shell` and `expand_aliases` alone. The 63rd
-file is a zsh snapshot carrying no `shopt` line at all, which is Q163's class
-rather than this one. Claude Code narrows one option itself: every Bash tool
+file is a zsh snapshot carrying no `shopt` line at all, which is the subject
+of *And the shell it is expanded by* below rather than of this paragraph: a
+shell with no `shopt` has no options for the filter here to read. Claude Code narrows one option itself: every Bash tool
 call runs `source <snapshot> ... && shopt -u extglob`, so `extglob` cannot be
 on for a tool shell whatever the rc file says.
 
@@ -2422,6 +2423,183 @@ superset instead -- dropping the hidden-file filter so nothing is missed -- is
 the direction this design refuses: a block on a file the command never sends is
 a false positive, and precision is the product. Nothing here reads a snapshot,
 so `PRIVACY.md` is unchanged.
+
+### And the shell it is expanded by is a setting, not a constant
+
+Everything above assumes the tool shell is bash. **Measured 2026-09-19 on
+Claude Code 2.1.275, it is bash only where something on the machine names
+bash.** How often that holds across machines is not measured here and one
+machine cannot measure it. Claude Code picks the shell before it
+runs anything: `CLAUDE_CODE_SHELL` if its path holds `bash` or `zsh` -- a
+substring over the whole path, not a basename -- and is executable, then
+`SHELL` on the same two conditions, and otherwise `zsh` and `bash` resolved on
+`$PATH` plus a fixed list over `/bin`, `/usr/bin`, `/usr/local/bin` and
+`/opt/homebrew/bin`. That list is **name-major** -- all four zsh paths before
+any bash path -- with the `PATH` hit for the preferred name unshifted ahead of
+it and the other pushed behind, and the whole order reverses only when `SHELL`
+holds `bash`. Read out of the shipped binary in the 2.1.270 CLI
+and in the 2.1.275 the desktop app runs -- 882 bytes in each and
+alpha-equivalent rather than byte-identical, since the minifier renames 10 of
+its 16 identifiers between builds, so the two carry the same ladder and not the
+same bytes. So a machine whose `SHELL` is unset, or names `fish` or `/bin/sh`, gets
+zsh. Do not read that lean as the common case: the thing that names a shell is
+almost always the login shell, and it reaches the ladder on every machine that
+has one.
+
+**That login shell is a per-account setting whose default varies by operating
+system, by version and by distribution, so it is a constant in neither
+direction.** macOS is the documented case and it is dated: macOS 10.15
+Catalina, 2019, made zsh the default for **newly created** accounts, which
+leaves an account created before it on bash through every upgrade since -- so a
+Mac running this month's release can still hand the harness `SHELL=/bin/bash`.
+[Apple's note](https://support.apple.com/102360) scopes it to newly created
+accounts; that an upgrade leaves an older account alone follows from that scope
+rather than being stated there. No other operating system is cited or measured.
+
+This machine ran zsh for a month and the switch is dated. Recovered from 2,232
+session transcripts, 1,374,388 records, 231 naming a shell snapshot: 212
+distinct tool shells, 96 zsh and 116 bash, with no interleaving -- re-taken
+independently two days later over 2,247 transcripts as 96 and 117, the same two
+runs with the same boundary seconds, the zsh count closed and only the bash one
+accruing, which is what a switched machine looks like. The last zsh
+tool shell is 2026-08-24 09:17:09, a `CLAUDE_CODE_SHELL` was committed to
+`~/.claude/settings.json` at 10:01:55, and the first bash tool shell is
+14:13:07. `dscl . -read /Users/karl UserShell` still reports `/bin/zsh`, so the
+96 are what this machine does with the setting removed rather than an old
+harness.
+
+**The switch is not an exogenous event, which strengthens that reading rather
+than weakening it.** `ea91c63` records the change and not its reason. The
+reason -- from the maintainer, who made it, rather than measured here -- is
+that bash-assuming tooling was failing under zsh, and forcing bash was cheaper
+than teaching each tool to survive the difference. So the zsh count stops where
+somebody hit this class of defect and mitigated it at the config layer, one
+level above any scanner, which makes the 96 corroboration rather than
+coincidence. What is exposed is the **zsh subset** of the machines that have not
+been bitten into making the same override -- a bash login shell is not exposed
+to this at all, because the expansion it assumes is the one it gets -- and the
+paragraph on the login shell above is why nothing here can size that subset.
+
+**zsh recurses `**` by default and bash does not, and that was a fail-open.**
+Over a fixture holding `top.env`, `sub/mid.env` and `sub/deep/low.env` with an
+AWS-shaped key in the deepest, driven through binaries built either side of the
+change:
+
+| call | shell | before | after |
+|---|---|---|---|
+| `cat **/*.env`, key in `sub/deep/low.env` | bash | allow, silent | allow, silent |
+| `cat **/*.env`, key in `sub/deep/low.env` | zsh | **allow, silent** | no verdict, recorded |
+| `cat **/*.env`, key in `sub/mid.env` | bash | deny | deny |
+| `cat sub/deep/low.env` | zsh | deny | deny |
+| `cat *.env` | bash | allow, silent | allow, silent |
+
+Read the third and fourth rows before the second. The key crossed on a clean
+exit with nothing written to the coverage log, and the controls are what make
+that an allow over the bash file set rather than a call that did nothing: the
+same payload denies once the key sits in the one file bash's expansion reaches,
+and the deep file named directly denies under zsh, so the scanner could read it
+and the expansion is what hid it.
+
+**Both controls are load-bearing and a re-take fails quietly without them.** A
+silent allow is what this scanner does for a clean file, for one it could not
+read and for one it never opened, so the first arm on its own distinguishes
+nothing. The independent review of the row lost a cycle to exactly that: its
+first fixture planted `AKIAIOSFODNN7EXAMPLE`, which the `aws-placeholder`
+validator rejects by design, so the control exited 0 and the silent arm would
+have reproduced for the wrong reason.
+
+**So a glob operand is a coverage failure where the shell is not bash** --
+`internal/hook/shell.go` resolves the ladder, `expand` refuses ahead of the
+options, and the call defers. It costs nothing where the shell is bash, which
+is the only shape this repo's own worktrees run under, and on every other
+machine it replaces a silent allow with a record **for a glob operand**.
+
+Read that scope as written, because the class is wider than the fix. Any
+zsh-only expansion that names a file bash would not open is the same
+under-scan, and `cat =ls` -- which zsh resolves to `/bin/ls` -- carries no glob
+metacharacter at all, so nothing here sees it and an operand naming no file
+allows silently. `Q184` owns that half. What this section establishes is that
+one member of the class is closed, not the class.
+
+Three readings in that are narrower than the harness on purpose. The harness's
+substring decides whether it *accepts* a path; what the file **is** decides how
+it globs, so the base name is read for that, and a `sh` under a directory named
+`bash-builds` is spawned by the harness and is not bash here. The executable
+test asks `access(2)` rather than reading `os.Stat`'s mode bits, because the
+two disagree on ownership, on an ACL and on a `noexec` mount, and one direction
+of that is an under-scan: where the
+bits say executable and `access` would refuse, the harness throws, falls through
+to detection and may spawn zsh, while a reading off the bits answers *bash* and
+expands under bash's rules. The other direction costs a record. `syscall.Access`
+is stdlib and is not portable -- it does not exist on Windows, which
+`cross-compile` gates -- so the split is by build tag rather than by choice. Windows has no
+execute bit and reads the bits instead, which is `Q192`'s platform anyway.
+
+And the third step is not reproduced. It is settled -- the expression is
+name-major, zsh at all four directories before bash at any of them, the two
+swapped when `SHELL` holds `bash`, so no arrangement of the directories changes
+the answer -- and reproducing it could only turn a deferral into an expansion.
+It reaches bash on two machines: one whose `SHELL` names a bash the harness
+could not spawn, and one with no zsh installed at all. Both already have nothing
+naming a usable shell, so answering *not bash* costs them a record and never
+expands under a shell this did not identify.
+
+**Refusing the whole expansion rather than `**` alone is the available fix,
+not the preferred one.** The narrower one rests on the rest of the expansion
+agreeing between the two shells, and that is unmeasured -- `Q184` carries the
+list, which is glob qualifiers, `=cmd`, named directories, and whether the
+segmentation port's reserved words and operators split the same way.
+
+**`SHELL` inside a tool process does not say what the harness read.** bash
+rewrites it in its own process, so `printenv SHELL` in a `Bash` call reports
+`/opt/homebrew/bin/bash` on this machine while the hook, a child of the harness
+rather than of the tool shell, reads `/bin/zsh`. Both are correct and only the
+second is the ladder's input, so anyone cross-checking this section the first
+way concludes it is wrong.
+
+**How the ladder's later steps were driven, since a live one cannot be.**
+`claude -p` refuses to authenticate, on the CLI and the desktop binary both and
+from two sessions independently, so no arm of the fallback can be watched in a
+real run -- that is a property of the harness here rather than of one session's
+credentials. What was done instead: the 882-byte selection function extracted
+from the 2.1.270 binary verbatim, its three externals stubbed, and the result
+run under `jsc` across nine environment arms. All nine agree with the reading
+above, including the decoy: `CLAUDE_CODE_SHELL=/opt/bashful/bin/fish` holds
+`bash` as a substring, so the harness accepts that path and **spawns fish**.
+It is the sharpest case for reading the dialect off the base name rather than
+off the path, and it applies at **both** rungs: the substring is tested on
+`SHELL` too, and an executable hit there is unshifted ahead of every fallback
+candidate, so `SHELL=/opt/bashful/bin/fish` is spawned where that file exists
+and merely flips the step-3 ordering where it does not. A resolver that took
+the substring for the answer would report bash, expand the glob and allow --
+over a shell that recurses `**` as zsh does, so the under-scan this section
+exists to close would have been reintroduced by the fix for it. A substring hit
+means *not certainly bash*; only a base name of `bash` earns the bash answer.
+Driven against the built binary at both rungs: `/opt/bashful/bin/fish` and
+`/home/zshaw/bin/fish`, made executable, defer -- against a real bash allowing
+and a real zsh deferring in the same run. An authenticated drive was declined rather than unavailable for one arm
+of it: writing a synthetic zsh snapshot would contaminate the population the
+96-of-212 count is drawn from.
+
+**What it does not establish, stated rather than closed.** How often a
+recursive glob reaches a reader is bounded and not counted -- 447 of 188,898
+real `Bash` calls carried a `**/`-shaped word on 2026-09-19, an upper bound,
+since most sit inside a heredoc or a quoted `git grep` pathspec where no shell
+expands them. Classified on a re-take two days later: 525 of 191,385, of which
+374 are inside heredocs, 105 quoted and 46 bare -- and several of the 46 are
+regex artifacts rather than globs. **The metric contaminates itself**: total
+calls grew 1.3% over those two days and `**/` hits grew 17%, because writing
+about the shape is what puts it in the transcripts. And Windows is unmeasured: the harness
+carries a PowerShell provider beside the posix one, nothing here establishes
+whether a `Bash` tool call can reach it, and the launcher ships for Windows.
+
+**The instrument was in hand a fortnight before it was used, which is the part
+worth remembering.** The drive above that went looking for a shell snapshot
+reported 55 environment variables and no route to one. That was true of the
+snapshot. `CLAUDE_CODE_SHELL` and `SHELL` were in the same environment, and
+they answer a question nobody had asked of it: not *which options did this
+shell restore* but *which shell is it*. A probe is read for what it was sent
+to find, and the rest of what it returned goes unread.
 
 ### A loop variable is one operand per value bash iterates
 

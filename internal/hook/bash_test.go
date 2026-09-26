@@ -113,6 +113,7 @@ func TestAHeredocBodyIsScanned(t *testing.T) {
 // the session read the same tree another way within four calls 99.2% of the
 // time, so the block bought a turn's delay and no coverage at all.
 func TestAnOperandThatCannotBeResolvedDefers(t *testing.T) {
+	bashShell(t)
 	dir := t.TempDir()
 	for _, tc := range []struct {
 		name    string
@@ -970,6 +971,7 @@ func loopFixture(t *testing.T) string {
 // these read the file the row expects, and the glob rows skipped a `.hidden.env`
 // beside them, which is the default globFiles already models.
 func TestALoopVariableResolvesToTheFilesBashIterates(t *testing.T) {
+	bashShell(t)
 	dir := loopFixture(t)
 	for _, tc := range []struct{ name, command, wants string }{
 		{"the first item", `for f in deploy.env clean.env; do cat "$f"; done`, "deploy.env"},

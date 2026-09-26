@@ -24,10 +24,10 @@ sandboxed home directory — and fails until this file agrees with all four.
 | `PreToolUse` | `Read` | the `file_path`, and the file it names |
 | `UserPromptSubmit` | every prompt | the prompt, and the files its `@` tokens name |
 
-The binary reads `CDPATH`, `GIT_CEILING_DIRECTORIES`, `GIT_DIR`,
-`GIT_WORK_TREE`, `HOME`, `TMPDIR` and `XDG_STATE_HOME` from its environment,
-and nothing else. The launcher, `hooks/run-spill-guard.cmd`, reads `HOME`,
-`LOCALAPPDATA`, `PATH` and `SPILL_GUARD_BIN`.
+The binary reads `CDPATH`, `CLAUDE_CODE_SHELL`, `GIT_CEILING_DIRECTORIES`,
+`GIT_DIR`, `GIT_WORK_TREE`, `HOME`, `SHELL`, `TMPDIR` and `XDG_STATE_HOME` from
+its environment, and nothing else. The launcher, `hooks/run-spill-guard.cmd`,
+reads `HOME`, `LOCALAPPDATA`, `PATH` and `SPILL_GUARD_BIN`.
 
 Driven in a sandboxed home directory, the hook wrote one file, and only on a
 call it could not scan: `$XDG_STATE_HOME/spill-guard/coverage.jsonl`, or
@@ -38,14 +38,24 @@ reason names the path of what went unread, and none of its bytes.
 
 `TMPDIR` is `selftest`'s, not the hook's: it plants its canaries in a
 temporary directory and removes them before it exits. The hook reads `HOME` to
-expand a `~` in a path and `XDG_STATE_HOME` to find the coverage log below. The
-other four decide whether a `cd` in a `Bash` command can be followed, so that a
+expand a `~` in a path and `XDG_STATE_HOME` to find the coverage log below.
+Four decide whether a `cd` in a `Bash` command can be followed, so that a
 relative file operand after it resolves against the right directory: `CDPATH`
 because bash searches it before the directory a relative target names, and
 `GIT_DIR`, `GIT_WORK_TREE` and `GIT_CEILING_DIRECTORIES` because any of them
 moves the answer to `git rev-parse --show-toplevel`, which the hook computes by
 walking for a `.git` entry rather than by running git. Each is tested for being
 set, or read as a path to compare against; none is stored, logged or emitted.
+
+`CLAUDE_CODE_SHELL` and `SHELL` name the shell the `Bash` tool will run, and
+the expansion of a glob operand here is bash's: Claude Code picks zsh unless
+one of these two names bash, and zsh expands a pattern differently, so where
+they do not name bash the pattern is left unexpanded and recorded rather than
+resolved. Neither is spawned — nothing here runs a shell — and neither is
+read for anything else. These two are the exception to the sentence above: the
+path one of them holds is written into the coverage record, because a record
+saying a call went unscanned over a shell it does not name is one nobody can
+act on. Only the path, and only on a call that was already being recorded.
 
 The rules are compiled into the binary. There is no rule file on disk and no
 project override: a ruleset that cannot be separated from the binary cannot

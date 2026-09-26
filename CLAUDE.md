@@ -224,7 +224,15 @@ defaults stays an assumption about the machine rather than a reading of it:
 driven 2026-09-07, nothing at `PreToolUse` can find the snapshot its own
 session sources — not the payload, not the environment, and the filename
 carries no session id — so the residual is bounded and stated in
-`docs/design/README.md` rather than closed. A variable the same command
+`docs/design/README.md` rather than closed. **Which shell it is is readable,
+and it is not bash unless something on the machine names bash** — Claude Code
+takes `CLAUDE_CODE_SHELL` then `SHELL`, each only where the path names bash or
+zsh and is executable, and otherwise tries zsh first. zsh recurses `**` and
+bash does not, so `cat **/*.env` over a key two directories down exited 0
+silent with nothing recorded. So a glob operand is a **coverage failure**
+wherever the shell is not bash; refusing every glob rather than `**` alone is
+the available fix, since the narrower one rests on the rest of the expansion
+agreeing, which is Q184. A variable the same command
 string assigns a plain literal is substituted before anything reads the
 segment, so `SP=/x; tail "$SP/unit.log"` resolves; `internal/hook/vars.go` is
 the port of workspace-guard's propagation and poisons rather than guesses at
