@@ -309,8 +309,8 @@ func TestARecursiveGlobIsNotAllowedUnderAShellThatRecursesIt(t *testing.T) {
 		zsh := shellNamed(t, "zsh")
 		code, stdout, stderr := drive(t, bashCall(t, "cat **/*.env", dir))
 		reason := deferred(t, code, stdout, stderr)
-		if !strings.Contains(reason, "rather than bash") {
-			t.Errorf("coverage reason = %q, want it to say the shell is not bash", reason)
+		if !strings.Contains(reason, "recurses") {
+			t.Errorf("coverage reason = %q, want it to say the shell recurses `**`", reason)
 		}
 		if !strings.Contains(reason, zsh) {
 			t.Errorf("coverage reason = %q, want it to name %q", reason, zsh)
@@ -318,10 +318,10 @@ func TestARecursiveGlobIsNotAllowedUnderAShellThatRecursesIt(t *testing.T) {
 	})
 }
 
-// Every glob defers under a shell that is not bash, not `**` alone: the
-// narrower fix rests on the rest of the expansion agreeing, which Q184 is the
-// measurement for. The control below is the same call under bash.
-func TestAGlobDefersWhereTheShellIsNotBash(t *testing.T) {
+// A glob zsh expands as bash does is scanned under zsh, which is Q194: until
+// then every glob deferred there, so `cat *.env` over a key went from a deny
+// on v0.4.1 to no verdict. Each command denies under both shells.
+func TestAGlobZshExpandsAsBashDoesIsScanned(t *testing.T) {
 	dir, name := planted(t)
 	for _, command := range []string{
 		"cat *.env",
@@ -329,34 +329,112 @@ func TestAGlobDefersWhereTheShellIsNotBash(t *testing.T) {
 		"cat " + filepath.Join(dir, "*.env"),
 		"cat ?eploy.env",
 		"cat deplo[xy].env",
+		"cat " + name,
+		// A quoted `(` is not a qualifier, and `options` as an argument
+		// assigns nothing: the review of this change measured the first
+		// deferring, which let the key cross.
+		"echo 'docs(queue): x' && cat *.env",
+		"grep -n options *.env",
 	} {
-		t.Run(command, func(t *testing.T) {
-			t.Run("zsh defers", func(t *testing.T) {
-				shellNamed(t, "zsh")
+		for _, shell := range []string{"zsh", "bash"} {
+			t.Run(command+"/"+shell, func(t *testing.T) {
+				shellNamed(t, shell)
 				code, stdout, stderr := drive(t, bashCall(t, command, dir))
-				if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "rather than bash") {
-					t.Errorf("coverage reason = %q, want the shell named as the cause", reason)
-				}
-			})
-			t.Run("bash still scans", func(t *testing.T) {
-				bashShell(t)
-				code, stdout, _ := drive(t, bashCall(t, command, dir))
 				if code != 0 {
-					t.Fatalf("exit code = %d, want 0", code)
+					t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
 				}
 				if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
 					t.Errorf("reason = %q, want the rule named", reason)
 				}
 			})
+		}
+	}
+}
+
+// What zsh reads differently still defers. Each command's file set under zsh
+// holds `.env`, which bash's expansion of the same word never reaches -- a
+// qualifier adds dotfiles or names a word outright, and an option changed
+// earlier in the string puts dotfiles in `*`. Driven on zsh 5.9. The control
+// is `cat *` alone, which leaves `.env` out under both shells and allows.
+func TestAGlobZshReadsDifferentlyDefers(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		".env":  "AWS_ACCESS_KEY_ID=" + secret + "\n",
+		"a.txt": "PORT=8080\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for command, cause := range map[string]string{
+		"cat *(D)":                        "qualifier",
+		"cat *.txt(P:.env:)":              "qualifier",
+		"cat *\"\"(D)":                    "qualifier",
+		"cat a.txt *(D)":                  "qualifier",
+		"setopt globdots; cat *":          "changes how the shell expands",
+		"set -o globdots; cat *":          "changes how the shell expands",
+		"set -4; cat *":                   "changes how the shell expands",
+		"emulate ksh; cat *":              "changes how the shell expands",
+		"cd . && unsetopt nomatch; cat *": "changes how the shell expands",
+		// Found by the review of this change, each a silent allow on its
+		// first head: none is a segment whose head reads setopt.
+		"options[globdots]=on; cat *":              "changes how the shell expands",
+		"options+=(globdots on); cat *":            "changes how the shell expands",
+		"builtin setopt globdots; cat *":           "changes how the shell expands",
+		"function f { setopt globdots }; f; cat *": "changes how the shell expands",
+		// The second review round, each a silent allow on the head before
+		// this: a body has only its own text, a variable resolves the head,
+		// and a head nothing resolves could be any command.
+		`setopt globdots; echo "$(cat *)"`: "changes how the shell expands",
+		"setopt globdots; echo `cat *`":    "changes how the shell expands",
+		// Neither head reading reaches this one, so it is what holds the
+		// option reading to the whole command rather than to each body.
+		`builtin setopt globdots; echo "$(cat *)"`: "changes how the shell expands",
+		"o=setopt; $o globdots; cat *":             "changes how the shell expands",
+		"${:-setopt} globdots; cat *":              "changes how the shell expands",
+		"cat *=(D)":                                "qualifier",
+		// Third round: the head reading saw `builtin`, the whole-text one
+		// the raw `$o`.
+		"o=setopt; builtin $o globdots; cat *": "changes how the shell expands",
+	} {
+		t.Run(command, func(t *testing.T) {
+			shellNamed(t, "zsh")
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, cause) {
+				t.Errorf("coverage reason = %q, want it to name %q", reason, cause)
+			}
 		})
 	}
-	// The scope control. A shell that is not bash puts a pattern on the
-	// record and changes nothing else: a named file is opened and judged
-	// under zsh exactly as under bash, so this is not the Bash surface going
-	// quiet.
-	t.Run("a named file is scanned under zsh too", func(t *testing.T) {
+	t.Run("control: `cat *` leaves .env out", func(t *testing.T) {
 		shellNamed(t, "zsh")
-		code, stdout, _ := drive(t, bashCall(t, "cat "+name, dir))
+		code, stdout, stderr := drive(t, bashCall(t, "cat *", dir))
+		if code != 0 || stdout != "" || stderr != "" {
+			t.Fatalf("exit %d, stdout %q, stderr %q, want a silent allow", code, stdout, stderr)
+		}
+	})
+	// The bash half of the same peel, which was Q195: a silent allow on main.
+	for _, command := range []string{
+		"builtin shopt -s dotglob; cat *",
+		"command shopt -s dotglob; cat *",
+		"command -p shopt -s dotglob; cat *",
+	} {
+		t.Run(command+"/bash", func(t *testing.T) {
+			bashShell(t)
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "changes how the shell expands") {
+				t.Errorf("coverage reason = %q, want the option change named", reason)
+			}
+		})
+	}
+	// A flag to `set` is counted under zsh alone. Under bash it changes
+	// nothing a pattern expands to unless it is -f, and `set -e` before a glob
+	// is common enough that counting it would record calls this can scan.
+	t.Run("control: `set -e` under bash still scans", func(t *testing.T) {
+		bashShell(t)
+		if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, _ := drive(t, bashCall(t, "set -e; cat *", dir))
 		if code != 0 {
 			t.Fatalf("exit code = %d, want 0", code)
 		}
@@ -364,6 +442,27 @@ func TestAGlobDefersWhereTheShellIsNotBash(t *testing.T) {
 			t.Errorf("reason = %q, want the rule named", reason)
 		}
 	})
+}
+
+// A shell the harness accepts that is neither bash nor zsh has no measured
+// expansion, so every glob still defers under it. The harness takes a path by
+// substring, so a `sh` under a directory named for zsh is spawned.
+func TestAGlobDefersUnderAnUnmeasuredShell(t *testing.T) {
+	dir, _ := planted(t)
+	bin := filepath.Join(t.TempDir(), "zsh-build")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sh := filepath.Join(bin, "sh")
+	if err := os.WriteFile(sh, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SHELL", sh)
+	t.Setenv("SHELL", sh)
+	code, stdout, stderr := drive(t, bashCall(t, "cat *.env", dir))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "rather than bash") {
+		t.Errorf("coverage reason = %q, want the unmeasured shell named", reason)
+	}
 }
 
 // Where the ladder settles on nothing the record cannot name a shell, so it

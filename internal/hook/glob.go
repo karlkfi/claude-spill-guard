@@ -70,13 +70,34 @@ func altersGlobbing(raw, sub []string, quotedFrom []int) bool {
 		}
 		return false
 	}
+	// `builtin shopt` and `command shopt` run shopt, in either shell, and a
+	// flag to `command` sits between (Q195). Peeled here and not in
+	// EnvPrefixPeel, because only this reading needs the name behind them.
+	for len(rest) > 1 && (filepath.Base(rest[0]) == "builtin" || filepath.Base(rest[0]) == "command") {
+		rest = rest[1:]
+		for len(rest) > 1 && strings.HasPrefix(rest[0], "-") {
+			rest = rest[1:]
+		}
+	}
 	name := filepath.Base(rest[0])
+	zsh := !toolShellIsBash()
 	switch {
 	case name == "shopt", poisonAllCmds[name]:
 		return true
+	// zsh's own spellings, read here on the substituted head as well as over
+	// the whole text in bash.go, because only this one sees `o=setopt; $o`.
+	case zsh && (name == "setopt" || name == "unsetopt" || name == "emulate"):
+		return true
+	// A head the map could not resolve, `${:-setopt}`, runs a command nothing
+	// here can name, and zsh has too many that change globbing to list.
+	case zsh && strings.ContainsAny(rest[0], "$`"):
+		return true
 	case name == "set":
 		for _, a := range rest[1:] {
-			if a == "noglob" || (len(a) > 1 && (a[0] == '-' || a[0] == '+') && a[1] != '-' && strings.Contains(a, "f")) {
+			flag := len(a) > 1 && (a[0] == '-' || a[0] == '+') && a[1] != '-'
+			// zsh sets any option through `set`, by name and by letter:
+			// `set -o globdots` and `set -4` both put dotfiles in `*`.
+			if a == "noglob" || flag && (zsh || strings.Contains(a, "f")) {
 				return true
 			}
 		}
@@ -93,8 +114,9 @@ func altersGlobbing(raw, sub []string, quotedFrom []int) bool {
 // expand is resolve for a list: the one path a literal names, or the files
 // bash would hand the command for a pattern. globsAltered says an earlier
 // segment changed the options the expansion assumes, which puts the pattern
-// on the record instead.
-func expand(operand, cwd string, cwdUnknown, globsAltered bool) ([]string, error) {
+// on the record instead. qualified says the command text carries a `(`
+// glued to a word, which only zsh reads, as a glob qualifier.
+func expand(operand, cwd string, cwdUnknown, globsAltered, qualified bool) ([]string, error) {
 	path, err := resolve(operand, cwd, cwdUnknown)
 	if err != nil || path == "" {
 		return nil, err
@@ -104,19 +126,38 @@ func expand(operand, cwd string, cwdUnknown, globsAltered bool) ([]string, error
 	}
 	// Ahead of the options, because a shell that is not bash does not have
 	// them: blaming a `shopt` for a set zsh computed another way names the
-	// wrong cause. shell.go carries the ladder and why the refusal is the
-	// whole of the expansion rather than `**` alone -- `cat **/*.env` recurses
-	// under zsh's defaults and does not under bash's, and the narrower fix
-	// rests on the rest of the expansion agreeing, which is unmeasured.
+	// wrong cause. shell.go carries the ladder.
+	//
+	// zsh is expanded here as bash is, outside the places its defaults
+	// disagree. TestTheExpansionAgreesUnderZsh drove bash's 37 rows through
+	// zsh 5.9: `*`, `?`, a class, `[!…]`, `[^…]`, `.*` and a leading dot give
+	// the same set in both, and a pattern zsh leaves unmatched stops the
+	// command on NOMATCH, so the literal bash would pass through is scanned
+	// for nothing. What disagrees is `**`, which zsh recurses, a qualifier,
+	// and an option changed anywhere in the string, which bash.go and
+	// altersGlobbing fold into globsAltered. Any other shell is unmeasured and refused whole, and so
+	// is a ladder that settles on nothing.
 	if !toolShellIsBash() {
-		if sh := toolShell(); sh != "" {
+		sh := toolShell()
+		switch {
+		case sh == "":
+			return nil, errors.New("a file operand is a glob and nothing on this " +
+				"machine names bash as the Bash tool's shell, so which files this " +
+				"command would read is not settled here")
+		case !toolShellIsZsh():
 			return nil, fmt.Errorf("a file operand is a glob and the Bash tool's "+
 				"shell is %q rather than bash, which expands one differently, so "+
 				"which files this command would read is not settled here", sh)
+		case strings.Contains(operand, "**"):
+			return nil, fmt.Errorf("a file operand is a `**` glob and the Bash "+
+				"tool's shell is %q, which recurses one where bash does not, so "+
+				"which files this command would read is not settled here", sh)
+		case qualified:
+			return nil, fmt.Errorf("a file operand is a glob and the Bash tool's "+
+				"shell is %q, which reads a `(` against a word as a glob qualifier "+
+				"that can add files, so which files this command would read is not "+
+				"settled here", sh)
 		}
-		return nil, errors.New("a file operand is a glob and nothing on this " +
-			"machine names bash as the Bash tool's shell, so which files this " +
-			"command would read is not settled here")
 	}
 	if globsAltered {
 		return nil, errors.New("a file operand is a glob and an earlier command " +

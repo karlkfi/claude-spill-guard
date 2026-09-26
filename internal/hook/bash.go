@@ -89,6 +89,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 		state substState
 	}
 	queue := []job{{command, 0, substState{cwd, false, newVars(), false}}}
+	// Two zsh readings, taken once over the whole command because the shapes
+	// need not sit at a segment's head, nor in the body they affect: a glob
+	// qualifier, which Segments splits off as a subshell so that `cat *(D)`
+	// reaches expand as `*`, and an option change -- `builtin setopt
+	// globdots`, `options[globdots]=on`, a `setopt` in a function body, or
+	// one before a `$(cat *)` whose body has only its own text.
+	// internal/bash/zsh.go has both, and altersGlobbing still reads the
+	// substituted head, which is where `o=setopt; $o globdots` resolves.
+	qualified := bash.GluedParen(command)
+	zshOptions := toolShellIsZsh() && bash.ChangesZshOptions(command)
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
@@ -123,7 +133,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// Whether a pattern still expands under the options the shell started
 		// with. glob.go says what changes them; once one has, every later
 		// pattern in the string is a set this cannot compute.
-		globsAltered := cur.state.globsAltered
+		globsAltered := cur.state.globsAltered || zshOptions
 		// The variables the string assigns, substituted into each segment
 		// before anything reads it, as bash expands before it runs. vars.go
 		// is the port and carries what it declines to resolve. A queued body
@@ -224,7 +234,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 						maxLoopCandidates)
 				}
 				for _, cand := range cands {
-					expanded, err := expand(cand, dir, dirUnknown, globsAltered)
+					expanded, err := expand(cand, dir, dirUnknown, globsAltered, qualified)
 					if err != nil {
 						return nil, fmt.Errorf("in the %q here, %w", command, err)
 					}

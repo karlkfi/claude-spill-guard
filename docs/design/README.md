@@ -2508,11 +2508,35 @@ first fixture planted `AKIAIOSFODNN7EXAMPLE`, which the `aws-placeholder`
 validator rejects by design, so the control exited 0 and the silent arm would
 have reproduced for the wrong reason.
 
-**So a glob operand is a coverage failure where the shell is not bash** --
+**So a glob operand zsh would expand differently is a coverage failure** --
 `internal/hook/shell.go` resolves the ladder, `expand` refuses ahead of the
 options, and the call defers. It costs nothing where the shell is bash, which
-is the only shape this repo's own worktrees run under, and on every other
-machine it replaces a silent allow with a record **for a glob operand**.
+is the only shape this repo's own worktrees run under, and under zsh it
+replaces a silent allow with a record **for a glob operand**. A shell that is
+neither, and a ladder that settles on nothing, refuse every glob.
+
+**Under zsh the refusal is narrowed to where the two expansions disagree, and
+that narrowing is Q194.** Q163 shipped the whole-expansion refusal, and on a zsh
+machine it turned `cat *.env` over a key from a deny on v0.4.1 into no verdict:
+driven 2026-09-26 on binaries built from `v0.4.1` and `abe6cf5`, with a
+named-file control denying on both. So the 37 patterns of
+`TestTheExpansionAgreesWithBash` were driven through zsh 5.9 with `-f` over the
+same fixture, and 30 print what bash prints. Of the other seven, two are
+refused here anyway, four read nothing in either shell -- bash passes through a
+name no file has, zsh stops on `NOMATCH` -- and `d/x[1].txt` stops zsh while
+bash reads the literal file, so the bash set is a superset there and costs
+precision rather than recall. What disagrees on reads, and so stays refused:
+
+| shape | zsh 5.9 reads | why it is refused |
+|---|---|---|
+| `**` in the operand | every level below | zsh recurses it; bash, without `globstar`, does not |
+| a `(` glued to the word, `cat *(D)` | `.env` beside the rest | a qualifier: `(D)` adds dotfiles, `(P:.env:)` prepends a word, `(e:…:)` replaces the matches. `Segments` splits it off as a subshell, so it is read off the lexer's own tokens, where an unquoted `(` stands alone after the word and a quoted `'docs(queue): x'` stays one token |
+| `setopt globdots; cat *` | `.env` beside the rest | an option change, and so is `set -o globdots`, `set -4`, `unsetopt`, `emulate` and an assignment to the `options` array. Read twice: as whole tokens over the whole command, because `builtin setopt globdots`, a `setopt` inside a function body, and one before a `$(cat *)` whose body holds only its own text are reached from no segment's head; and on each substituted head, where `o=setopt; $o globdots` resolves. A head nothing resolves, `${:-setopt}`, counts as well, because it could run any of them. The review of Q194 drove nine spellings through its first two heads as silent allows |
+
+The one zsh snapshot on this machine sets no glob option -- its option section
+is `nohashdirs` and `login` -- so the defaults are the baseline, on the same
+standing as bash's 62 of 62 and with the same residual: an rc file that turns
+`GLOB_DOTS` or `EXTENDED_GLOB` on is not readable from `PreToolUse`.
 
 Read that scope as written, because the class is wider than the fix. Any
 zsh-only expansion that names a file bash would not open is the same
@@ -2544,11 +2568,12 @@ could not spawn, and one with no zsh installed at all. Both already have nothing
 naming a usable shell, so answering *not bash* costs them a record and never
 expands under a shell this did not identify.
 
-**Refusing the whole expansion rather than `**` alone is the available fix,
-not the preferred one.** The narrower one rests on the rest of the expansion
-agreeing between the two shells, and that is unmeasured -- `Q184` carries the
-list, which is glob qualifiers, `=cmd`, named directories, and whether the
-segmentation port's reserved words and operators split the same way.
+**What the narrowing does not reach is the segmentation, and that is `Q184`.**
+A zsh-only shape `Segments` splits as a bash operator never arrives as a glob
+operand: `cat (a|b).env` is a pipeline to it and `cat k<1-2>.env` a redirect,
+and both read the key file under zsh while the hook writes nothing -- driven on
+the Q194 build and on `v0.4.1` alike, so not a regression. `=cmd` and named
+directories are the same list.
 
 **`SHELL` inside a tool process does not say what the harness read.** bash
 rewrites it in its own process, so `printenv SHELL` in a `Bash` call reports
