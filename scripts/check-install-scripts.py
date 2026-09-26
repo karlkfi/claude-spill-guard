@@ -346,6 +346,35 @@ def drive(label, launch, dist, tmp, archive, version):
                             f"name_template, and a release whose binary and "
                             f"filename disagree is one nobody can reason about")
 
+    # What it tells the user about finding the binary. The launcher looks in
+    # one directory off PATH, so a --dir anywhere else is one every hooked call
+    # blocks on, and the script has to say so rather than that it will run.
+    # The arm above installed off PATH and off that default.
+    if rc == 0 and ("will run as a hook" in out
+                    or "SPILL_GUARD_BIN" not in out):
+        findings.append(f"[{label}] the install script put the binary where "
+                        f"the hook launcher never looks and did not say to "
+                        f"set SPILL_GUARD_BIN or PATH{evidence(rc, out)}")
+
+    # And the default, where the launcher does look. Its home is a temporary
+    # one, so the arm installs nowhere a real session would find.
+    home = where("home")
+    home.mkdir()
+    env = dict(os.environ)
+    env["LOCALAPPDATA" if WINDOWS else "HOME"] = str(home)
+    with Serving(dist) as base:
+        rc, out = run(launch, flag("version", version) + flag("rehearse", base),
+                      env)
+    default = (home / "spill-guard" / "bin" if WINDOWS
+               else home / ".local" / "bin") / binary
+    if rc != 0 or not default.is_file():
+        findings.append(f"[{label}] the install script did not install to "
+                        f"{default} when given no directory{evidence(rc, out)}")
+    elif "will run as a hook" not in out:
+        findings.append(f"[{label}] the install script installed to the "
+                        f"directory the hook launcher falls back to and did "
+                        f"not say the hook will find it{evidence(rc, out)}")
+
     # Which verifier it would use. The verification itself needs a signed
     # release, so this is the furthest a pull request reaches.
     #

@@ -273,8 +273,24 @@ try {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
 
-if (($env:PATH -split ';') -notcontains $Dir) {
-    Say "$Dir is not on your PATH. The hook launcher looks there anyway, so"
-    Say 'spill-guard will run as a hook; add it to PATH to use the command'
-    Say "yourself:    setx PATH `"%PATH%;$Dir`""
+# The launcher tries SPILL_GUARD_BIN, then PATH, then %LOCALAPPDATA%\spill-guard\bin
+# and nothing else, so a -Dir off PATH is found only when it is that default.
+$full = (Resolve-Path -LiteralPath $Dir).ProviderPath.TrimEnd('\')
+$default = ''
+if ($env:LOCALAPPDATA) {
+    $default = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'spill-guard\bin')).TrimEnd('\')
+}
+$onPath = ($env:PATH -split ';') | Where-Object { $_ -eq $Dir -or $_.TrimEnd('\') -eq $full }
+if (-not $onPath) {
+    if ($full -eq $default) {
+        Say "$Dir is not on your PATH. The hook launcher looks there anyway, so"
+        Say 'spill-guard will run as a hook; add it to PATH to use the command'
+        Say "yourself:    setx PATH `"%PATH%;$full`""
+    } else {
+        Say "$Dir is not on your PATH, and the hook launcher does not look there:"
+        Say 'until it can find the binary, every call it hooks is blocked. Set'
+        Say 'either of these, then start a new session:'
+        Say "    setx SPILL_GUARD_BIN `"$full\spill-guard.exe`""
+        Say "    setx PATH `"%PATH%;$full`""
+    }
 }
