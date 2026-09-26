@@ -382,6 +382,17 @@ func TestAGlobZshReadsDifferentlyDefers(t *testing.T) {
 		"options+=(globdots on); cat *":            "changes how the shell expands",
 		"builtin setopt globdots; cat *":           "changes how the shell expands",
 		"function f { setopt globdots }; f; cat *": "changes how the shell expands",
+		// The second review round, each a silent allow on the head before
+		// this: a body has only its own text, a variable resolves the head,
+		// and a head nothing resolves could be any command.
+		`setopt globdots; echo "$(cat *)"`: "changes how the shell expands",
+		"setopt globdots; echo `cat *`":    "changes how the shell expands",
+		// Neither head reading reaches this one, so it is what holds the
+		// option reading to the whole command rather than to each body.
+		`builtin setopt globdots; echo "$(cat *)"`: "changes how the shell expands",
+		"o=setopt; $o globdots; cat *":             "changes how the shell expands",
+		"${:-setopt} globdots; cat *":              "changes how the shell expands",
+		"cat *=(D)":                                "qualifier",
 	} {
 		t.Run(command, func(t *testing.T) {
 			shellNamed(t, "zsh")

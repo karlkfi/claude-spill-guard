@@ -25,9 +25,13 @@ func GluedParen(text string) bool {
 		}
 		prev := tokens[i-1]
 		switch {
+		// An array assignment, `arr=(a b)`, and a process substitution, `=(…)`
+		// or `$(…)`. `=(` is one only at the start of a word, so `*=(D)` is a
+		// qualifier on `*=` and counts.
 		case quotedFrom[i-1] == NotQuoted && allPunct(prev),
 			isReservedWord(prev, quotedFrom[i-1]),
-			strings.HasSuffix(prev, "="), strings.HasSuffix(prev, "$"):
+			isAssignment(prev, quotedFrom[i-1]) && strings.HasSuffix(prev, "="),
+			prev == "=", strings.HasSuffix(prev, "$"):
 			continue
 		}
 		return true

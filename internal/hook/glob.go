@@ -71,12 +71,24 @@ func altersGlobbing(raw, sub []string, quotedFrom []int) bool {
 		return false
 	}
 	name := filepath.Base(rest[0])
+	zsh := !toolShellIsBash()
 	switch {
 	case name == "shopt", poisonAllCmds[name]:
 		return true
+	// zsh's own spellings, read here on the substituted head as well as over
+	// the whole text in bash.go, because only this one sees `o=setopt; $o`.
+	case zsh && (name == "setopt" || name == "unsetopt" || name == "emulate"):
+		return true
+	// A head the map could not resolve, `${:-setopt}`, runs a command nothing
+	// here can name, and zsh has too many that change globbing to list.
+	case zsh && strings.ContainsAny(rest[0], "$`"):
+		return true
 	case name == "set":
 		for _, a := range rest[1:] {
-			if a == "noglob" || (len(a) > 1 && (a[0] == '-' || a[0] == '+') && a[1] != '-' && strings.Contains(a, "f")) {
+			flag := len(a) > 1 && (a[0] == '-' || a[0] == '+') && a[1] != '-'
+			// zsh sets any option through `set`, by name and by letter:
+			// `set -o globdots` and `set -4` both put dotfiles in `*`.
+			if a == "noglob" || flag && (zsh || strings.Contains(a, "f")) {
 				return true
 			}
 		}
@@ -113,8 +125,8 @@ func expand(operand, cwd string, cwdUnknown, globsAltered, qualified bool) ([]st
 	// the same set in both, and a pattern zsh leaves unmatched stops the
 	// command on NOMATCH, so the literal bash would pass through is scanned
 	// for nothing. What disagrees is `**`, which zsh recurses, a qualifier,
-	// and an option changed anywhere in the string, which bash.go folds into
-	// globsAltered. Any other shell is unmeasured and refused whole, and so
+	// and an option changed anywhere in the string, which bash.go and
+	// altersGlobbing fold into globsAltered. Any other shell is unmeasured and refused whole, and so
 	// is a ladder that settles on nothing.
 	if !toolShellIsBash() {
 		sh := toolShell()

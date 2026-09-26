@@ -18,9 +18,13 @@ func TestGluedParen(t *testing.T) {
 		"a && (cat *)":              false,
 		"if true; then (cat *); fi": false,
 		"arr=(a b); cat *":          false,
-		"echo $(cat *)":             false,
-		"diff <(cat a) b":           false,
-		"echo 'unterminated":        true,
+		"arr+=(c); cat *":           false,
+		"diff =(ls) b":              false,
+		// `=(` is a process substitution only at the start of a word.
+		"cat *=(D)":          true,
+		"echo $(cat *)":      false,
+		"diff <(cat a) b":    false,
+		"echo 'unterminated": true,
 	} {
 		if got := GluedParen(text); got != want {
 			t.Errorf("GluedParen(%q) = %v, want %v", text, got, want)
