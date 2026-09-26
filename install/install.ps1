@@ -275,14 +275,19 @@ try {
 
 # The launcher tries SPILL_GUARD_BIN, then PATH, then %LOCALAPPDATA%\spill-guard\bin
 # and nothing else, so a -Dir off PATH is found only when it is that default.
-$full = (Resolve-Path -LiteralPath $Dir).ProviderPath.TrimEnd('\')
-$default = ''
+# Both sides go through Get-Item, because two resolvers can disagree about an
+# 8.3 short name such as RUNNER~1 and call one directory two.
+$full = (Get-Item -LiteralPath $Dir).FullName.TrimEnd('\')
+$isDefault = $false
 if ($env:LOCALAPPDATA) {
-    $default = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'spill-guard\bin')).TrimEnd('\')
+    $default = Join-Path $env:LOCALAPPDATA 'spill-guard\bin'
+    $isDefault = ($Dir -eq $default) -or
+        ((Test-Path -LiteralPath $default) -and
+         (Get-Item -LiteralPath $default).FullName.TrimEnd('\') -eq $full)
 }
 $onPath = ($env:PATH -split ';') | Where-Object { $_ -eq $Dir -or $_.TrimEnd('\') -eq $full }
 if (-not $onPath) {
-    if ($full -eq $default) {
+    if ($isDefault) {
         Say "$Dir is not on your PATH. The hook launcher looks there anyway, so"
         Say 'spill-guard will run as a hook; add it to PATH to use the command'
         Say "yourself:    setx PATH `"%PATH%;$full`""
