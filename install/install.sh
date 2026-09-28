@@ -56,6 +56,9 @@
 # requiring it costs nobody anything.
 
 set -eu
+# cd consults CDPATH before the current directory, so a relative --dir could
+# resolve somewhere else, or nowhere, and kill the script after the install.
+unset CDPATH
 
 REPO='karlkfi/claude-spill-guard'
 WORKFLOW='.github/workflows/release.yml'
@@ -312,13 +315,28 @@ if ! reported="$("$dest/spill-guard" version)"; then
 fi
 say "installed spill-guard $reported to $dest/spill-guard"
 
+# The launcher tries SPILL_GUARD_BIN, then PATH, then ~/.local/bin and nothing
+# else, so a --dir off PATH is found only when it is that default. Compared
+# resolved, because --dir can be relative or reach it through a symlink.
+abs="$(cd "$dest" && pwd -P)"
+default="$(cd "${HOME:-/nonexistent}/.local/bin" 2>/dev/null && pwd -P)" || default=''
+
 case ":${PATH}:" in
-*":$dest:"*) ;;
+*":$dest:"* | *":$abs:"*) ;;
 *)
 	printf '\n'
-	printf 'install.sh: %s is not on your PATH. The hook launcher looks there\n' "$dest"
-	printf 'install.sh: anyway, so spill-guard will run as a hook; add it to PATH to\n'
-	printf 'install.sh: use the command yourself:\n\n'
-	printf '  export PATH="%s:$PATH"\n\n' "$dest"
+	if [ "$abs" = "$default" ]; then
+		printf 'install.sh: %s is not on your PATH. The hook launcher looks there\n' "$dest"
+		printf 'install.sh: anyway, so spill-guard will run as a hook; add it to PATH to\n'
+		printf 'install.sh: use the command yourself:\n\n'
+		printf '  export PATH="%s:$PATH"\n\n' "$abs"
+	else
+		printf 'install.sh: %s is not on your PATH, and the hook launcher does not\n' "$dest"
+		printf 'install.sh: look there: until it can find the binary, every call it\n'
+		printf 'install.sh: hooks is blocked. In the environment you start Claude Code\n'
+		printf 'install.sh: from, set either of these, then start a new session:\n\n'
+		printf '  export SPILL_GUARD_BIN="%s/spill-guard"\n' "$abs"
+		printf '  export PATH="%s:$PATH"\n\n' "$abs"
+	fi
 	;;
 esac

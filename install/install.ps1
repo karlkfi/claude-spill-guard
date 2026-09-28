@@ -273,8 +273,31 @@ try {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
 
-if (($env:PATH -split ';') -notcontains $Dir) {
-    Say "$Dir is not on your PATH. The hook launcher looks there anyway, so"
-    Say 'spill-guard will run as a hook; add it to PATH to use the command'
-    Say "yourself:    setx PATH `"%PATH%;$Dir`""
+# The launcher tries SPILL_GUARD_BIN, then PATH, then %LOCALAPPDATA%\spill-guard\bin
+# and nothing else, so a -Dir off PATH is found only when it is that default.
+# Compared as written first: with -Dir omitted it is the default string itself,
+# and resolving the two sides separately called one directory two on a runner
+# whose path carried the 8.3 name RUNNER~1. The Get-Item comparison is for the
+# default passed explicitly, and no arm drives it.
+$full = (Get-Item -LiteralPath $Dir).FullName.TrimEnd('\')
+$isDefault = $false
+if ($env:LOCALAPPDATA) {
+    $default = Join-Path $env:LOCALAPPDATA 'spill-guard\bin'
+    $isDefault = ($Dir -eq $default) -or
+        ((Test-Path -LiteralPath $default) -and
+         (Get-Item -LiteralPath $default).FullName.TrimEnd('\') -eq $full)
+}
+$onPath = ($env:PATH -split ';') | Where-Object { $_ -eq $Dir -or $_.TrimEnd('\') -eq $full }
+if (-not $onPath) {
+    if ($isDefault) {
+        Say "$Dir is not on your PATH. The hook launcher looks there anyway, so"
+        Say 'spill-guard will run as a hook; add it to PATH to use the command'
+        Say "yourself:    setx PATH `"%PATH%;$full`""
+    } else {
+        Say "$Dir is not on your PATH, and the hook launcher does not look there:"
+        Say 'until it can find the binary, every call it hooks is blocked. Set'
+        Say 'either of these, then start a new session:'
+        Say "    setx SPILL_GUARD_BIN `"$full\spill-guard.exe`""
+        Say "    setx PATH `"%PATH%;$full`""
+    }
 }
