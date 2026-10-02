@@ -34,19 +34,14 @@ func write(t *testing.T, body string) string {
 // The shipped file is what every table reads, so this is the case that has to
 // pass. It is also the positive control for the four below: they assert a
 // failure, and a loader that failed on everything would satisfy all of them.
+// loadFrom runs the floor and the value checks itself, so an empty recorder is
+// the whole assertion: anything checked after it could only re-ask a question
+// already answered.
 func TestTheShippedFileLoads(t *testing.T) {
 	var rec recorder
-	set := loadFrom(&rec, find(&rec))
+	loadFrom(&rec, find(&rec))
 	if len(rec.failures) != 0 {
 		t.Fatalf("loading the shipped file failed: %v", rec.failures)
-	}
-	if len(set) < minVectors {
-		t.Errorf("the shipped file holds %d vector(s), want at least %d", len(set), minVectors)
-	}
-	for id := range set {
-		if got := set.Get(t, id); got == "" {
-			t.Errorf("vector %q has no value", id)
-		}
 	}
 }
 
