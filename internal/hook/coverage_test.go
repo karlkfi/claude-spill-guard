@@ -109,15 +109,86 @@ func TestAFindingIsNotLoggedAsACoverageFailure(t *testing.T) {
 
 // The record must not carry the value, for the reason no verdict may: this
 // file is on disk and a path is not a secret, but the reasons are composed
-// from the same strings the API sees.
+// from the same strings the API sees. The operand is the one field that
+// could carry it, so an operand the ruleset matches is withheld.
 func TestACoverageRecordCarriesNoScannedValue(t *testing.T) {
 	dir := t.TempDir()
 	code, stdout, stderr := drive(t, bashCall(t, "cat $HOME/"+secret, dir))
 	deferred(t, code, stdout, stderr)
-	for _, c := range readCoverage(t) {
-		if strings.Contains(c.Reason, secret) {
-			t.Errorf("the coverage record carries the value: %q", c.Reason)
-		}
+	got := readCoverage(t)
+	if len(got) != 1 {
+		t.Fatalf("wrote %d records, want 1", len(got))
+	}
+	if strings.Contains(got[0].Reason, secret) {
+		t.Errorf("the coverage record carries the value: %q", got[0].Reason)
+	}
+	if len(got[0].Operands) != 0 {
+		t.Errorf("the coverage record carries the operand holding the value: %q",
+			got[0].Operands)
+	}
+}
+
+// The control for the test above, and the row the fields exist for: a record
+// has to name the call well enough to find it, and the operand that failed is
+// what a reason deliberately does not say. Without these a record was
+// attributable only by a timestamp join against every transcript on the
+// machine.
+func TestACoverageRecordNamesTheCall(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "docs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		command string
+		want    string
+	}{
+		{"cat $SOME_VAR/notes.txt", "$SOME_VAR/notes.txt"},
+		{"grep -rn pat docs", filepath.Join(dir, "docs")},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash",` +
+				`"session_id":"s-1234","cwd":` + quote(t, dir) +
+				`,"tool_input":{"command":` + quote(t, tc.command) + `}}`
+			code, stdout, stderr := drive(t, payload)
+			deferred(t, code, stdout, stderr)
+			got := readCoverage(t)
+			if len(got) != 1 {
+				t.Fatalf("wrote %d records, want 1", len(got))
+			}
+			c := got[0]
+			if c.SessionID != "s-1234" {
+				t.Errorf("session_id = %q, want the payload's", c.SessionID)
+			}
+			if c.CWD != dir {
+				t.Errorf("cwd = %q, want %q", c.CWD, dir)
+			}
+			if len(c.Operands) != 1 || c.Operands[0] != tc.want {
+				t.Errorf("operands = %q, want [%q]", c.Operands, tc.want)
+			}
+			// The log only. stderr is kept in the transcript beside the call.
+			if strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr names the operand: %q", stderr)
+			}
+		})
+	}
+}
+
+// A prompt's `@` token is the operand on that surface.
+func TestACoverageRecordNamesAPromptOperand(t *testing.T) {
+	payload := `{"hook_event_name":"UserPromptSubmit","session_id":"s-5678",` +
+		`"prompt":"look at @notes.txt"}`
+	code, stdout, stderr := drive(t, payload)
+	deferred(t, code, stdout, stderr)
+	got := readCoverage(t)
+	if len(got) != 1 {
+		t.Fatalf("wrote %d records, want 1", len(got))
+	}
+	if got[0].SessionID != "s-5678" {
+		t.Errorf("session_id = %q, want the payload's", got[0].SessionID)
+	}
+	if len(got[0].Operands) != 1 || got[0].Operands[0] != "notes.txt" {
+		t.Errorf("operands = %q, want the token", got[0].Operands)
 	}
 }
 

@@ -32,8 +32,9 @@ reads `HOME`, `LOCALAPPDATA`, `PATH` and `SPILL_GUARD_BIN`.
 Driven in a sandboxed home directory, the hook wrote one file, and only on a
 call it could not scan: `$XDG_STATE_HOME/spill-guard/coverage.jsonl`, or
 `~/.local/state/spill-guard/coverage.jsonl` when `XDG_STATE_HOME` is unset,
-created mode `0600`. A record carries `time`, `event`, `tool` and `reason`; the
-reason names the path of what went unread, and none of its bytes.
+created mode `0600`. A record carries `time`, `event`, `tool`, `session_id`,
+`cwd`, `reason` and `operands`; the reason and the operands name the path of
+what went unread, and none of its bytes.
 <!-- privacy:end -->
 
 `TMPDIR` is `selftest`'s, not the hook's: it plants its canaries in a
@@ -86,6 +87,13 @@ A coverage record leaves the process too, on stderr and into the log above.
 It carries the reason the call could not be read, which names a path this
 binary resolved or the shape of an operand it could not — never the bytes of
 either. The record is about what went unread, and carries nothing of it.
+
+The log line carries three more fields than stderr does, so a gap can be traced
+to the call that hit it: the session id and working directory from the payload,
+and the operand that failed, as the command or prompt wrote it or as this
+binary resolved it. An operand is text the call already carries, not bytes of a
+file, and it is written to the log only. One the shipped rules match is
+withheld from the record entirely.
 
 ## Scope
 

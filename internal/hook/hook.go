@@ -116,7 +116,7 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// defers anyway, for consistency with the rule the other two follow:
 		// the alternative is a prompt on the one call a person has least
 		// context to judge. The performance defect underneath it is Q122.
-		return abstain(stdout, stderr, call, event, overran(budget))
+		return abstain(stdout, stderr, call, event, overran(budget), nil)
 	}
 	findings, skips, err := got.findings, got.skips, got.err
 	if err != nil {
@@ -137,7 +137,7 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// This is the class the measurement in coverage.go is about -- an
 		// operand carrying a `$`, a glob, a directory, a relative path after a
 		// `cd`. It is 94.3% of what this hook used to block and it defers.
-		return abstain(stdout, stderr, call, event, failed(err))
+		return abstain(stdout, stderr, call, event, failed(err), operandOf(err))
 	}
 	// Ahead of the findings, because found() says what the matches in this call
 	// are, and a buffer nothing opened makes that a claim about coverage rather
@@ -162,7 +162,8 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// not content, so it defers -- and the allowed skips beside it still
 		// get their notice, which is the one thing on this branch a person can
 		// act on.
-		return abstain(stdout, stderr, call, event, unread(blocking), allowed...)
+		return abstain(stdout, stderr, call, event, unread(blocking),
+			skippedOperands(blocking), allowed...)
 	}
 	if len(findings) > 0 {
 		return decide(stdout, stderr, call, event, overridden, found(findings), notice)
@@ -238,8 +239,8 @@ func decide(stdout, stderr io.Writer, call payload, event Event, overridden bool
 // allowed carries the skips that were permitted on the same call. They keep
 // the notice they would have had, because that one names buffers a person can
 // convert and is the pre-existing behaviour of every allowed call.
-func abstain(stdout, stderr io.Writer, call payload, event Event, reason string, allowed ...skipped) int {
-	record(stderr, call, event, reason)
+func abstain(stdout, stderr io.Writer, call payload, event Event, reason string, operands []string, allowed ...skipped) int {
+	record(stderr, call, event, reason, operands)
 	if len(allowed) > 0 {
 		if err := notify(stdout, noticeLead+unscanned(allowed)); err != nil {
 			return refuse(stderr, err)

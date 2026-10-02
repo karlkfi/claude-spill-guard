@@ -36,6 +36,9 @@ type payload struct {
 	// Code sends it on every event; an empty one makes a relative operand
 	// unresolvable rather than a guess.
 	CWD string `json:"cwd"`
+	// SessionID is read only into a coverage record, to name the call that
+	// went unread. Nothing decides on it.
+	SessionID string `json:"session_id"`
 	// PermissionMode is the session's permission mode, and the only thing that
 	// says whether a confirmation can reach anybody. Driven 2026-08-28 against
 	// 2.1.238: every PreToolUse payload carried it, reading "default" and
