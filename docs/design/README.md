@@ -18,7 +18,7 @@ scans what the call would have sent, and blocks — driven end to end against a
 live Claude Code on 2026-08-27, where a `Read` of a file carrying a Slack
 webhook came back denied with the rule, the path and the byte offset and no
 fragment of the value. `hooks/hooks.json` and the plugin manifests now point
-Claude Code at that binary, at `PreToolUse` on `Read` and `Bash` and at
+Claude Code at that binary, at `PreToolUse` on `Read`, `Bash` and `Grep` and at
 `UserPromptSubmit`; they were held back until there was a hook to fire, because
 a repo installable as a security tool scanning nothing is the failure this
 document indicts the predecessor for. `Bash` is scanned as a command string
@@ -58,7 +58,10 @@ and the model's context.
   [wider than those](#what-gets-scanned-is-the-crossing-not-the-hop), and
   [driving the rest of it](#the-rest-of-the-class-driven) leaves three members
   out, for two reasons between them. A search tool returns lines from files it
-  chooses, so nothing a `PreToolUse` hook opens can bound it. A skill load
+  chooses, so nothing a `PreToolUse` hook opens can bound it — which is why
+  the `Grep` tool is now refused in `content` mode over a directory and routed
+  to [a filtered `grep`](#a-recursive-grep-is-scanned-through-a-filter-on-its-own-output)
+  rather than scanned. A skill load
   carries a name rather than a path, so nothing here can resolve what it would
   read. An MCP server's file reader is out on both at once: the hook sees the
   call and a deny stops it, and which of a server's tools is bounded, and which
@@ -830,6 +833,20 @@ all: a session asked to search file contents reached `ToolSearch` for
 affordance that is present is the `Explore` subagent, which is the paragraph
 above.
 
+**Absent here is not absent everywhere, and the transcripts say so.** A walk of
+this machine's 2,346 transcripts on 2026-10-01 found 161 `Grep` tool calls
+between 2026-08-02 and that evening: 113 in `content` mode, 44
+`files_with_matches`, 3 `count`, 1 with no mode. So the tool exists in some
+sessions and not in others, and the hook now matches it. It cannot bound the
+search any more than before, so it does not try: a `content` search over a
+directory is refused and the reason names the `grep` that pipes the same
+search through the filter, the two modes that return no file content pass, and
+a `path` naming one file is scanned whole the way a `Read` of it is. The field
+names are the ones those 161 calls carried, read from the transcripts and not
+driven, because this session had no `Grep` tool to drive; an absent mode is
+read as `content`, which costs a turn where reading it the other way would let
+a search's lines cross if the default is not what it seems.
+
 **The fourth member is driven, and it splits inside one server.** Three
 readings settle a candidate, in this order, because each is cheap only where
 the one before it came back yes:
@@ -898,7 +915,7 @@ nothing in the payload to tell one of its tools from the other.
 **Stoppable and scanned are two claims, and this member is the first to
 separate them.** The deny works — reading 2 — so a hook wired to these calls
 could stop one. Nothing here is wired to them: `hooks/hooks.json` matches
-`Read|Bash`, which no `mcp__…` name matches, so a file an MCP server reads is
+`Read|Bash|Grep`, which no `mcp__…` name matches, so a file an MCP server reads is
 not scanned and a session that installs one has a reader this scanner does not
 cover. The consequence is stated rather than fixed, and reading only the second
 half of it gets the posture backwards: the hook is not powerless on that
@@ -2293,8 +2310,10 @@ have covered in 13 ms goes through unread, with the record as the only trace.
 The alternative on the bottom rows is a scanner reporting on a file set the
 command would not have sent.
 
-**The reason has to name its own subject, because nothing here parses a
-recursion flag.** `-rn`, `-r`, `--recursive` and no flag at all reach one
+**The reason has to name its own subject, because when it was written nothing
+here parsed a recursion flag.** grep's are parsed now and a recursive grep gets
+[its own refusal](#a-recursive-grep-is-scanned-through-a-filter-on-its-own-output),
+but `rg` walks by default and still meets this one, so the subject stays named. `-rn`, `-r`, `--recursive` and no flag at all reach one
 return — driven on a built binary, four arms, byte-identical reasons — so a
 clause reading *this reads files rather than walking them* is false of the
 three spellings that do walk, and the recursive form is the one this refusal
@@ -2304,7 +2323,8 @@ proposed the cluster `-rn` as the first hypothesis to test, when there is no
 flag parser to have a bug in. So the clause says **this scanner** reads files
 rather than walking a tree, and
 `TestADirectoryOperandSaysSoAndSaysWhatToDoInstead` runs its four arms against
-that substring. The remedy stays *name the files instead* even though a
+that substring — a grep with no recursion, `cat`, `head` and `rg` since the
+recursive grep moved to its own refusal. The remedy stays *name the files instead* even though a
 recursive caller wanted a tree, because the repair that fits their intent is a
 reader with no row — `git grep` — and a refusal that routes the model to an
 unscanned command is a bypass this hook would be recommending. Since the
@@ -2312,6 +2332,67 @@ deferral the reason reaches the coverage record rather than the model, so the
 reader it is written for is whoever runs `spill-guard coverage`; the wording
 argument is the same for that reader, and the bypass argument is why it still
 does not name `git grep`.
+
+#### A recursive grep is scanned through a filter on its own output
+
+Both arguments above are about reading the *files*. Neither reaches grep's
+*output*, which is what crosses and is a buffer — so for grep the refusal now
+names a form that scans it, and this subsection reopens the decision for that
+one reader on purpose.
+
+The traffic is why, as Q203 counted it — the figures are carried from that
+row and were not re-taken for this change. Of 2,400 coverage records from 2026-09-07 to 2026-10-01,
+1,364 (56.8%) were a directory operand and 1,361 of those were `grep`; of the
+637 that replayed and parsed, 636 were recursive and 305 carried `--include` or
+`--exclude`. The cost is a turn per unfiltered call, accepted on 2026-10-01
+against the 2026-09-05 measurement that made coverage failures defer.
+
+| Shape | Answer |
+|---|---|
+| `grep -rn pat dir` | denied; the reason carries `set -o pipefail; grep -rn pat dir \| <binary> filter` |
+| `grep -rn pat` | the same: a recursive grep with no operand searches `.`, and used to cross with nothing recorded |
+| `grep -rn pat dir \| spill-guard filter` | allowed; the directory is not read here, because the filter reads what the walk produced |
+| `grep -rl`, `-L`, `-c`, `-q` | allowed bare: no matched text crosses, and these are the forms whose exit status a session tests |
+| `grep -n pat dir` | unchanged: no recursion, so the directory reason above |
+| `rg pat dir` | unchanged: not offered the filter until the coverage log says it is worth a turn |
+
+**Position in the pipeline is the test, as it is for `env`.** A filter stage
+after the grep in its own pipeline is the careful form; one in a different
+pipeline of the same string filters nothing of this one's. The recursion flags
+are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`,
+`--dereference-recursive`, `-d recurse` — and both GNU grep and the BSD grep
+macOS ships permute, so a flag after an operand counts: driven, `grep hello d -r
+-l` on BSD grep 2.6.0 lists the file.
+
+**The rewrite is checked before it is offered.** Appending a stage pipes the
+string's last pipeline, so `echo $(grep -r x .)` produced a rewrite this hook
+refused in turn — driven, before the check existed — and a model following it
+would loop. So the rewrite is segmented and held to the refusal's own test, and
+where it fails, or the string ends in `&`, a comment or a second line, the
+reason says what to append instead. Two further conditions keep the one reason
+here that repeats the caller's string safe to repeat: every rune printable, and
+no rule matching it, because the refusal is reached before the command string
+is scanned and a key typed into a pattern would otherwise go straight back out.
+
+**The filter blocks, and redaction is asked for by name.** On a finding it
+writes nothing to stdout, names the rule and the output line on stderr, and
+exits 3, which `pipefail` reports apart from grep's 0, 1 and 2; a filter that
+cannot run exits 4. It reads the whole stream first, because a block has to
+withhold everything and the private-key rule spans lines. `--redact` writes the
+output with each value replaced by `[spill-guard redacted: <rule>]` and says so,
+for a session that needs the rest of the output and has no better way to get
+it: what it reads is then not the file, and a marker copied back by an edit
+would replace a live value, which is why it is not the default.
+
+**What it does not reach.** grep prefixes each line with `path:` or `path-`, and
+the private-key rule allows only a diff's `+` or `-` before a PEM line, so a key
+block printed with `-A` context arrives as lines that rule does not match — the
+same shape as Q187 and Q193. Output this cannot decode — a UTF-32 mark — is
+withheld rather than passed, since the filter was asked for by name and
+withholding is its only power. And the binary's own path is spliced into the
+rewrite, forward-slashed for Git Bash on Windows; `make filter-rewrite` runs the
+rewrite under a real bash on Linux, macOS and Windows, which is the only thing
+here that executes it.
 
 ### A glob operand is expanded, because bash settles it before the command runs
 

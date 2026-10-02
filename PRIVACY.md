@@ -22,6 +22,7 @@ sandboxed home directory — and fails until this file agrees with all four.
 |---|---|---|
 | `PreToolUse` | `Bash` | the command string, and the files its readers are pointed at |
 | `PreToolUse` | `Read` | the `file_path`, and the file it names |
+| `PreToolUse` | `Grep` | the `pattern`, and the file a `path` names when it names one file |
 | `UserPromptSubmit` | every prompt | the prompt, and the files its `@` tokens name |
 
 The binary reads `CDPATH`, `CLAUDE_CODE_SHELL`, `GIT_CEILING_DIRECTORIES`,

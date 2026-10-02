@@ -81,6 +81,8 @@ SURFACES = {
     ("PreToolUse", "Bash"): "the command string, and the files its readers "
                             "are pointed at",
     ("PreToolUse", "Read"): "the `file_path`, and the file it names",
+    ("PreToolUse", "Grep"): "the `pattern`, and the file a `path` names when "
+                            "it names one file",
     ("UserPromptSubmit", None): "the prompt, and the files its `@` tokens name",
 }
 
@@ -295,6 +297,7 @@ def verdict(rc, stdout):
 
 READ = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
 BASH = {"hook_event_name": "PreToolUse", "tool_name": "Bash"}
+GREP = {"hook_event_name": "PreToolUse", "tool_name": "Grep"}
 OFFSET = re.compile(r"at byte (\d+) of")
 
 
@@ -333,6 +336,14 @@ def payloads(sb, line):
         ],
         ("PreToolUse", "Read"): [
             ("the file it names", {**READ, "tool_input": {"file_path": str(sb.planted)}}),
+        ],
+        ("PreToolUse", "Grep"): [
+            ("the pattern",
+             {**GREP, "tool_input": {"pattern": line, "path": str(sb.quiet),
+                                     "output_mode": "files_with_matches"}}),
+            ("the one file a path names",
+             {**GREP, "tool_input": {"pattern": "x", "path": str(sb.planted),
+                                     "output_mode": "content"}}),
         ],
         ("UserPromptSubmit", None): [
             ("the prompt text", {**prompt, "prompt": "deploy with " + line}),

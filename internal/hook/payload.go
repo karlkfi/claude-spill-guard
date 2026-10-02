@@ -127,6 +127,15 @@ type bashInput struct {
 	Command *string `json:"command"`
 }
 
+// grepToolInput is the Grep tool's arguments. The field names are the ones 161
+// real calls carried, read out of this machine's transcripts on 2026-10-01
+// rather than from the tool's documentation.
+type grepToolInput struct {
+	Pattern    *string `json:"pattern"`
+	Path       *string `json:"path"`
+	OutputMode *string `json:"output_mode"`
+}
+
 // unmarshalToolInput decodes tool_input into v, naming the tool on failure.
 func unmarshalToolInput(tool string, raw json.RawMessage, v any) error {
 	if len(raw) == 0 {

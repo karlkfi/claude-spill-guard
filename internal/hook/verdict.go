@@ -342,6 +342,54 @@ func dumped(command string) string {
 		command)
 }
 
+// walked is the body for a recursive grep over a directory, refused for its
+// form rather than for anything matched.
+//
+// It names the filtered form whole where grep.go could build one, because the
+// model applies a command it is handed and a description costs it a guess. The
+// `set -o pipefail` is part of the fix rather than decoration: without it the
+// pipeline reports the filter's status, so grep's 1 for "no match" would read
+// as 0. Where no rewrite was safe to build, it says what to append.
+//
+// It names the bare forms that stay allowed, since -l and -c are what a
+// session reaches for when it wants to know where a pattern is rather than
+// what surrounds it, and they need no filter at all.
+//
+// %q on the command name, which is a key of grepNames, so a closed set.
+func walked(command, rewrite string) string {
+	fix := fmt.Sprintf("pipe it through `%s` as its last stage, with `set -o "+
+		"pipefail;` ahead of the command so grep's own exit status survives",
+		filterCommand())
+	if rewrite != "" {
+		fix = fmt.Sprintf("run it as `%s` instead", rewrite)
+	}
+	return fmt.Sprintf("a recursive %q over a directory sends whatever lines the "+
+		"walk matches, and which files it walks is decided by grep at run time, "+
+		"so nothing here can read them first. Nothing was sent. To have the "+
+		"output scanned, %s: the filter writes the output when no rule matches "+
+		"it and withholds all of it, naming the rule and line, when one does. "+
+		"`-l`, `-L`, `-c` and `-q` print no matched text and are not refused.",
+		command, fix)
+}
+
+// searched is the body for a Grep tool search in content mode over a directory.
+//
+// The pattern and path stay out of it: both are the caller's strings, and
+// unlike walked()'s rewrite nothing here would check them. It names the Bash
+// spelling as a template instead, and says the two regex dialects differ,
+// because the tool is ripgrep and the command it names is grep.
+func searched() string {
+	return fmt.Sprintf("a Grep search in content mode over a directory sends the "+
+		"lines it matches, and which files it reads is decided by the search at "+
+		"run time, so nothing here can read them first. Nothing was sent. "+
+		"`files_with_matches` and `count` modes return no file content and are not "+
+		"refused. To have the matched lines scanned, run the search through Bash "+
+		"instead: `set -o pipefail; grep -rn PATTERN PATH | %s`, which writes the "+
+		"output when no rule matches it and withholds it, naming the rule and "+
+		"line, when one does. grep's regex dialect is not ripgrep's, so `-E` or "+
+		"`-P` may be needed for the same pattern.", filterCommand())
+}
+
 // guarded is the body for a read refused because the path is credentials by
 // convention, whatever is in it.
 //

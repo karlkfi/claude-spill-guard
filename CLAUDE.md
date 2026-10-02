@@ -18,7 +18,8 @@ measured.
 | `docs/design/brief.md` | The origin brief, as written. |
 | `docs/development/release-process.md` | Cutting a release: what a person does, and what the tag does. |
 | `docs/img/` | The social preview and the mark, as SVG masters and the one PNG rendered from them. [`rendering-images.md`](docs/development/rendering-images.md) says how. |
-| `cmd/spill-guard/` | The entry point. `hook`, `selftest`, `coverage` and `version`; the rest land with the rows that specify them. |
+| `cmd/spill-guard/` | The entry point. `hook`, `filter`, `selftest`, `coverage` and `version`; the rest land with the rows that specify them. |
+| `internal/filter/` | The `filter` subcommand: the shipped ruleset over stdin, run as the last stage of a recursive grep. Writes the output when nothing matched and withholds all of it when something did; `--redact` is the exception a session asks for by name. |
 | `internal/validate/` | The eight validators, and the one extent. Precision lives here, not in the regex — and so does the only answer to *how far does this run*, which a bounded repeat cannot give past 1,003 bytes. |
 | `internal/rules/` | The loader. Decode, merge the project's overrides, compile, and fail closed on anything it cannot settle. |
 | `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. `coverage.go` is the other half: what to do when there is no verdict to reach, and where the gap gets recorded. |
@@ -139,7 +140,7 @@ fire.
 **The matcher is held to the Go constants, not kept in step by hand.**
 `internal/hook/manifest_test.go` reads `hooks/hooks.json` and asserts set
 equality both ways against `PreToolUse`/`UserPromptSubmit` and
-`ToolRead`/`ToolBash`. Containment would only catch the loud direction. A
+`ToolRead`/`ToolBash`/`ToolGrep`. Containment would only catch the loud direction. A
 matcher wider than the scanner delivers calls the hook returns clean on, and
 the hook still runs; an event the scanner handles and the manifest omits fires
 nothing at all — no payload, no verdict, no line in the transcript — so the
@@ -384,6 +385,23 @@ which is the class this repo refuses by name for shell parsing, and there is no
 shortcut: learning which files a command reads means running it, and `os/exec`
 is forbidden across this build graph.
 
+**A recursive grep is the exception, and it reopened that decision on purpose
+rather than walking past it.** Both arguments above are about reading the
+*files*; a grep's *output* is what crosses, and it is a buffer. So a recursive
+`grep` over a directory — or with no operand, which searches `.` and used to
+cross silently — is denied, and the reason carries the same command with `set
+-o pipefail;` ahead of it and `<this binary> filter` as its last stage. Position
+in the pipeline is the test, as for `env`; `-l`, `-L`, `-c` and `-q` print no
+matched text and stay allowed bare. The filter blocks on a finding and writes
+nothing, exit 3, so pipefail reports it apart from grep's 0, 1 and 2; `--redact`
+replaces each value with its rule's name instead. The rewrite is checked
+against the same test before it is offered, because a rewrite this hook then
+refused would loop. By Q203's count, not re-taken, 1,361 of the 2,400 coverage records from 2026-09-07 to
+2026-10-01 were this shape, and the turn each now costs was accepted against
+that on 2026-10-01 (Q203). `rg` is not offered the filter yet and keeps the
+plain directory reason. `internal/hook/grep.go` carries it, and
+`make filter-rewrite` runs the rewrite under a real bash on all three platforms.
+
 **And there is a third answer on that surface that matches nothing.** `env`
 writes values that exist only in the tool process, so at `PreToolUse` there is
 no buffer to open and no rule can help; the call is refused on its shape
@@ -449,8 +467,13 @@ ten of the twenty-four cases expect an empty splice, and a replay that drove
 nothing agrees with all ten. The rest of the class is driven now, all four
 members of it. A **subagent** load is covered and needs
 nothing: the subagent's own tool calls fire the same hooks the parent's do. A
-**search** tool stays out, because nothing a `PreToolUse` hook opens can bound
-a walk over a tree. A **skill** load stays out for a different reason — the
+**search** tool cannot be bounded, because nothing a `PreToolUse` hook opens
+can bound a walk over a tree — so the `Grep` tool is now matched and refused in
+`content` mode over a directory, with the reason naming the filtered `grep`
+instead, while `files_with_matches` and `count` pass and a `path` naming one
+file is scanned whole. Its field names come from 161 real calls in this
+machine's transcripts, 2026-08-02 to 2026-10-01, and are not driven: the tool
+is absent from some sessions, this one included. A **skill** load stays out for a different reason — the
 payload is `{"skill": "<name>"}` and names no file, though a deny on it does
 stop the body crossing, so it is a member this cannot resolve rather than one
 that is not there. An **MCP** file reader stays out on both of those reasons at
@@ -462,7 +485,7 @@ saying which shape arrived. The split is *inside* one server, so membership
 cannot be decided per server or per protocol either — a per-server rule would
 owe these two tools opposite answers — which is this repo's rejection of the
 payload-shape test arriving from a new direction. And stoppable is not scanned:
-`hooks.json` matches `Read|Bash`, which no `mcp__…` name matches, so the hook
+`hooks.json` matches `Read|Bash|Grep`, which no `mcp__…` name matches, so the hook
 is not powerless on that surface, it is not pointed at it. The design states
 that rather than fixing it.
 
@@ -565,7 +588,9 @@ in good faith is the failure mode here, and review does not reliably catch it.
 A **finding** — a rule matched something — blocks, and that is untouched. So
 does a **shape refusal**: an `env` dump, or a read of one of the six
 guarded credential-path classes, where the tool knows there is something to stop and
-no rule could recognise it.
+no rule could recognise it — and a recursive grep with no filter after it, where
+the bytes exist only once the walk runs and the reason names the form that scans
+them.
 
 A **coverage failure** — an operand that will not resolve, a buffer nothing
 decoded, a scan past its budget — no longer blocks. It **defers**: the hook
@@ -827,6 +852,7 @@ pass reports the whole tree. `make <gate>` runs a single one and
 | `privacy-drift` | PRIVACY.md still says what the hook reads and writes, against the manifest, the source and a driven binary |
 | `hooks-check` | every tracked git hook is executable, so none is silently inert |
 | `launcher` | the hook launcher is executable in the index, resolves a binary, and denies when it cannot |
+| `filter-rewrite` | the command a recursive-grep refusal names runs under bash, passes clean output and withholds a key |
 | `script-modes` | a shebang and the executable bit travel together, in the index, both ways |
 | `vendor` | every vendored copy still hashes to the digest scripts/README.md declares |
 | `docs` | every relative link in the repo markdown resolves |

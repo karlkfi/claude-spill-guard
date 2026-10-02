@@ -68,6 +68,9 @@ const heredocLabel = "<heredoc>"
 // file it never opened.
 func bashTargets(command, cwd string) ([]target, error) {
 	targets := []target{{commandLabel, []byte(command)}}
+	// The loop below names its reader `command`, so the string is kept here
+	// for the one reason that repeats it.
+	whole := command
 	seen := make(map[string]bool)
 
 	// A body queued for a later pass runs in the state that was in force where
@@ -194,6 +197,17 @@ func bashTargets(command, cwd string) ([]target, error) {
 			if !known {
 				continue
 			}
+			// grep.go carries the argument for both: a recursive grep with no
+			// operand reads `.`, and one whose output is filtered or carries no
+			// matched text sends nothing a directory operand would need read.
+			isGrep := grepNames[filepath.Base(tokens[0])]
+			recursive, quiet := false, false
+			if isGrep {
+				recursive, quiet = grepMode(tokens)
+				if recursive && len(operands) == 0 {
+					operands = []string{"."}
+				}
+			}
 			// A `<` target is a file the reader reads that Files cannot see:
 			// Segments takes redirects out of the tokens first, so `cat <
 			// deploy.env` reached here with no operand and crossed unread, past
@@ -303,13 +317,25 @@ func bashTargets(command, cwd string) ([]target, error) {
 				//
 				// The subject of that clause is this scanner and it is named,
 				// because the shorter form was read as a claim about the
-				// command. Nothing here parses a recursion flag -- `-rn`,
-				// `-r`, `--recursive` and no flag at all reach this same
-				// return, driven -- so a reason saying the command reads
-				// rather than walks is false of every recursive form, and the
-				// recursive form is the one this refusal meets. It cost a
-				// friction report the day it was read that way, spent hunting
-				// a flag parser that does not exist.
+				// command. It cost a friction report the day it was read that
+				// way, spent hunting a flag parser that did not exist. grep's
+				// recursion flags are parsed now, for the refusal below, but rg
+				// walks with no flag at all and still reaches this return, so a
+				// reason saying the command reads rather than walks would still
+				// be false of the commonest form that meets it.
+				//
+				// A recursive grep is the exception, refused toward a filter on
+				// its output rather than deferred; grep.go has why.
+				if info.IsDir() && isGrep && recursive {
+					if quiet || filteredLater(segments, i) {
+						continue
+					}
+					rewrite := ""
+					if cur.depth == 0 {
+						rewrite = filteredRewrite(whole, segments, i)
+					}
+					return nil, &grepRefusal{filepath.Base(tokens[0]), rewrite}
+				}
 				if info.IsDir() {
 					return nil, unresolved{path, fmt.Errorf("in the %q here, a file "+
 						"operand names a directory, and this scanner reads files rather "+

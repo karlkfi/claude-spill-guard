@@ -288,19 +288,20 @@ func TestAnIndirectlyNamedFileDefers(t *testing.T) {
 // the argument. A change that made the reason generic again would close
 // nothing and would read as tidying.
 //
-// The arms are the recursion spellings, and they are here because the subject
-// of the clause used to be implicit and got read as the command. Nothing
-// parses a recursion flag, so all four reach one return -- which makes "this
-// reads files rather than walking them" false of the three that do walk, and
-// that reading cost a friction report. Containment on "this scanner" is what
-// holds the subject named; the four arms are what stop a future flag parser
-// from making one spelling say something the others do not.
+// The arms used to be grep's recursion spellings, because nothing parsed a
+// recursion flag and all four reached this return. grep.go parses one now, and
+// a recursive grep gets its own refusal (TestARecursiveGrepIsRefused...), so
+// the arms here are the readers that still meet this reason: a grep with no
+// recursion, two plain readers, and rg, whose walk is recursive by default and
+// which is not yet offered the filter. Containment on "this scanner" is what
+// holds the subject named, so the clause is not read as a claim about the
+// command.
 func TestADirectoryOperandSaysSoAndSaysWhatToDoInstead(t *testing.T) {
 	for _, command := range []string{
-		"grep -rn pat sub",         // recursion inside a cluster
-		"grep -r -n pat sub",       // recursion as its own flag
-		"grep --recursive pat sub", // the long form
-		"grep -n pat sub",          // no recursion at all
+		"grep -n pat sub", // no recursion at all
+		"cat sub",
+		"head -n 3 sub",
+		"rg pat sub", // recursive, and not offered the filter
 	} {
 		t.Run(command, func(t *testing.T) {
 			dir := t.TempDir()
@@ -353,7 +354,7 @@ func TestADrivenRefusalDoesNotNameTheOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	payloads := map[string]string{
-		"a directory operand": bashCall(t, "grep -rn pat sub", dir),
+		"a directory operand": bashCall(t, "grep -n pat sub", dir),
 		"an unresolvable var": bashCall(t, "cat $HOME/x.env", dir),
 		"a glob":              bashCall(t, "cat *.[env", dir),
 		"a Read of a directory": `{"hook_event_name":"PreToolUse","tool_name":"Read",` +

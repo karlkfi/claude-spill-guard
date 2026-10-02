@@ -33,9 +33,10 @@ authoritative and is not.
 | Run as a Claude Code hook | yes |
 | Ship a ruleset | yes |
 
-`spill-guard` builds, answers `coverage`, `hook`, `selftest`, `version`, and
-reaches `internal/bash`, `internal/hook`, `internal/readers`, `internal/rules`,
-`internal/scan`, `internal/selftest`, `internal/validate`, `rules`.
+`spill-guard` builds, answers `coverage`, `filter`, `hook`, `selftest`,
+`version`, and reaches `internal/bash`, `internal/filter`, `internal/hook`,
+`internal/readers`, `internal/rules`, `internal/scan`, `internal/selftest`,
+`internal/validate`, `rules`.
 <!-- status:end -->
 
 - [`docs/design/`](docs/design/) — the proposed design: threat model, hook

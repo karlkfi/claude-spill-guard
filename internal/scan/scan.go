@@ -45,6 +45,11 @@ type Finding struct {
 	// bytes and mapped back here, so this always names the same place a hex
 	// dump of the file would.
 	Offset int
+	// End is where the captured group stops, mapped back the same way, so
+	// End-Offset is how many bytes of the file the value occupies. It is a
+	// position and not a fragment: `spill-guard filter --redact` needs to know
+	// what to overwrite, and nothing else needs it.
+	End int
 	// Digest is the dedup key, and it is why no field here holds the value.
 	// The predecessor's Finding carried the secret beside a redacted copy; it
 	// was used only as a dedup key and never printed, and the field's
@@ -457,6 +462,7 @@ func accept(path string, text []byte, source func(int) int, rule rules.Rule, m [
 		// offset is the field that has to name a place in the file, and source
 		// is what maps it back.
 		Offset: source(lo),
+		End:    source(hi),
 		Digest: digest(rule.ID, text[lo:hi]),
 	}, resume, true, nil
 }
