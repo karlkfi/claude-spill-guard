@@ -128,6 +128,22 @@ func TestACoverageRecordCarriesNoScannedValue(t *testing.T) {
 	}
 }
 
+// An operand the scanner skips is withheld as well. A NUL or a byte-order mark
+// sends the buffer down the binary skip, where it yields no findings, so
+// checking findings alone kept the key. argv cannot carry a NUL, so this is
+// unlikely to happen for real, but the withholding is fail-closed by claim.
+func TestASkippedOperandIsWithheld(t *testing.T) {
+	for name, operand := range map[string]string{
+		"nul":   "/home/x/\x00" + secret,
+		"utf16": "\xff\xfe/home/x/" + secret,
+		"utf32": "\xff\xfe\x00\x00/home/x/" + secret,
+	} {
+		if got := withheld([]string{operand}); len(got) != 0 {
+			t.Errorf("%s: an operand the scanner skipped was kept", name)
+		}
+	}
+}
+
 // The control for the test above, and the row the fields exist for: a record
 // has to name the call well enough to find it, and the operand that failed is
 // what a reason deliberately does not say. Without these a record was
@@ -171,6 +187,22 @@ func TestACoverageRecordNamesTheCall(t *testing.T) {
 				t.Errorf("stderr names the operand: %q", stderr)
 			}
 		})
+	}
+}
+
+// A Read call's file_path is the operand on that surface.
+func TestACoverageRecordNamesAReadOperand(t *testing.T) {
+	dir := t.TempDir()
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Read","cwd":` +
+		quote(t, dir) + `,"tool_input":{"file_path":` + quote(t, dir) + `}}`
+	code, stdout, stderr := drive(t, payload)
+	deferred(t, code, stdout, stderr)
+	got := readCoverage(t)
+	if len(got) != 1 {
+		t.Fatalf("wrote %d records, want 1", len(got))
+	}
+	if len(got[0].Operands) != 1 || got[0].Operands[0] != dir {
+		t.Errorf("operands = %q, want the directory", got[0].Operands)
 	}
 }
 

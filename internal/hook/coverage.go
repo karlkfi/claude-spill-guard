@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
 	"github.com/karlkfi/claude-spill-guard/internal/scan"
@@ -145,13 +147,33 @@ func withheld(operands []string) []string {
 	}
 	var out []string
 	for _, o := range operands {
+		// The scanner reads a buffer as whatever it declares, so an operand
+		// opening on a byte-order mark is decoded as UTF-16 and a key in it
+		// scans clean, and one carrying a NUL takes the binary skip. A path or
+		// an `@` token is plain text, so anything else is withheld unread.
+		if !plain(o) {
+			continue
+		}
 		got, err := scan.Buffer("", []byte(o), set)
-		if err != nil || len(got.Findings) > 0 {
+		if err != nil || len(got.Findings) > 0 || got.Skipped != scan.Scanned {
 			continue
 		}
 		out = append(out, o)
 	}
 	return out
+}
+
+// plain reports whether s is valid UTF-8 with no control characters.
+func plain(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || r == '\uFEFF' {
+			return false
+		}
+	}
+	return true
 }
 
 // coverageCap is where the log rotates, per file. Two files are kept, so the

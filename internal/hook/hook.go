@@ -454,8 +454,9 @@ func toolTargets(call payload) ([]target, error) {
 			// it would send content the scan never examined. That `file_path`
 			// is a path by contract where an operand is a command-string token
 			// does not change what has happened to it here, which is nothing.
-			return nil, errors.New("the Read call names a relative file_path, " +
-				"which this cannot resolve to the file the tool would open")
+			return nil, unresolved{*in.FilePath, errors.New("the Read call names " +
+				"a relative file_path, which this cannot resolve to the file the " +
+				"tool would open")}
 		}
 		info, err := os.Stat(*in.FilePath)
 		if err != nil {
@@ -466,7 +467,8 @@ func toolTargets(call payload) ([]target, error) {
 				// failure is a file that exists and went unchecked.
 				return nil, nil
 			}
-			return nil, fmt.Errorf("reading the file this call would send: %w", err)
+			return nil, unresolved{*in.FilePath, fmt.Errorf("reading the file "+
+				"this call would send: %w", err)}
 		}
 		// Only a regular file, for bash.go's reason: os.ReadFile on a fifo
 		// blocks until something writes it, which hangs the call instead of
@@ -485,14 +487,14 @@ func toolTargets(call payload) ([]target, error) {
 		// actually meets, and one reason for every mode would say less than
 		// the OS error this replaced.
 		if info.IsDir() {
-			return nil, errors.New("the Read call names a directory, and this " +
-				"reads files rather than listing them, so what it would send " +
-				"was not read")
+			return nil, unresolved{*in.FilePath, errors.New("the Read call names " +
+				"a directory, and this reads files rather than listing them, so " +
+				"what it would send was not read")}
 		}
 		if !info.Mode().IsRegular() {
-			return nil, errors.New("the Read call names something that is " +
-				"neither a file nor a directory, so what it would send cannot " +
-				"be read here")
+			return nil, unresolved{*in.FilePath, errors.New("the Read call names " +
+				"something that is neither a file nor a directory, so what it " +
+				"would send cannot be read here")}
 		}
 		// Ahead of the read, because the whole of this refusal is that the
 		// file is not opened. There is no pipeline to read position in the way
@@ -504,7 +506,8 @@ func toolTargets(call payload) ([]target, error) {
 		}
 		buf, err := os.ReadFile(*in.FilePath)
 		if err != nil {
-			return nil, fmt.Errorf("reading the file this call would send: %w", err)
+			return nil, unresolved{*in.FilePath, fmt.Errorf("reading the file "+
+				"this call would send: %w", err)}
 		}
 		return []target{{*in.FilePath, buf}}, nil
 	case ToolBash:
