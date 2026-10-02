@@ -146,7 +146,13 @@ func Run(version string, stdout, stderr io.Writer) int {
 	} else {
 		defer os.Unsetenv("XDG_STATE_HOME") //nolint:errcheck // restoring
 	}
-	if err := os.Setenv("XDG_STATE_HOME", dir); err != nil {
+	// Absolute, because coverageDir ignores a relative XDG_STATE_HOME and
+	// falls back to $HOME -- and os.MkdirTemp returns a relative TMPDIR as is.
+	state, err := filepath.Abs(dir)
+	if err == nil {
+		err = os.Setenv("XDG_STATE_HOME", state)
+	}
+	if err != nil {
 		fmt.Fprintf(stderr, "spill-guard: selftest could not point the coverage "+
 			"log away from yours, so nothing below was driven: %v\n", err)
 		return 1

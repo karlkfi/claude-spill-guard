@@ -77,6 +77,37 @@ func TestSelftestWritesNothingToTheCoverageLog(t *testing.T) {
 	}
 }
 
+// The same, with a relative TMPDIR, where the scratch directory comes back
+// relative and a relative XDG_STATE_HOME is ignored for $HOME's log. So the
+// log asserted absent here is the fallback under $HOME, which is where the
+// records went before the path was made absolute. The arms fail under a
+// relative TMPDIR for reasons of their own, so only the log is asserted.
+func TestSelftestWritesNothingToTheCoverageLogUnderARelativeTMPDIR(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("rel", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", "rel")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", "")
+	os.Unsetenv("XDG_STATE_HOME") //nolint:errcheck // t.Setenv restores it
+
+	log, err := hook.CoveragePath()
+	if err != nil {
+		t.Fatalf("resolving the coverage log: %v", err)
+	}
+	if !strings.HasPrefix(log, os.Getenv("HOME")) {
+		t.Fatalf("the log resolves to %s, outside the test's HOME, so its "+
+			"absence below would prove nothing", log)
+	}
+	run(t)
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		b, _ := os.ReadFile(log)
+		t.Errorf("selftest wrote to the coverage log at %s (stat: %v):\n%s",
+			log, err, b)
+	}
+}
+
 // Every arm has to be capable of failing, which is a different claim from
 // every arm passing.
 //
