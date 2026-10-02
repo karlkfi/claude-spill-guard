@@ -471,9 +471,11 @@ nothing: the subagent's own tool calls fire the same hooks the parent's do. A
 can bound a walk over a tree — so the `Grep` tool is now matched and refused in
 `content` mode over a directory, with the reason naming the filtered `grep`
 instead, while `files_with_matches` and `count` pass and a `path` naming one
-file is scanned whole. Its field names come from 161 real calls in this
-machine's transcripts, 2026-08-02 to 2026-10-01, and are not driven: the tool
-is absent from some sessions, this one included. A **skill** load stays out for a different reason — the
+file is scanned whole. Nothing here shows the tool exists: all 161 `Grep`
+calls in this machine's transcripts, 2026-08-02 to 2026-10-01, came back `No
+such tool available`, so the field names it reads are the ones the model
+guessed and not a schema. It is matched ahead of that evidence, and Q207 owns
+establishing both. A **skill** load stays out for a different reason — the
 payload is `{"skill": "<name>"}` and names no file, though a deny on it does
 stop the body crossing, so it is a member this cannot resolve rather than one
 that is not there. An **MCP** file reader stays out on both of those reasons at

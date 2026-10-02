@@ -44,6 +44,20 @@ func TestGrepMode(t *testing.T) {
 		{"grep -- -r f", false, false},
 		// -s is "no messages", not quiet, in both greps.
 		{"grep -rs pat .", true, false},
+		// getopt_long takes a unique prefix of a long option, and a prefix of
+		// a value-taking one consumes the next token -- here the `-l`, which
+		// read as quiet until the review drove it.
+		{"grep -r --exclude-d -l x .", true, false},
+		{"grep -r --exclude-dir -l x .", true, false},
+		{"grep -r --cou x .", true, true},
+		{"grep --recur x .", true, false},
+		// Ambiguous or unknown: refused, never quiet.
+		{"grep -r --co -l x .", true, false},
+		{"grep --frobnicate -l x .", true, false},
+		// A `--directories` value is abbreviated the same way.
+		{"grep -d rec pat .", true, false},
+		{"grep --directories=rec pat .", true, false},
+		{"grep --dir=read pat .", false, false},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
 			recursive, quiet := grepMode(strings.Fields(tc.command))
@@ -113,6 +127,7 @@ func TestARecursiveGrepIsRefusedAndItsRewriteIsAllowed(t *testing.T) {
 		"grep -r foo . | head -5",
 		"cd sub && grep -r foo .",
 		"grep -rn foo . ;",
+		"grep -r --exclude-d -l foo .",
 	} {
 		t.Run(command, func(t *testing.T) {
 			reason := denyReason(t, bashCall(t, command, dir))

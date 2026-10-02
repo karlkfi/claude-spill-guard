@@ -50,13 +50,54 @@ var grepNames = map[string]bool{"grep": true, "egrep": true, "fgrep": true}
 // is reached in a cluster the rest of the cluster is its value: `-rnA3`.
 const grepShortValued = "ABCDdefm"
 
-// The long options that take a value in the next token when no `=` carries it.
-var grepLongValued = map[string]bool{
-	"--after-context": true, "--before-context": true, "--binary-files": true,
-	"--context": true, "--devices": true, "--directories": true, "--exclude": true,
-	"--exclude-dir": true, "--exclude-from": true, "--file": true,
-	"--group-separator": true, "--include": true, "--label": true,
-	"--max-count": true, "--regexp": true,
+// grepLong is every long option GNU grep 3.x or the BSD grep macOS ships
+// accepts, and whether it takes its value from the next token when no `=`
+// carries it. `--color` and `--colour` take one only with `=`. Where the two
+// greps disagree the consuming answer is kept: a consumed token is never read
+// as a flag, so it can hide `-l` and leave a call refused that would have
+// passed, and never the reverse.
+var grepLong = map[string]bool{
+	"--after-context": true, "--basic-regexp": false, "--before-context": true,
+	"--binary": false, "--binary-files": true, "--byte-offset": false,
+	"--bz2decompress": false, "--color": false, "--colour": false,
+	"--context": true, "--count": false, "--decompress": false,
+	"--dereference-recursive": false, "--devices": true, "--directories": true,
+	"--exclude": true, "--exclude-dir": true, "--exclude-from": true,
+	"--extended-regexp": false, "--file": true, "--files-with-matches": false,
+	"--files-without-match": false, "--fixed-regexp": false,
+	"--fixed-strings": false, "--group-separator": true, "--help": false,
+	"--ignore-case": false, "--include": true, "--include-dir": true,
+	"--initial-tab": false, "--invert-match": false, "--label": true,
+	"--line-buffered": false, "--line-number": false, "--line-regexp": false,
+	"--lzma": false, "--max-count": true, "--mmap": false,
+	"--no-filename": false, "--no-group-separator": false,
+	"--no-ignore-case": false, "--no-messages": false, "--null": false,
+	"--null-data": false, "--only-matching": false, "--perl-regexp": false,
+	"--quiet": false, "--recursive": false, "--regexp": true, "--silent": false,
+	"--text": false, "--unix-byte-offsets": false, "--version": false,
+	"--with-filename": false, "--word-regexp": false, "--xz": false,
+}
+
+// resolveLong names the long option a key stands for, or "" where this cannot
+// say. getopt_long takes any unique prefix, so `--exclude-d` is `--exclude-dir`
+// and consumes the token after it -- and matching keys exactly read that token
+// as a flag, so `grep -r --exclude-d -l x d` was taken for `-l` and allowed
+// with nothing recorded while grep printed the matched lines (Q203's review,
+// driven on BSD grep 2.6.0).
+func resolveLong(key string) string {
+	if _, ok := grepLong[key]; ok {
+		return key
+	}
+	found := ""
+	for name := range grepLong {
+		if strings.HasPrefix(name, key) {
+			if found != "" {
+				return ""
+			}
+			found = name
+		}
+	}
+	return found
 }
 
 // grepQuietLong are the long spellings of the forms that print no matched text.
@@ -70,6 +111,12 @@ var grepQuietLong = map[string]bool{
 // after an operand counts: driven 2026-10-01, `grep hello d -r -l` on BSD grep
 // 2.6.0 lists the file rather than reading `-l` as one.
 func grepMode(tokens []string) (recursive, quiet bool) {
+	unsure := false
+	defer func() {
+		if unsure {
+			recursive, quiet = true, false
+		}
+	}()
 	for i := 1; i < len(tokens); i++ {
 		tok := tokens[i]
 		if tok == "--" {
@@ -77,18 +124,26 @@ func grepMode(tokens []string) (recursive, quiet bool) {
 		}
 		if strings.HasPrefix(tok, "--") {
 			key, value, inline := strings.Cut(tok, "=")
+			name := resolveLong(key)
+			if name == "" {
+				// Unknown or ambiguous: whether it consumed the next token is
+				// not knowable, so nothing after it can be trusted to say the
+				// call prints no text. Refused rather than allowed.
+				unsure = true
+				continue
+			}
 			switch {
-			case key == "--recursive" || key == "--dereference-recursive":
+			case name == "--recursive" || name == "--dereference-recursive":
 				recursive = true
-			case grepQuietLong[key]:
+			case grepQuietLong[name]:
 				quiet = true
-			case key == "--directories":
+			case name == "--directories":
 				if !inline && i+1 < len(tokens) {
 					value = tokens[i+1]
 				}
-				recursive = recursive || value == "recurse"
+				recursive = recursive || recurses(value)
 			}
-			if grepLongValued[key] && !inline {
+			if grepLong[name] && !inline {
 				i++
 			}
 			continue
@@ -110,7 +165,7 @@ func grepMode(tokens []string) (recursive, quiet bool) {
 					i++
 					value = tokens[i]
 				}
-				if c == 'd' && value == "recurse" {
+				if c == 'd' && recurses(value) {
 					recursive = true
 				}
 				break
@@ -118,6 +173,13 @@ func grepMode(tokens []string) (recursive, quiet bool) {
 		}
 	}
 	return recursive, quiet
+}
+
+// recurses reads a `--directories` value. Both greps take an abbreviation of
+// one here too, so anything that is not plainly `read` or `skip` is read as
+// recursion, which refuses toward the filter rather than allowing.
+func recurses(value string) bool {
+	return value != "read" && value != "skip"
 }
 
 // filteredLater reports whether a stage after segment i in its own pipeline is
@@ -286,9 +348,9 @@ func allFiltered(command string) bool {
 // that needs no walk at all, so that file is read and scanned whole, the way a
 // Read of it is.
 //
-// An absent mode is read as `content`. One of the 161 calls in the census had
-// none, and refusing it costs a turn where reading it the other way would let
-// a search's lines cross unread if the default is not what it seems.
+// An absent mode is read as `content`: nothing here knows the tool's default,
+// and refusing costs a turn where the other reading would let a search's
+// lines cross unread.
 //
 // The pattern is scanned, as a Bash command string is: it is text the call
 // carries, and a key typed into one is a key in the transcript.

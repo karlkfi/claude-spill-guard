@@ -159,7 +159,9 @@ func TestACoverageRecordNamesTheCall(t *testing.T) {
 		want    string
 	}{
 		{"cat $SOME_VAR/notes.txt", "$SOME_VAR/notes.txt"},
-		{"grep -rn pat docs", filepath.Join(dir, "docs")},
+		// rg rather than grep: a recursive grep over a directory is refused
+		// toward the output filter (grep.go), so it writes no record.
+		{"rg -n pat docs", filepath.Join(dir, "docs")},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
 			t.Setenv("XDG_STATE_HOME", t.TempDir())

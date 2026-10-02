@@ -833,19 +833,22 @@ all: a session asked to search file contents reached `ToolSearch` for
 affordance that is present is the `Explore` subagent, which is the paragraph
 above.
 
-**Absent here is not absent everywhere, and the transcripts say so.** A walk of
-this machine's 2,346 transcripts on 2026-10-01 found 161 `Grep` tool calls
-between 2026-08-02 and that evening: 113 in `content` mode, 44
-`files_with_matches`, 3 `count`, 1 with no mode. So the tool exists in some
-sessions and not in others, and the hook now matches it. It cannot bound the
-search any more than before, so it does not try: a `content` search over a
-directory is refused and the reason names the `grep` that pipes the same
-search through the filter, the two modes that return no file content pass, and
-a `path` naming one file is scanned whole the way a `Read` of it is. The field
-names are the ones those 161 calls carried, read from the transcripts and not
-driven, because this session had no `Grep` tool to drive; an absent mode is
-read as `content`, which costs a turn where reading it the other way would let
-a search's lines cross if the default is not what it seems.
+**The hook matches `Grep` anyway, ahead of any evidence the tool exists.** A
+walk of this machine's 2,346 transcripts on 2026-10-01 found 161 `Grep`
+`tool_use` blocks between 2026-08-02 and that evening, and every one came back
+`No such tool available: Grep` — the model reaching for a tool this harness
+did not offer. So the absence the drive above recorded holds on every session
+this machine has kept, and those calls establish neither that the tool exists
+anywhere nor what its payload looks like: their keys are the model's guesses.
+The hook matches it so that where it does exist, a search over a tree is not a
+crossing nothing is pointed at. It cannot bound the search any more than
+before, so it does not try: a `content` search over a directory is refused
+and the reason names the `grep` that pipes the same search through the
+filter, `files_with_matches` and `count` pass, and a `path` naming one file is
+scanned whole the way a `Read` of it is. An absent mode is read as `content`,
+which costs a turn where the other reading would let lines cross. Q207 owns
+whether the tool exists and what its payload carries; until then every field
+name here is assumed.
 
 **The fourth member is driven, and it splits inside one server.** Three
 readings settle a candidate, in this order, because each is cheap only where
