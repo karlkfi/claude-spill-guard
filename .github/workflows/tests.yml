@@ -539,6 +539,9 @@ jobs:
       # than on the table. The reading to take from that is the general one:
       # what the list has to cover is every arm that NAMES a cut package, not
       # every arm that reaches the scanner.
+      #
+      # And on 2026-10-01 for `filter`, which reaches internal/scan directly:
+      # the precondition stopped the step until its arm joined the list.
       - name: Unwiring the scanner must fail the check and flip the table
         run: |
           python3 - <<'PY'
@@ -546,12 +549,15 @@ jobs:
           p = pathlib.Path("cmd/spill-guard/main.go")
           s = p.read_text(encoding="utf-8")
           for line in (
+              '\t"github.com/karlkfi/claude-spill-guard/internal/filter"\n',
               '\t"github.com/karlkfi/claude-spill-guard/internal/hook"\n',
               '\t"github.com/karlkfi/claude-spill-guard/internal/selftest"\n',
               '\tcase "hook":\n\t\treturn hook.Run(stdin, stdout, stderr)\n',
+              '\tcase "filter":\n\t\treturn filter.Run(args[1:], stdin, stdout, stderr)\n',
               '\tcase "selftest":\n\t\treturn selftest.Run(version, stdout, stderr)\n',
               '\tcase "coverage":\n\t\treturn hook.Summarize(args[1:], stdout, stderr)\n',
               "  hook      scan a Claude Code hook payload read from stdin\n",
+              "  filter    scan stdin and write it to stdout only if nothing matched\n",
               "  selftest  drive the hook path over a canary and report what it did\n",
               "  coverage  report what this scanner could not read, commonest first\n",
               "            [--since TIME] count only records from TIME on\n",
@@ -822,7 +828,7 @@ jobs:
       # arguments the page never mentions reading.
       - name: A tool added to the matcher must fail the check
         run: |
-          sed -i 's/"matcher": "Read|Bash"/"matcher": "Read|Bash|Write"/' hooks/hooks.json
+          sed -i 's/"matcher": "Read|Bash|Grep"/"matcher": "Read|Bash|Grep|Write"/' hooks/hooks.json
           if git diff --quiet -- hooks/hooks.json; then
             echo "::error::the mutation changed nothing, so this step tested nothing" >&2
             exit 1
