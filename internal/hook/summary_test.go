@@ -14,17 +14,17 @@ import (
 // plausible-looking count beside it. It was caught by driving the subcommand,
 // which is why it is pinned here.
 //
-// The two directions are separate failures. Keeping the inner span fragments
-// one class into one-per-command; dropping the outer span merges every class
-// into one. A test asserting only that two identical reasons group together
-// would pass for both.
-func TestClassKeepsTheReasonAndElidesTheCommandName(t *testing.T) {
-	glob := `Nothing scanned this call for secrets, because the scan could not ` +
-		`be completed: "in the \"grep\" here, a file operand is a glob, so which ` +
-		`files this command would read is not settled here". The call was not stopped.`
-	variable := `Nothing scanned this call for secrets, because the scan could not ` +
-		`be completed: "in the \"cat\" here, a file operand expands at run time, so ` +
-		`what this command would read cannot be known before it runs". The call was not stopped.`
+// The inner span is a command name, and it used to be elided too. It is kept
+// now, because which command hit a gap is what a reader acts on, and the set
+// is the reader table's keys. A shell path in the same span is still elided.
+func TestClassKeepsTheReasonAndTheCommandName(t *testing.T) {
+	reason := func(command, clause string) string {
+		return `Nothing scanned this call for secrets, because the scan could not ` +
+			`be completed: "in the \"` + command + `\" here, a file operand ` + clause +
+			`". The call was not stopped.`
+	}
+	glob := reason("grep", "is a glob, so which files this command would read is not settled here")
+	variable := reason("cat", "expands at run time, so what this command would read cannot be known before it runs")
 
 	t.Run("different reasons stay different", func(t *testing.T) {
 		if class(glob) == class(variable) {
@@ -33,23 +33,41 @@ func TestClassKeepsTheReasonAndElidesTheCommandName(t *testing.T) {
 		}
 	})
 
-	t.Run("the same reason with a different command groups together", func(t *testing.T) {
-		sed := `Nothing scanned this call for secrets, because the scan could not ` +
-			`be completed: "in the \"sed\" here, a file operand is a glob, so which ` +
-			`files this command would read is not settled here". The call was not stopped.`
-		if class(glob) != class(sed) {
-			t.Errorf("the same gap under two commands does not group:\n%q\n%q",
-				class(glob), class(sed))
+	t.Run("the same reason under two commands stays apart", func(t *testing.T) {
+		sed := reason("sed", "is a glob, so which files this command would read is not settled here")
+		if class(glob) == class(sed) {
+			t.Errorf("grep and sed group together, so the summary cannot say "+
+				"which command hit the gap:\n%q", class(glob))
+		}
+		again := reason("grep", "is a glob, so which files this command would read is not settled here")
+		if class(glob) != class(again) {
+			t.Errorf("one gap under one command does not group:\n%q\n%q",
+				class(glob), class(again))
 		}
 	})
 
-	t.Run("the distinguishing clause survives", func(t *testing.T) {
+	t.Run("the distinguishing clause and the command survive", func(t *testing.T) {
 		got := class(glob)
 		if !strings.Contains(got, "is a glob") {
 			t.Errorf("class dropped the clause that names the gap: %q", got)
 		}
-		if strings.Contains(got, "grep") {
-			t.Errorf("class kept the command name, which fragments the count: %q", got)
+		if !strings.Contains(got, `"grep"`) {
+			t.Errorf("class dropped the command name: %q", got)
+		}
+	})
+
+	t.Run("a shell path in the inner span is elided", func(t *testing.T) {
+		shell := func(path string) string {
+			return `Nothing scanned this call for secrets, because the scan could not ` +
+				`be completed: "in the \"cat\" here, a file operand is a glob and the ` +
+				`Bash tool's shell is \"` + path + `\" rather than bash". The call was not stopped.`
+		}
+		a, b := class(shell("/opt/homebrew/bin/fish")), class(shell("/usr/bin/fish"))
+		if a != b {
+			t.Errorf("one gap on two installs does not group:\n%q\n%q", a, b)
+		}
+		if strings.Contains(a, "fish") {
+			t.Errorf("the shell path survived the elision: %q", a)
 		}
 	})
 }

@@ -384,6 +384,7 @@ def reads(sb, keys, findings):
 def writes(sb, findings):
     """What a deferred call writes, with and without XDG_STATE_HOME."""
     payload = {"hook_event_name": "PreToolUse", "tool_name": "Read",
+               "session_id": "privacy-probe", "cwd": str(sb.cwd),
                "tool_input": {"file_path": str(sb.undecodable)}}
     out = {"keys": [], "mode": None, "names_path": False}
     for label, xdg, base in (("xdg", True, sb.xdg), ("home", False, sb.home)):
@@ -411,7 +412,8 @@ def writes(sb, findings):
         record = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
         out["keys"] = list(record)
         out["mode"] = stat.S_IMODE(path.stat().st_mode)
-        out["names_path"] = str(sb.undecodable) in record.get("reason", "")
+        out["names_path"] = (str(sb.undecodable) in record.get("reason", "")
+                             and record.get("operands") == [str(sb.undecodable)])
         path.unlink()
     if out["keys"] and not out["names_path"]:
         findings.append("the coverage record does not name the path that went "
@@ -466,7 +468,8 @@ def table(f):
             f"and only on a call it could not scan: `$XDG_STATE_HOME/{w['xdg']}`, "
             f"or `~/{w['home']}` when `XDG_STATE_HOME` is unset, created mode "
             f"`{w['mode']:04o}`. A record carries {names(w['keys'])}; the reason "
-            f"names the path of what went unread, and none of its bytes."))
+            f"and the operands name the path of what went unread, and none of "
+            f"its bytes."))
     else:
         lines.extend(wrapped("What the hook writes could not be derived; see "
                              "the findings `make privacy-drift` reports."))

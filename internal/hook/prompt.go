@@ -75,7 +75,7 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 			}
 			path, err := resolveAt(candidate, cwd)
 			if err != nil {
-				return nil, err
+				return nil, unresolved{candidate, err}
 			}
 			if seen[path] {
 				continue
@@ -89,29 +89,29 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 					// a Read of an absent file.
 					continue
 				}
-				return nil, errFileUnreadable
+				return nil, unresolved{path, errFileUnreadable}
 			}
 			seen[path] = true
 			switch {
 			case info.Mode().IsRegular():
 				buf, err := os.ReadFile(path)
 				if err != nil {
-					return nil, errFileUnreadable
+					return nil, unresolved{path, errFileUnreadable}
 				}
 				targets = append(targets, target{path, buf})
 			case info.IsDir():
 				buf, err := listing(path)
 				if err != nil {
-					return nil, err
+					return nil, unresolved{path, err}
 				}
 				targets = append(targets, target{path, buf})
 			default:
 				// A fifo or a device. os.ReadFile on one blocks for as long as
 				// nothing writes, which would hang the session rather than
 				// scan anything, so this refuses instead of opening it.
-				return nil, errors.New("a prompt names something that is " +
-					"neither a file nor a directory, so what it would send " +
-					"cannot be read here")
+				return nil, unresolved{path, errors.New("a prompt names something " +
+					"that is neither a file nor a directory, so what it would send " +
+					"cannot be read here")}
 			}
 		}
 	}

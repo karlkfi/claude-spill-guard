@@ -133,6 +133,32 @@ func Run(version string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer os.RemoveAll(dir)
+	// os.MkdirTemp hands back a relative TMPDIR as is. Every arm's payload
+	// names a path under here, and the hook defers on a relative one rather
+	// than guess the directory, so a relative dir fails eight arms; and a
+	// relative XDG_STATE_HOME is ignored for $HOME's log, so it also undoes
+	// the redirect below.
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+
+	// The unread arm defers, and a deferred call appends to the coverage log
+	// the person reads with `spill-guard coverage`. Left alone, every selftest
+	// run -- the check a user is told to run -- adds a record naming
+	// a file in a directory removed before it exits: 225 of 2,400 records on
+	// one machine by 2026-10-01, every one reading as a real encoding gap.
+	// So the log goes in the scratch directory for the length of the run. The
+	// record on stderr, which is what the arm asserts on, is untouched.
+	if prev, ok := os.LookupEnv("XDG_STATE_HOME"); ok {
+		defer os.Setenv("XDG_STATE_HOME", prev) //nolint:errcheck // restoring
+	} else {
+		defer os.Unsetenv("XDG_STATE_HOME") //nolint:errcheck // restoring
+	}
+	if err := os.Setenv("XDG_STATE_HOME", dir); err != nil {
+		fmt.Fprintf(stderr, "spill-guard: selftest could not point the coverage "+
+			"log away from yours, so nothing below was driven: %v\n", err)
+		return 1
+	}
 
 	planted := filepath.Join(dir, "deploy.env")
 	if err := os.WriteFile(planted, []byte("AWS_ACCESS_KEY_ID="+canary+"\n"), 0o600); err != nil {

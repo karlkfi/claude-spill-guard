@@ -207,19 +207,24 @@ func parseSince(v string) (time.Time, bool) {
 
 // class reduces a reason to the group a reader counts by.
 //
-// There are two quote levels and only the inner one may be elided. A composed
-// reason reads
+// There are two quote levels. A composed reason reads
 //
 //	... could not be completed: "in the \"cat\" here, a file operand is a glob ...".
 //
 // The outer span is the specific reason and is the whole of what distinguishes
-// one gap from another; the inner span is the command name, which is what
-// makes 500 records group into 500 classes. Eliding the outer one was the
-// first version of this and it reported every coverage failure on the machine
-// as a single class -- caught by driving the subcommand rather than by a test,
-// because the grouping was self-consistently wrong.
+// one gap from another, so its marks are dropped and its content kept. Eliding
+// it was the first version of this and it reported every coverage failure on
+// the machine as a single class -- caught by driving the subcommand rather
+// than by a test, because the grouping was self-consistently wrong.
+//
+// The inner span is kept too, unless it is a path. It is a command name in
+// almost every record, a key of the reader table -- a closed set -- so keeping
+// it splits a class by at most that table's size, and it is the half a reader
+// acts on: 1,361 of 1,364 directory records on 2026-10-01 were `grep`, and the
+// summary could not say so. A path in that span is the shell glob.go names,
+// which varies by machine and would split one gap per install.
 func class(reason string) string {
-	var b strings.Builder
+	var b, span strings.Builder
 	runes := []rune(reason)
 	inner := false
 	for i := 0; i < len(runes); i++ {
@@ -227,13 +232,19 @@ func class(reason string) string {
 		// An escaped quote opens or closes the inner span.
 		if r == '\\' && i+1 < len(runes) && runes[i+1] == '"' {
 			i++
-			inner = !inner
 			if inner {
-				b.WriteString(`"…"`)
+				if strings.ContainsAny(span.String(), `/\\`) {
+					b.WriteString(`"…"`)
+				} else {
+					b.WriteString(`"` + span.String() + `"`)
+				}
+				span.Reset()
 			}
+			inner = !inner
 			continue
 		}
 		if inner {
+			span.WriteRune(r)
 			continue
 		}
 		// A bare quote is an outer delimiter: drop the mark, keep the content.

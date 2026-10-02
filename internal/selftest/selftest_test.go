@@ -45,6 +45,70 @@ func TestSelftestPassesOnTheShippedRuleset(t *testing.T) {
 	}
 }
 
+// A run leaves the coverage log where it found it, and the environment too.
+//
+// TestMain already points this package at a temp directory, which is what
+// keeps the suite out of the developer's log and is also why it cannot see
+// this: the leak is the subcommand's, and a person running `selftest` has no
+// TestMain. So the state directory here is one the test owns and reads back.
+//
+// The deferral is asserted first, because a run whose unread arm wrote no
+// record at all would leave no log behind either and read as the fix.
+func TestSelftestWritesNothingToTheCoverageLog(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+
+	_, stdout, _ := run(t)
+	if !strings.Contains(stdout, "deferred ("+string(scan.SkippedUTF32)+")") {
+		t.Fatalf("the unread arm did not defer, so an empty log proves "+
+			"nothing:\n%s", stdout)
+	}
+	if got := os.Getenv("XDG_STATE_HOME"); got != state {
+		t.Errorf("XDG_STATE_HOME is %q after the run, want %q restored", got, state)
+	}
+	log, err := hook.CoveragePath()
+	if err != nil {
+		t.Fatalf("resolving the coverage log: %v", err)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		b, _ := os.ReadFile(log)
+		t.Errorf("selftest wrote to the coverage log at %s (stat: %v):\n%s",
+			log, err, b)
+	}
+}
+
+// The same, with a relative TMPDIR, where os.MkdirTemp hands back a relative
+// scratch directory. Two things went wrong there before it was made absolute:
+// eight arms deferred on relative paths, and a relative XDG_STATE_HOME was
+// ignored for the fallback under $HOME -- which is the log asserted absent.
+func TestSelftestPassesAndWritesNothingUnderARelativeTMPDIR(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("rel", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", "rel")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", "")
+	os.Unsetenv("XDG_STATE_HOME") //nolint:errcheck // t.Setenv restores it
+
+	log, err := hook.CoveragePath()
+	if err != nil {
+		t.Fatalf("resolving the coverage log: %v", err)
+	}
+	if !strings.HasPrefix(log, os.Getenv("HOME")) {
+		t.Fatalf("the log resolves to %s, outside the test's HOME, so its "+
+			"absence below would prove nothing", log)
+	}
+	if code, stdout, _ := run(t); code != 0 {
+		t.Errorf("selftest exited %d under a relative TMPDIR:\n%s", code, stdout)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		b, _ := os.ReadFile(log)
+		t.Errorf("selftest wrote to the coverage log at %s (stat: %v):\n%s",
+			log, err, b)
+	}
+}
+
 // Every arm has to be capable of failing, which is a different claim from
 // every arm passing.
 //
