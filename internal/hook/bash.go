@@ -228,15 +228,15 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// turns on.
 				cands, ok := v.candidates(operand)
 				if !ok {
-					return nil, fmt.Errorf("in the %q here, a file operand names loop "+
-						"variables standing for more than %d paths, so which files this "+
-						"command would read was not enumerated here", command,
-						maxLoopCandidates)
+					return nil, unresolved{operand, fmt.Errorf("in the %q here, a file "+
+						"operand names loop variables standing for more than %d paths, so "+
+						"which files this command would read was not enumerated here",
+						command, maxLoopCandidates)}
 				}
 				for _, cand := range cands {
 					expanded, err := expand(cand, dir, dirUnknown, globsAltered, qualified)
 					if err != nil {
-						return nil, fmt.Errorf("in the %q here, %w", command, err)
+						return nil, unresolved{cand, fmt.Errorf("in the %q here, %w", command, err)}
 					}
 					paths = append(paths, expanded...)
 				}
@@ -254,8 +254,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 						// absent file.
 						continue
 					}
-					return nil, fmt.Errorf("reading a file this command would "+
-						"send: %w", err)
+					return nil, unresolved{path, fmt.Errorf("reading a file this "+
+						"command would send: %w", err)}
 				}
 				// Only a regular file. os.ReadFile on a fifo blocks until
 				// something writes, which hangs the call rather than deciding it --
@@ -311,15 +311,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// friction report the day it was read that way, spent hunting
 				// a flag parser that does not exist.
 				if info.IsDir() {
-					return nil, fmt.Errorf("in the %q here, a file operand names a "+
-						"directory, and this scanner reads files rather than walking "+
-						"a tree, so what that operand would send was not read -- name "+
-						"the files instead", command)
+					return nil, unresolved{path, fmt.Errorf("in the %q here, a file "+
+						"operand names a directory, and this scanner reads files rather "+
+						"than walking a tree, so what that operand would send was not "+
+						"read -- name the files instead", command)}
 				}
 				if !info.Mode().IsRegular() {
-					return nil, fmt.Errorf("in the %q here, a file operand names "+
-						"something that is neither a file nor a directory, so what "+
-						"this command would send cannot be read here", command)
+					return nil, unresolved{path, fmt.Errorf("in the %q here, a file "+
+						"operand names something that is neither a file nor a "+
+						"directory, so what this command would send cannot be read "+
+						"here", command)}
 				}
 				// Ahead of the read, because not opening the file is the whole
 				// of this refusal -- guarded.go carries why a path whose
@@ -337,8 +338,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 				}
 				buf, err := os.ReadFile(path)
 				if err != nil {
-					return nil, fmt.Errorf("reading a file this command would "+
-						"send: %w", err)
+					return nil, unresolved{path, fmt.Errorf("reading a file this "+
+						"command would send: %w", err)}
 				}
 				targets = append(targets, target{path, buf})
 			}

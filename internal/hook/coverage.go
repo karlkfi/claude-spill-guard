@@ -2,11 +2,18 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/karlkfi/claude-spill-guard/internal/rules"
+	"github.com/karlkfi/claude-spill-guard/internal/scan"
+	embedded "github.com/karlkfi/claude-spill-guard/rules"
 )
 
 // A coverage failure is a call this scanner could not decide: an operand that
@@ -31,11 +38,56 @@ import (
 // What replaces it is a record. A gap nobody can see is a gap nobody fixes,
 // and the point of not prompting is that the prompt was never the thing that
 // closed one.
+//
+// SessionID and CWD are the payload's own, and Operands names what the reason
+// deliberately does not. Without them a record said which command it was and
+// nothing a person could use to find the call: attributing 2,175 Bash records
+// on 2026-10-01 took a timestamp join against 193,138 transcript tool calls,
+// and 1,213 of the joins had more than one candidate inside the window,
+// because parallel sessions issue `grep` within the same seconds.
 type coverage struct {
-	Time   time.Time `json:"time"`
-	Event  string    `json:"event"`
-	Tool   string    `json:"tool,omitempty"`
-	Reason string    `json:"reason"`
+	Time      time.Time `json:"time"`
+	Event     string    `json:"event"`
+	Tool      string    `json:"tool,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
+	CWD       string    `json:"cwd,omitempty"`
+	Reason    string    `json:"reason"`
+	Operands  []string  `json:"operands,omitempty"`
+}
+
+// unresolved is a coverage failure that knows which operand it was about.
+//
+// The reason never names the token, for the argument bash.go's resolve gives,
+// and that argument is about the API: a reason is composed from strings the
+// model sees. The log is not one of them, so the operand rides beside the
+// reason as data rather than inside it, and only record reads it.
+type unresolved struct {
+	operand string
+	err     error
+}
+
+func (u unresolved) Error() string { return u.err.Error() }
+func (u unresolved) Unwrap() error { return u.err }
+
+// operandOf is the operand a failed scan was about, or nothing.
+func operandOf(err error) []string {
+	var u unresolved
+	if errors.As(err, &u) && u.operand != "" {
+		return []string{u.operand}
+	}
+	return nil
+}
+
+// skippedOperands are the files among skips. A label standing in for a
+// prompt or a command string names no file, so it is not an operand.
+func skippedOperands(skips []skipped) []string {
+	var out []string
+	for _, s := range skips {
+		if s.label != promptLabel && s.label != commandLabel {
+			out = append(out, s.label)
+		}
+	}
+	return out
 }
 
 // record writes one coverage failure to both sinks and reports nothing.
@@ -45,11 +97,17 @@ type coverage struct {
 // change the verdict -- turning a logging failure into a block would rebuild
 // the friction this whole path exists to remove, and would do it on the
 // machines least able to diagnose it.
-func record(stderr io.Writer, call payload, event Event, reason string) {
+//
+// operands go to the log and never to stderr, which the harness keeps in the
+// transcript beside the call.
+func record(stderr io.Writer, call payload, event Event, reason string, operands []string) {
 	c := coverage{
-		Time:   time.Now().UTC(),
-		Event:  string(event),
-		Reason: reason,
+		Time:      time.Now().UTC(),
+		Event:     string(event),
+		SessionID: call.SessionID,
+		CWD:       call.CWD,
+		Reason:    reason,
+		Operands:  withheld(operands),
 	}
 	// ToolName is absent on UserPromptSubmit and optional everywhere, so the
 	// field stays empty rather than inventing a name for the record.
@@ -69,6 +127,53 @@ func record(stderr io.Writer, call payload, event Event, reason string) {
 	// the free sink, never the only one.
 	fmt.Fprintf(stderr, "%s%s\n", noticeLead, reason)
 	appendCoverage(c)
+}
+
+// withheld drops the operands the shipped ruleset matches.
+//
+// An operand is text from the call, and nothing scanned it: the walk that
+// failed on it is what stopped the scan. `cat $HOME/<a key>` defers, so the
+// key is the operand, and a record carrying it puts a raw secret in a file
+// that outlives the call. Withheld rather than redacted, because a fragment
+// of a key is still part of the key. Fail closed: a ruleset that does not
+// load keeps nothing.
+func withheld(operands []string) []string {
+	if len(operands) == 0 {
+		return nil
+	}
+	set, err := rules.Load(embedded.Shipped)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, o := range operands {
+		// The scanner reads a buffer as whatever it declares, so an operand
+		// opening on a byte-order mark is decoded as UTF-16 and a key in it
+		// scans clean, and one carrying a NUL takes the binary skip. A path or
+		// an `@` token is plain text, so anything else is withheld unread.
+		if !plain(o) {
+			continue
+		}
+		got, err := scan.Buffer("", []byte(o), set)
+		if err != nil || len(got.Findings) > 0 || got.Skipped != scan.Scanned {
+			continue
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+// plain reports whether s is valid UTF-8 with no control characters.
+func plain(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || r == '\uFEFF' {
+			return false
+		}
+	}
+	return true
 }
 
 // coverageCap is where the log rotates, per file. Two files are kept, so the

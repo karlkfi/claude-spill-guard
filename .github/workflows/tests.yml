@@ -729,7 +729,7 @@ jobs:
           import pathlib
           p = pathlib.Path("internal/hook/coverage.go")
           s = p.read_text(encoding="utf-8")
-          old = "func record(stderr io.Writer, call payload, event Event, reason string) {\n"
+          old = "func record(stderr io.Writer, call payload, event Event, reason string, operands []string) {\n"
           assert s.count(old) == 1, "record() is not where the mutation expects it"
           p.write_text(s.replace(old, old + '\t_ = os.Getenv("SPILL_GUARD_TELEMETRY")\n'), encoding="utf-8")
           PY
@@ -762,7 +762,7 @@ jobs:
           import pathlib
           p = pathlib.Path("internal/hook/coverage.go")
           s = p.read_text(encoding="utf-8")
-          old = "func record(stderr io.Writer, call payload, event Event, reason string) {\n"
+          old = "func record(stderr io.Writer, call payload, event Event, reason string, operands []string) {\n"
           assert s.count(old) == 1, "record() is not where the mutation expects it"
           p.write_text(s.replace(old, old + '\t_ = os.Getenv(reason)\n'), encoding="utf-8")
           PY
