@@ -24,6 +24,8 @@ commands:
   hook      scan a Claude Code hook payload read from stdin
   selftest  drive the hook path over a canary and report what it did
   coverage  report what this scanner could not read, commonest first
+            [--since TIME] count only records from TIME on
+            [--file LOG]   read one log, e.g. coverage.jsonl.1
   version   print the version and exit
 `
 
@@ -50,7 +52,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "selftest":
 		return selftest.Run(version, stdout, stderr)
 	case "coverage":
-		return hook.Summarize(stdout, stderr)
+		return hook.Summarize(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0
