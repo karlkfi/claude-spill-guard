@@ -37,8 +37,11 @@ reason names the path of what went unread, and none of its bytes.
 <!-- privacy:end -->
 
 `TMPDIR` is `selftest`'s, not the hook's: it plants its canaries in a
-temporary directory and removes them before it exits. The hook reads `HOME` to
-expand a `~` in a path and `XDG_STATE_HOME` to find the coverage log below.
+temporary directory and removes them before it exits, pointing
+`XDG_STATE_HOME` into that directory for the run so the record its own
+undecodable canary produces never reaches your coverage log. The hook reads
+`HOME` to expand a `~` in a path and `XDG_STATE_HOME` to find the coverage log
+below.
 Four decide whether a `cd` in a `Bash` command can be followed, so that a
 relative file operand after it resolves against the right directory: `CDPATH`
 because bash searches it before the directory a relative target names, and
