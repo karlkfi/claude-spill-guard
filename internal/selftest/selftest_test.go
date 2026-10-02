@@ -77,12 +77,11 @@ func TestSelftestWritesNothingToTheCoverageLog(t *testing.T) {
 	}
 }
 
-// The same, with a relative TMPDIR, where the scratch directory comes back
-// relative and a relative XDG_STATE_HOME is ignored for $HOME's log. So the
-// log asserted absent here is the fallback under $HOME, which is where the
-// records went before the path was made absolute. The arms fail under a
-// relative TMPDIR for reasons of their own, so only the log is asserted.
-func TestSelftestWritesNothingToTheCoverageLogUnderARelativeTMPDIR(t *testing.T) {
+// The same, with a relative TMPDIR, where os.MkdirTemp hands back a relative
+// scratch directory. Two things went wrong there before it was made absolute:
+// eight arms deferred on relative paths, and a relative XDG_STATE_HOME was
+// ignored for the fallback under $HOME -- which is the log asserted absent.
+func TestSelftestPassesAndWritesNothingUnderARelativeTMPDIR(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if err := os.Mkdir("rel", 0o700); err != nil {
 		t.Fatal(err)
@@ -100,7 +99,9 @@ func TestSelftestWritesNothingToTheCoverageLogUnderARelativeTMPDIR(t *testing.T)
 		t.Fatalf("the log resolves to %s, outside the test's HOME, so its "+
 			"absence below would prove nothing", log)
 	}
-	run(t)
+	if code, stdout, _ := run(t); code != 0 {
+		t.Errorf("selftest exited %d under a relative TMPDIR:\n%s", code, stdout)
+	}
 	if _, err := os.Stat(log); !os.IsNotExist(err) {
 		b, _ := os.ReadFile(log)
 		t.Errorf("selftest wrote to the coverage log at %s (stat: %v):\n%s",

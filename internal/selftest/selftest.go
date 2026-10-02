@@ -133,6 +133,14 @@ func Run(version string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer os.RemoveAll(dir)
+	// os.MkdirTemp hands back a relative TMPDIR as is. Every arm's payload
+	// names a path under here, and the hook defers on a relative one rather
+	// than guess the directory, so a relative dir fails eight arms; and a
+	// relative XDG_STATE_HOME is ignored for $HOME's log, so it also undoes
+	// the redirect below.
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
 
 	// The unread arm defers, and a deferred call appends to the coverage log
 	// the person reads with `spill-guard coverage`. Left alone, every selftest
@@ -146,13 +154,7 @@ func Run(version string, stdout, stderr io.Writer) int {
 	} else {
 		defer os.Unsetenv("XDG_STATE_HOME") //nolint:errcheck // restoring
 	}
-	// Absolute, because coverageDir ignores a relative XDG_STATE_HOME and
-	// falls back to $HOME -- and os.MkdirTemp returns a relative TMPDIR as is.
-	state, err := filepath.Abs(dir)
-	if err == nil {
-		err = os.Setenv("XDG_STATE_HOME", state)
-	}
-	if err != nil {
+	if err := os.Setenv("XDG_STATE_HOME", dir); err != nil {
 		fmt.Fprintf(stderr, "spill-guard: selftest could not point the coverage "+
 			"log away from yours, so nothing below was driven: %v\n", err)
 		return 1
