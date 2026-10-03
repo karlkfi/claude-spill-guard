@@ -71,7 +71,7 @@ func TestTheManifestNamesEveryEventThisPackageScans(t *testing.T) {
 }
 
 // The PreToolUse matcher is held to the constants rather than kept in step by
-// hand, which is what ToolRead and ToolBash are exported for.
+// hand, which is what ToolRead, ToolBash and ToolGrep are exported for.
 func TestThePreToolUseMatcherNamesExactlyTheScannedTools(t *testing.T) {
 	wiring := loadWiring(t)
 
@@ -81,7 +81,7 @@ func TestThePreToolUseMatcherNamesExactlyTheScannedTools(t *testing.T) {
 			"so that this test reads all of it", manifestPath, len(entries))
 	}
 	named := strings.Split(entries[0].Matcher, "|")
-	if diff := setDiff(named, []string{ToolRead, ToolBash}); diff != "" {
+	if diff := setDiff(named, []string{ToolRead, ToolBash, ToolGrep}); diff != "" {
 		t.Errorf("the PreToolUse matcher %q does not name what toolTargets "+
 			"scans: %s", entries[0].Matcher, diff)
 	}

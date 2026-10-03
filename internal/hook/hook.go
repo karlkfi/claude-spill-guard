@@ -60,6 +60,7 @@ import (
 const (
 	ToolRead = "Read"
 	ToolBash = "Bash"
+	ToolGrep = "Grep"
 )
 
 // What a finding is reported against when there is no file. The design lets a
@@ -521,6 +522,12 @@ func toolTargets(call payload) ([]target, error) {
 		// The command string, and the files its readers are pointed at.
 		// internal/readers is what decides which token of a segment is a path.
 		return bashTargets(*in.Command, call.CWD)
+	case ToolGrep:
+		var in grepToolInput
+		if err := unmarshalToolInput(ToolGrep, call.ToolInput, &in); err != nil {
+			return nil, err
+		}
+		return grepToolTargets(in, call.CWD)
 	default:
 		// Not a tool this package scans. The set above is closed and named so
 		// that hooks.json's matcher can be held to it; a tool arriving here is

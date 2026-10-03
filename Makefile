@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift job-drift status-drift privacy-drift hooks-check launcher script-modes vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
+GATES := doctor gate-drift job-drift status-drift privacy-drift hooks-check launcher filter-rewrite script-modes vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -21,6 +21,7 @@ status-drift.desc   := the README's status table still says what the tree can ac
 privacy-drift.desc  := PRIVACY.md still says what the hook reads and writes, against the manifest, the source and a driven binary
 hooks-check.desc    := every tracked git hook is executable, so none is silently inert
 launcher.desc       := the hook launcher is executable in the index, resolves a binary, and denies when it cannot
+filter-rewrite.desc := the command a recursive-grep refusal names runs under bash, passes clean output and withholds a key
 script-modes.desc   := a shebang and the executable bit travel together, in the index, both ways
 vendor.desc         := every vendored copy still hashes to the digest scripts/README.md declares
 docs.desc           := every relative link in the repo markdown resolves
@@ -190,6 +191,9 @@ script-modes:
 # every other gate here while the guard never fires once.
 launcher:
 	$(PYTHON) scripts/check-launcher.py
+
+filter-rewrite:
+	$(PYTHON) scripts/check-filter-rewrite.py
 
 vendor:
 	$(PYTHON) scripts/check-vendor.py

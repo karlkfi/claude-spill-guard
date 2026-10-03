@@ -539,6 +539,9 @@ jobs:
       # than on the table. The reading to take from that is the general one:
       # what the list has to cover is every arm that NAMES a cut package, not
       # every arm that reaches the scanner.
+      #
+      # And on 2026-10-01 for `filter`, which reaches internal/scan directly:
+      # the precondition stopped the step until its arm joined the list.
       - name: Unwiring the scanner must fail the check and flip the table
         run: |
           python3 - <<'PY'
@@ -546,12 +549,15 @@ jobs:
           p = pathlib.Path("cmd/spill-guard/main.go")
           s = p.read_text(encoding="utf-8")
           for line in (
+              '\t"github.com/karlkfi/claude-spill-guard/internal/filter"\n',
               '\t"github.com/karlkfi/claude-spill-guard/internal/hook"\n',
               '\t"github.com/karlkfi/claude-spill-guard/internal/selftest"\n',
               '\tcase "hook":\n\t\treturn hook.Run(stdin, stdout, stderr)\n',
+              '\tcase "filter":\n\t\treturn filter.Run(args[1:], stdin, stdout, stderr)\n',
               '\tcase "selftest":\n\t\treturn selftest.Run(version, stdout, stderr)\n',
               '\tcase "coverage":\n\t\treturn hook.Summarize(args[1:], stdout, stderr)\n',
               "  hook      scan a Claude Code hook payload read from stdin\n",
+              "  filter    scan stdin and write it to stdout only if nothing matched\n",
               "  selftest  drive the hook path over a canary and report what it did\n",
               "  coverage  report what this scanner could not read, commonest first\n",
               "            [--since TIME] count only records from TIME on\n",
@@ -822,7 +828,7 @@ jobs:
       # arguments the page never mentions reading.
       - name: A tool added to the matcher must fail the check
         run: |
-          sed -i 's/"matcher": "Read|Bash"/"matcher": "Read|Bash|Write"/' hooks/hooks.json
+          sed -i 's/"matcher": "Read|Bash|Grep"/"matcher": "Read|Bash|Grep|Write"/' hooks/hooks.json
           if git diff --quiet -- hooks/hooks.json; then
             echo "::error::the mutation changed nothing, so this step tested nothing" >&2
             exit 1
@@ -1401,6 +1407,70 @@ jobs:
           export PATH="$HOME/fake-bin:$PATH"
           command -v spill-guard || { echo "::error::the fixture is not on PATH, so this step tested nothing" >&2; exit 1; }
           make launcher
+
+  # The Go suite checks the rewrite a recursive-grep refusal names and that
+  # the hook allows it; this runs it. The binary's own path is spliced into a
+  # shell command, and on Windows that is a drive-letter path handed to Git
+  # Bash -- the shell the Bash tool runs there -- which no ubuntu job reaches.
+  filter-rewrite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The rewrite a grep refusal names runs and does what it says
+        if: runner.os != 'Windows'
+        run: make filter-rewrite
+
+      # The launcher job's reason: make is not assumed on the Windows image,
+      # and the Makefile rule is a one-line wrapper around this script.
+      - name: The rewrite a grep refusal names runs and does what it says
+        if: runner.os == 'Windows'
+        run: python scripts/check-filter-rewrite.py
+
+  # A filter that passes everything through still exits 0 on clean output and
+  # 1 on no match, so two of the gate's three arms cannot see it. The planted
+  # key is the arm that has to: the mutation removes the block, and the gate
+  # must go red saying the rewrite exited 0 where it wanted 3.
+  filter-rewrite-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: A filter that withholds nothing must fail the gate
+        run: |
+          sed -i 's/if len(got.Findings) == 0 {/if true {/' internal/filter/filter.go
+          if git diff --quiet -- internal/filter/filter.go; then
+            echo "::error::the mutation did not land, so this step tested nothing" >&2
+            exit 1
+          fi
+          make filter-rewrite > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- internal/filter/filter.go
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a filter that withholds nothing" >&2
+            exit 1
+          fi
+          if ! grep -q 'exit 0, want 3' mutant.log; then
+            echo "::error::the gate failed, but not on the key the filter let through" >&2
+            exit 1
+          fi
 
   # `make check` is a loop over GATES, and a loop is how a run reports green
   # while a gate it was supposed to cover failed -- take the status from the
