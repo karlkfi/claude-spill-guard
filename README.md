@@ -36,7 +36,7 @@ authoritative and is not.
 `spill-guard` builds, answers `coverage`, `filter`, `hook`, `selftest`,
 `version`, and reaches `internal/bash`, `internal/filter`, `internal/hook`,
 `internal/readers`, `internal/rules`, `internal/scan`, `internal/selftest`,
-`internal/validate`, `rules`.
+`internal/validate`, `internal/version`, `rules`.
 <!-- status:end -->
 
 - [`docs/design/`](docs/design/) — the proposed design: threat model, hook

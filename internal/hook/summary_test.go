@@ -203,11 +203,76 @@ func TestSummarizeRefusesWhatItCannotHonour(t *testing.T) {
 	}{
 		{[]string{"--file", "coverage.jsonl.2"}, 1},
 		{[]string{"--since", "last tuesday"}, 2},
+		{[]string{"--since", "v1.2"}, 2},
 		{[]string{"stray"}, 2},
 		{[]string{"--nope"}, 2},
 	} {
 		if rc, _, _ := summarize(t, tc.args...); rc != tc.rc {
 			t.Errorf("%q: exit %d, want %d", tc.args, rc, tc.rc)
+		}
+	}
+}
+
+// --since with a version reads the build that wrote each record, which is what
+// "has this gap been fixed since" asks. A record no version can place -- one
+// from before records carried a version, or a dev build -- is left out and
+// counted, rather than guessed into either side.
+func TestSinceAVersionLeavesOutOlderBuilds(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "spill-guard")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	log := ""
+	for _, r := range []struct{ version, reason string }{
+		{"", "unversioned"},
+		{"dev", "unversioned"},
+		{"0.5.0", "older"},
+		{"0.6.0-rc.1", "older"},
+		{"0.6.0", "newer"},
+		{"0.10.0", "newer"},
+	} {
+		log += `{"time":"2026-09-20T12:00:00Z","event":"PreToolUse","version":"` +
+			r.version + `","reason":"` + r.reason + `"}` + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "coverage.jsonl"), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, out, errs := summarize(t, "--since", "v0.6.0")
+	if rc != 0 {
+		t.Fatalf("exit %d, stderr %q", rc, errs)
+	}
+	assertHas(t, out,
+		"2 record(s) before v0.6.0 left out.",
+		"2 record(s) name no release",
+		"2 call(s)",
+		"(100.0%)  newer",
+	)
+	for _, leaked := range []string{"  older\n", "  unversioned\n"} {
+		if strings.Contains(out, leaked) {
+			t.Errorf("--since v0.6.0 counted a record it should have left out (%q):\n%s", leaked, out)
+		}
+	}
+}
+
+func TestVersionPrecedence(t *testing.T) {
+	ordered := []string{"0.5.0", "0.6.0-alpha", "0.6.0-alpha.1", "0.6.0-alpha.beta",
+		"0.6.0-rc.1", "0.6.0-rc.2", "0.6.0-rc.10", "0.6.0", "v0.6.1", "0.10.0", "1.0.0+build.5"}
+	for i := 0; i+1 < len(ordered); i++ {
+		a, okA := parseVersion(ordered[i])
+		b, okB := parseVersion(ordered[i+1])
+		if !okA || !okB {
+			t.Fatalf("did not parse %q or %q", ordered[i], ordered[i+1])
+		}
+		if a.compare(b) >= 0 || b.compare(a) <= 0 {
+			t.Errorf("%s should sort before %s", ordered[i], ordered[i+1])
+		}
+	}
+	for _, bad := range []string{"", "dev", "1.2", "1.2.3.4", "01.2.3", "1.2.3-", "2026-09-28", "v1.x.3"} {
+		if _, ok := parseVersion(bad); ok {
+			t.Errorf("%q parsed as a version", bad)
 		}
 	}
 }

@@ -14,10 +14,8 @@ import (
 	"github.com/karlkfi/claude-spill-guard/internal/filter"
 	"github.com/karlkfi/claude-spill-guard/internal/hook"
 	"github.com/karlkfi/claude-spill-guard/internal/selftest"
+	"github.com/karlkfi/claude-spill-guard/internal/version"
 )
-
-// version is overridden at release time with -ldflags -X.
-var version = "dev"
 
 const usage = `usage: spill-guard <command>
 
@@ -26,8 +24,8 @@ commands:
   filter    scan stdin and write it to stdout only if nothing matched
   selftest  drive the hook path over a canary and report what it did
   coverage  report what this scanner could not read, commonest first
-            [--since TIME] count only records from TIME on
-            [--file LOG]   read one log, e.g. coverage.jsonl.1
+            [--since TIME|VERSION] count only records from then on
+            [--file LOG]           read one log, e.g. coverage.jsonl.1
   version   print the version and exit
 `
 
@@ -54,11 +52,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "filter":
 		return filter.Run(args[1:], stdin, stdout, stderr)
 	case "selftest":
-		return selftest.Run(version, stdout, stderr)
+		return selftest.Run(version.Version, stdout, stderr)
 	case "coverage":
 		return hook.Summarize(args[1:], stdout, stderr)
 	case "version":
-		fmt.Fprintln(stdout, version)
+		fmt.Fprintln(stdout, version.Version)
 		return 0
 	default:
 		// %q escapes C0, DEL and the bidi overrides, which is required of every

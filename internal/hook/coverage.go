@@ -13,6 +13,7 @@ import (
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
 	"github.com/karlkfi/claude-spill-guard/internal/scan"
+	"github.com/karlkfi/claude-spill-guard/internal/version"
 	embedded "github.com/karlkfi/claude-spill-guard/rules"
 )
 
@@ -51,8 +52,11 @@ type coverage struct {
 	Tool      string    `json:"tool,omitempty"`
 	SessionID string    `json:"session_id,omitempty"`
 	CWD       string    `json:"cwd,omitempty"`
-	Reason    string    `json:"reason"`
-	Operands  []string  `json:"operands,omitempty"`
+	// Version is the build that wrote the record, so a report can leave out
+	// what a release since has closed.
+	Version  string   `json:"version"`
+	Reason   string   `json:"reason"`
+	Operands []string `json:"operands,omitempty"`
 }
 
 // unresolved is a coverage failure that knows which operand it was about.
@@ -106,6 +110,7 @@ func record(stderr io.Writer, call payload, event Event, reason string, operands
 		Event:     string(event),
 		SessionID: call.SessionID,
 		CWD:       call.CWD,
+		Version:   version.Version,
 		Reason:    reason,
 		Operands:  withheld(operands),
 	}

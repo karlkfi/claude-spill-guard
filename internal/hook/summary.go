@@ -2,6 +2,7 @@ package hook
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,8 +29,8 @@ import (
 // reads as a machine whose gaps went away.
 //
 // --file narrows the report to one file and --since to the records written at
-// or after a moment, so a gap already reported, or closed by a later release,
-// stops being counted again.
+// or after a moment, or by a release at or after a version, so a gap already
+// reported, or closed by a later release, stops being counted again.
 //
 // Exit 0 on an absent log: a machine that has had no coverage failure is the
 // good case, not an error. A file named by --file is not that case, since
@@ -37,7 +39,7 @@ func Summarize(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("coverage", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	file := fs.String("file", "", "read only this `log`: a bare name is looked up in the state directory, anything else is a path")
-	sinceArg := fs.String("since", "", "count only records written at or after this `time` (2006-01-02, 2006-01-02T15:04, or RFC 3339; local time unless it says otherwise)")
+	sinceArg := fs.String("since", "", "count only records written at or after this `time` (2006-01-02, 2006-01-02T15:04, or RFC 3339; local time unless it says otherwise), or by this release `version` or later (v0.6.0)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -45,12 +47,13 @@ func Summarize(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%sunexpected argument %q\n", noticeLead, fs.Arg(0))
 		return 2
 	}
-	var since time.Time
+	t := tally{counts: map[string]int{}}
 	if *sinceArg != "" {
-		var ok bool
-		if since, ok = parseSince(*sinceArg); !ok {
-			fmt.Fprintf(stderr, "%s--since %q is not a time this reads: use 2006-01-02, "+
-				"2006-01-02T15:04, or RFC 3339\n", noticeLead, *sinceArg)
+		if v, ok := parseVersion(*sinceArg); ok {
+			t.sinceVersion = &v
+		} else if t.since, ok = parseSince(*sinceArg); !ok {
+			fmt.Fprintf(stderr, "%s--since %q is neither a time nor a version this reads: "+
+				"use 2006-01-02, 2006-01-02T15:04, RFC 3339, or v0.6.0\n", noticeLead, *sinceArg)
 			return 2
 		}
 	}
@@ -68,7 +71,6 @@ func Summarize(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	t := tally{counts: map[string]int{}, since: since}
 	var read []string
 	for _, p := range paths {
 		ok, err := t.add(p)
@@ -94,11 +96,22 @@ func Summarize(args []string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintf(stdout, "%s\n\n", strings.Join(read, "\n"))
 	if t.earlier > 0 {
-		fmt.Fprintf(stdout, "%d record(s) before %s left out.\n\n",
-			t.earlier, since.Local().Format(time.DateTime))
+		bound := t.since.Local().Format(time.DateTime)
+		if t.sinceVersion != nil {
+			bound = "v" + t.sinceVersion.String()
+		}
+		fmt.Fprintf(stdout, "%d record(s) before %s left out.\n", t.earlier, bound)
+	}
+	if t.unversioned > 0 {
+		fmt.Fprintf(stdout, "%d record(s) name no release, so no version can place them, "+
+			"and were left out: written before records carried a version, or by a dev build.\n",
+			t.unversioned)
+	}
+	if t.earlier > 0 || t.unversioned > 0 {
+		fmt.Fprintln(stdout)
 	}
 	if t.total == 0 {
-		if t.earlier > 0 {
+		if t.earlier > 0 || t.unversioned > 0 {
 			fmt.Fprint(stdout, "Nothing was recorded since then.\n")
 			return 0
 		}
@@ -138,10 +151,11 @@ func Summarize(args []string, stdout, stderr io.Writer) int {
 
 // tally accumulates records across the log's generations.
 type tally struct {
-	counts                   map[string]int
-	total, unparsed, earlier int
-	first, last              time.Time
-	since                    time.Time // zero counts everything
+	counts                                map[string]int
+	total, unparsed, earlier, unversioned int
+	first, last                           time.Time
+	since                                 time.Time // zero counts everything
+	sinceVersion                          *semver   // nil counts every build
 }
 
 // add counts the records in one generation, reporting false for a file that
@@ -176,6 +190,17 @@ func (t *tally) add(path string) (bool, error) {
 			t.earlier++
 			continue
 		}
+		if t.sinceVersion != nil {
+			v, ok := parseVersion(c.Version)
+			if !ok {
+				t.unversioned++
+				continue
+			}
+			if v.compare(*t.sinceVersion) < 0 {
+				t.earlier++
+				continue
+			}
+		}
 		t.total++
 		t.counts[class(c.Reason)]++
 		if t.first.IsZero() || c.Time.Before(t.first) {
@@ -203,6 +228,84 @@ func parseSince(v string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// semver is a release version: the tag GoReleaser stamps into the binary, with
+// or without its v. A dev build is not one, and neither is anything with fewer
+// than three numeric parts.
+type semver struct {
+	core [3]int
+	pre  []string
+}
+
+func parseVersion(s string) (semver, bool) {
+	s = strings.TrimPrefix(s, "v")
+	s, _, _ = strings.Cut(s, "+")
+	s, pre, hasPre := strings.Cut(s, "-")
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return semver{}, false
+	}
+	var v semver
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 || p != strconv.Itoa(n) {
+			return semver{}, false
+		}
+		v.core[i] = n
+	}
+	if hasPre {
+		if pre == "" {
+			return semver{}, false
+		}
+		v.pre = strings.Split(pre, ".")
+	}
+	return v, true
+}
+
+// compare orders two versions by SemVer precedence: a prerelease sorts before
+// its release, so --since v0.6.0 leaves out what v0.6.0-rc.1 wrote.
+func (v semver) compare(o semver) int {
+	for i := range v.core {
+		if c := cmp.Compare(v.core[i], o.core[i]); c != 0 {
+			return c
+		}
+	}
+	switch {
+	case len(v.pre) == 0 && len(o.pre) == 0:
+		return 0
+	case len(v.pre) == 0:
+		return 1
+	case len(o.pre) == 0:
+		return -1
+	}
+	for i := 0; i < len(v.pre) && i < len(o.pre); i++ {
+		a, aErr := strconv.Atoi(v.pre[i])
+		b, bErr := strconv.Atoi(o.pre[i])
+		var c int
+		switch {
+		case aErr == nil && bErr == nil:
+			c = cmp.Compare(a, b)
+		case aErr == nil:
+			c = -1
+		case bErr == nil:
+			c = 1
+		default:
+			c = strings.Compare(v.pre[i], o.pre[i])
+		}
+		if c != 0 {
+			return c
+		}
+	}
+	return cmp.Compare(len(v.pre), len(o.pre))
+}
+
+func (v semver) String() string {
+	s := fmt.Sprintf("%d.%d.%d", v.core[0], v.core[1], v.core[2])
+	if len(v.pre) > 0 {
+		s += "-" + strings.Join(v.pre, ".")
+	}
+	return s
 }
 
 // class reduces a reason to the group a reader counts by.

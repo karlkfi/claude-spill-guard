@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/karlkfi/claude-spill-guard/internal/version"
 )
 
 // readCoverage returns the records written under the isolated state dir.
@@ -41,6 +43,9 @@ func readCoverage(t *testing.T) []coverage {
 // receives what the stderr line says -- the two are written together and only
 // one of them survives the session.
 func TestACoverageFailureIsWrittenToTheLog(t *testing.T) {
+	was := version.Version
+	version.Version = "9.8.7"
+	t.Cleanup(func() { version.Version = was })
 	dir := t.TempDir()
 	code, stdout, stderr := drive(t, bashCall(t, "cat $SOME_VAR", dir))
 	deferred(t, code, stdout, stderr)
@@ -60,6 +65,11 @@ func TestACoverageFailureIsWrittenToTheLog(t *testing.T) {
 	}
 	if got[0].Time.IsZero() {
 		t.Error("the record carries no timestamp, so a trend cannot be read from it")
+	}
+	// Set rather than read back, so a record that ignored the build's version
+	// and wrote a constant cannot pass.
+	if got[0].Version != version.Version {
+		t.Errorf("version = %q, want the build's %q", got[0].Version, version.Version)
 	}
 }
 

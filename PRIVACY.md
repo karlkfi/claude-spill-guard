@@ -34,8 +34,8 @@ Driven in a sandboxed home directory, the hook wrote one file, and only on a
 call it could not scan: `$XDG_STATE_HOME/spill-guard/coverage.jsonl`, or
 `~/.local/state/spill-guard/coverage.jsonl` when `XDG_STATE_HOME` is unset,
 created mode `0600`. A record carries `time`, `event`, `tool`, `session_id`,
-`cwd`, `reason` and `operands`; the reason and the operands name the path of
-what went unread, and none of its bytes.
+`cwd`, `version`, `reason` and `operands`; the reason and the operands name the
+path of what went unread, and none of its bytes.
 <!-- privacy:end -->
 
 `TMPDIR` is `selftest`'s, not the hook's: it plants its canaries in a
