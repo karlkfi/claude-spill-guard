@@ -31,7 +31,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w -X github.com/karlkfi/claude-spill-guard/internal/version.Version={{ .Version }}
 
     # Two builds of one commit differ only in the embedded build time unless
     # something pins it. The commit's own timestamp is the one value every

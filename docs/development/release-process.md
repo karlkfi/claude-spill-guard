@@ -13,8 +13,8 @@ Everything below is the part a person does.
 ## The tag carries the version, except in the plugin manifests
 
 The binary reports whatever the tag said, with the leading `v` stripped.
-`cmd/spill-guard/main.go` carries `dev` as the default and `-ldflags -X
-main.version={{ .Version }}` overrides it at build time, so a working tree says
+`internal/version/version.go` carries `dev` as the default and `-ldflags -X
+…/internal/version.Version={{ .Version }}` overrides it at build time, so a working tree says
 `dev` and the tag `v1.2.3` produces a binary reporting `1.2.3`. GoReleaser's
 `.Version` is the tag without the `v`; `.Tag` is the raw tag. The archive name
 carries the same stripped form, so the binary and the file it ships in agree —
