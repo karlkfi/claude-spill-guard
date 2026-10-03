@@ -1,6 +1,9 @@
 package hook
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -97,5 +100,114 @@ func TestClassElidesABarePathInTheUnreadBody(t *testing.T) {
 	w := class(body(`C:\Users\k\AppData\Local\Temp\notes.utf32`))
 	if strings.Contains(w, "AppData") {
 		t.Errorf("a Windows path survived the elision: %q", w)
+	}
+}
+
+// twoGenerations writes a rotated generation holding two records and a live
+// one holding a third, and returns the live path.
+func twoGenerations(t *testing.T) string {
+	t.Helper()
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "spill-guard")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "coverage.jsonl")
+	old := `{"time":"2026-09-01T12:00:00Z","event":"PreToolUse","reason":"older"}` + "\n" +
+		`{"time":"2026-09-02T12:00:00Z","event":"PreToolUse","reason":"older"}` + "\n"
+	if err := os.WriteFile(path+".1", []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cur := `{"time":"2026-09-20T12:00:00Z","event":"PreToolUse","reason":"newer"}` + "\n"
+	if err := os.WriteFile(path, []byte(cur), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func summarize(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
+	var out, errw bytes.Buffer
+	rc := Summarize(args, &out, &errw)
+	return rc, out.String(), errw.String()
+}
+
+func assertHas(t *testing.T, got string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Errorf("the report lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// A rotation moves every record but the newest into coverage.jsonl.1, so a
+// report that read only the live file would describe the machine as having
+// one gap. Both generations are counted, and the date range spans them.
+func TestSummarizeCountsTheRotatedGeneration(t *testing.T) {
+	path := twoGenerations(t)
+	rc, out, errs := summarize(t)
+	if rc != 0 {
+		t.Fatalf("exit %d, stderr %q", rc, errs)
+	}
+	assertHas(t, out,
+		"3 call(s)",
+		"2026-09-01 to 2026-09-20",
+		"     2  (66.7%)  older",
+		"     1  (33.3%)  newer",
+		path+".1\n"+path+"\n",
+	)
+}
+
+// --since drops what was already reported, and says how much it dropped so a
+// short report is not read as a machine with few gaps.
+func TestSinceLeavesOutEarlierRecordsAndCountsThem(t *testing.T) {
+	twoGenerations(t)
+	rc, out, errs := summarize(t, "--since", "2026-09-02T13:00:00Z")
+	if rc != 0 {
+		t.Fatalf("exit %d, stderr %q", rc, errs)
+	}
+	assertHas(t, out, "2 record(s) before", "1 call(s)", "100.0%)  newer")
+	if strings.Contains(out, "  older\n") {
+		t.Errorf("a record before --since was counted:\n%s", out)
+	}
+
+	rc, out, _ = summarize(t, "--since", "2026-09-21")
+	if rc != 0 || !strings.Contains(out, "Nothing was recorded since then.") {
+		t.Errorf("exit %d, want the empty-window report:\n%s", rc, out)
+	}
+}
+
+// A bare name is a file in the state directory; anything with a separator is
+// a path as given.
+func TestFileReadsOneLog(t *testing.T) {
+	path := twoGenerations(t)
+	for _, arg := range []string{"coverage.jsonl.1", path + ".1"} {
+		rc, out, errs := summarize(t, "--file", arg)
+		if rc != 0 {
+			t.Fatalf("--file %s: exit %d, stderr %q", arg, rc, errs)
+		}
+		assertHas(t, out, "2 call(s)", "100.0%)  older")
+		if strings.Contains(out, "  newer\n") {
+			t.Errorf("--file %s read the live log too:\n%s", arg, out)
+		}
+	}
+}
+
+func TestSummarizeRefusesWhatItCannotHonour(t *testing.T) {
+	twoGenerations(t)
+	for _, tc := range []struct {
+		args []string
+		rc   int
+	}{
+		{[]string{"--file", "coverage.jsonl.2"}, 1},
+		{[]string{"--since", "last tuesday"}, 2},
+		{[]string{"stray"}, 2},
+		{[]string{"--nope"}, 2},
+	} {
+		if rc, _, _ := summarize(t, tc.args...); rc != tc.rc {
+			t.Errorf("%q: exit %d, want %d", tc.args, rc, tc.rc)
+		}
 	}
 }

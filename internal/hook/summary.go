@@ -3,9 +3,11 @@ package hook
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,31 +22,140 @@ import (
 // time, so the shape a reader needs is the count per class. That grouping is
 // the whole of what this adds.
 //
+// The generation appendCoverage rotated out is read as well, oldest first.
+// Without it a report taken just after a rotation covers a few records and
+// reads as a machine whose gaps went away.
+//
+// --file narrows the report to one file and --since to the records written at
+// or after a moment, so a gap already reported, or closed by a later release,
+// stops being counted again.
+//
 // Exit 0 on an absent log: a machine that has had no coverage failure is the
-// good case, not an error.
-func Summarize(stdout, stderr io.Writer) int {
+// good case, not an error. A file named by --file is not that case, since
+// somebody asked for it, and its absence exits 1.
+func Summarize(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("coverage", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	file := fs.String("file", "", "read only this `log`: a bare name is looked up in the state directory, anything else is a path")
+	sinceArg := fs.String("since", "", "count only records written at or after this `time` (2006-01-02, 2006-01-02T15:04, or RFC 3339; local time unless it says otherwise)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "%sunexpected argument %q\n", noticeLead, fs.Arg(0))
+		return 2
+	}
+	var since time.Time
+	if *sinceArg != "" {
+		var ok bool
+		if since, ok = parseSince(*sinceArg); !ok {
+			fmt.Fprintf(stderr, "%s--since %q is not a time this reads: use 2006-01-02, "+
+				"2006-01-02T15:04, or RFC 3339\n", noticeLead, *sinceArg)
+			return 2
+		}
+	}
+
 	path, err := CoveragePath()
 	if err != nil {
 		fmt.Fprintf(stderr, "%sthe state directory could not be resolved: %v\n", noticeLead, err)
 		return 1
 	}
+	paths := []string{path + ".1", path}
+	if *file != "" {
+		paths = []string{*file}
+		if !strings.ContainsAny(*file, `/\`) {
+			paths[0] = filepath.Join(filepath.Dir(path), *file)
+		}
+	}
+
+	t := tally{counts: map[string]int{}, since: since}
+	var read []string
+	for _, p := range paths {
+		ok, err := t.add(p)
+		if err != nil {
+			fmt.Fprintf(stderr, "%sthe coverage log could not be read: %v\n", noticeLead, err)
+			return 1
+		}
+		if ok {
+			read = append(read, p)
+		}
+	}
+	if len(read) == 0 {
+		if *file != "" {
+			fmt.Fprintf(stderr, "%sno coverage log at %q\n", noticeLead, paths[0])
+			return 1
+		}
+		fmt.Fprintf(stdout, "No coverage log at %q.\n\n"+
+			"Nothing this scanner could not read has been recorded on this "+
+			"machine. That is the good case: every call either scanned or "+
+			"found something.\n", path)
+		return 0
+	}
+
+	fmt.Fprintf(stdout, "%s\n\n", strings.Join(read, "\n"))
+	if t.earlier > 0 {
+		fmt.Fprintf(stdout, "%d record(s) before %s left out.\n\n",
+			t.earlier, since.Local().Format(time.DateTime))
+	}
+	if t.total == 0 {
+		if t.earlier > 0 {
+			fmt.Fprint(stdout, "Nothing was recorded since then.\n")
+			return 0
+		}
+		fmt.Fprint(stdout, "The log is empty.\n")
+		return 0
+	}
+	fmt.Fprintf(stdout, "%d call(s) this scanner could not read, %s to %s.\n\n",
+		t.total, t.first.Local().Format(time.DateOnly), t.last.Local().Format(time.DateOnly))
+
+	type row struct {
+		reason string
+		n      int
+	}
+	rows := make([]row, 0, len(t.counts))
+	for r, n := range t.counts {
+		rows = append(rows, row{r, n})
+	}
+	// Count descending, then the reason, so two runs over one log agree.
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].n != rows[j].n {
+			return rows[i].n > rows[j].n
+		}
+		return rows[i].reason < rows[j].reason
+	})
+	for _, r := range rows {
+		fmt.Fprintf(stdout, "  %6d  (%4.1f%%)  %s\n", r.n, 100*float64(r.n)/float64(t.total), r.reason)
+	}
+	if t.unparsed > 0 {
+		fmt.Fprintf(stdout, "\n%d line(s) did not parse, which is what a rotation "+
+			"mid-write leaves behind.\n", t.unparsed)
+	}
+	fmt.Fprint(stdout, "\nEach of these is a call that proceeded with nothing "+
+		"scanned. They are not findings: a rule that matched would have stopped "+
+		"the call and is not written here.\n")
+	return 0
+}
+
+// tally accumulates records across the log's generations.
+type tally struct {
+	counts                   map[string]int
+	total, unparsed, earlier int
+	first, last              time.Time
+	since                    time.Time // zero counts everything
+}
+
+// add counts the records in one generation, reporting false for a file that
+// does not exist.
+func (t *tally) add(path string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintf(stdout, "No coverage log at %q.\n\n"+
-				"Nothing this scanner could not read has been recorded on this "+
-				"machine. That is the good case: every call either scanned or "+
-				"found something.\n", path)
-			return 0
+			return false, nil
 		}
-		fmt.Fprintf(stderr, "%sthe coverage log could not be read: %v\n", noticeLead, err)
-		return 1
+		return false, err
 	}
 	defer f.Close() //nolint:errcheck // read-only
 
-	counts := map[string]int{}
-	total, unparsed := 0, 0
-	var first, last time.Time
 	s := bufio.NewScanner(f)
 	// A reason can be long; the default 64 KiB token is not guaranteed to hold
 	// one with a deep path in it.
@@ -58,57 +169,40 @@ func Summarize(stdout, stderr io.Writer) int {
 		if err := json.Unmarshal([]byte(line), &c); err != nil {
 			// A truncated last line is what a rotation mid-write leaves, so
 			// this is counted and reported rather than being fatal.
-			unparsed++
+			t.unparsed++
 			continue
 		}
-		total++
-		counts[class(c.Reason)]++
-		if first.IsZero() || c.Time.Before(first) {
-			first = c.Time
+		if c.Time.Before(t.since) {
+			t.earlier++
+			continue
 		}
-		if c.Time.After(last) {
-			last = c.Time
+		t.total++
+		t.counts[class(c.Reason)]++
+		if t.first.IsZero() || c.Time.Before(t.first) {
+			t.first = c.Time
+		}
+		if c.Time.After(t.last) {
+			t.last = c.Time
 		}
 	}
 	if err := s.Err(); err != nil {
-		fmt.Fprintf(stderr, "%sthe coverage log could not be read to the end: %v\n", noticeLead, err)
-		return 1
+		return true, fmt.Errorf("%s: %w", path, err)
 	}
+	return true, nil
+}
 
-	fmt.Fprintf(stdout, "%s\n\n", path)
-	if total == 0 {
-		fmt.Fprint(stdout, "The log is empty.\n")
-		return 0
+// parseSince reads --since. A form with no zone is local time, because the
+// report prints its dates in local time and a bound should read the same way.
+func parseSince(v string) (time.Time, bool) {
+	if ts, err := time.Parse(time.RFC3339, v); err == nil {
+		return ts, true
 	}
-	fmt.Fprintf(stdout, "%d call(s) this scanner could not read, %s to %s.\n\n",
-		total, first.Local().Format(time.DateOnly), last.Local().Format(time.DateOnly))
-
-	type row struct {
-		reason string
-		n      int
-	}
-	rows := make([]row, 0, len(counts))
-	for r, n := range counts {
-		rows = append(rows, row{r, n})
-	}
-	// Count descending, then the reason, so two runs over one log agree.
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].n != rows[j].n {
-			return rows[i].n > rows[j].n
+	for _, layout := range []string{time.DateOnly, "2006-01-02T15:04", "2006-01-02T15:04:05", time.DateTime} {
+		if ts, err := time.ParseInLocation(layout, v, time.Local); err == nil {
+			return ts, true
 		}
-		return rows[i].reason < rows[j].reason
-	})
-	for _, r := range rows {
-		fmt.Fprintf(stdout, "  %6d  (%4.1f%%)  %s\n", r.n, 100*float64(r.n)/float64(total), r.reason)
 	}
-	if unparsed > 0 {
-		fmt.Fprintf(stdout, "\n%d line(s) did not parse, which is what a rotation "+
-			"mid-write leaves behind.\n", unparsed)
-	}
-	fmt.Fprint(stdout, "\nEach of these is a call that proceeded with nothing "+
-		"scanned. They are not findings: a rule that matched would have stopped "+
-		"the call and is not written here.\n")
-	return 0
+	return time.Time{}, false
 }
 
 // class reduces a reason to the group a reader counts by.
