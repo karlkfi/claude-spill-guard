@@ -77,8 +77,8 @@ file at the commit named below.
 
 | Here | Upstream path | Taken from | sha256 |
 |---|---|---|---|
-| [`queue.py`](vendor/claude-skills/queue.py) | `session-backlog/scripts/queue.py` | `c0a239b`, 2026-08-22 | `b1a0345d7efff9a9` |
-| [`alloc-queue-id.sh`](vendor/claude-skills/alloc-queue-id.sh) | `session-backlog/scripts/alloc-queue-id.sh` | `e52e962`, 2026-08-16 | `c6bf6edd06d8fc0c` |
+| [`queue.py`](vendor/claude-skills/queue.py) | `session-backlog/scripts/queue.py` | `f1fae51`, 2026-10-19 | `064f57c95bf39c41` |
+| [`alloc-queue-id.sh`](vendor/claude-skills/alloc-queue-id.sh) | `session-backlog/scripts/alloc-queue-id.sh` | `f1fae51`, 2026-10-19 | `be7bda85037a7aa3` |
 
 The digests are the first 16 hex characters of `shasum -a 256`, which
 reproduces them in one command:
