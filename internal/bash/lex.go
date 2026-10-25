@@ -360,7 +360,7 @@ func lex(text string) ([]string, []int, error) {
 // a `"` inside one does not close the outer string. POSIX quoting closes it
 // there, and on `"$(echo '"')"` the real closing `"` is then unbalanced and the
 // lexer reports it -- which defers every reader in the call, not just the
-// segment carrying the substitution (Q202 here, Q257 upstream). Only then is
+// segment carrying the substitution (Q202 here, claude-bouncer Q257). Only then is
 // each one copied with its `"` and `\` escaped. Where the flat reading lexes,
 // it is kept: it spills a nested body's commands into the outer words, and
 // upstream measured that holding every substitution changed verdicts on deep
@@ -368,7 +368,8 @@ func lex(text string) ([]string, []int, error) {
 //
 // Upstream's requote has two more arms, both rewriting an unquoted word before
 // the balance check: each `$'…'` becomes the single-quoted word it decodes to
-// (Q225), and each backtick substitution a double-quoted run holding it (Q274).
+// (claude-bouncer Q225), and each backtick substitution a double-quoted run
+// holding it (claude-bouncer Q274).
 // Neither is ported, so the flat reading is the text itself and the check runs
 // on it directly. Q211 owns both. The first defers a call bash would run; the
 // second was driven on three operand shapes -- a backtick substitution as

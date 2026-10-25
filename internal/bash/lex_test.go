@@ -76,7 +76,7 @@ func TestLex(t *testing.T) {
 
 // bash 5.3.15 parses each body on its own and runs `id` after it, so the inner
 // `"` does not close the outer string. Read as closing it, the real closing `"`
-// was unbalanced and lex reported it. From LexTests upstream (Q257), with the
+// was unbalanced and lex reported it. From LexTests upstream (claude-bouncer Q257), with the
 // commit-message idiom Q202 was filed on added.
 func TestAQuoteInASubstitutionInDoubleQuotesClosesNothing(t *testing.T) {
 	for _, tc := range []struct{ in, word string }{

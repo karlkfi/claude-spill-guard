@@ -102,11 +102,11 @@ func consumeHeredocBody(text string, i int, delim string, stripTabs bool) (int, 
 // chain reads as a `;` sequence.
 //
 // A `$(…)`, backtick span or `${…}` inside double quotes is copied whole, since
-// a `"` inside it does not end the outer string (Q257 upstream). Read as ending
+// a `"` inside it does not end the outer string (claude-bouncer Q257). Read as ending
 // it, the `#` in `echo "$(echo "a # c")" ; cat f` starts a comment, the `cat`
 // is stripped with it, and its file is never opened by the scan -- a silent
-// allow. Upstream's matching arm for an UNQUOTED backtick or `${…}` (Q254), its
-// `$(a)#b` word join (Q264) and its subscript copy (Q217) are not ported; each
+// allow. Upstream's matching arm for an UNQUOTED backtick or `${…}`, its `$(a)#b` word
+// join and its subscript copy -- claude-bouncer Q254, Q264 and Q217 -- are not ported; each
 // is a silent allow of its own, and Q210 owns them.
 func StripComments(cmd string) string {
 	var out []byte

@@ -302,7 +302,7 @@ func scanBackticks(text string, start int) (string, int, bool) {
 // string. Callers check this only where bash would: outside double quotes,
 // which leave `$'` literal.
 //
-// The scanner alone, from upstream's Q225. Its decode, which requote applies to
+// The scanner alone, from claude-bouncer Q225. Its decode, which requote applies to
 // rewrite each `$'…'` as the word it means, is not ported -- Q211 owns it -- so
 // braceEnd below is the one caller, and needs only where the string ends.
 func ansiCEnd(text string, i int) int {
@@ -384,7 +384,7 @@ func braceEnd(text string, i int) int {
 // closes there.
 //
 // bash parses each on its own, so a `"` inside one does not close the outer
-// string: `"$(echo '"')"` is one word (Q257 upstream). `$((…))` is left to the
+// string: `"$(echo '"')"` is one word (claude-bouncer Q257). `$((…))` is left to the
 // caller.
 func dqExpansionEnd(text string, i int) int {
 	rest := text[i:]
