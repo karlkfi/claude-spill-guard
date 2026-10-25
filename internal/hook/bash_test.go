@@ -401,6 +401,31 @@ func TestAQuoteInsideADoubleQuotedSubstitutionClosesNothing(t *testing.T) {
 	}
 }
 
+// A `#` that bash reads as text starts no comment, so the reader after it is
+// reached (Q210). Driven against bash 5.3.15, each command reads the file;
+// read as a comment, the strip took the `cat` with it and the call was allowed
+// silently. Ported from claude-bouncer Q254 (the first two) and Q264 (the last
+// two).
+func TestAHashBashReadsAsTextStartsNoComment(t *testing.T) {
+	dir, name := planted(t)
+	for _, head := range []string{
+		"echo `true # c`",
+		`echo ${x:- #}`,
+		`echo $(true)#b`,
+		`cat <(true)#b`,
+	} {
+		t.Run(head, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, head+" ; cat "+name, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file cat reads", reason)
+			}
+		})
+	}
+}
+
 // The list is read and what it names is not, so scanning the list alone would
 // report a clean result for every path inside it.
 func TestAnIndirectlyNamedFileDefers(t *testing.T) {

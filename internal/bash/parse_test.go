@@ -34,6 +34,52 @@ func TestStripComments(t *testing.T) {
 			"echo \"`echo \"a # c\"`\" ; id"},
 		{"a continuation inside a held span is still folded",
 			"echo \"$(echo a \\\n b)\" # c", "echo \"$(echo a  b)\" "},
+		// bash 5.3.15 reads `FOO[a #b]=x cat f` as a prefix and prints f
+		// (claude-bouncer Q217).
+		{"an assignment subscript holds no comment", "FOO[a #b]=x cat f", "FOO[a #b]=x cat f"},
+		{"nor an appending one", "X=1 FOO[a #b]+=x cat f", "X=1 FOO[a #b]+=x cat f"},
+		// Outside an assignment, bash starts the comment there.
+		{"a subscript that assigns nothing", "echo a[x #y]", "echo a[x "},
+		// bash 5.3.15 prints each `#b` as part of its word and runs `id`: the
+		// close of a substitution does not end the word (claude-bouncer Q264).
+		{"a substitution close holds no comment", "echo $(true)#b; id", "echo $(true)#b; id"},
+		{"nor a process substitution's", "cat <(true)#b; id", "cat <(true)#b; id"},
+		{"nor an output one's", "echo >(true)#b; id", "echo >(true)#b; id"},
+		{"nor arithmetic's", "echo $((1))#b; id", "echo $((1))#b; id"},
+		{"nor one nested in an assignment", "x=$(cat <(echo a)#b); id", "x=$(cat <(echo a)#b); id"},
+		{"nor one holding a case arm", "echo $(case x in a) echo;; esac)#b; id",
+			"echo $(case x in a) echo;; esac)#b; id"},
+		{"nor one holding a quoted paren", `echo $(echo ")")#b; id`, `echo $(echo ")")#b; id`},
+		{"a continuation joins the close and the hash", "echo $(true)\\\n#b; id", "echo $(true)#b; id"},
+		// A subshell's close does end the word, and so does a space.
+		{"a subshell close ends the word", "(true)#b; id", "(true)"},
+		{"a space ends it", "echo $(true) #b; id", "echo $(true) "},
+		// bash 5.3.15 runs `id` after each: a comment in backticks ends at the
+		// closing backtick, and a `#` in `${...}` is text (claude-bouncer Q254).
+		{"a backtick span holds no comment", "echo `true # c` ; id", "echo `true # c` ; id"},
+		{"nor one glued to a hash", "echo `true # c`#x ; id", "echo `true # c`#x ; id"},
+		{"a brace expansion holds no comment", "echo ${x:- #} ; id", "echo ${x:- #} ; id"},
+		{"nor a nested one", "echo ${x:-${y:- #}} ; id", "echo ${x:-${y:- #}} ; id"},
+		{"nor one holding a substitution's brace", "echo ${x:-$(echo }) #} ; id",
+			"echo ${x:-$(echo }) #} ; id"},
+		{"nor one holding a backtick's brace", "echo ${x:-`echo } #`} ; id",
+			"echo ${x:-`echo } #`} ; id"},
+		{"nor a double-quoted one", `echo "${x:-" #"}" ; id`, `echo "${x:-" #"}" ; id`},
+		{"nor one holding an ANSI-C apostrophe", `echo ${x:-$'\'} #'} ; id`,
+			`echo ${x:-$'\'} #'} ; id`},
+		{"a continuation inside one is folded", "echo ${x:-a\\\n #} ; id", "echo ${x:-a #} ; id"},
+		// A quoted `}` does not close one, and a bare `{` does not nest, so the
+		// comment after the real close still goes.
+		{"a double-quoted brace closes nothing", `echo ${x:-"}"} #c`, `echo ${x:-"}"} `},
+		{"a single-quoted brace closes nothing", "echo ${x:-'}'} #c", "echo ${x:-'}'} "},
+		{"an escaped brace closes nothing", `echo ${x:-\}} #c`, `echo ${x:-\}} `},
+		{"a bare brace does not nest", "echo ${x:-{a} #c}", "echo ${x:-{a} "},
+		{"a length expansion", "echo ${#x} #c", "echo ${#x} "},
+		{"a special parameter", "echo $# #c", "echo $# "},
+		{"a backtick glued to a hash", "echo `echo a`#x #c", "echo `echo a`#x "},
+		// Unterminated, each is read as before.
+		{"an unterminated brace expansion", "echo ${x:- # c", "echo ${x:- "},
+		{"an unterminated backtick span", "echo `true # c", "echo `true "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := StripComments(tc.in); got != tc.want {
