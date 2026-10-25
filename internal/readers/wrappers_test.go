@@ -113,8 +113,15 @@ func TestAWrapperSaysWhetherItIsTheShell(t *testing.T) {
 			t.Errorf("%s: External = %v, want %v", in, got, external)
 		}
 	}
-	if !PeelWrappers(strings.Fields("builtin cat f")).Builtin {
-		t.Error("builtin cat f: Builtin = false, want true")
+	for in, want := range map[string]bool{
+		"builtin cat f":         true,
+		"command builtin cat f": true,
+		"builtin command cat f": false,
+		"builtin exec cat f":    false,
+	} {
+		if got := PeelWrappers(strings.Fields(in)).Builtin; got != want {
+			t.Errorf("%s: Builtin = %v, want %v", in, got, want)
+		}
 	}
 }
 

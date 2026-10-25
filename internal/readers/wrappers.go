@@ -168,8 +168,8 @@ type Peel struct {
 	// External is true when a wrapper on the way is a separate program, so a
 	// `cd` it runs moves nothing in the shell.
 	External bool
-	// Builtin is true when a `builtin` on the way restricts the command to the
-	// shell's own builtins. No reader is one, so `builtin cat f` is bash's
+	// Builtin is true when the last wrapper peeled is `builtin`, which
+	// restricts the command to the shell's own builtins. No reader is one, so `builtin cat f` is bash's
 	// `not a shell builtin` and reads nothing. Upstream judges Argv behind it
 	// anyway, which costs its question nothing; here it would block a file no
 	// command opens, which is the precision this project is measured on.
@@ -198,7 +198,9 @@ func PeelWrappers(tokens []string) Peel {
 		}
 		p.External = p.External || w.external
 		appends = appends || name == "xargs"
-		p.Builtin = p.Builtin || name == "builtin"
+		// Only the last wrapper peeled decides: `builtin command cat f` runs
+		// command, which runs cat.
+		p.Builtin = name == "builtin"
 		rest, read := peelOne(name, w, argv[1:], &p.Chdirs)
 		if rest == nil {
 			argv = nil

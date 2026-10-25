@@ -201,6 +201,12 @@ func TestAReaderBehindAWrapperIsScanned(t *testing.T) {
 		// The shell's own cd, run through a wrapper, still moves the shell.
 		"command cd sub && cat " + name,
 		"builtin cd sub; cat " + name,
+		// A substitution body reads where it was written, so the move the
+		// wrapper ran reaches it too. substStates is the walk that decides it.
+		"command cd sub && echo \"$(cat " + name + ")\"",
+		// `builtin` is not the last wrapper, so it does not stop the reader.
+		"builtin command cat sub/" + name,
+		"builtin exec cat sub/" + name,
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
@@ -222,6 +228,7 @@ func TestAWrapperThatRunsNoReaderOpensNothing(t *testing.T) {
 	dir, name := planted(t)
 	for _, command := range []string{
 		"builtin cat " + name,
+		"command builtin cat " + name,
 		"command -v cat " + name,
 		"command -V cat " + name,
 		"sudo -e " + name,
