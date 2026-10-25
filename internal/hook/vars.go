@@ -122,6 +122,13 @@ type vars struct {
 	// is no longer a scalar.
 	loops     map[string][]string
 	propagate bool
+	// cdpath is whether anything earlier in the string may have assigned
+	// CDPATH, in any spelling and at any depth. bash searches it before the
+	// directory a relative `cd` names, and where both hold the target it takes
+	// the CDPATH one (Q186), so follow treats it as it treats the environment's.
+	// It is never cleared: an assignment in a subshell, or one later undone,
+	// costs the operands after it a verdict and nothing else.
+	cdpath bool
 }
 
 func newVars() *vars {
@@ -136,6 +143,7 @@ func (v *vars) clone() *vars {
 		m:         make(map[string]string, len(v.m)),
 		loops:     make(map[string][]string, len(v.loops)),
 		propagate: v.propagate,
+		cdpath:    v.cdpath,
 	}
 	for name, val := range v.m {
 		c.m[name] = val
@@ -204,13 +212,37 @@ func (v *vars) observe(raw, sub []string, quotedFrom []int, persists, binds bool
 		}
 		return nil, observedLoopHeader
 	}
-	if clobbersIFS(raw, sub, quotedFrom) {
+	if clobbers(raw, sub, quotedFrom, "IFS") {
 		v.stop()
 	} else {
 		poisonVars(raw, sub, quotedFrom, v.m)
 		poisonVars(raw, sub, quotedFrom, v.loops) // the same rules invalidate a binding
 	}
 	return nil, observedCommand
+}
+
+// noteCDPATH records a segment that may assign CDPATH. The words bash peels
+// as assignments go through SplitAssignment, so `CDPATH+=:/x` and
+// `CDPATH[0]=/x` count as the plain spelling does -- `$CDPATH` is
+// `${CDPATH[0]}`, and bash 5.3.15 searches both. A subscripted word in front
+// of a command is the exception, since there bash sets nothing at all, which
+// is assigns' reading. clobbers takes `export`, `declare`, `read` and the
+// commands that can assign anything. Asked of every segment whether or not
+// observe still propagates, since an IFS change stops the map and not the
+// search.
+func (v *vars) noteCDPATH(raw, sub []string, quotedFrom []int) {
+	k := bash.ShKeywordPeel(raw, quotedFrom)
+	e := bash.EnvPrefixPeel(raw[k:], quotedFrom[k:])
+	alone := k+e == len(raw)
+	for _, t := range raw[k : k+e] {
+		if name, form, _ := bash.SplitAssignment(t); name == "CDPATH" &&
+			(alone || form != bash.AssignSubscript) {
+			v.cdpath = true
+		}
+	}
+	if clobbers(raw, sub, quotedFrom, "CDPATH") {
+		v.cdpath = true
+	}
 }
 
 // candidates is the concrete tokens a loop variable in tok stands for, one per
@@ -727,16 +759,16 @@ func poisonVars[V any](raw, sub []string, quotedFrom []int, varmap map[string]V)
 	}
 }
 
-// clobbersIFS reports whether the segment may leave IFS holding a value this
-// never saw. A changed IFS re-splits every later expansion, so a value checked
-// here as one word can reach the command as several. applyAssignmentGroup
+// clobbers reports whether the segment may leave name holding a value this
+// never saw. For IFS that re-splits every later expansion, so a value checked
+// here as one word can reach the command as several; for CDPATH it sends a
+// relative `cd` somewhere other than the directory named. applyAssignmentGroup
 // catches the plain and `export` forms; this catches the rest -- the
 // poison-all commands, which can set it invisibly, and the arg-assigner
 // builtins whose arguments name it. The dispatch mirrors poisonVars so the two
-// cannot disagree about what a segment assigns. `unset` is exempt: bash
-// word-splits on the default IFS while IFS is unset, and the default is what
-// this already models.
-func clobbersIFS(raw, sub []string, quotedFrom []int) bool {
+// cannot disagree about what a segment assigns. `unset` is exempt: unset, IFS
+// splits on the default this already models, and CDPATH searches nothing.
+func clobbers(raw, sub []string, quotedFrom []int, name string) bool {
 	k := bash.ShKeywordPeel(raw, quotedFrom)
 	rest := sub[k+bash.EnvPrefixPeel(raw[k:], quotedFrom[k:]):]
 	if len(rest) == 0 {
@@ -760,7 +792,7 @@ func clobbersIFS(raw, sub []string, quotedFrom []int) bool {
 		if strings.Contains(t, "$") {
 			return true
 		}
-		if identRE.FindString(t) == "IFS" {
+		if identRE.FindString(t) == name {
 			return true
 		}
 	}

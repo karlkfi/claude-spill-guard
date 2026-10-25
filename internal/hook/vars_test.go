@@ -234,7 +234,7 @@ func probeVars(t *testing.T, setup, probe string) string {
 		if kind, arg := classifyCd(bash.StripEnvPrefix(segment.Tokens[k:],
 			segment.QuotedFrom[k:])); kind != "" {
 			var dir string
-			dir, dirUnknown = follow(kind, arg, "/", dirUnknown, segment)
+			dir, dirUnknown = follow(kind, arg, "/", dirUnknown, segment, v.cdpath)
 			_ = dir
 			list.moved(segment, dirUnknown)
 			continue
@@ -413,8 +413,8 @@ func TestClobbersIFS(t *testing.T) {
 		if raw == nil {
 			raw = c.tokens
 		}
-		if got := clobbersIFS(raw, c.tokens, bash.Unquoted(len(c.tokens))); got != c.want {
-			t.Errorf("clobbersIFS(%q) = %v, want %v", c.tokens, got, c.want)
+		if got := clobbers(raw, c.tokens, bash.Unquoted(len(c.tokens)), "IFS"); got != c.want {
+			t.Errorf("clobbers(%q, IFS) = %v, want %v", c.tokens, got, c.want)
 		}
 	}
 }
