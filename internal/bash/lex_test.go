@@ -1,6 +1,9 @@
 package bash
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // tokenize is the whole token pipeline, as every caller runs it and as the
 // upstream suite's own helper does.
@@ -71,10 +74,46 @@ func TestLex(t *testing.T) {
 	}
 }
 
+// bash 5.3.15 parses each body on its own and runs `id` after it, so the inner
+// `"` does not close the outer string. Read as closing it, the real closing `"`
+// was unbalanced and lex reported it. From LexTests upstream (claude-bouncer Q257), with the
+// commit-message idiom Q202 was filed on added.
+func TestAQuoteInASubstitutionInDoubleQuotesClosesNothing(t *testing.T) {
+	for _, tc := range []struct{ in, word string }{
+		{`echo "$(echo '"')" ; id`, `$(echo '"')`},
+		{`echo "$(echo $'"')" ; id`, `$(echo $'"')`},
+		{"echo \"`echo '\"'`\" ; id", "`echo '\"'`"},
+		{`echo "$(printf '%s"' x)" ; id`, `$(printf '%s"' x)`},
+		{`echo "$(case x in x) echo '"';; esac)" ; id`, `$(case x in x) echo '"';; esac)`},
+		{`echo "$(printf 'a'"'"'s b')" ; id`, `$(printf 'a'"'"'s b')`},
+		{`echo "${x:-'"'}" ; id`, `${x:-'"'}`},
+		// The escape is the half requoteHeld adds and lex takes back out, so a
+		// backslash in the body survives byte for byte.
+		{`echo "$(printf '\n"')" ; id`, `$(printf '\n"')`},
+	} {
+		if got, want := tokenize(t, tc.in), []string{"echo", tc.word, ";", "id"}; !equalStrings(got, want) {
+			t.Errorf("tokenize(%q) = %q, want %q", tc.in, got, want)
+		}
+	}
+	// Where POSIX quoting reads the line anyway, it is read as before. A nested
+	// body's command then spills into the outer words.
+	if got, want := tokenize(t, `echo "$(echo \")" ; id`), []string{"echo", `$(echo ")`, ";", "id"}; !equalStrings(got, want) {
+		t.Errorf("a line that lexes flat = %q, want %q", got, want)
+	}
+	if got := tokenize(t, `echo "$(echo "$(cat f)")"`); !slices.Contains(got, "cat") {
+		t.Errorf("a nested body no longer spills: %q", got)
+	}
+	if got, want := tokenize(t, `echo "a$x" b`), []string{"echo", "a$x", "b"}; !equalStrings(got, want) {
+		t.Errorf("a plain expansion = %q, want %q", got, want)
+	}
+}
+
 // A command the lexer cannot read is one no caller should judge, so it reports
 // rather than guessing at a token stream.
 func TestLexUnbalanced(t *testing.T) {
 	for _, in := range []string{
+		// Holding the substitution does not rescue a string bash cannot close.
+		`echo "$(echo a) b`,
 		`echo "unclosed`,
 		"echo 'unclosed",
 		`echo trailing\`,

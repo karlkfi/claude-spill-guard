@@ -25,6 +25,15 @@ func TestStripComments(t *testing.T) {
 		// different rule, and the wrong verdict.
 		{"a continuation is folded", "make check \\\n && echo ok",
 			"make check  && echo ok"},
+		// A `"` in a substitution in double quotes ends nothing, so the `#`
+		// after it is text and `id` survives (claude-bouncer Q257). Read as ending
+		// it, the strip took `id` with the comment.
+		{"a hash in a double-quoted substitution's own string",
+			`echo "$(echo "a # c")" ; id`, `echo "$(echo "a # c")" ; id`},
+		{"and in backticks", "echo \"`echo \"a # c\"`\" ; id",
+			"echo \"`echo \"a # c\"`\" ; id"},
+		{"a continuation inside a held span is still folded",
+			"echo \"$(echo a \\\n b)\" # c", "echo \"$(echo a  b)\" "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := StripComments(tc.in); got != tc.want {

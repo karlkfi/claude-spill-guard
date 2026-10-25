@@ -337,7 +337,7 @@ const (
 // the current token. Invalid UTF-8 therefore survives byte for byte, where a
 // []rune conversion would substitute U+FFFD and change the token.
 func lex(text string) ([]string, []int, error) {
-	l := &lexer{src: text, state: stateSpace}
+	l := &lexer{src: requote(text), state: stateSpace}
 	var out []string
 	var quotedFrom []int
 	for {
@@ -351,6 +351,133 @@ func lex(text string) ([]string, []int, error) {
 		out = append(out, token)
 		quotedFrom = append(quotedFrom, from)
 	}
+}
+
+// requote rewrites what POSIX quoting cannot read the way bash does, so a lexer
+// that knows only POSIX quoting reads the same words.
+//
+// Inside double quotes bash parses a `$(…)`, backtick or `${…}` on its own, so
+// a `"` inside one does not close the outer string. POSIX quoting closes it
+// there, and on `"$(echo '"')"` the real closing `"` is then unbalanced and the
+// lexer reports it -- which defers every reader in the call, not just the
+// segment carrying the substitution (Q202 here, claude-bouncer Q257). Only then is
+// each one copied with its `"` and `\` escaped. Where the flat reading lexes,
+// it is kept: it spills a nested body's commands into the outer words, and
+// upstream measured that holding every substitution changed verdicts on deep
+// nesting, so every command that lexed before tokenizes as before.
+//
+// Upstream's requote has two more arms, both rewriting an unquoted word before
+// the balance check: each `$'…'` becomes the single-quoted word it decodes to
+// (claude-bouncer Q225), and each backtick substitution a double-quoted run
+// holding it (claude-bouncer Q274).
+// Neither is ported, so the flat reading is the text itself and the check runs
+// on it directly. Q211 owns both. The first defers a call bash would run; the
+// second was driven on three operand shapes -- a backtick substitution as
+// cat's whole operand, glued to a prefix, and inside double quotes -- and
+// each already defers as a runtime expansion.
+func requote(text string) string {
+	if shlexBalanced(text) {
+		return text
+	}
+	return requoteHeld(text)
+}
+
+// shlexBalanced reports whether lex reads text without errNoClosingQuote or
+// errNoEscapedChar.
+//
+// Upstream decides this for shlex, and agreed with it on 400,000 random strings
+// drawn from quotes, backslash, whitespace and operator characters. lex is a
+// port of that state machine with commenters empty, so the commenter arm
+// upstream carries is dead here and is left out.
+func shlexBalanced(text string) bool {
+	for i, n := 0, len(text); i < n; {
+		switch text[i] {
+		case '\\':
+			if i+1 >= n {
+				return false
+			}
+			i += 2
+		case '\'':
+			j := strings.IndexByte(text[i+1:], '\'')
+			if j < 0 {
+				return false
+			}
+			i += j + 2
+		case '"':
+			i++
+			for i < n && text[i] != '"' {
+				if text[i] == '\\' {
+					i += 2
+				} else {
+					i++
+				}
+			}
+			if i >= n {
+				return false
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return true
+}
+
+// requoteHeld is upstream's `_requote` with hold set, less the two arms requote
+// names. Each expansion inside double quotes is copied with `\` and `"`
+// escaped, so the lexer keeps it as text inside the outer string; lex's
+// escapedquotes handling takes each escape back out, so the token carries the
+// expansion byte for byte.
+func requoteHeld(text string) string {
+	var out strings.Builder
+	inDouble := false
+	for i, n := 0, len(text); i < n; {
+		c := text[i]
+		if c == '\\' {
+			end := min(i+2, n)
+			out.WriteString(text[i:end])
+			i = end
+			continue
+		}
+		if inDouble {
+			if end := dqExpansionEnd(text, i); end > 0 { // escaped to read as text
+				out.WriteString(strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(text[i:end]))
+				i = end
+				continue
+			}
+			out.WriteByte(c)
+			i++
+			inDouble = c != '"'
+			continue
+		}
+		switch c {
+		case '"':
+			inDouble = true
+			out.WriteByte(c)
+			i++
+			continue
+		case '\'':
+			j := strings.IndexByte(text[i+1:], '\'')
+			end := n
+			if j >= 0 {
+				end = i + j + 2
+			}
+			out.WriteString(text[i:end])
+			i = end
+			continue
+		}
+		// Upstream rewrites a `$'…'` here. Unported, it is still stepped over
+		// whole, so a `\'` inside one does not open a single-quoted run that
+		// inverts every quote after it.
+		if end := ansiCEnd(text, i); end > 0 {
+			out.WriteString(text[i:end])
+			i = end
+			continue
+		}
+		out.WriteByte(c)
+		i++
+	}
+	return out.String()
 }
 
 type lexer struct {

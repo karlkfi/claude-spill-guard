@@ -265,6 +265,34 @@ func TestASingleQuotedSubstitutionIsNotFollowed(t *testing.T) {
 	}
 }
 
+// A `"` inside a substitution in double quotes does not close the outer string,
+// so the reader after it is reached (Q202). Driven against bash 5.3.15, each
+// command reads the file. Read as closing it, the first five deferred on `no
+// closing quotation` and the last two lost the `cat` to a comment the `#`
+// started, which allowed it silently -- a different symptom of the one misread.
+func TestAQuoteInsideADoubleQuotedSubstitutionClosesNothing(t *testing.T) {
+	dir, name := planted(t)
+	for _, head := range []string{
+		`echo "$(printf 'a'"'"'s b')"`,
+		`echo "$(echo '"')"`,
+		"echo \"`echo '\"'`\"",
+		`echo "${x:-'"'}"`,
+		`echo "$(case x in x) echo '"';; esac)"`,
+		`echo "$(echo "a # c")"`,
+		"echo \"`echo \"a # c\"`\"",
+	} {
+		t.Run(head, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, head+"; cat "+name, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file cat reads", reason)
+			}
+		})
+	}
+}
+
 // The list is read and what it names is not, so scanning the list alone would
 // report a clean result for every path inside it.
 func TestAnIndirectlyNamedFileDefers(t *testing.T) {

@@ -294,6 +294,117 @@ func scanBackticks(text string, start int) (string, int, bool) {
 	return "", start, false
 }
 
+// ansiCEnd reports the index just past the ANSI-C string `$'…'` opening at
+// text[i], or -1 when text[i] opens none or it never closes.
+//
+// Inside one a backslash escapes the next character, `'` included, so a
+// backslash-apostrophe pair is one apostrophe to bash and does not close the
+// string. Callers check this only where bash would: outside double quotes,
+// which leave `$'` literal.
+//
+// The scanner alone, from claude-bouncer Q225. Its decode, which requote applies to
+// rewrite each `$'…'` as the word it means, is not ported -- Q211 owns it -- so
+// braceEnd below is the one caller, and needs only where the string ends.
+func ansiCEnd(text string, i int) int {
+	if !strings.HasPrefix(text[i:], "$'") {
+		return -1
+	}
+	for i, n := i+2, len(text); i < n; {
+		switch text[i] {
+		case '\\':
+			i += 2
+		case '\'':
+			return i + 1
+		default:
+			i++
+		}
+	}
+	return -1
+}
+
+// braceEnd reports the index just past the `}` closing the `${` at text[i], or
+// -1 when it never closes.
+//
+// Driven upstream on bash 5.3.15: quotes inside one quote a `}`, outer double
+// quotes or not (`"${x:-'}'}"` prints `'}'`), and a nested `${`, `$(` or
+// backtick holds its own. A bare `{` does not nest -- `${x:-{a}` ends at the
+// first `}`.
+func braceEnd(text string, i int) int {
+	inDouble := false
+	for i, n := i+2, len(text); i < n; {
+		c := text[i]
+		if c == '\\' {
+			i += 2
+			continue
+		}
+		if c == '"' {
+			inDouble = !inDouble
+			i++
+			continue
+		}
+		end := -1
+		if !inDouble {
+			end = ansiCEnd(text, i)
+		}
+		switch {
+		case end > 0:
+		case c == '\'' && !inDouble:
+			end = strings.IndexByte(text[i+1:], '\'')
+			if end >= 0 {
+				end += i + 2
+			}
+		case strings.HasPrefix(text[i:], "$(("):
+			end = skipBalancedParens(text, i+1)
+		case strings.HasPrefix(text[i:], "$("):
+			if _, e, ok := scanDollarParen(text, i+2); ok {
+				end = e
+			}
+		case strings.HasPrefix(text[i:], "${"):
+			end = braceEnd(text, i)
+		case c == '`':
+			if _, e, ok := scanBackticks(text, i+1); ok {
+				end = e
+			}
+		case c == '}' && !inDouble:
+			return i + 1
+		default:
+			i++
+			continue
+		}
+		if end < 0 {
+			return -1
+		}
+		i = end
+	}
+	return -1
+}
+
+// dqExpansionEnd reports the index just past the `$(…)`, backtick span or
+// `${…}` opening at text[i] inside double quotes, or -1 when none opens or
+// closes there.
+//
+// bash parses each on its own, so a `"` inside one does not close the outer
+// string: `"$(echo '"')"` is one word (claude-bouncer Q257). `$((…))` is left to the
+// caller.
+func dqExpansionEnd(text string, i int) int {
+	rest := text[i:]
+	switch {
+	case strings.HasPrefix(rest, "$(("):
+		return -1
+	case strings.HasPrefix(rest, "$("):
+		if _, end, ok := scanDollarParen(text, i+2); ok {
+			return end
+		}
+	case strings.HasPrefix(rest, "${"):
+		return braceEnd(text, i)
+	case strings.HasPrefix(rest, "`"):
+		if _, end, ok := scanBackticks(text, i+1); ok {
+			return end
+		}
+	}
+	return -1
+}
+
 // CommandSubstitutions extracts the command-substitution bodies bash would
 // evaluate in text.
 //
