@@ -87,7 +87,7 @@ func TestAQuoteInASubstitutionInDoubleQuotesClosesNothing(t *testing.T) {
 		{`echo "$(case x in x) echo '"';; esac)" ; id`, `$(case x in x) echo '"';; esac)`},
 		{`echo "$(printf 'a'"'"'s b')" ; id`, `$(printf 'a'"'"'s b')`},
 		{`echo "${x:-'"'}" ; id`, `${x:-'"'}`},
-		// The escape is the half requoteHeld adds and lex takes back out, so a
+		// The escape is the half requoteOnce adds and lex takes back out, so a
 		// backslash in the body survives byte for byte.
 		{`echo "$(printf '\n"')" ; id`, `$(printf '\n"')`},
 	} {
@@ -447,5 +447,82 @@ func TestASubscriptTheLexerCannotKeepWholeIsUnderPeeled(t *testing.T) {
 					" -- Q185 has closed, so drop this row (%s)", tc.word, tc.why)
 			}
 		})
+	}
+}
+
+// `$'\”` is one apostrophe to bash (claude-bouncer Q225). Read raw, it closed
+// a single-quoted run at the escaped quote and opened another at the real
+// close, so the line no longer lexed and every reader in the call deferred.
+// From AnsiCQuoteTests upstream, driven there under `env -i bash --norc
+// --noprofile -c` (5.3.15).
+func TestTheLexerReadsTheANSICWordBashDoes(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{`echo $'\'' ; id`, []string{"echo", "'", ";", "id"}},
+		{`x=$'a\'b' id`, []string{"x=a'b", "id"}},
+		{`$'\x6bubectl' get`, []string{"kubectl", "get"}},
+		{`echo "$'" ; id`, []string{"echo", "$'", ";", "id"}},
+	} {
+		if got := tokenize(t, tc.in); !equalStrings(got, tc.want) {
+			t.Errorf("tokenize(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// Quoting, so not an assignment: bash looks for a program `SP=x`.
+	toks, qf, err := lex(`$'SP=x'`)
+	if err != nil || isAssignment(toks[0], qf[0]) {
+		t.Errorf("lex(`$'SP=x'`) = %q, %v, err %v; want a word that assigns nothing", toks, qf, err)
+	}
+}
+
+// printf '<%s>' on each of these under bash 5.3.15, read through od -c,
+// upstream. The last two are this port's: an octal or `\x` escape is the byte
+// it names, where upstream's Python writes that codepoint as UTF-8.
+func TestANSICEscapesDecodeAsBashDecodesThem(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{`a\x41\101é\q`, "aAAé\\q"},
+		{`\x`, `\x`},
+		{`\'`, "'"},
+		{`x\0yz`, "x"},
+		{`\cA`, "\x01"},
+		{`\e`, "\x1b"},
+		{`\"\?`, `"?`},
+		{`\351`, "\xe9"},
+		{`\xe9`, "\xe9"},
+	} {
+		if got := ansiCDecode(tc.body); got != tc.want {
+			t.Errorf("ansiCDecode(%q) = %q, want %q", tc.body, got, tc.want)
+		}
+	}
+}
+
+// bash parses a backtick body on its own, so neither its spaces nor its `;`
+// split the word it sits in (claude-bouncer Q274). Split, each fragment reached
+// the readers as a path or a command of its own.
+func TestABacktickSubstitutionIsOneWord(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{"cat `cat list.txt`", []string{"cat", "`cat list.txt`"}},
+		{"echo `a; b` c", []string{"echo", "`a; b`", "c"}},
+		{"echo a`b c`d e", []string{"echo", "a`b c`d", "e"}},
+		{"echo `echo \"a b\"` c", []string{"echo", "`echo \"a b\"`", "c"}},
+		{"echo `echo \\`x\\`` c", []string{"echo", "`echo \\`x\\``", "c"}},
+		{"x=`date` cmd", []string{"x=`date`", "cmd"}},
+		// Quoted or escaped, a backtick opens nothing, and one that never
+		// closes is left as it was.
+		{"cat 'a`b' c", []string{"cat", "a`b", "c"}},
+		{"echo \\` a", []string{"echo", "`", "a"}},
+		{"echo `a b", []string{"echo", "`a", "b"}},
+	} {
+		if got := tokenize(t, tc.in); !equalStrings(got, tc.want) {
+			t.Errorf("tokenize(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	toks, qf, err := lex("x=`date` cmd")
+	if err != nil || !isAssignment(toks[0], qf[0]) {
+		t.Errorf("lex(\"x=`date` cmd\") = %q, %v, err %v; want an assignment first", toks, qf, err)
 	}
 }

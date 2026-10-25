@@ -23,8 +23,9 @@
 // in StripComments. So are the comment stripper's claude-bouncer Q254
 // (e82fe12), Q264 (ea64a90) and Q217 (a3c9052) arms, read at 784fc36 (Q210).
 // Q217's lexer half -- keeping `NAME[...]` whole in command position -- is not,
-// and is Q185 here. The ANSI-C and backtick rewrites in requote (claude-bouncer
-// Q225 and Q274), and StripComments' `$'…'` arm, are Q211 here.
+// and is Q185 here. requote's ANSI-C decode and backtick rewrite
+// (claude-bouncer Q225, b0e3fdc, and Q274, f440dbd) and StripComments' `$'…'`
+// arm are ported too, from the same revision (Q211).
 //
 // Structural identity is the point, and it is a rule this repo states rather
 // than a preference (CLAUDE.md, "Do not hand-roll shell parsing"). A segmenter

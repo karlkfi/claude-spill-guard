@@ -1,6 +1,11 @@
 package bash
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 // matchWord matches `[A-Za-z_][A-Za-z0-9_]*` at i, returning the word and the
 // index just past it, or ok=false when i is not a word start.
@@ -61,6 +66,10 @@ func scanCasePattern(text string, start int) (int, bool) {
 				inDouble = false
 			}
 			i++
+			continue
+		}
+		if end := ansiCEnd(text, i); end > 0 {
+			i = end
 			continue
 		}
 		switch {
@@ -185,6 +194,11 @@ func scanDollarParen(text string, start int) (string, int, bool) {
 			i += 2
 			continue
 		}
+		if end := ansiCEnd(text, i); end > 0 {
+			cmdPos = false
+			i = end
+			continue
+		}
 		if c == '\'' {
 			inSingle = true
 			cmdPos = false
@@ -300,11 +314,7 @@ func scanBackticks(text string, start int) (string, int, bool) {
 // Inside one a backslash escapes the next character, `'` included, so a
 // backslash-apostrophe pair is one apostrophe to bash and does not close the
 // string. Callers check this only where bash would: outside double quotes,
-// which leave `$'` literal.
-//
-// The scanner alone, from claude-bouncer Q225. Its decode, which requote applies to
-// rewrite each `$'…'` as the word it means, is not ported -- Q211 owns it -- so
-// braceEnd below is the one caller, and needs only where the string ends.
+// which leave `$'` literal (claude-bouncer Q225).
 func ansiCEnd(text string, i int) int {
 	if !strings.HasPrefix(text[i:], "$'") {
 		return -1
@@ -320,6 +330,95 @@ func ansiCEnd(text string, i int) int {
 		}
 	}
 	return -1
+}
+
+var ansiCSimple = map[byte]string{'a': "\a", 'b': "\b", 'e': "\x1b", 'E': "\x1b", 'f': "\f",
+	'n': "\n", 'r': "\r", 't': "\t", 'v': "\v", '\\': `\`,
+	'\'': "'", '"': `"`, '?': "?"}
+
+var ansiCNumeric = []struct {
+	letter byte
+	width  int
+}{{'x', 2}, {'u', 4}, {'U', 8}}
+
+// ansiCDecode is the string bash makes of the inside of `$'…'`: `\n`, `\x41`,
+// `\101`, `é` and `\cA` decode, an unknown escape keeps its backslash,
+// and `\0` ends the string. Driven upstream on bash 5.3.15.
+//
+// An octal or `\x` escape is written as the one byte it names, where upstream
+// writes the codepoint and Python encodes it as UTF-8 -- bash writes the byte,
+// so `$'\351'` names a different file there than here, and here is bash's.
+// `\u` and `\U` are UTF-8 on both sides, as bash writes them in a UTF-8 locale.
+func ansiCDecode(body string) string {
+	var out []byte
+	for i, n := 0, len(body); i < n; {
+		c := body[i]
+		if c != '\\' || i+1 >= n {
+			out = append(out, c)
+			i++
+			continue
+		}
+		e := body[i+1]
+		if s, ok := ansiCSimple[e]; ok {
+			out = append(out, s...)
+			i += 2
+			continue
+		}
+		if e >= '0' && e <= '7' {
+			j := i + 1
+			for j < n && j < i+4 && body[j] >= '0' && body[j] <= '7' {
+				j++
+			}
+			code, _ := strconv.ParseUint(body[i+1:j], 8, 32)
+			if code == 0 {
+				break
+			}
+			out = append(out, byte(code&0xff))
+			i = j
+			continue
+		}
+		if e == 'c' && i+2 < n {
+			out = append(out, byte(unicode.ToUpper(rune(body[i+2])))^0x40)
+			i += 3
+			continue
+		}
+		numeric := false
+		for _, num := range ansiCNumeric {
+			if e != num.letter {
+				continue
+			}
+			numeric = true
+			j := i + 2
+			for j < n && j < i+2+num.width && isHexDigit(body[j]) {
+				j++
+			}
+			if j == i+2 { // `\x` with no digits is text
+				out = append(out, c, e)
+				i += 2
+				break
+			}
+			code, _ := strconv.ParseUint(body[i+2:j], 16, 32)
+			if code == 0 {
+				return string(out)
+			}
+			if e == 'x' {
+				out = append(out, byte(code))
+			} else {
+				out = utf8.AppendRune(out, rune(min(code, unicode.MaxRune)))
+			}
+			i = j
+			break
+		}
+		if !numeric {
+			out = append(out, c, e)
+			i += 2
+		}
+	}
+	return string(out)
+}
+
+func isHexDigit(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
 }
 
 // braceEnd reports the index just past the `}` closing the `${` at text[i], or
@@ -484,6 +583,12 @@ func CommandSubstitutionSpans(text string, quotes bool) []Substitution {
 		if c == '\\' { // escapes next byte (not in '')
 			i += 2
 			continue
+		}
+		if quotes && !inDouble {
+			if end := ansiCEnd(text, i); end > 0 {
+				i = end
+				continue
+			}
 		}
 		if quotes && c == '\'' && !inDouble {
 			inSingle = true

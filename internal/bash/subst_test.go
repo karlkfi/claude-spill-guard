@@ -130,3 +130,26 @@ func TestHeredocInSubstitution(t *testing.T) {
 		}
 	})
 }
+
+// Nothing substitutes inside `$'…'`, an escaped apostrophe does not close one,
+// and inside double quotes `$'` is two characters of text (claude-bouncer
+// Q225). Read raw, the quote state inverted after one and the substitution
+// after it was never found.
+func TestASubstitutionAfterAnANSICStringIsFound(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{`echo $'\'' "$(id)"`, []string{"id"}},
+		{`echo $'\'' $(id)`, []string{"id"}},
+		{"echo $'it\\'s' `id`", []string{"id"}},
+		{`echo "$(echo $'\'' ; id)"`, []string{`echo $'\'' ; id`}},
+		{`echo $'$(id)'`, nil},
+		{`echo $'\'' '$(id)'`, nil},
+		{`echo "it's $'" $(id)`, []string{"id"}},
+	} {
+		if got := CommandSubstitutions(tc.in, true); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+			t.Errorf("CommandSubstitutions(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

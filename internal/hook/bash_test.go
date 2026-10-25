@@ -426,6 +426,34 @@ func TestAHashBashReadsAsTextStartsNoComment(t *testing.T) {
 	}
 }
 
+// An ANSI-C string is read as the word bash decodes it to (Q211). Driven
+// against bash 5.3.15, each command reads the file. Read raw, the first two
+// named no file and the rest no longer lexed, or hid what came after the
+// string from the substitution and heredoc scanners: each deferred or was
+// allowed silently. Ported from claude-bouncer Q225.
+func TestAnANSICStringIsReadAsTheWordBashDecodes(t *testing.T) {
+	dir, name := planted(t)
+	for _, cmd := range []string{
+		"cat $'" + name + "'",
+		"cat $'\\x" + fmt.Sprintf("%02x", name[0]) + name[1:] + "'",
+		"echo $'it\\'s'; cat " + name,
+		"echo $'\\'' ; cat " + name,
+		"echo $'\\' #' ; cat " + name,
+		"echo $'\\'' \"$(cat " + name + ")\"",
+		"cat <<$'EOF'\n$(echo SUB)\nEOF\ncat " + name,
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, cmd, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file cat reads", reason)
+			}
+		})
+	}
+}
+
 // The list is read and what it names is not, so scanning the list alone would
 // report a clean result for every path inside it.
 func TestAnIndirectlyNamedFileDefers(t *testing.T) {
