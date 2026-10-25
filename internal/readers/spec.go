@@ -52,6 +52,9 @@
 // that trips a credential rule is somebody grepping for a credential, and
 // blocking that is not the wrong answer.
 //
+// wrappers.go is the other half of the lookup: a wrapper that runs the next
+// word as the command is peeled off the head before the table is asked.
+//
 // # What it cannot resolve, which is the caller's problem
 //
 // `sort --files0-from=LIST`, `wc --files0-from=LIST` and `file --files-from

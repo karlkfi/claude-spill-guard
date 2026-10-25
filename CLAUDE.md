@@ -25,7 +25,7 @@ measured.
 | `internal/hook/` | The entry Claude Code invokes. Decode a payload, choose what of the call is scannable — including the `@` tokens a prompt carries — encode a verdict. `coverage.go` is the other half: what to do when there is no verdict to reach, and where the gap gets recorded. |
 | `internal/scan/` | The pipeline over one buffer. The BOM decode, the binary skip, the literal prefilter, the match loop, findings — and the reason, when it could not read the text. |
 | `internal/bash/` | Shell segmentation, ported from `claude-workspace-guard` rather than written. Splits a command string into the simple commands it runs, so a reader's file operands can be found. |
-| `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. |
+| `internal/readers/` | Which token of a segment is a path. The per-command table, ported from the same upstream; the read/write split is this repo's and is written at each site. `wrappers.go` peels `command`, `nice`, `env`, `sudo` and the rest off the head first, by upstream's grammar. |
 | `internal/selftest/` | The `selftest` subcommand. Canary payloads through `hook.Run` in-process, an allowing arm per surface, and a report that says what it cannot establish. |
 | `internal/version/` | The release version, set by one `-X` flag. The `version` subcommand and every coverage record read it, so `coverage --since v0.6.0` can tell builds apart. |
 | `internal/testvec/` | The loader for `testdata/corpus/vectors/`. Test-only, linked into no binary, and it takes a `TB` rather than `*testing.T` so nothing outside a test imports `testing`. |
@@ -309,8 +309,10 @@ and only the first is an argument from ignorance. Concatenating the second is
 available and unmeasured. And `env` is the
 exception, which upstream's own row had backwards: driven on bash 5.3.15,
 `env FOO+=bar env` exports a variable literally called `FOO+` and leaves `FOO`
-alone, where the `export` builtin beside it appends. No site here reads through
-an `env` prefix, so nothing needs the other split; a reader row for `env` would.
+alone, where the `export` builtin beside it appends. The wrapper peel in
+`internal/readers/wrappers.go` reads through an `env` prefix now, and takes
+env's assignments by the `=` they hold, which is env's own rule, so it never
+asks `SplitAssignment` and needs no other split.
 `NAME[sub]=value` is one too, and was not until Q175: the scan stopped at the
 `[`, so `FOO[0]=x cat <key>` took the command head and the file crossed with no
 verdict and no coverage record -- the same silence the `+=` spelling had. Bash
@@ -368,7 +370,12 @@ anything reads them — and because the traffic it costs was measured at 12 of
 129,000 `Bash` calls. The reading is `os.Stat`, which follows a symlink the way
 the tools do; `os.Lstat` cannot tell a link to a fifo from a link to a file. A
 command with no row contributes no operands, which is the design's stated
-limitation rather than a gap.
+limitation rather than a gap. A wrapper that runs the next word -- `command`,
+`exec`, `nice`, `nohup`, `env`, `sudo`, `timeout`, `xargs` and eleven more --
+is not such a command: it is peeled by upstream's grammar and the reader behind
+it is looked up (Q196). `xargs`, and a wrapper whose own options cannot be read,
+make the reader's operands unknowable, which is a coverage failure; `builtin`
+runs no reader at all, which is why `builtin cat f` stays silent.
 
 **A directory operand is refused rather than walked, and that is settled.** Do
 not re-derive it from the walk time: that is the reading the question started

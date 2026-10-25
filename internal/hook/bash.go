@@ -197,17 +197,49 @@ func bashTargets(command, cwd string) ([]target, error) {
 			if len(tokens) == 0 {
 				continue
 			}
-			if kind, arg := classifyCd(tokens); kind != "" {
+			// The command a wrapper runs is judged rather than the wrapper:
+			// `command cat f`, `nice cat f` and `sudo cat f` each print f, and
+			// read by the wrapper's name they had no row and crossed unread
+			// (Q196). readers/wrappers.go is the port and carries the grammar.
+			// A cd run by a separate program, `env cd x`, moves nothing in the
+			// shell; `command cd x` and `builtin cd x` move it like a bare one.
+			wrap := readers.PeelWrappers(tokens)
+			if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
 				moved = true
 				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment)
 				list.moved(segment, dirUnknown)
 				continue
 			}
 			list.ran()
+			tokens = wrap.Argv
 			operands, known := readers.Files(tokens)
-			if !known {
+			if !known || wrap.Builtin {
 				continue
 			}
+			// `xargs` hands the reader operands from its input, and a wrapper
+			// whose options could not be read may have been handed any of them,
+			// so the operands on the line are not the files the command reads.
+			// A grep that prints no matched text sends nothing a hidden operand
+			// would need read, for grep.go's reason.
+			if wrap.Opaque {
+				if grepNames[filepath.Base(tokens[0])] {
+					if _, quiet := grepMode(tokens); quiet {
+						continue
+					}
+				}
+				note(fmt.Errorf("in the %q here, a command wrapper ahead of it "+
+					"supplies operands or options this cannot read, so which files "+
+					"it would read is not settled here", filepath.Base(tokens[0])))
+				continue
+			}
+			// `env -C` and `sudo -D` move the command they run and nothing
+			// else, so its operands resolve there and a `<` redirect, which the
+			// shell opens before the wrapper runs, does not.
+			cmdDir, cmdDirUnknown := dir, dirUnknown
+			for _, d := range wrap.Chdirs {
+				cmdDir, cmdDirUnknown = chdirTo(d, cmdDir, cmdDirUnknown)
+			}
+			fileOperands := len(operands)
 			// grep.go carries the argument for both: a recursive grep with no
 			// operand reads `.`, and one whose output is filtered or carries no
 			// matched text sends nothing a directory operand would need read.
@@ -245,7 +277,11 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// invoked as /tmp/<a key>/cat reports `cat`.
 			command := filepath.Base(tokens[0])
 			var paths []string
-			for _, operand := range operands {
+			for i, operand := range operands {
+				at, atUnknown := cmdDir, cmdDirUnknown
+				if i >= fileOperands {
+					at, atUnknown = dir, dirUnknown
+				}
 				// A `$f` bound to a `for f in <list>` stands for one path per
 				// value bash iterates, and the loop body reads every one of
 				// them, so every one is scanned. vars.go carries why that is
@@ -261,7 +297,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 					continue
 				}
 				for _, cand := range cands {
-					expanded, err := expand(cand, dir, dirUnknown, globsAltered, qualified)
+					expanded, err := expand(cand, at, atUnknown, globsAltered, qualified)
 					if err != nil {
 						note(unresolved{cand, fmt.Errorf("in the %q here, %w", command, err)})
 						continue
@@ -563,7 +599,8 @@ func substStates(text string, subs []bash.Substitution, entry, fallback substSta
 		if len(tokens) == 0 {
 			continue
 		}
-		if kind, arg := classifyCd(tokens); kind != "" {
+		wrap := readers.PeelWrappers(tokens)
+		if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
 			dir, unknown = follow(kind, arg, dir, unknown, seg)
 			list.moved(seg, unknown)
 			continue
@@ -827,6 +864,28 @@ func envPrefix(tokens []string, quotedFrom []int) []string {
 	k := bash.ShKeywordPeel(tokens, quotedFrom)
 	head, headQF := tokens[k:], quotedFrom[k:]
 	return head[:bash.EnvPrefixPeel(head, headQF)]
+}
+
+// chdirTo is the directory `env -C d` or `sudo -D d` runs its command in.
+// Neither searches CDPATH, which is the shell's and not chdir(2)'s, so a
+// relative target joins the directory it is written from. An empty target is
+// one nothing here can know, and a target that is not a directory is one the
+// wrapper refuses, so both lose it.
+func chdirTo(d, dir string, unknown bool) (string, bool) {
+	if d == "" {
+		return dir, true
+	}
+	d = expandTilde(d)
+	if !filepath.IsAbs(d) {
+		if unknown || dir == "" {
+			return dir, true
+		}
+		d = filepath.Join(dir, d)
+	}
+	if info, err := os.Stat(d); err != nil || !info.IsDir() {
+		return dir, true
+	}
+	return d, false
 }
 
 // expandTilde is upstream's expand_tilde: a leading `~` or `~/…` becomes the
