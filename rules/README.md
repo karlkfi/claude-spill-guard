@@ -36,7 +36,7 @@ carried by a planted fixture in
 | `stripe-live-secret-key` | `sk_live_` `rk_live_` | live keys only — see below |
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
-| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not, and behind a unified diff's `+` or `-` |
+| `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not, behind a unified diff's `+` or `-`, and behind grep's `path:N:` or `path-N-` |
 | `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, measured by an extent rather than capped, floor 3.5, and no published sample signature |
 
 **The entropy floors are what make a *padded* placeholder quiet.** A repository
@@ -245,15 +245,16 @@ It does: 13 files, 13,360 bytes, 0 findings, unchanged either side.
 [`pemblock_test.go`](../internal/scan/pemblock_test.go) is the guard on the
 corpus, and it computes what the widening newly admits instead of approximating
 it — walking each half of the corpus with the shipped rule and with the
-pre-widening clause and taking the difference. 3 newly admitted planted files, 0
+pre-widening clause and taking the difference. 4 newly admitted planted files, 0
 clean. A hand-written approximation can drift from the two patterns it stands
 between; a subtraction cannot.
 
-That figure was 1 until the section below landed, and the extra 2 are not this
+That figure was 1 until the sections below landed, and the extra 3 are not this
 widening's. A patch's added and removed lines separate a key's header from its
 body with a whitespace-only line *and* put a marker in front of every line, so
 the two fixtures that section plants need both steps and the pre-widening
-clause misses them for either reason. A subtraction says what one pattern
+clause misses them for either reason. The grep-output fixture is the third, for
+the same reason with grep's prefix in place of the marker. A subtraction says what one pattern
 admits over another, never which of two changes is responsible, which is why
 the section below takes its own.
 
@@ -383,8 +384,9 @@ takes **two** subtractions rather than one. Against a markerless clause it says
 the corpus holds the shape at all; against a `+`-only clause it says the corpus
 holds the *removed* half, which a single subtraction cannot — either fixture
 alone satisfies that one, so the `-` arm could be dropped with the count still
-moving. 2 newly admitted planted files, 1 of them by `-`, and 0 clean either
-way.
+moving. 3 newly admitted planted files, 2 of them by `-`, and 0 clean either
+way. Each count is one higher than the markers explain: the grep-output fixture
+below is missed by both older clauses, for its prefix rather than a marker.
 
 **What no marker reaches is a key a hunk header splits.** Under `git diff`'s
 default three lines of context, a change close enough to a key puts `@@ -n,m
@@ -393,6 +395,59 @@ the key's own file does not contain. Driven: missed on context lines and on
 added lines alike, before this change and after it. Admitting it is the
 bounded-window shape this section already refuses by name, so it is a row
 rather than an edit, and whether it has traffic is unmeasured.
+
+**grep's per-line prefix is crossed too, because `spill-guard filter` reads
+nothing else.** The filter is the last stage of a recursive grep, and grep
+opens every line it prints with `path:N:`, or `path-N-` on a context line,
+`path:` and `path-` without `-n`, and `N:` and `N-` with `-h`. None of that is
+a marker or whitespace, so a key printed by `grep -rn -A30 'PRIVATE KEY' .`
+crossed the filter whole. Driven 2026-10-25 against `main` at `9f0fbdc`: under
+`-rn -A30`, `-r -A30`, `-rnh -A30`, `-rn -C2` and `-rn -A30 --null` with the
+system grep, and the first three again with the one a session's `grep` resolves
+to, the planted keys exited 0 every time. Only `-rh`, which prints no prefix,
+exited 3.
+
+The arm is an optional path that opens on neither a marker nor whitespace,
+then `-` or `:`, digits, and `-` or `:` again; or the same path ending `-` with
+no digits. Two things hold it down:
+
+- **`path:` without a line number is not admitted.** Admitting it admits any
+  first word ending in a colon, which is the `base64:` row the named-pair step
+  above was chosen to refuse. So a body on a *matched* line under `grep -r`
+  without `-n` is a stated under-fire. A pattern has to match the body itself
+  to produce it.
+- **A body behind a grep prefix has to reach the end of its line.** The prefix
+  can stop at any hyphen inside the path, and `/` is in the base64 alphabet, so
+  a Go pseudo-version reads as a key body: `-3a47de7e79bd/googleapis/appengine/v1/certificate`
+  is 48 bytes of it. The first draft of this arm reported genproto's
+  `certificate.pb.go`, a doc comment displaying a header, in four module
+  versions. A body line ends where the line does and a path does not.
+
+**The differential is the files a key-bearing grep would print.** Over the 974
+files under `~/go/pkg/mod` carrying `PRIVATE KEY` on 2026-10-25, each read raw
+and as `grep -A30 'PRIVATE KEY'` output under `-n -H`, `-H` and `-n -h`: raw,
+both clauses report 834 matches in 587 files and the set the arm newly admits
+is **empty**. As grep output `main` reports **0**, and this clause reports 827
+matches in the same 587 files under all three prefixes, with no file reported
+that is not reported raw. The 7 matches short of raw are all in one go-jose
+test file, and are other rules' findings past the 30-line window, four of them
+named `jwt` and three not named. It is a reading over one
+machine's module cache and nothing re-runs it.
+
+`TestTheCorpusAsGrepOutput` is the gate that does re-run. It reads every clean
+file as grep output under all four prefixes and demands silence, and reads the
+planted PEM files the same way and demands a finding, so the zero cannot come
+from a transform that broke the rule. Only `tls-runbook.md` of the 13 clean
+files carries the keyword, so that zero is a floor. Grep output of this
+repository was read the same way:
+`grep -rn -A5 KEY`, `-rn -A30 PRIVATE.KEY`, `-r -A30 PRIVATE.KEY`,
+`-rn -C10 BEGIN` and `-rn -A3 -i token`, outside `planted/`, `vectors/` and
+`.git`, 3,026 lines at the largest. Every one exits 0 on both builds, and the
+same `-rn -A30` with `planted/` put back blocks on 7 matches on this one and
+on none on `main`.
+[`private-key-block-in-grep-output.txt`](../testdata/corpus/planted/private-key-block-in-grep-output.txt)
+is real `grep -rn -A30` output of an encrypted key, so the prefix falls on the
+RFC 1421 fields and the separator line as well as the body.
 
 **Two rules carry a second check, because their vendor publishes a realistic
 example.** An entropy floor drops a padded placeholder and admits a plausible

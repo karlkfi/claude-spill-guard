@@ -237,7 +237,14 @@ var planted = map[string]string{
 	// accident: `+` is in the base64 alphabet, so an added plain key was
 	// reported before any of this, and `-` is not.
 	"private-key-block-in-diff-removed.patch": "private-key-block",
-	"jwt.txt": "jwt",
+	// And a seventh, for a producer that writes something in front of every
+	// line and is not a diff: `grep -rn -A30`, whose output is what
+	// `spill-guard filter` reads. Each line opens `path:N:` or `path-N-`,
+	// which is neither a marker nor whitespace. It is grep output of an
+	// encrypted key, so the prefix falls on the RFC 1421 fields and the
+	// separator line as well as the body.
+	"private-key-block-in-grep-output.txt": "private-key-block",
+	"jwt.txt":                              "jwt",
 }
 
 func TestEveryPlantedSecretIsFoundExactlyOnce(t *testing.T) {

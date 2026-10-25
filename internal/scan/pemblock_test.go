@@ -1,7 +1,10 @@
 package scan
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -248,6 +251,117 @@ func TestTheCorpusHoldsBothDiffMarkerShapes(t *testing.T) {
 	}
 }
 
+// grepless is the clause as it stood before grep's per-line prefix was
+// admitted, verbatim: one diff marker and horizontal whitespace in front of
+// each line, and nothing else. Compiled here and shipped nowhere, for the
+// reason the patterns above are.
+var grepless = regexp.MustCompile(
+	`(-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |SSH2 ENCRYPTED |ENCRYPTED )?PRIVATE KEY-----)` +
+		`(?:[-+]?[ \t]*[\r\n])+(?:[-+]?[ \t]*(?:Proc-Type|DEK-Info):[^\r\n]*(?:[-+]?[ \t]*[\r\n])+)*` +
+		`[-+]?[ \t]*[A-Za-z0-9+/=]{32,}`)
+
+// What the grep prefix newly admits, by subtraction as the two tests above
+// take theirs.
+func TestTheCorpusHoldsTheGrepPrefixShape(t *testing.T) {
+	before := []rules.Rule{{
+		ID:          "private-key-block-grepless",
+		Family:      rules.Credential,
+		Description: "the body clause before grep's per-line prefix was admitted",
+		Regex:       grepless,
+		Enabled:     true,
+	}}
+	shipped := privateKeyBlock(t)
+
+	for _, half := range []string{"planted", "clean"} {
+		now := walk(t, half, shipped)
+		then := walk(t, half, before)
+		newly := len(now.findings) - len(then.findings)
+		t.Logf("%s: %d finding(s) now, %d without the grep prefix, %d newly admitted",
+			half, len(now.findings), len(then.findings), newly)
+
+		switch half {
+		case "planted":
+			if newly < 1 {
+				t.Error("no planted file is grep output of a key, so the clean " +
+					"corpus's zero says nothing about this axis")
+			}
+		case "clean":
+			if newly != 0 || len(now.findings) != 0 {
+				t.Errorf("the shipped rule reports %d clean file(s), %d newly:\n%s",
+					len(now.findings), newly, report(now.findings))
+			}
+		}
+	}
+}
+
+// asGrepOutput is buf as `grep -n -A` prints a file it matched on every line:
+// each line behind `name:N:`, or `name-N-` for context, or the same without
+// the line number when lineNumbers is false.
+func asGrepOutput(name, buf string, sep byte, lineNumbers bool) string {
+	var b strings.Builder
+	for i, line := range strings.SplitAfter(buf, "\n") {
+		if line == "" {
+			continue
+		}
+		b.WriteString(name)
+		b.WriteByte(sep)
+		if lineNumbers {
+			b.WriteString(strconv.Itoa(i + 1))
+			b.WriteByte(sep)
+		}
+		b.WriteString(line)
+	}
+	return b.String()
+}
+
+// The filter's whole traffic is grep output of ordinary files, so the clean
+// corpus has to stay quiet as grep output too and not only as files. Every
+// clean file is re-read as the four prefixes grep writes. The planted PEM
+// files are the positive control: the same transform has to leave each of
+// them reportable, or a zero here would only say the transform broke the
+// rule.
+func TestTheCorpusAsGrepOutput(t *testing.T) {
+	set := privateKeyBlock(t)
+	for _, half := range []string{"clean", "planted"} {
+		dir := filepath.Join(corpusRoot, half)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("reading %s: %v", dir, err)
+		}
+		for _, e := range entries {
+			if half == "planted" && planted[e.Name()] != "private-key-block" {
+				continue
+			}
+			raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, sep := range []byte{':', '-'} {
+				for _, n := range []bool{true, false} {
+					buf := asGrepOutput("./"+half+"/"+e.Name(), string(raw), sep, n)
+					got, err := Buffer(e.Name(), []byte(buf), set)
+					if err != nil {
+						t.Fatalf("scanning: %v", err)
+					}
+					if got.Skipped != Scanned {
+						t.Fatalf("%s not read: %s", e.Name(), got.Skipped)
+					}
+					switch {
+					case half == "clean" && len(got.Findings) != 0:
+						t.Errorf("%s as grep output (%q, -n %v) reports %d finding(s)",
+							e.Name(), sep, n, len(got.Findings))
+					case half == "planted" && len(got.Findings) == 0 && !(sep == ':' && !n):
+						// `path:` without a line number is the stated
+						// under-fire in TestPrivateKeyBlockAcrossThePEMLayouts.
+						t.Errorf("%s as grep output (%q, -n %v) reports nothing",
+							e.Name(), sep, n)
+					}
+				}
+			}
+		}
+	}
+}
+
 // quotedReplyOnly is what a third marker would add and the shipped rule does
 // not: a key quoted back in an email reply, where every line opens `> `.
 var quotedReplyOnly = []struct{ name, buf string }{
@@ -387,6 +501,60 @@ func TestPrivateKeyBlockAcrossThePEMLayouts(t *testing.T) {
 		// what holds the choice down. rules/README.md carries the table.
 		{"an indented list item, which is the marker and the indentation the other way round",
 			"-----BEGIN RSA PRIVATE KEY-----\n  - " + pemBody + "\n", false},
+
+		// What grep writes in front of every line, which is what `spill-guard
+		// filter` reads: `path:N:` on a matched line and `path-N-` on a
+		// context line, the line number only under -n and the path only
+		// without -h. The header may already sit anywhere on a line, so these
+		// rows are about the lines after it.
+		{"grep -rn, the body on a context line",
+			"./k.pem:1:-----BEGIN RSA PRIVATE KEY-----\n./k.pem-2-" + pemBody + "\n", true},
+		{"grep -rn of an encrypted key, so the prefix falls on the separator line too",
+			"./k.pem:1:-----BEGIN RSA PRIVATE KEY-----\n./k.pem-2-Proc-Type: 4,ENCRYPTED\n" +
+				"./k.pem-3-DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n./k.pem-4-\n" +
+				"./k.pem-5-" + pemBody + "\n", true},
+		{"grep -rn, the body on a matched line",
+			"./k.pem:1:-----BEGIN RSA PRIVATE KEY-----\n./k.pem:2:" + pemBody + "\n", true},
+		{"grep -r without -n, the body on a context line",
+			"./k.pem:-----BEGIN RSA PRIVATE KEY-----\n./k.pem-" + pemBody + "\n", true},
+		{"grep -r without -n, of an encrypted key",
+			"./k.pem:-----BEGIN RSA PRIVATE KEY-----\n./k.pem-Proc-Type: 4,ENCRYPTED\n" +
+				"./k.pem-DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n./k.pem-\n" +
+				"./k.pem-" + pemBody + "\n", true},
+		{"grep -rnh, so the line number is all there is",
+			"1:-----BEGIN RSA PRIVATE KEY-----\n2-Proc-Type: 4,ENCRYPTED\n" +
+				"3-DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n4-\n5-" + pemBody + "\n", true},
+		{"grep -rn -b, which adds a byte offset after the line number",
+			"./k.pem:1:0:-----BEGIN RSA PRIVATE KEY-----\n./k.pem-2-32-" + pemBody + "\n", true},
+		{"grep -rn of an indented key, so the prefix and the indentation compose",
+			"./s.yaml:2:  -----BEGIN RSA PRIVATE KEY-----\n./s.yaml-3-  " + pemBody + "\n", true},
+		{"grep -rn of a patch, so the prefix and a diff marker compose",
+			"./a.patch:6:+-----BEGIN RSA PRIVATE KEY-----\n./a.patch-7-+Proc-Type: 4,ENCRYPTED\n" +
+				"./a.patch-8-+DEK-Info: AES-128-CBC,7A1B2C3D4E5F60718293A4B5C6D7E8F9\n./a.patch-9-+\n" +
+				"./a.patch-10-+" + pemBody + "\n", true},
+		// The narrowing, held down. Without -n a matched line opens `path:`,
+		// and admitting that is admitting any first word ending in a colon --
+		// which is genericOnly's `base64:` row below. Only `path-` is
+		// admitted without a line number, so a body on a *matched* line under
+		// grep -r without -n is a stated under-fire, reachable only by a
+		// pattern that matches the body itself.
+		{"grep -r without -n, the body on a matched line",
+			"./k.pem:-----BEGIN RSA PRIVATE KEY-----\n./k.pem:" + pemBody + "\n", false},
+		// The prefix can stop at any hyphen inside the path, and `/` is in the
+		// base64 alphabet, so a Go pseudo-version reads as a body: after
+		// `-3a47de7e79bd` the path runs 48 bytes before its first `.`. A body
+		// behind a grep prefix has to reach the end of its line, which a body
+		// line does and a path never does. This row is
+		// genproto's certificate.pb.go under grep -n -A30, which reported
+		// before that requirement and is a doc comment displaying a header.
+		{"a header in a doc comment, under grep, whose module path holds a base64 run",
+			"/m/genproto@v0.0.0-20220519153652-3a47de7e79bd/googleapis/appengine/v1/certificate.pb.go:299:" +
+				"\t// -----BEGIN RSA PRIVATE KEY-----\n" +
+				"/m/genproto@v0.0.0-20220519153652-3a47de7e79bd/googleapis/appengine/v1/certificate.pb.go-300-" +
+				"\t// <unencrypted_key_value>\n", false},
+		{"grep output of a displayed header with prose under it",
+			"./doc.md:3:-----BEGIN RSA PRIVATE KEY-----\n./doc.md-4-\n" +
+				"./doc.md-5-then the encryption headers, then a blank line, then lines of\n", false},
 
 		// One marker, not a run of them: what keeps the `-` arm off prose is
 		// that the byte after it has to be whitespace or the body itself.
