@@ -84,6 +84,29 @@ var neverPropagate = map[string]bool{
 // poisonAllCmds can assign any variable invisibly, so the whole map dies.
 var poisonAllCmds = map[string]bool{"eval": true, "source": true, ".": true}
 
+// makesNameref reports whether a `declare`, `typeset` or `local` carries `-n`,
+// alone or in a cluster, among the options bash reads before the first name.
+// An assignment through a nameref lands on the name it refers to, so `declare
+// -n r=CDPATH; r=/x` sets CDPATH while every rule here sees `r` -- and so does
+// `declare -n r; r=CDPATH; r=/x`, where the first assignment picks the target.
+// Modelling the alias would mean tracking a target that can itself come from
+// an expansion, so a nameref is treated as eval is (Q213). `export -n` is
+// unexport and is not one.
+func makesNameref(name0 string, args []string) bool {
+	if name0 != "declare" && name0 != "typeset" && name0 != "local" {
+		return false
+	}
+	for _, t := range args {
+		if t == "--" || len(t) < 2 || (t[0] != '-' && t[0] != '+') {
+			return false
+		}
+		if t[0] == '-' && strings.ContainsRune(t[1:], 'n') {
+			return true
+		}
+	}
+	return false
+}
+
 // argAssignerCmds assign to the variables their arguments name. `printf`
 // assigns only under `-v`, which printfAssigns gates.
 var argAssignerCmds = map[string]bool{
@@ -721,11 +744,11 @@ func poisonVars[V any](raw, sub []string, quotedFrom []int, varmap map[string]V)
 	}
 	if len(rest) > 0 {
 		name0 := filepath.Base(rest[0])
-		if poisonAllCmds[name0] {
+		args := rest[1:]
+		if poisonAllCmds[name0] || makesNameref(name0, args) {
 			clear(varmap)
 			return
 		}
-		args := rest[1:]
 		if argAssignerCmds[name0] && (name0 != "printf" || printfAssigns(args)) {
 			for _, t := range args {
 				if name0 == "printf" {
@@ -775,13 +798,13 @@ func clobbers(raw, sub []string, quotedFrom []int, name string) bool {
 		return false
 	}
 	name0 := filepath.Base(rest[0])
-	if poisonAllCmds[name0] {
+	args := rest[1:]
+	if poisonAllCmds[name0] || makesNameref(name0, args) {
 		return true
 	}
 	if name0 == "unset" || !argAssignerCmds[name0] {
 		return false
 	}
-	args := rest[1:]
 	if name0 == "printf" && !printfAssigns(args) {
 		return false
 	}
