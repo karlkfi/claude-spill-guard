@@ -19,6 +19,11 @@
 // Q168 -- and the substitution-span half of #109 (c368aca). #110's own
 // peel-before-rebuild repair is unported too, and is Q167.
 //
+// Q257's (abc788e) is ported: requote's double-quote hold and the matching arm
+// in StripComments. The rest of requote and StripComments as they stood at that
+// commit is not -- the ANSI-C and backtick rewrites (Q225, Q274) are Q211, and
+// the comment stripper's Q254, Q264 and Q217 arms are Q210.
+//
 // Structural identity is the point, and it is a rule this repo states rather
 // than a preference (CLAUDE.md, "Do not hand-roll shell parsing"). A segmenter
 // fails silently in both directions -- one that under-splits hands back a

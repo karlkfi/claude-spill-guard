@@ -100,6 +100,14 @@ func consumeHeredocBody(text string, i int, delim string, stripTabs bool) (int, 
 // before tokenizing. lex makes a newline a command boundary, so one left in
 // place splits an `&&` chain written across lines into two statements and the
 // chain reads as a `;` sequence.
+//
+// A `$(…)`, backtick span or `${…}` inside double quotes is copied whole, since
+// a `"` inside it does not end the outer string (Q257 upstream). Read as ending
+// it, the `#` in `echo "$(echo "a # c")" ; cat f` starts a comment, the `cat`
+// is stripped with it, and its file is never opened by the scan -- a silent
+// allow. Upstream's matching arm for an UNQUOTED backtick or `${…}` (Q254), its
+// `$(a)#b` word join (Q264) and its subscript copy (Q217) are not ported; each
+// is a silent allow of its own, and Q210 owns them.
 func StripComments(cmd string) string {
 	var out []byte
 	inSingle, inDouble := false, false
@@ -126,6 +134,13 @@ func StripComments(cmd string) string {
 			i += 2
 			continue
 		}
+		if inDouble {
+			if end := dqExpansionEnd(cmd, i); end > i+1 { // copied whole
+				out = append(out, foldContinuations(cmd[i:end])...)
+				i = end
+				continue
+			}
+		}
 		if c == '"' {
 			inDouble = !inDouble
 			out = append(out, c)
@@ -141,6 +156,24 @@ func StripComments(cmd string) string {
 		}
 		out = append(out, c)
 		i++
+	}
+	return string(out)
+}
+
+// foldContinuations drops each backslash-newline from a span StripComments
+// copies whole, the way its own loop drops one outside such a span, and keeps
+// every other escape as written.
+func foldContinuations(span string) string {
+	var out []byte
+	for i, n := 0, len(span); i < n; i++ {
+		if span[i] == '\\' && i+1 < n {
+			if span[i+1] != '\n' {
+				out = append(out, span[i], span[i+1])
+			}
+			i++
+			continue
+		}
+		out = append(out, span[i])
 	}
 	return string(out)
 }
