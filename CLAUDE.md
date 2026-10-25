@@ -348,11 +348,16 @@ rule, since it never opens the file.
 A literal `cd` target is followed, per segment in order, so `cd sub && cat x`
 resolves `x` under `sub` and gets a verdict; what is not followed is bare `cd`,
 `cd -`, `popd`, a `$`-bearing target other than the quoted `"$(git rev-parse
---show-toplevel)"` and `"$(pwd)"`, and a move inside a subshell or a pipeline
-stage. `classifyCd` and `follow` in `internal/hook/bash.go` are the port of
-workspace-guard's tracker and say at each arm where this one loses the
-directory and upstream does not. A command-substitution body is resolved
-where it was **written** rather than where the string ended, so `cd sub &&
+--show-toplevel)"` and `"$(pwd)"`, and a move in a pipeline stage or a
+background job. A move inside a subshell is followed for the segments inside
+it and dropped at its close, so `(cd w && cat x)` reads `w/x` and `(cd w);
+cat x` reads `./x`, as bash 5.3 does: `Segment.Shells` numbers the subshells a
+segment sits in and `enterShell` restores the directory on the way out, both
+upstream's Q173. A piped `{ … }` group and a function body are still read as
+the current shell, which is Q212. `classifyCd` and `follow` in
+`internal/hook/bash.go` are the port of workspace-guard's tracker and say at
+each arm where this one loses the directory and upstream does not. A
+command-substitution body is resolved where it was **written** rather than where the string ended, so `cd sub &&
 echo $(cat x)` reads `x` under `sub` like the plain spelling beside it:
 `substStates` marks each substitution in the string with a `\x1e`-bracketed
 word — 0 of 161,818 real `Bash` commands carry that byte, against 1 carrying

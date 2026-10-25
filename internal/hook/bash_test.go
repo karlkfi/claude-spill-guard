@@ -744,14 +744,77 @@ func TestAWhitelistedSubstitutionCdIsFollowed(t *testing.T) {
 	})
 }
 
+// A move inside a subshell reaches the commands inside it and stops at its
+// close (Q201), which is upstream's enter_shell. Before it the tracker lost
+// the directory at any subshell move, so `(cd tools && go mod graph | grep x)`
+// recorded where the same command without the parens got a verdict -- 87 of
+// the 120 replay-confirmed "cannot follow" records from 2026-09-07 to
+// 2026-10-01 carried one.
+//
+// Every row plants the key in the one file bash 5.3.15 reads, driven with
+// `env -i bash --norc --noprofile -c` over the same tree, and a clean file
+// everywhere else, so a row resolved against the wrong directory allows
+// silently rather than failing on a path. The last two halves of the nested
+// row and the closing half of the first are the restore: a subshell that
+// leaked its move would scan the clean file inside it.
+func TestAMoveInASubshellReachesTheCommandsInsideIt(t *testing.T) {
+	for _, tc := range []struct{ command, key string }{
+		{"(cd w && cat x)", "w/x"},
+		{"(cd w; cat x); cat x", "x"},
+		{"(cd w) && cat x", "x"},
+		{"(cd a; cd b; cat x)", "a/b/x"},
+		{"(cd w; (cd v; cat x); cat x); cat x", "w/v/x"},
+		{"(cd w; (cd v; cat x); cat x); cat x", "w/x"},
+		{"(cd w; (cd v; cat x); cat x); cat x", "x"},
+		{"echo $(cd w; cat x)", "w/x"},
+		// A pattern's `)` is pattern syntax. Read as a close, it ended the
+		// subshell early and the `cat` after the `esac` read the clean file
+		// outside.
+		{"(cd w; case q in z) :;; q) :;; esac; cat x)", "w/x"},
+		{"(cd w; case q in (q) :;; esac; cat x)", "w/x"},
+		// A process substitution's `)` closes its own shell and not the one
+		// around it.
+		{"(cd w; echo <(:) >/dev/null; cat x)", "w/x"},
+		// A subshell piped as a whole is still one shell.
+		{"(cd w) | cat; cat x", "x"},
+	} {
+		t.Run(tc.command+" reads "+tc.key, func(t *testing.T) {
+			root := t.TempDir()
+			for _, f := range []string{"x", "w/x", "w/v/x", "a/b/x"} {
+				path := filepath.Join(root, filepath.FromSlash(f))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				body := "nothing here\n"
+				if f == tc.key {
+					body = "AWS_ACCESS_KEY_ID=" + secret + "\n"
+				}
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, root))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout == "" {
+				t.Fatalf("allowed with no verdict, want a block naming %s (stderr: %q)", tc.key, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, filepath.Join(root, filepath.FromSlash(tc.key))) {
+				t.Errorf("reason = %q, want the file at %s", reason, tc.key)
+			}
+		})
+	}
+}
+
 // The moves whose destination is not the literal, or not a literal at all.
 // Each leaves the directory unknown and the relative operand after it
 // recorded rather than resolved -- which is also what every one of them did
 // before the tracker, so this is the arm that has to stay where it is.
 //
 // The first five are upstream's own "unknown" answers. The rest are this
-// port's, each in the direction that records: a move in a subshell or a
-// pipeline stage does not reach the commands after it; `-P` resolves `..`
+// port's, each in the direction that records: a move in a pipeline stage does
+// not reach the commands after it, and upstream keeps the directory there; `-P` resolves `..`
 // through symlinks where the tracker reads it lexically; `pushd -n` rotates
 // the stack without moving; a target that is not a directory leaves the shell
 // where it was under `;`; a CDPATH turns a relative target into a search; a
@@ -773,8 +836,11 @@ func TestACdThisCannotFollowLeavesTheOperandUnsettled(t *testing.T) {
 		{"a $ target", "cd $D && cat " + name},
 		{"another user's home", "cd ~someone && cat " + name},
 		{"pushd +N", "pushd +1 && cat " + name},
-		{"a move in a subshell", "(cd " + base + ") && cat " + name},
 		{"a move in a pipeline stage", "cd " + base + " | cat " + name},
+		// Segments read only `|` as a pipe, so before isPipe this move was
+		// followed and the operand resolved under a directory bash never
+		// entered.
+		{"a move in a |& pipeline stage", "true |& cd " + base + "; cat " + name},
 		{"a physical cd", "cd -P " + base + " && cat " + name},
 		{"pushd -n", "pushd -n " + base + " && cat " + name},
 		{"a target that is not there", "cd nowhere; cat " + name},
@@ -902,6 +968,7 @@ func TestAnAssignmentThePortCannotTrustLeavesTheOperandUnresolved(t *testing.T) 
 		{"a glob value", "SP=" + dir + "*; cat $SP/" + name},
 		{"assigned in a subshell", "(SP=" + dir + "); cat $SP/" + name},
 		{"assigned in a pipeline stage", "SP=" + dir + " | cat $SP/" + name},
+		{"assigned in a |& pipeline stage", "true |& SP=" + dir + "; cat $SP/" + name},
 		{"assigned in the background", "SP=" + dir + " & cat $SP/" + name},
 		{"a prefix on the reader", "SP=" + dir + " cat $SP/" + name},
 		{"reached through && after a command, in the next statement", "true && SP=" + dir + "; cat $SP/" + name},
