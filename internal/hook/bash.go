@@ -163,6 +163,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			dir, dirUnknown = enterShell(&saved, segment.Shells, dir, dirUnknown)
 			sub := v.expand(segment.Tokens)
 			inputs := v.expand(segment.Inputs)
+			v.noteCDPATH(segment.Tokens, sub, segment.QuotedFrom)
 			// The head is decided on the segment's own tokens and applied to
 			// the substituted copy by index. expand rebuilds token for token,
 			// so the count indexes sub exactly, and the provenance stays
@@ -208,7 +209,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			wrap := readers.PeelWrappers(tokens)
 			if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
 				moved = true
-				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment)
+				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment, v.cdpath)
 				list.moved(segment, dirUnknown)
 				continue
 			}
@@ -452,8 +453,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// keeps the inheritance every body had before the marking: the parent's
 		// directory and none of it if the parent moved at all, an empty map,
 		// and the glob options settled over the whole string.
+		// The unplaced bodies keep CDPATH from anywhere in the string: an empty
+		// map would otherwise be the one reading that forgot an assignment.
+		unplaced := newVars()
+		unplaced.cdpath = v.cdpath
 		states := substStates(stripped, subs, cur.state,
-			substState{cur.state.dir, cur.state.unknown || moved, newVars(), globsAltered})
+			substState{cur.state.dir, cur.state.unknown || moved, unplaced, globsAltered})
 		for i, body := range bash.UnstrippedSubstBodies(cur.text, bodies) {
 			queue = append(queue, job{body, cur.depth + 1, states[i]})
 		}
@@ -466,7 +471,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 		for _, doc := range append(docs.Expanded, docs.Unterminated...) {
 			for _, body := range bash.CommandSubstitutions(doc, false) {
 				queue = append(queue, job{body, cur.depth + 1,
-					substState{cur.state.dir, cur.state.unknown || moved, newVars(), globsAltered}})
+					substState{cur.state.dir, cur.state.unknown || moved, unplaced, globsAltered}})
 			}
 		}
 	}
@@ -586,6 +591,7 @@ func substStates(text string, subs []bash.Substitution, entry, fallback substSta
 			recordMarks(out, tok, here)
 		}
 		sub := v.expand(seg.Tokens)
+		v.noteCDPATH(seg.Tokens, sub, seg.QuotedFrom)
 		if altersGlobbing(seg.Tokens, sub, seg.QuotedFrom) {
 			globsAltered = true
 		}
@@ -605,7 +611,7 @@ func substStates(text string, subs []bash.Substitution, entry, fallback substSta
 		}
 		wrap := readers.PeelWrappers(tokens)
 		if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
-			dir, unknown = follow(kind, arg, dir, unknown, seg)
+			dir, unknown = follow(kind, arg, dir, unknown, seg, v.cdpath)
 			list.moved(seg, unknown)
 			continue
 		}
@@ -834,10 +840,11 @@ func enterShell(saved *[]savedShell, shells []int, dir string, unknown bool) (st
 //   - a target that is not a directory here. Under `;` the shell stays where
 //     it was and under `&&` the next command never runs, and the operator is
 //     not in the segment model either.
-//   - CDPATH, in the environment or assigned on the segment, which bash
-//     searches before the directory named. The hook and the tool inherit one
+//   - CDPATH, in the environment, on the segment, or anywhere earlier in the
+//     string (searched, which vars.noteCDPATH sets), which bash searches
+//     before the directory named. The hook and the tool inherit one
 //     environment from Claude Code, so the reading here is the tool's.
-func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, bool) {
+func follow(kind, arg, dir string, unknown bool, segment bash.Segment, searched bool) (string, bool) {
 	switch {
 	case segment.Forked:
 		return dir, true
@@ -845,7 +852,8 @@ func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, 
 		return dir, true
 	case kind == "arg":
 		if !filepath.IsAbs(arg) {
-			if unknown || dir == "" || os.Getenv("CDPATH") != "" || assigns(segment.Tokens, segment.QuotedFrom, "CDPATH") {
+			if unknown || dir == "" || searched || os.Getenv("CDPATH") != "" ||
+				assigns(segment.Tokens, segment.QuotedFrom, "CDPATH") {
 				return dir, true
 			}
 			arg = filepath.Join(dir, arg)
@@ -876,9 +884,9 @@ func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, 
 // subscript is refused here for the reason the override hatch refuses it:
 // both ask whether bash set something by this name, and it did not.
 //
-// The standalone spelling is a different question and not this one, which no
-// caller asks for the plain spelling either: `CDPATH[0]=<dir>; cd target`
-// does search, and so does `CDPATH=<dir>; cd target`. Q186 carries it.
+// The standalone spelling is a different question and not this one:
+// `CDPATH[0]=<dir>; cd target` does search, and so does `CDPATH=<dir>; cd
+// target`. vars.noteCDPATH answers that one.
 func assigns(tokens []string, quotedFrom []int, name string) bool {
 	for _, assignment := range envPrefix(tokens, quotedFrom) {
 		if n, form, _ := bash.SplitAssignment(assignment); n == name &&

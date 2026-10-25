@@ -286,7 +286,7 @@ the reserved-word half of the same peel. Both are decided at one point in the
 shell's own order, so one count covers them: the peel is taken on the
 segment's own tokens and applied to the substituted copy by index, `expand`
 being token-for-token. Six sites take it -- the two head peels, `poisonVars`,
-`clobbersIFS`, `forLoopBinding` and `altersGlobbing` -- and upstream's #110
+`clobbers`, `forLoopBinding` and `altersGlobbing` -- and upstream's #110
 does the same thing for a different reason, that its substituted tokens lose
 quote provenance entirely where this port carries it alongside. It is a
 precision fix and not a fail-open: nothing crossed that should not have.
@@ -327,7 +327,11 @@ append's -- `$NAME` is `${NAME[0]}`, so `P=/lit; P[0]=/arr` gives `/arr` and
 `P[1]=/arr` gives `/lit`, one shape with two answers picked by a subscript
 nothing here evaluates. And the **override does not arm** on it, nor does
 `assigns`, because as a prefix bash sets nothing whatever: `CDPATH[0]=<dir> cd
-target` does not search where `CDPATH=<dir>` and `CDPATH+=:<dir>` both do. What
+target` does not search where `CDPATH=<dir>` and `CDPATH+=:<dir>` both do.
+Standing alone it does search, and so does any spelling of CDPATH assigned
+earlier in the string -- `export`, `declare`, a heredoc's substitution --
+which `vars.noteCDPATH` records so `follow` loses the directory, where before
+the cd went to the local copy while bash read the CDPATH one (Q186). What
 is left open is a subscript the lexer cannot keep whole -- one carrying
 whitespace, shell punctuation, or a quoted `]` -- which is still under-peeled
 and is Q185.

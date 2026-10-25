@@ -1444,6 +1444,67 @@ func TestAnAppendToCDPATHLosesTheDirectoryToo(t *testing.T) {
 	})
 }
 
+// A CDPATH assigned earlier in the string, rather than on the cd's own segment
+// (Q186). bash searches it before the directory named, and where both hold the
+// target it takes the CDPATH one, so before this the tracker followed the cd
+// to the local copy, scanned it clean, and allowed while bash read the other.
+// Every row was taken on bash 5.3.15 over this tree with the key where bash
+// read it. All but the seventh were a silent allow on main at 9f0fbdc; that
+// one deferred there only because a subshell move was not followed at all.
+//
+// The last three are the controls: a subscripted prefix sets nothing, an
+// assignment after the cd is not searched by it, and no CDPATH at all is
+// followed -- each blocks on the local copy, which is what says the tracker
+// still follows a cd here.
+func TestACDPATHAssignedEarlierInTheStringLosesTheDirectory(t *testing.T) {
+	for _, tc := range []struct{ command, key string }{
+		{"CDPATH={A}; cd target; cat f", "away"},
+		{"CDPATH+={A}; cd target; cat f", "away"},
+		{"CDPATH[0]={A}; cd target; cat f", "away"},
+		{"export CDPATH={A}; cd target && cat f", "away"},
+		{"declare CDPATH={A}; cd target; cat f", "away"},
+		{"CDPATH={A}; echo \"$(cd target && cat f)\"", "away"},
+		{"(CDPATH={A}; cd target; cat f)", "away"},
+		// A heredoc body's substitution has no marker to be placed at, so it
+		// starts from a fresh map, which has to carry the flag anyway.
+		{"CDPATH={A}; cat <<EOF\n$(cd target && cat f)\nEOF", "away"},
+		{"CDPATH[0]={A} cd target; cat f", "local"},
+		{"cd target; cat f; CDPATH={A}", "local"},
+		{"cd target && cat f", "local"},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			root := t.TempDir()
+			cwd, away := filepath.Join(root, "cwd"), filepath.Join(root, "away")
+			for _, base := range []string{cwd, away} {
+				if err := os.MkdirAll(filepath.Join(base, "target"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				body := "nothing here\n"
+				if (base == away) == (tc.key == "away") {
+					body = "AWS_ACCESS_KEY_ID=" + secret + "\n"
+				}
+				if err := os.WriteFile(filepath.Join(base, "target", "f"), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			command := strings.ReplaceAll(tc.command, "{A}", away)
+			code, stdout, stderr := drive(t, bashCall(t, command, cwd))
+			if tc.key == "away" {
+				if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+					t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+				}
+				return
+			}
+			if code != 0 || stdout == "" {
+				t.Fatalf("exit code = %d, stdout = %q, want a block on the local copy (stderr: %q)", code, stdout, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, filepath.Join(cwd, "target", "f")) {
+				t.Errorf("reason = %q, want the local copy", reason)
+			}
+		})
+	}
+}
+
 // The fail-open Q175 names. `FOO[0]=x` is an inline env prefix to bash's
 // parser exactly as `FOO=x` is: the shell peels it, fails to export it --
 // `FOO[0]: not a valid identifier` on stderr -- and runs the command behind it
