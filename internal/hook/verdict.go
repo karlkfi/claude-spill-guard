@@ -526,8 +526,8 @@ const convertHint = "Text this build cannot read arrives here wearing the " +
 // the error, for resolve's reason in bash.go -- an operand is the word after
 // substitution, which no scan reads, and the error is composed around it.
 const partlyRead = "Part of what this call would have sent could not be " +
-	"resolved here, so it was not read: the matches named are in what could " +
-	"be, and no verdict on this call is a report on the rest."
+	"read here: the matches named are in what could be, and no verdict on " +
+	"this call is a report on the rest."
 
 // alsoUnread is unscanned's counterpart for a call that is being blocked or
 // confirmed rather than allowed.
