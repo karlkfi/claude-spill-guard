@@ -146,8 +146,10 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// The and-or list, which says whether a conditional assignment or
 		// move had run by the time a later segment does; vars.go has the rule.
 		list := andOr{settled: true}
+		var saved []savedShell
 		for i, segment := range segments {
 			list.enter(segment, v, &dirUnknown)
+			dir, dirUnknown = enterShell(&saved, segment.Shells, dir, dirUnknown)
 			sub := v.expand(segment.Tokens)
 			inputs := v.expand(segment.Inputs)
 			// The head is decided on the segment's own tokens and applied to
@@ -486,6 +488,7 @@ func substStates(text string, subs []bash.Substitution, entry, fallback substSta
 	}
 	v := entry.vars.clone()
 	list := andOr{settled: true}
+	var saved []savedShell
 	for _, segment := range segments {
 		// A restored copy, and everything below reads it rather than the marked
 		// segment: every rule here is written for shell text, and a marker is a
@@ -509,6 +512,7 @@ func substStates(text string, subs []bash.Substitution, entry, fallback substSta
 		seg.Tokens = restoreAll(segment.Tokens, text, subs)
 		seg.Redirects = restoreAll(segment.Redirects, text, subs)
 		list.enter(seg, v, &unknown)
+		dir, unknown = enterShell(&saved, seg.Shells, dir, unknown)
 		// Read the positions before this segment's own `cd`, assignments and
 		// glob change apply, off the MARKED tokens, which are the only ones a
 		// marker survives in. A substitution is expanded to build the command
@@ -721,19 +725,53 @@ func classifyCd(tokens []string) (kind, arg string) {
 	return "unknown", "" // bare `cd` -> $HOME
 }
 
+// A savedShell is one subshell entered and not yet left, holding the directory
+// in force when it was entered.
+type savedShell struct {
+	shell   int
+	dir     string
+	unknown bool
+}
+
+// enterShell is upstream's enter_shell (its Q173): the directory a segment
+// starts in, given the subshells it sits inside. Leaving a subshell restores
+// the directory it was entered with, because a `cd` bash ran inside one never
+// reached the shell outside it; entering one records the current directory
+// for that restore. `(cd w && cat x)` reads x under w, and `(cd w); cat x`
+// reads it where the string started.
+//
+// The caller runs it after andOr.enter, never before, because a `(` always
+// opens a segment reached through no operator, and closing the list there is
+// what turns a tentative move outside the subshell into a lost directory --
+// `x && cd a && (cat f); cat g` has to save that, or the restore at `cat g`
+// hands back a directory the shell may never have reached.
+func enterShell(saved *[]savedShell, shells []int, dir string, unknown bool) (string, bool) {
+	k := 0
+	for k < len(*saved) && k < len(shells) && (*saved)[k].shell == shells[k] {
+		k++
+	}
+	if k < len(*saved) {
+		dir, unknown = (*saved)[k].dir, (*saved)[k].unknown
+		*saved = (*saved)[:k]
+	}
+	for _, sh := range shells[k:] {
+		*saved = append(*saved, savedShell{sh, dir, unknown})
+	}
+	return dir, unknown
+}
+
 // follow moves the tracked directory the way the segment's cd would, or loses
-// it. Four arms lose it here and keep it upstream, each in the direction that
+// it. Five arms lose it here and keep it upstream, each in the direction that
 // records the operand after it rather than resolving it against a directory
 // the shell may not be in:
 //
 //   - a move inside a `case` arm, which ran only on a pattern match. Upstream
 //     does not read arms at all; Segment.CaseArm carries why this does.
-//   - a move in a subshell, a pipeline stage or a background job (Persists
-//     false) reaches the commands inside that subshell and not the ones after
-//     it, and which later segments are inside is not in the segment model.
-//     Driven before any tracker existed: `pushd elsewhere && cat rel.env`
-//     resolved rel.env against the payload's cwd, scanned a file the command
-//     never reads, and allowed the call.
+//   - a move in a pipeline stage or a background job (Forked) moves a child
+//     shell nothing after it runs in, so upstream keeps the directory it had.
+//     This loses it, which costs the operands after it a verdict and nothing
+//     else. A move in a subshell is followed, for the segments inside it, and
+//     enterShell puts the directory back when the subshell closes.
 //   - a relative target while the directory is already lost has nothing to
 //     join to. Upstream joins it to the stale one and calls it found.
 //   - a target that is not a directory here. Under `;` the shell stays where
@@ -744,7 +782,7 @@ func classifyCd(tokens []string) (kind, arg string) {
 //     environment from Claude Code, so the reading here is the tool's.
 func follow(kind, arg, dir string, unknown bool, segment bash.Segment) (string, bool) {
 	switch {
-	case !segment.Persists:
+	case segment.Forked:
 		return dir, true
 	case segment.Conditional == "||", segment.CaseArm:
 		return dir, true

@@ -125,6 +125,21 @@ type Segment struct {
 	// from the `'if'` that does not. Upstream keeps it on the token itself;
 	// lex.go's NotQuoted has why Go cannot.
 	QuotedFrom []int
+	// Shells numbers each `(` the segment sits inside, outermost first, so two
+	// sibling subshells at the same depth still read as different shells. A
+	// bare `$(` reaches here as `$(` then `(`, so a substitution counts too,
+	// and so does a process substitution's `<(`. Upstream's `shells`, which it
+	// returns through split_groups' `scopes` out-parameter (its Q173); a field
+	// here for the reason Pipe is one. Upstream's other scopes are not ported:
+	// a `{ … }`, loop, `if` or `case` piped or backgrounded as a whole (its
+	// Q272) and a function body (its Q265), which Q212 carries. The process
+	// substitution is this port's, and upstream has no shell for it.
+	Shells []int
+	// Forked is true for a pipeline stage or a backgrounded command, which
+	// bash runs in a child shell of its own, so a `cd` in it moves nothing
+	// the next segment runs in. Upstream's `own`, negated so the zero value is
+	// the common case. Unlike Persists it reads `|&` as the pipe it is.
+	Forked bool
 }
 
 // conditional is the Conditional field for a segment reached through sep.
@@ -188,8 +203,18 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		paren     int
 		pipe      int
 		prevSep   string
+		// The subshells open at this point, numbered in the order they
+		// opened, which is what Segment.Shells reports.
+		shells []int
+		opened int
+		// Where a `case` pattern stands, upstream's pdepth and pstarted
+		// (its Q273): the parens an extglob opened inside the pattern, and
+		// whether the pattern has a word yet, without which its leading `(`
+		// is bash's optional opener rather than a group.
+		patDepth   int
+		patStarted bool
 		// One entry per open `case`, in the states scanDollarParen tracks it
-		// in: "in" | "pat" | "body". The two read against each other on
+		// in: "in" | "pat" | "body", and "next" for a later arm's pattern. The two read against each other on
 		// purpose -- there the question is which `)` closes a substitution,
 		// here it is which segments an arm holds -- and neither is upstream's,
 		// whose group loop has no case handling at all. Segment.CaseArm has
@@ -203,30 +228,52 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
 		if isOperator(t, quotedFrom[i], separators) {
-			if len(cur) > 0 || len(curRedir) > 0 {
+			empty := len(cur) == 0 && len(curRedir) == 0
+			if !empty {
 				persists := paren == 0 && prevSep != "|" &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
 				segs = append(segs, Segment{cur, curRedir, curInputs, persists,
-					conditional(prevSep), inCaseArm(clauses), pipe, curQF})
+					conditional(prevSep), inCaseArm(clauses), pipe, curQF,
+					append([]int(nil), shells...), forked(prevSep, t)})
 				cur, curQF, curRedir, curInputs = nil, nil, nil, nil
 			}
-			switch t {
-			case "(":
-				paren++
-			case ")":
-				if paren > 0 {
-					paren--
+			n := len(clauses)
+			pattern := n > 0 && (clauses[n-1] == "pat" || clauses[n-1] == "next")
+			switch {
+			case pattern && t == "(":
+				// A pattern's parens are pattern syntax and open no subshell:
+				// read as one, the `)` after `y` closed the subshell around the
+				// `case`, and a `cd` after the `esac` escaped it.
+				if patStarted {
+					patDepth++
 				}
+				patStarted = true
+			case pattern && t == ")" && patDepth > 0:
+				patDepth--
+			case pattern && t == ")":
 				// A case pattern's `)` needs no opener, so it is the one
 				// separator that means something beyond the depth: it ends the
 				// pattern and opens the arm. Read AFTER the flush above, so
 				// the `case x in y` header -- which the same `)` terminates --
-				// is not itself marked. bash's optional `(` opener balanced
-				// the depth just above, and a `)` in an arm's body finds the
-				// clause already past "pat" and changes nothing.
-				if n := len(clauses); n > 0 && clauses[n-1] == "pat" {
-					clauses[n-1] = "body"
+				// is not itself marked.
+				clauses[n-1] = "body"
+			case t == "(":
+				paren++
+				opened++
+				shells = append(shells, opened)
+			case t == ")":
+				if paren > 0 {
+					paren--
 				}
+				if len(shells) > 0 {
+					shells = shells[:len(shells)-1]
+				}
+			case empty && prevSep == ";" && (t == ";" || t == "&") &&
+				n > 0 && clauses[n-1] == "body":
+				// `;;`, `;&` or `;;&` ends an arm, and the words up to the
+				// next unopened `)` are a pattern again.
+				clauses[n-1] = "next"
+				patDepth, patStarted = 0, false
 			}
 			if t != "|" {
 				pipe++
@@ -276,6 +323,15 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				if t == "<" && tokens[i+1] != "(" {
 					curInputs = append(curInputs, tokens[i+1])
 				}
+				// Its body runs in a subshell, and its `)` still arrives
+				// as a separator. Upstream counts neither, so that `)`
+				// closes whatever subshell the command sits in, and the
+				// segments after it, still inside, read as outside.
+				if tokens[i+1] == "(" {
+					paren++
+					opened++
+					shells = append(shells, opened)
+				}
 				i += 2
 				continue
 			}
@@ -284,14 +340,25 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		}
 		cur = append(cur, t)
 		curQF = append(curQF, quotedFrom[i])
+		opening := len(clauses) > 0 && clauses[len(clauses)-1] == "in"
 		cmdPos = trackCase(&clauses, t, cmdPos)
+		// The `in` that opens the first pattern is no word of it.
+		patStarted = !opening || clauses[len(clauses)-1] != "pat"
 		i++
 	}
 	if len(cur) > 0 || len(curRedir) > 0 {
 		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && prevSep != "|",
-			conditional(prevSep), inCaseArm(clauses), pipe, curQF})
+			conditional(prevSep), inCaseArm(clauses), pipe, curQF,
+			append([]int(nil), shells...), forked(prevSep, "")})
 	}
 	return segs, nil
+}
+
+// forked is the Forked field for a segment reached through lead and ended by
+// sep, upstream's stage_own without the `lastpipe` arm: a `cd` that arm says
+// may move the current shell is one the caller loses track of either way.
+func forked(lead, sep string) bool {
+	return sep == "|" || sep == "|&" || sep == "&" || lead == "|" || lead == "|&"
 }
 
 // trackCase advances the `case` clause states for one word token and reports
@@ -326,7 +393,7 @@ func trackCase(clauses *[]string, word string, cmdPos bool) bool {
 // arm, and so does everything under it.
 func inCaseArm(clauses []string) bool {
 	for _, state := range clauses {
-		if state == "body" {
+		if state == "body" || state == "next" {
 			return true
 		}
 	}
