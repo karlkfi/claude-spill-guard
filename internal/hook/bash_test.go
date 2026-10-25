@@ -170,6 +170,114 @@ func TestACommandWithNoRowIsNotJudged(t *testing.T) {
 	}
 }
 
+// A wrapper runs the reader behind it, so the reader's operands are read
+// (Q196). Each command below prints the file under bash 5.3.15, sudo's arms
+// excepted, which are upstream's grammar and not driven here. Looked up by the
+// wrapper's name, each had no row, and the file crossed unread with nothing
+// recorded.
+func TestAReaderBehindAWrapperIsScanned(t *testing.T) {
+	dir, name := planted(t)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, "sub", name)); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{
+		"command cat sub/" + name,
+		"command -p cat sub/" + name,
+		"exec cat sub/" + name,
+		"exec -a x cat sub/" + name,
+		"nice -n 5 cat sub/" + name,
+		"nohup cat sub/" + name,
+		"env A=1 cat sub/" + name,
+		"timeout -s KILL 5 cat sub/" + name,
+		"stdbuf -oL cat sub/" + name,
+		"/usr/bin/time -p cat sub/" + name,
+		"sudo -u root cat sub/" + name,
+		"nice nohup env -i timeout 5 cat sub/" + name,
+		// The operand resolves where the wrapper runs the command.
+		"env -C sub cat " + name,
+		// The shell's own cd, run through a wrapper, still moves the shell.
+		"command cd sub && cat " + name,
+		"builtin cd sub; cat " + name,
+		// A substitution body reads where it was written, so the move the
+		// wrapper ran reaches it too. substStates is the walk that decides it.
+		"command cd sub && echo \"$(cat " + name + ")\"",
+		// `builtin` is not the last wrapper, so it does not stop the reader.
+		"builtin command cat sub/" + name,
+		"builtin exec cat sub/" + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file the reader prints", reason)
+			}
+		})
+	}
+}
+
+// The other side of the peel, where bash opens nothing: `builtin` runs only
+// the shell's own builtins and no reader is one, `command -v` looks the name
+// up, `sudo -e` edits, and a cd run by a separate program moves nothing, so
+// `name` is still a path in dir, where no file by that name exists.
+func TestAWrapperThatRunsNoReaderOpensNothing(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		"builtin cat " + name,
+		"command builtin cat " + name,
+		"command -v cat " + name,
+		"command -V cat " + name,
+		"sudo -e " + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 || stdout != "" || stderr != "" {
+				t.Errorf("exit %d, stdout %q, stderr %q, want a silent 0", code, stdout, stderr)
+			}
+		})
+	}
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "env cd sub; cat "+name, dir))
+	if code != 0 || !strings.Contains(reasonOf(t, stdout), name) {
+		t.Errorf("env cd moved the shell: exit %d, stdout %q (stderr: %q)", code, stdout, stderr)
+	}
+}
+
+// `xargs` takes the reader's operands from its input, and a wrapper option
+// off its row may have been anything, so the files the reader opens are not
+// the ones on the line: recorded, never resolved. A finding elsewhere in the
+// call still blocks, and a grep that prints no matched text needs nothing.
+func TestAWrapperThatHidesOperandsDefers(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		"echo " + name + " | xargs cat",
+		"env -X cat " + name,
+		"nice -n $N cat " + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "wrapper") {
+				t.Errorf("coverage reason = %q, want it to name the wrapper", reason)
+			}
+		})
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "cat "+name+"; echo x | xargs cat", dir))
+	if code != 0 || !strings.Contains(reasonOf(t, stdout), name) {
+		t.Errorf("the finding before the xargs did not block: exit %d, stdout %q (stderr: %q)", code, stdout, stderr)
+	}
+	code, stdout, stderr = drive(t, bashCall(t, "echo "+name+" | xargs grep -l KEY", dir))
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Errorf("a quiet grep behind xargs: exit %d, stdout %q, stderr %q, want a silent 0", code, stdout, stderr)
+	}
+}
+
 // The write commands have no row, so a `cp` of a secret-bearing file sends
 // nothing and is not judged. This is the read/write divergence reaching the
 // hook, and it is the one place a reader can see it happen.

@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/karlkfi/claude-spill-guard/internal/bash"
+	"github.com/karlkfi/claude-spill-guard/internal/readers"
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
 	"github.com/karlkfi/claude-spill-guard/internal/scan"
 	embedded "github.com/karlkfi/claude-spill-guard/rules"
@@ -325,7 +326,7 @@ func allFiltered(command string) bool {
 	}
 	for i, segment := range segments {
 		k := bash.ShKeywordPeel(segment.Tokens, segment.QuotedFrom)
-		tokens := bash.StripEnvPrefix(segment.Tokens[k:], segment.QuotedFrom[k:])
+		tokens := readers.PeelWrappers(bash.StripEnvPrefix(segment.Tokens[k:], segment.QuotedFrom[k:])).Argv
 		if len(tokens) == 0 || !grepNames[filepath.Base(tokens[0])] {
 			continue
 		}

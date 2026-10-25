@@ -119,6 +119,13 @@ worth having and neither complete:
    That table is `internal/readers`, and its read/write split is this repo's
    own: workspace-guard asks which files a command touches, writes included,
    and this asks what is about to leave the machine, which is the reads.
+   A wrapper that runs the next word as the command -- `command cat f`,
+   `nice -n 5 cat f`, `timeout 5 cat f`, `env -C dir cat f` -- is peeled
+   first, by upstream's grammar for nineteen of them, so the reader behind it
+   is the one looked up. Before Q196 each was looked up by the wrapper's name,
+   found no row, and crossed unread. Where a wrapper hides the operands --
+   `xargs` takes them from its input -- or an option of its own cannot be
+   read, the call is a coverage failure rather than a guess.
 
 Neither catches a command that synthesizes a secret at runtime. That is a
 stated limitation of content matching rather than a gap to close later, and

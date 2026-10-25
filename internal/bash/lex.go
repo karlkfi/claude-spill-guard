@@ -224,9 +224,10 @@ const (
 // external program with no append semantics -- driven on bash 5.3.15, `env
 // FOO+=bar env` exports a variable literally called `FOO+` and leaves `FOO` at
 // its old value, where the `export` builtin beside it appends.
-// internal/readers carries no env row, so nothing in this build looks through
-// an env prefix to the command behind it; a reader that did would need the
-// name split the other way.
+// internal/readers' wrapper peel looks through an env prefix to the command
+// behind it, and takes env's assignments by the `=` they hold, which is env's
+// own rule -- so it never asks this function, and no caller needs the name
+// split the other way.
 func SplitAssignment(tok string) (name string, form AssignForm, value string) {
 	name, value, _ = strings.Cut(tok, "=")
 	if rest, ok := strings.CutSuffix(name, "+"); ok {
