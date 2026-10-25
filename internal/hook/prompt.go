@@ -42,8 +42,8 @@ const trailingPunct = "!\"#$%&'()*+,-.:;<=>?@[\\]^_`{|}~"
 // `Read` call's `file_path` is a path by contract and a `Bash` operand had to
 // be an operand of a reader in a table this repo authored, so both sites quote
 // the path an OS error carries and the design allows it. An `@` token is free
-// text at any offset of anything a human pasted, and the walk fails before the
-// prompt itself has been scanned -- so `@/root/<a key>/x` on a directory this
+// text at any offset of anything a human pasted, and the reason is composed
+// before the prompt itself is scanned -- so `@/root/<a key>/x` on a directory this
 // process cannot traverse would put the key in the refusal, which reaches the
 // API. There is no bound that leaves a real path legible and still cuts a key,
 // for the reason bash.go's resolve gives, so the reason names the category and
@@ -63,6 +63,14 @@ var errFileUnreadable = errors.New("a prompt names a file that could not be " +
 func promptTargets(prompt, cwd string) ([]target, error) {
 	targets := []target{{promptLabel, []byte(prompt)}}
 	seen := make(map[string]bool)
+	// The first token that would not resolve, kept while the rest are read,
+	// for bashTargets' reason.
+	var gap error
+	note := func(err error) {
+		if gap == nil {
+			gap = err
+		}
+	}
 	for _, token := range atTokens(prompt) {
 		for _, candidate := range candidates(token) {
 			if strings.Trim(candidate, "./") == "" {
@@ -75,7 +83,8 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 			}
 			path, err := resolveAt(candidate, cwd)
 			if err != nil {
-				return nil, unresolved{candidate, err}
+				note(unresolved{candidate, err})
+				continue
 			}
 			if seen[path] {
 				continue
@@ -89,33 +98,37 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 					// a Read of an absent file.
 					continue
 				}
-				return nil, unresolved{path, errFileUnreadable}
+				note(unresolved{path, errFileUnreadable})
+				continue
 			}
 			seen[path] = true
 			switch {
 			case info.Mode().IsRegular():
 				buf, err := os.ReadFile(path)
 				if err != nil {
-					return nil, unresolved{path, errFileUnreadable}
+					note(unresolved{path, errFileUnreadable})
+					continue
 				}
 				targets = append(targets, target{path, buf})
 			case info.IsDir():
 				buf, err := listing(path)
 				if err != nil {
-					return nil, unresolved{path, err}
+					note(unresolved{path, err})
+					continue
 				}
 				targets = append(targets, target{path, buf})
 			default:
 				// A fifo or a device. os.ReadFile on one blocks for as long as
 				// nothing writes, which would hang the session rather than
 				// scan anything, so this refuses instead of opening it.
-				return nil, unresolved{path, errors.New("a prompt names something " +
+				note(unresolved{path, errors.New("a prompt names something " +
 					"that is neither a file nor a directory, so what it would send " +
-					"cannot be read here")}
+					"cannot be read here")})
+				continue
 			}
 		}
 	}
-	return targets, nil
+	return targets, gap
 }
 
 // atTokens returns the text after each `@` that could name a file, in the
@@ -251,7 +264,7 @@ func candidates(token string) []string {
 //
 // None of these reasons names the token, for the reason bash.go's resolve does
 // not name an operand: this text reaches the API, and on this path nothing has
-// been scanned yet -- the walk fails before the prompt itself is looked at --
+// been scanned yet -- the reason is composed before the prompt is looked at --
 // so quoting the token would send content the scan never examined.
 func resolveAt(candidate, cwd string) (string, error) {
 	// `@~/.zshrc` spliced /Users/<user>/.zshrc, so a file outside the project

@@ -72,6 +72,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 	// for the one reason that repeats it.
 	whole := command
 	seen := make(map[string]bool)
+	// The first coverage failure, kept while the walk goes on: an operand this
+	// cannot settle is no reason to leave unread the ones it can, and a
+	// refusal further on still refuses. hook.go scans what was collected and
+	// lets a finding in it block.
+	var gap error
+	note := func(err error) {
+		if gap == nil {
+			gap = err
+		}
+	}
 
 	// A body queued for a later pass runs in the state that was in force where
 	// it was WRITTEN -- the directory, the variables assigned by then, and the
@@ -108,8 +118,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 
 		segments, err := bash.Segments(cur.text)
 		if err != nil {
-			return nil, fmt.Errorf("the Bash command could not be read, so what "+
-				"it would send is unknown: %w", err)
+			note(fmt.Errorf("the Bash command could not be read, so what "+
+				"it would send is unknown: %w", err))
+			continue
 		}
 
 		// Ahead of the operands, because this refusal is not about them. A
@@ -221,9 +232,10 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// without opening it, and scanning the list alone would report a
 			// clean result for every file in it.
 			if flags := readers.Indirect(tokens); len(flags) > 0 {
-				return nil, fmt.Errorf("a file operand is named indirectly "+
+				note(fmt.Errorf("a file operand is named indirectly "+
 					"through %q, so which files this command would read is not "+
-					"settled here", strings.Join(flags, ", "))
+					"settled here", strings.Join(flags, ", ")))
+				continue
 			}
 			// Safe to name, and the argument has to be exact because this is
 			// the one caller-derived string the reason carries. Files matched
@@ -242,15 +254,17 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// turns on.
 				cands, ok := v.candidates(operand)
 				if !ok {
-					return nil, unresolved{operand, fmt.Errorf("in the %q here, a file "+
+					note(unresolved{operand, fmt.Errorf("in the %q here, a file "+
 						"operand names loop variables standing for more than %d paths, so "+
 						"which files this command would read was not enumerated here",
-						command, maxLoopCandidates)}
+						command, maxLoopCandidates)})
+					continue
 				}
 				for _, cand := range cands {
 					expanded, err := expand(cand, dir, dirUnknown, globsAltered, qualified)
 					if err != nil {
-						return nil, unresolved{cand, fmt.Errorf("in the %q here, %w", command, err)}
+						note(unresolved{cand, fmt.Errorf("in the %q here, %w", command, err)})
+						continue
 					}
 					paths = append(paths, expanded...)
 				}
@@ -268,8 +282,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 						// absent file.
 						continue
 					}
-					return nil, unresolved{path, fmt.Errorf("reading a file this "+
-						"command would send: %w", err)}
+					note(unresolved{path, fmt.Errorf("reading a file this "+
+						"command would send: %w", err)})
+					continue
 				}
 				// Only a regular file. os.ReadFile on a fifo blocks until
 				// something writes, which hangs the call rather than deciding it --
@@ -337,16 +352,18 @@ func bashTargets(command, cwd string) ([]target, error) {
 					return nil, &grepRefusal{filepath.Base(tokens[0]), rewrite}
 				}
 				if info.IsDir() {
-					return nil, unresolved{path, fmt.Errorf("in the %q here, a file "+
+					note(unresolved{path, fmt.Errorf("in the %q here, a file "+
 						"operand names a directory, and this scanner reads files rather "+
 						"than walking a tree, so what that operand would send was not "+
-						"read -- name the files instead", command)}
+						"read -- name the files instead", command)})
+					continue
 				}
 				if !info.Mode().IsRegular() {
-					return nil, unresolved{path, fmt.Errorf("in the %q here, a file "+
+					note(unresolved{path, fmt.Errorf("in the %q here, a file "+
 						"operand names something that is neither a file nor a "+
 						"directory, so what this command would send cannot be read "+
-						"here", command)}
+						"here", command)})
+					continue
 				}
 				// Ahead of the read, because not opening the file is the whole
 				// of this refusal -- guarded.go carries why a path whose
@@ -364,8 +381,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 				}
 				buf, err := os.ReadFile(path)
 				if err != nil {
-					return nil, unresolved{path, fmt.Errorf("reading a file this "+
-						"command would send: %w", err)}
+					note(unresolved{path, fmt.Errorf("reading a file this "+
+						"command would send: %w", err)})
+					continue
 				}
 				targets = append(targets, target{path, buf})
 			}
@@ -377,9 +395,10 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// this depth the walk stopped, and it cannot tell which of the
 			// bodies below it were reached by the flattening and which were
 			// backticks or heredoc bodies that were not.
-			return nil, fmt.Errorf("the Bash command nests command substitutions "+
+			note(fmt.Errorf("the Bash command nests command substitutions "+
 				"more than %d deep, so what the innermost would send was not "+
-				"scanned", maxSubstDepth)
+				"scanned", maxSubstDepth))
+			continue
 		}
 		var docs bash.Heredocs
 		stripped := bash.StripHeredocBodies(cur.text, &docs, true)
@@ -413,7 +432,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			}
 		}
 	}
-	return targets, nil
+	return targets, gap
 }
 
 // substMark brackets the index of a substitution lifted out of a command
@@ -617,7 +636,8 @@ func restoreMarks(tok, text string, subs []bash.Substitution) string {
 //
 // A reason reaches the API. An unresolvable operand is a fragment of a command
 // string the model wrote, and on this path nothing has been scanned yet -- the
-// walk fails before the command string itself is looked at -- so quoting the
+// reason is composed before the command string is looked at, and the operand
+// is the word after substitution, which no scan reads -- so quoting the
 // operand sends content the scan never examined. `cat $HOME/<a key>` put the
 // key in the refusal verbatim.
 //

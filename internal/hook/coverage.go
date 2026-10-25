@@ -136,10 +136,11 @@ func record(stderr io.Writer, call payload, event Event, reason string, operands
 
 // withheld drops the operands the shipped ruleset matches.
 //
-// An operand is text from the call, and nothing scanned it: the walk that
-// failed on it is what stopped the scan. `cat $HOME/<a key>` defers, so the
-// key is the operand, and a record carrying it puts a raw secret in a file
-// that outlives the call. Withheld rather than redacted, because a fragment
+// An operand is the word after substitution, and nothing scanned it. The
+// command string is scanned, so `cat $HOME/<a key>` blocks on it, but `A=<one
+// half>; B=<the other>; cat $HOME/$A$B` assembles a key no buffer holds whole,
+// defers, and makes the key the operand -- and a record carrying it puts a raw
+// secret in a file that outlives the call. Withheld rather than redacted, because a fragment
 // of a key is still part of the key. Fail closed: a ruleset that does not
 // load keeps nothing.
 func withheld(operands []string) []string {

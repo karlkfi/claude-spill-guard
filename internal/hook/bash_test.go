@@ -589,9 +589,14 @@ func TestASubstitutionBodyResolvesWhereItWasWritten(t *testing.T) {
 	// Code sends, and a string carrying one anyway is left unmarked rather than
 	// mismarked. What it falls back to is what every body inherited before the
 	// marking, so the arm is the pre-Q147 answer rather than a new one.
+	//
+	// A backtick body, for the reason the arm two above gives: a `$(…)` one is
+	// flattened into the in-order pass, which follows the `cd` and reads the
+	// key where bash would, and that finding blocks whatever the re-walk of
+	// the body then fails on (Q204).
 	t.Run("a string carrying the sentinel is left unmarked", func(t *testing.T) {
 		code, stdout, stderr := drive(t, bashCall(t,
-			"cd "+base+" && echo \x1e && echo $(cat "+name+")", parent))
+			"cd "+base+" && echo \x1e && echo `cat "+name+"`", parent))
 		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
 			t.Errorf("coverage reason = %q, want the move unfollowed", reason)
 		}
