@@ -433,7 +433,7 @@ it in real files, and the independent review of this change re-took it over
 985 files and found none either. It is a constructed cost and not a measured
 one.
 
-**A path with a space in it is not crossed.** The prefix arm admits no
+**A key under a path with a space crosses the filter.** The prefix arm admits no
 whitespace, because a path that may contain spaces is a prose line, and prose
 under a header is the thing this rule refuses. So `grep -rn -A3` over
 `my keys/k.pem` passes the key, where the same file read raw, or grepped with
