@@ -1357,6 +1357,14 @@ the permission flow that would have run without it runs unchanged. Not an
 explicit `allow`, which would suppress the user's own rules; this has no
 opinion to spend on them, because it could not read the call.
 
+**A gap does not hide a finding beside it.** The walk goes on past an operand it
+cannot settle, everything it did collect is scanned — the prompt or command
+string, and every file that resolved — and a match there blocks, with a notice
+that part of the call went unread. Only a call where nothing readable matched
+defers. Until Q204 the first failure returned no buffers at all, so `echo <a
+key>; cat $X` and a key typed beside an `@` token with no working directory
+both exited 0 with no verdict.
+
 **A payload that does not decode still blocks on exit 2.** Not JSON, no event,
 an event this binary cannot withhold at. That is the hook being invoked wrongly
 rather than a scanner failing to read something, and it is the signal that says

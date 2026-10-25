@@ -517,6 +517,18 @@ const convertHint = "Text this build cannot read arrives here wearing the " +
 	"UTF-8 mark ahead of a NUL -- so if one of them is text, converting it to " +
 	"UTF-8 gets it scanned."
 
+// partlyRead is the notice on a call blocked on a finding after the walk over
+// its operands failed.
+//
+// It is alsoUnread's argument for a gap with no label: found() is a claim about
+// what this call would have sent, and part of that was never opened, so the
+// notice says the verdict does not reach it. It names neither the operand nor
+// the error, for resolve's reason in bash.go -- an operand is the word after
+// substitution, which no scan reads, and the error is composed around it.
+const partlyRead = "Part of what this call would have sent could not be " +
+	"read here: the matches named are in what could be, and no verdict on " +
+	"this call is a report on the rest."
+
 // alsoUnread is unscanned's counterpart for a call that is being blocked or
 // confirmed rather than allowed.
 //

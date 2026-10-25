@@ -2,6 +2,7 @@ package hook
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,9 +122,16 @@ func TestAFindingIsNotLoggedAsACoverageFailure(t *testing.T) {
 // file is on disk and a path is not a secret, but the reasons are composed
 // from the same strings the API sees. The operand is the one field that
 // could carry it, so an operand the ruleset matches is withheld.
+//
+// The key is split across two assignments, because the command string is
+// scanned now and `cat $HOME/<key>` blocks on it before any record is written
+// (TestAFindingBlocksWhereAnOperandCouldNotBeResolved). Assembled by
+// substitution, the key is in the operand and in no buffer the scan reads,
+// which is the case withheld is for.
 func TestACoverageRecordCarriesNoScannedValue(t *testing.T) {
 	dir := t.TempDir()
-	code, stdout, stderr := drive(t, bashCall(t, "cat $HOME/"+secret, dir))
+	command := "A=" + secret[:10] + "; B=" + secret[10:] + "; cat $HOME/$A$B"
+	code, stdout, stderr := drive(t, bashCall(t, command, dir))
 	deferred(t, code, stdout, stderr)
 	got := readCoverage(t)
 	if len(got) != 1 {
@@ -135,6 +143,72 @@ func TestACoverageRecordCarriesNoScannedValue(t *testing.T) {
 	if len(got[0].Operands) != 0 {
 		t.Errorf("the coverage record carries the operand holding the value: %q",
 			got[0].Operands)
+	}
+}
+
+// A walk that fails on an operand still scans what it collected first, and a
+// finding there blocks. Before Q204 every arm here exited 0 with no verdict:
+// the failure returned no buffers, so a key beside an unresolvable operand
+// crossed unread. The operand itself still goes unread, so the verdict says
+// it stops short, and no coverage record is written beside a block.
+func TestAFindingBlocksWhereAnOperandCouldNotBeResolved(t *testing.T) {
+	dir := t.TempDir()
+	keyfile := filepath.Join(dir, "notes.cfg")
+	if err := os.WriteFile(keyfile, []byte("id="+secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// No cwd on the prompts, so a relative `@` token cannot be resolved --
+	// real payloads carry one, which is why the row calls this synthetic.
+	prompt := func(text string) string {
+		return `{"hook_event_name":"UserPromptSubmit","prompt":` + quote(t, text) + `}`
+	}
+	for _, tc := range []struct {
+		name, payload, label string
+	}{
+		{"prompt text beside an unresolved token",
+			prompt("here " + secret + " and @notes.txt"), promptLabel},
+		{"prompt file resolved ahead of an unresolved token",
+			prompt("see @" + keyfile + " and @other.txt"), keyfile},
+		{"command string beside an unresolved operand",
+			bashCall(t, "echo "+secret+"; cat $X", dir), commandLabel},
+		{"file operand resolved ahead of an unresolved one",
+			bashCall(t, "cat notes.cfg $X", dir), keyfile},
+		// The walk goes on past the failure, so what comes after it is read
+		// too, and not only what came first.
+		{"prompt file after an unresolved token",
+			prompt("see @other.txt and @" + keyfile), keyfile},
+		{"file operand after an unresolved one",
+			bashCall(t, "cat $X; cat notes.cfg", dir), keyfile},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, tc.payload)
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 with a block (stderr: %q)", code, stderr)
+			}
+			if stdout == "" {
+				t.Fatal("no verdict: the text beside the failed operand was not scanned")
+			}
+			reason := reasonOf(t, stdout)
+			if want := `"aws-access-key-id" at byte`; !strings.Contains(reason, want) ||
+				!strings.Contains(reason, fmt.Sprintf("%q", tc.label)) {
+				t.Errorf("reason = %q, want %s in %q", reason, want, tc.label)
+			}
+			// The notice rides the reason on a prompt and its own field on a
+			// tool call; carry decides, and either way the person sees it.
+			notice := reason
+			if m, ok := decision(t, stdout)["systemMessage"].(string); ok {
+				notice = m
+			}
+			if !strings.Contains(notice, partlyRead) {
+				t.Errorf("the verdict does not say part of the call went unread: %q", stdout)
+			}
+			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+				t.Error("the verdict carries the value")
+			}
+			if got := readCoverage(t); len(got) != 0 {
+				t.Errorf("a block wrote %d coverage record(s): %+v", len(got), got)
+			}
+		})
 	}
 }
 
@@ -313,5 +387,23 @@ func TestAnUnwritableLogDoesNotChangeTheVerdict(t *testing.T) {
 	// The stderr half still works, because it does not touch the filesystem.
 	if !strings.Contains(stderr, "expands at run time") {
 		t.Errorf("stderr = %q, want the record on the sink that still works", stderr)
+	}
+}
+
+// A refusal further on in a walk that has already failed on an operand still
+// refuses. The walk used to stop at the first failure, so `cat $X; cat .env`
+// deferred on the operand and never reached the guarded path. `env` would not
+// show it: envDumped reads every segment before any operand is resolved.
+func TestARefusalPastAnUnresolvedOperandStillRefuses(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("NAME=value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "cat $X; cat .env", dir))
+	if code != 0 || stdout == "" {
+		t.Fatalf("exit %d, stdout %q, stderr %q, want the path refused", code, stdout, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "refused to read it") {
+		t.Errorf("reason = %q, want the guarded-path refusal", reason)
 	}
 }

@@ -600,7 +600,9 @@ decoded, a scan past its budget — no longer blocks. It **defers**: the hook
 writes no verdict at all, so the permission flow that would have run without
 this hook runs unchanged. An explicit `allow` would suppress the user's own
 rules; this has no opinion to spend on them, because it could not read the
-call.
+call. **A gap does not hide a finding beside it**: the walk goes on past an
+operand it cannot settle, what it did read is scanned, and a match there
+blocks (Q204).
 
 Why, measured over the week to 2026-09-05 across 100 sessions on one machine:
 

@@ -131,9 +131,26 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 			return decide(stdout, stderr, call, event, overridden,
 				refused.body(), "")
 		}
-		// No notice: scanCall reports nothing it read when it errors, so there
-		// is no set of allowed skips to name and failed() already says that
-		// nothing scanned this call at all.
+		// What the walk collected before it failed was scanned, and a finding
+		// in it blocks: the gap is in what could not be read, and deferring on
+		// it is no reason to wave through what could. The notice says the
+		// verdict stops short, because found() names matches in what this
+		// call would have sent and part of that was never opened.
+		//
+		// No coverage record beside the block. failed() says the call was not
+		// stopped, which would be false here, and the record exists because a
+		// deferred call is quiet to the person -- this one is not.
+		if len(findings) > 0 {
+			notice := partlyRead
+			if len(skips) > 0 {
+				notice += " " + alsoUnread(skips)
+			}
+			return decide(stdout, stderr, call, event, overridden, found(findings), notice)
+		}
+		// Nothing matched in what could be read, so nothing here is a reason
+		// to stop the call, and failed() says nothing scanned it: true of the
+		// call as a whole, which is the claim a coverage record makes. No
+		// notice for the skips, which keeps this branch what it was.
 		//
 		// This is the class the measurement in coverage.go is about -- an
 		// operand carrying a `$`, a glob, a directory, a relative path after a
@@ -263,10 +280,19 @@ const bypassPermissions = "bypassPermissions"
 // The loop runs to the end rather than returning at the first unread buffer. A
 // call naming several files should name every one of them that went unread, and
 // by here they are all in memory anyway.
+//
+// A walk that failed on an operand still hands back what it collected first --
+// the prompt or command string, and any file resolved ahead of the failure --
+// and those are scanned, with the error returned beside the findings. The
+// failure is a reason the rest of the call cannot be decided, not a reason to
+// skip the part that can: before Q204 a key typed beside an `@` token that
+// would not resolve crossed with no verdict. A refusal is the exception, since
+// it blocks whatever the buffers hold.
 func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
-	buffers, err := targets(call, event)
-	if err != nil || len(buffers) == 0 {
-		return nil, nil, err
+	buffers, gap := targets(call, event)
+	var refused refusal
+	if errors.As(gap, &refused) || len(buffers) == 0 {
+		return nil, nil, gap
 	}
 	set, err := rules.Load(embedded.Shipped)
 	if err != nil {
@@ -305,7 +331,7 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 		}
 		findings = append(findings, got.Findings...)
 	}
-	return findings, skips, nil
+	return findings, skips, gap
 }
 
 // A skipped is one buffer the pipeline could not read the text of, carried
@@ -404,7 +430,8 @@ type target struct {
 //
 // No targets means there was nothing to scan, which is a different answer from
 // an error and is why the two are separate returns. An error means something
-// that should have been scannable could not be read, and that blocks.
+// that should have been scannable could not be read, and it comes back with the
+// targets collected ahead of it, which scanCall still reads.
 func targets(call payload, event Event) ([]target, error) {
 	switch event {
 	case UserPromptSubmit:
