@@ -138,7 +138,7 @@ type Segment struct {
 	// Forked is true for a pipeline stage or a backgrounded command, which
 	// bash runs in a child shell of its own, so a `cd` in it moves nothing
 	// the next segment runs in. Upstream's `own`, negated so the zero value is
-	// the common case. Unlike Persists it reads `|&` as the pipe it is.
+	// the common case.
 	Forked bool
 }
 
@@ -214,11 +214,12 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		patDepth   int
 		patStarted bool
 		// One entry per open `case`, in the states scanDollarParen tracks it
-		// in: "in" | "pat" | "body", and "next" for a later arm's pattern. The two read against each other on
-		// purpose -- there the question is which `)` closes a substitution,
-		// here it is which segments an arm holds -- and neither is upstream's,
-		// whose group loop has no case handling at all. Segment.CaseArm has
-		// what this costs and why the port takes it.
+		// in: "in" | "pat" | "body", and "next" for a later arm's pattern.
+		// The two read against each other on purpose -- there the question
+		// is which `)` closes a substitution, here it is which segments an arm
+		// holds -- and neither is upstream's, whose group loop has no case
+		// handling at all. Segment.CaseArm has what this costs and why the
+		// port takes it.
 		clauses []string
 		// Whether the next word is where bash reads a command name, so `case`
 		// in `echo case` stays an operand. cmdPosKeywords is the same set
@@ -230,7 +231,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		if isOperator(t, quotedFrom[i], separators) {
 			empty := len(cur) == 0 && len(curRedir) == 0
 			if !empty {
-				persists := paren == 0 && prevSep != "|" &&
+				persists := paren == 0 && !isPipe(prevSep) &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
 				segs = append(segs, Segment{cur, curRedir, curInputs, persists,
 					conditional(prevSep), inCaseArm(clauses), pipe, curQF,
@@ -275,7 +276,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				clauses[n-1] = "next"
 				patDepth, patStarted = 0, false
 			}
-			if t != "|" {
+			if !isPipe(t) {
 				pipe++
 			}
 			prevSep = t
@@ -347,7 +348,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		i++
 	}
 	if len(cur) > 0 || len(curRedir) > 0 {
-		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && prevSep != "|",
+		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && !isPipe(prevSep),
 			conditional(prevSep), inCaseArm(clauses), pipe, curQF,
 			append([]int(nil), shells...), forked(prevSep, "")})
 	}
@@ -358,8 +359,14 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 // sep, upstream's stage_own without the `lastpipe` arm: a `cd` that arm says
 // may move the current shell is one the caller loses track of either way.
 func forked(lead, sep string) bool {
-	return sep == "|" || sep == "|&" || sep == "&" || lead == "|" || lead == "|&"
+	return isPipe(sep) || sep == "&" || isPipe(lead)
 }
+
+// isPipe is upstream's PIPE_OPS. `|&` is `2>&1 |`, so its right side is a
+// stage like any other: upstream's persistence rule and pipeline numbering
+// test for `|` alone, and `P=/x; true |& P=/y; cat $P/f` read /y/f where
+// bash reads /x/f, silently.
+func isPipe(sep string) bool { return sep == "|" || sep == "|&" }
 
 // trackCase advances the `case` clause states for one word token and reports
 // whether the next word is still in command position. The three arms and their

@@ -356,8 +356,8 @@ segment sits in and `enterShell` restores the directory on the way out, both
 upstream's Q173. A piped `{ … }` group and a function body are still read as
 the current shell, which is Q212. `classifyCd` and `follow` in
 `internal/hook/bash.go` are the port of workspace-guard's tracker and say at
-each arm where this one loses the directory and upstream does not. A command-substitution body is resolved
-where it was **written** rather than where the string ended, so `cd sub &&
+each arm where this one loses the directory and upstream does not. A
+command-substitution body is resolved where it was **written** rather than where the string ended, so `cd sub &&
 echo $(cat x)` reads `x` under `sub` like the plain spelling beside it:
 `substStates` marks each substitution in the string with a `\x1e`-bracketed
 word — 0 of 161,818 real `Bash` commands carry that byte, against 1 carrying

@@ -119,6 +119,12 @@ func TestSegments(t *testing.T) {
 				{[]string{"f=x"}, nil, nil, false, "", false, 0, nil, nil, true},
 				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false},
 			}},
+		{"nor one in a |& stage", "a |& f=x; cat $f",
+			[]Segment{
+				{[]string{"a"}, nil, nil, false, "", false, 0, nil, nil, true},
+				{[]string{"f=x"}, nil, nil, false, "", false, 0, nil, nil, true},
+				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false},
+			}},
 		{"one in a pipeline stage does not", "a | f=x; cat $f",
 			[]Segment{
 				{[]string{"a"}, nil, nil, false, "", false, 0, nil, nil, true},
@@ -294,7 +300,7 @@ func TestSegmentsNumbersTheShellsASegmentRunsIn(t *testing.T) {
 				{[]int{1}, false}}},
 		{"a pipeline's stages are forked", "cd a | cat x",
 			[]want{{nil, true}, {nil, true}}},
-		{"and so is a |& stage, which Persists reads as the shell's own",
+		{"and so is a |& stage",
 			"true |& cd w; cat x",
 			[]want{{nil, true}, {nil, true}, {nil, false}}},
 		{"and a backgrounded one", "cd a & cat x",

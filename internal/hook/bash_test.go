@@ -804,7 +804,7 @@ func TestACdThisCannotFollowLeavesTheOperandUnsettled(t *testing.T) {
 		{"another user's home", "cd ~someone && cat " + name},
 		{"pushd +N", "pushd +1 && cat " + name},
 		{"a move in a pipeline stage", "cd " + base + " | cat " + name},
-		// Persists reads only `|` as a pipe, so before Forked this move was
+		// Segments read only `|` as a pipe, so before isPipe this move was
 		// followed and the operand resolved under a directory bash never
 		// entered.
 		{"a move in a |& pipeline stage", "true |& cd " + base + "; cat " + name},
@@ -935,6 +935,7 @@ func TestAnAssignmentThePortCannotTrustLeavesTheOperandUnresolved(t *testing.T) 
 		{"a glob value", "SP=" + dir + "*; cat $SP/" + name},
 		{"assigned in a subshell", "(SP=" + dir + "); cat $SP/" + name},
 		{"assigned in a pipeline stage", "SP=" + dir + " | cat $SP/" + name},
+		{"assigned in a |& pipeline stage", "true |& SP=" + dir + "; cat $SP/" + name},
 		{"assigned in the background", "SP=" + dir + " & cat $SP/" + name},
 		{"a prefix on the reader", "SP=" + dir + " cat $SP/" + name},
 		{"reached through && after a command, in the next statement", "true && SP=" + dir + "; cat $SP/" + name},
