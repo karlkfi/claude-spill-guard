@@ -423,6 +423,22 @@ no digits. Two things hold it down:
   `certificate.pb.go`, a doc comment displaying a header, in four module
   versions. A body line ends where the line does and a path does not.
 
+**The arm runs on every buffer and not only on grep output, so on a raw file it
+can only add false positives.** A PEM body line never holds a `-`. Under a
+header, the line `https://example.com/some-` followed by 36 base64 characters
+to the end of the line exits 3 here and 0 on `main`. That is the class it
+belongs to, not the whole of it: any first word ending in `-` and followed by
+a base64 run to the line's end. The differential below finds no instance of
+it in real files, and the independent review of this change re-took it over
+985 files and found none either. It is a constructed cost and not a measured
+one.
+
+**A path with a space in it is not crossed.** The prefix arm admits no
+whitespace, because a path that may contain spaces is a prose line, and prose
+under a header is the thing this rule refuses. So `grep -rn -A3` over
+`my keys/k.pem` passes the key, where the same file read raw, or grepped with
+`-h`, is blocked. Found by the same review and driven here.
+
 **The differential is the files a key-bearing grep would print.** Over the 974
 files under `~/go/pkg/mod` carrying `PRIVATE KEY` on 2026-10-25, each read raw
 and as `grep -A30 'PRIVATE KEY'` output under `-n -H`, `-H` and `-n -h`: raw,
