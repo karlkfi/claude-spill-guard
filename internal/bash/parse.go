@@ -101,16 +101,33 @@ func consumeHeredocBody(text string, i int, delim string, stripTabs bool) (int, 
 // place splits an `&&` chain written across lines into two statements and the
 // chain reads as a `;` sequence.
 //
-// A `$(…)`, backtick span or `${…}` inside double quotes is copied whole, since
-// a `"` inside it does not end the outer string (claude-bouncer Q257). Read as ending
-// it, the `#` in `echo "$(echo "a # c")" ; cat f` starts a comment, the `cat`
-// is stripped with it, and its file is never opened by the scan -- a silent
-// allow. Upstream's matching arm for an UNQUOTED backtick or `${…}`, its `$(a)#b` word
-// join and its subscript copy -- claude-bouncer Q254, Q264 and Q217 -- are not ported; each
-// is a silent allow of its own, and Q210 owns them.
+// An assignment's subscript is copied whole, since bash reads `FOO[a #b]=x` as
+// one word and no comment starts inside it (claude-bouncer Q217). Only a
+// subscript followed by `=` or `+=` is, because outside an assignment bash does
+// start one there. subscriptEnd does not skip a quoted `]` the way upstream's
+// does, which is Q185; such a subscript closes early, finds no `=`, and is read
+// as before.
+//
+// The close of a `$(…)`, `<(…)`, `>(…)` or `$((…))` does not end a word, so a
+// `#` straight after one is text: bash reads `$(a)#b` as one word, where
+// `(a)#b` ends a subshell (claude-bouncer Q264). Each opener's close is found
+// with the substitution scanner and only a close found that way joins the word.
+//
+// A backtick substitution and a `${…}` expansion are copied whole, in or out of
+// double quotes, since no comment starts inside either for the outer line: bash
+// ends a comment in "`true # c`" at the closing backtick and reads the `#` in
+// `${x:- #}` as text (claude-bouncer Q254). So is a `$(…)` in double quotes,
+// where a `"` inside it does not end the outer string (claude-bouncer Q257).
+// Read as a comment, each of these took the command after it along, and that
+// command's file was never opened by the scan -- a silent allow. A substitution
+// body's own comments are the caller's, when it recurses into the body.
+//
+// Upstream's arm stepping over a `$'…'` whole is not ported; Q211 owns it.
 func StripComments(cmd string) string {
 	var out []byte
 	inSingle, inDouble := false, false
+	closes := map[int]bool{} // indices of the `)` that close a substitution
+	glued := -1              // len(out) just past such a `)`
 	for i, n := 0, len(cmd); i < n; {
 		c := cmd[i]
 		if inSingle {
@@ -134,12 +151,21 @@ func StripComments(cmd string) string {
 			i += 2
 			continue
 		}
-		if inDouble {
-			if end := dqExpansionEnd(cmd, i); end > i+1 { // copied whole
-				out = append(out, foldContinuations(cmd[i:end])...)
-				i = end
-				continue
+		end := -1
+		switch {
+		case inDouble:
+			end = dqExpansionEnd(cmd, i)
+		case c == '`':
+			if _, e, ok := scanBackticks(cmd, i+1); ok {
+				end = e
 			}
+		case strings.HasPrefix(cmd[i:], "${"):
+			end = braceEnd(cmd, i)
+		}
+		if end > i+1 { // copied whole (claude-bouncer Q254)
+			out = append(out, foldContinuations(cmd[i:end])...)
+			i = end
+			continue
 		}
 		if c == '"' {
 			inDouble = !inDouble
@@ -147,14 +173,34 @@ func StripComments(cmd string) string {
 			i++
 			continue
 		}
-		if !inDouble && c == '#' &&
-			(len(out) == 0 || isCommentPreceder(out[len(out)-1])) {
+		if c == '(' && !inDouble && i > 0 && strings.IndexByte("$<>", cmd[i-1]) >= 0 {
+			if _, e, ok := scanDollarParen(cmd, i+1); ok { // `$((` nests in it
+				closes[e-1] = true
+			}
+		}
+		atWord := (len(out) == 0 || isCommentPreceder(out[len(out)-1])) && len(out) != glued
+		if !inDouble && c == '#' && atWord {
 			for i < n && cmd[i] != '\n' { // keep the newline itself
 				i++
 			}
 			continue
 		}
+		if atWord && !inDouble {
+			name := nameRE.FindString(cmd[i:])
+			if j := i + len(name); name != "" && j < n && cmd[j] == '[' {
+				// `FOO[a #b]=x` (claude-bouncer Q217)
+				if e := subscriptEnd(cmd, j); e > 0 &&
+					(strings.HasPrefix(cmd[e:], "=") || strings.HasPrefix(cmd[e:], "+=")) {
+					out = append(out, cmd[i:e]...)
+					i = e
+					continue
+				}
+			}
+		}
 		out = append(out, c)
+		if closes[i] {
+			glued = len(out)
+		}
 		i++
 	}
 	return string(out)
