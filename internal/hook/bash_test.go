@@ -1530,6 +1530,74 @@ func TestACDPATHAssignedEarlierInTheStringLosesTheDirectory(t *testing.T) {
 	}
 }
 
+// A nameref assigns the name it refers to, so `declare -n r=CDPATH; r=<away>`
+// sets CDPATH while the tracker reads an assignment to `r` (Q213). Every row
+// was taken on bash 5.3.15 with the key where bash read it, and every one but
+// the unset-P row was a silent allow on main at 411ba2d: the tracker followed
+// the cd, kept P at `clean`, or split `$P` on the default IFS, and scanned the
+// clean copy. The unset-P row deferred there already and is kept for the
+// shape.
+//
+// The controls block on the local copy, which says the walk still follows the
+// cd and resolves the operand: `+n` removes the attribute, `export -n`
+// unexports, and bash reads no option after the first name.
+func TestANamerefLosesWhatItCouldAssign(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		files   map[string]bool // relative to root; true carries the key
+		local   string          // the copy a control blocks on, or "" to defer
+	}{
+		{"declare -n r=CDPATH; r={A}; cd target; cat f", cdpathFiles, ""},
+		{"typeset -n r=CDPATH; r={A}; cd target; cat f", cdpathFiles, ""},
+		{"declare -gn r=CDPATH; r={A}; cd target; cat f", cdpathFiles, ""},
+		{"declare '-n' r=CDPATH; r={A}; cd target; cat f", cdpathFiles, ""},
+		{"fn() { local -n r=CDPATH; r={A}; cd target; cat f; }; fn", cdpathFiles, ""},
+		{"declare -n r; r=CDPATH; r={A}; cd target; cat f", cdpathFiles, ""},
+		{"P=clean; declare -n r=P; r=keyed; cat $P/f", map[string]bool{"cwd/clean/f": false, "cwd/keyed/f": true}, ""},
+		{"declare -n r=P; r=keyed; cat $P/f", map[string]bool{"cwd/keyed/f": true}, ""},
+		{"P=clean/k; declare -n r=IFS; r=/; cat $P", map[string]bool{"cwd/clean/k": false, "cwd/k": true}, ""},
+		{"declare +n r; cd target; cat f", localFiles, "cwd/target/f"},
+		{"export -n P; cd target; cat f", localFiles, "cwd/target/f"},
+		{"declare r=CDPATH -n; r={A}; cd target; cat f", localFiles, "cwd/target/f"},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			root := t.TempDir()
+			for rel, keyed := range tc.files {
+				p := filepath.Join(root, rel)
+				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				body := "nothing here\n"
+				if keyed {
+					body = "AWS_ACCESS_KEY_ID=" + secret + "\n"
+				}
+				if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			command := strings.ReplaceAll(tc.command, "{A}", filepath.Join(root, "away"))
+			code, stdout, stderr := drive(t, bashCall(t, command, filepath.Join(root, "cwd")))
+			if tc.local == "" {
+				if reason := deferred(t, code, stdout, stderr); reason == "" {
+					t.Error("want a coverage record -- the nameref may have assigned what the walk reads")
+				}
+				return
+			}
+			if code != 0 || stdout == "" {
+				t.Fatalf("exit code = %d, stdout = %q, want a block on the local copy (stderr: %q)", code, stdout, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, filepath.Join(root, tc.local)) {
+				t.Errorf("reason = %q, want the local copy", reason)
+			}
+		})
+	}
+}
+
+var (
+	cdpathFiles = map[string]bool{"cwd/target/f": false, "away/target/f": true}
+	localFiles  = map[string]bool{"cwd/target/f": true, "away/target/f": false}
+)
+
 // The fail-open Q175 names. `FOO[0]=x` is an inline env prefix to bash's
 // parser exactly as `FOO=x` is: the shell peels it, fails to export it --
 // `FOO[0]: not a valid identifier` on stderr -- and runs the command behind it
