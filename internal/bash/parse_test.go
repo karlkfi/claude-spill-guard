@@ -77,6 +77,8 @@ func TestStripComments(t *testing.T) {
 		{"a length expansion", "echo ${#x} #c", "echo ${#x} "},
 		{"a special parameter", "echo $# #c", "echo $# "},
 		{"a backtick glued to a hash", "echo `echo a`#x #c", "echo `echo a`#x "},
+		// An escaped apostrophe does not close a `$'…'` (claude-bouncer Q225).
+		{"an ANSI-C string holds no comment", `echo $'\' #' ; id`, `echo $'\' #' ; id`},
 		// Unterminated, each is read as before.
 		{"an unterminated brace expansion", "echo ${x:- # c", "echo ${x:- "},
 		{"an unterminated backtick span", "echo `true # c", "echo `true "},
@@ -117,6 +119,10 @@ func TestStripHeredocBodies(t *testing.T) {
 			`grep x <<< "$v"`, `grep x <<< "$v"`},
 		{"a quoted operator is text",
 			"echo '<<EOF' ; echo real", "echo '<<EOF' ; echo real"},
+		// An escaped apostrophe does not close a `$'…'`, so the `<<` after one
+		// is still an operator (claude-bouncer Q225).
+		{"a heredoc after an ANSI-C string",
+			"cat <<EOF ; echo $'\\''\nx\nEOF\nid", "cat <<EOF ; echo $'\\''\nid"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := StripHeredocBodies(tc.in, nil, false); got != tc.want {
@@ -276,4 +282,20 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// bash ends `<<$'E\x4fF'` at an `EOF` line, prints `$(echo SUB)` unexpanded,
+// and runs the line after (claude-bouncer Q225). Read as `$` and a quoted
+// word, the body ran to the end of the input and swallowed that line.
+func TestAnANSICHeredocDelimiterEndsWhereBashEndsIt(t *testing.T) {
+	for _, word := range []string{`$'EOF'`, `$'E\x4fF'`} {
+		h := &Heredocs{}
+		got := StripHeredocBodies("cat <<"+word+"\n$(echo SUB)\nEOF\nid", h, false)
+		if want := "cat <<" + word + "\nid"; got != want {
+			t.Errorf("StripHeredocBodies with delimiter %s = %q, want %q", word, got, want)
+		}
+		if len(h.Expanded) != 0 {
+			t.Errorf("delimiter %s: Expanded = %q, want none, since quoting makes the body literal", word, h.Expanded)
+		}
+	}
 }

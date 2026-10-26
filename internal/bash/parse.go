@@ -122,7 +122,8 @@ func consumeHeredocBody(text string, i int, delim string, stripTabs bool) (int, 
 // command's file was never opened by the scan -- a silent allow. A substitution
 // body's own comments are the caller's, when it recurses into the body.
 //
-// Upstream's arm stepping over a `$'…'` whole is not ported; Q211 owns it.
+// A `$'…'` is copied whole too, since a backslash-escaped apostrophe inside one
+// does not close it: `echo $'\' #' ; cat f` runs cat (claude-bouncer Q225).
 func StripComments(cmd string) string {
 	var out []byte
 	inSingle, inDouble := false, false
@@ -141,6 +142,13 @@ func StripComments(cmd string) string {
 			out = append(out, c)
 			i++
 			continue
+		}
+		if !inDouble {
+			if end := ansiCEnd(cmd, i); end > 0 {
+				out = append(out, cmd[i:end]...)
+				i = end
+				continue
+			}
 		}
 		if c == '\\' && i+1 < n { // escape survives both modes
 			if cmd[i+1] == '\n' { // continuation -> one logical line
@@ -247,7 +255,12 @@ func scanHeredocDelim(text string, i int) (delim string, stripTabs, quoted bool,
 	}
 	var chars []byte
 	for i < n && strings.IndexByte(" \t\n;|&()<>", text[i]) < 0 {
+		e := ansiCEnd(text, i)
 		switch d := text[i]; {
+		case e > 0: // `<<$'EOF'` ends at `EOF` (claude-bouncer Q225)
+			quoted = true
+			chars = append(chars, ansiCDecode(text[i+2:e-1])...)
+			i = e
 		case d == '\'':
 			quoted = true
 			i++
@@ -405,6 +418,12 @@ func StripHeredocBodies(cmd string, h *Heredocs, ownLevelOnly bool) string {
 				inDouble = false
 			}
 			i++
+			continue
+		}
+		if end := ansiCEnd(cmd, i); end > 0 {
+			out = append(out, cmd[i:end]...)
+			last = '\''
+			i = end
 			continue
 		}
 		if c == '\'' {

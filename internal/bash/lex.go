@@ -357,6 +357,17 @@ func lex(text string) ([]string, []int, error) {
 // requote rewrites what POSIX quoting cannot read the way bash does, so a lexer
 // that knows only POSIX quoting reads the same words.
 //
+// Each `$'…'` becomes the single-quoted word it decodes to (claude-bouncer
+// Q225). Read raw, a backslash-escaped apostrophe inside one closed the run
+// early, so `echo $'it\'s'; cat f` no longer lexed and every reader in the call
+// deferred, and `cat $'f'` handed cat an operand that named no file. Each
+// backtick substitution becomes a double-quoted run holding it verbatim, so it
+// stays one word with what is glued to it: bash parses its body separately,
+// and split on whitespace and operators it reached the readers as fragments
+// (claude-bouncer Q274). Only an unquoted one of either is rewritten: inside
+// double quotes `$'` is text and a backtick span is already one word, inside
+// single quotes everything is.
+//
 // Inside double quotes bash parses a `$(…)`, backtick or `${…}` on its own, so
 // a `"` inside one does not close the outer string. POSIX quoting closes it
 // there, and on `"$(echo '"')"` the real closing `"` is then unbalanced and the
@@ -367,20 +378,14 @@ func lex(text string) ([]string, []int, error) {
 // upstream measured that holding every substitution changed verdicts on deep
 // nesting, so every command that lexed before tokenizes as before.
 //
-// Upstream's requote has two more arms, both rewriting an unquoted word before
-// the balance check: each `$'…'` becomes the single-quoted word it decodes to
-// (claude-bouncer Q225), and each backtick substitution a double-quoted run
-// holding it (claude-bouncer Q274).
-// Neither is ported, so the flat reading is the text itself and the check runs
-// on it directly. Q211 owns both. The first defers a call bash would run; the
-// second was driven on three operand shapes -- a backtick substitution as
-// cat's whole operand, glued to a prefix, and inside double quotes -- and
-// each already defers as a runtime expansion.
+// Upstream also takes a commenters argument, which lex's configuration leaves
+// empty, so it is left out here as it is in shlexBalanced.
 func requote(text string) string {
-	if shlexBalanced(text) {
-		return text
+	flat := requoteOnce(text, false)
+	if shlexBalanced(flat) {
+		return flat
 	}
-	return requoteHeld(text)
+	return requoteOnce(text, true)
 }
 
 // shlexBalanced reports whether lex reads text without errNoClosingQuote or
@@ -424,12 +429,11 @@ func shlexBalanced(text string) bool {
 	return true
 }
 
-// requoteHeld is upstream's `_requote` with hold set, less the two arms requote
-// names. Each expansion inside double quotes is copied with `\` and `"`
-// escaped, so the lexer keeps it as text inside the outer string; lex's
-// escapedquotes handling takes each escape back out, so the token carries the
-// expansion byte for byte.
-func requoteHeld(text string) string {
+// requoteOnce is upstream's `_requote`. With hold set, each expansion inside
+// double quotes is copied with `\` and `"` escaped, so the lexer keeps it as
+// text inside the outer string; lex's escapedquotes handling takes each escape
+// back out, so the token carries the expansion byte for byte.
+func requoteOnce(text string, hold bool) string {
 	var out strings.Builder
 	inDouble := false
 	for i, n := 0, len(text); i < n; {
@@ -441,8 +445,12 @@ func requoteHeld(text string) string {
 			continue
 		}
 		if inDouble {
-			if end := dqExpansionEnd(text, i); end > 0 { // escaped to read as text
-				out.WriteString(strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(text[i:end]))
+			end := -1
+			if hold {
+				end = dqExpansionEnd(text, i)
+			}
+			if end > 0 { // escaped to read as text (claude-bouncer Q257)
+				out.WriteString(dqEscaper.Replace(text[i:end]))
 				i = end
 				continue
 			}
@@ -467,19 +475,26 @@ func requoteHeld(text string) string {
 			i = end
 			continue
 		}
-		// Upstream rewrites a `$'…'` here. Unported, it is still stepped over
-		// whole, so a `\'` inside one does not open a single-quoted run that
-		// inverts every quote after it.
 		if end := ansiCEnd(text, i); end > 0 {
-			out.WriteString(text[i:end])
+			out.WriteString("'" + strings.ReplaceAll(ansiCDecode(text[i+2:end-1]), "'", `'\''`) + "'")
 			i = end
 			continue
+		}
+		if c == '`' {
+			if _, end, ok := scanBackticks(text, i+1); ok {
+				out.WriteString(`"` + dqEscaper.Replace(text[i:end]) + `"`)
+				i = end
+				continue
+			}
 		}
 		out.WriteByte(c)
 		i++
 	}
 	return out.String()
 }
+
+// dqEscaper escapes a span so it reads as text inside a double-quoted run.
+var dqEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
 type lexer struct {
 	src   string
