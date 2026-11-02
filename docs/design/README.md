@@ -2227,13 +2227,16 @@ file can be refused as well: 64 KiB of 80-column lines arrived whole and 128
 KiB of them arrived as nothing. The bytes that ran the scan past its budget
 were therefore bytes the harness was not going to send.
 
-**That does not make the record harmless, because an overrun discards the
-findings already made.** A small file named beside the big ones is attached
-unscanned. Driven on the same version with a build of `162fcf9` at the shipped
-budget, load 115: the six fixtures and `@notes.txt`, a copy of the planted key
-file, ran for 49.702s, and the prompt proceeded with `notes.txt` attached and
-its key in the attachment. The same binary blocks that file on its own. That is
-Q227, and it is a defect on `main` rather than in this measurement.
+**That does not make the record harmless, because an overrun reaches no verdict
+on any buffer in the call.** A small file named beside the big ones is attached
+with nothing said about it. Driven on the same version with a build of
+`162fcf9` at the shipped budget, at load 115, with the six fixtures followed by
+`@notes.txt`, a copy of the planted key file. The run took 49.702s and the
+prompt proceeded with `notes.txt` attached, key included. In that order the
+small file was never read. Under a budget cut to 1s it crosses in the other
+order too, after its finding was made and then discarded. The same binary
+blocks that file on its own. That is Q227, and it is a defect on `main` rather
+than in this measurement.
 
 None of this moves
 [the over-read](#a-buffer-whose-bytes-cross-anyway-measured): the limit is the
