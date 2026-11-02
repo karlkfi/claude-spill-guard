@@ -97,18 +97,14 @@ ALLOWED = {
         "the canary is compiled in rather than read from a file, because a "
         "canary a broken install fails to find is one whose absence looks "
         "like a pass. Shipped source, so it cannot read testdata either way",
-    # The next three describe the literal rather than deciding it -- none of
-    # them says why the value could not come from testvec. Q152 is the row that
-    # answers that per file, and whatever moves takes its line out of here.
-    "cmd/spill-guard/main_test.go":
-        "the literal sits inside a JSON payload driven through the binary end "
-        "to end. Q152 asks whether it could be built with the vector instead",
-    "internal/hook/hook_test.go":
-        "the value the block assertions are written against. Q152 asks whether "
-        "the const could be a testvec lookup",
+    # The two below are decisions about bytes the assertion is made of. The
+    # value in each either must equal a planted file's own bytes or is one
+    # shape of a table, so a lookup in testvec would put it far from its case.
     "internal/scan/decode_test.go":
-        "the key a UTF-16 fixture is built around, in the test that builds it. "
-        "Q152 asks whether the bytes here are the assertion or just the input",
+        "the key the planted UTF-16 fixture is built around, and the test "
+        "asserts a finding's offset lands on those exact bytes in that file. "
+        "It is deliberately not a vector: a vector's value is shared with "
+        "other fixtures, and an edit to either would break the other silently",
     "internal/validate/jwt_test.go":
         "a table of JWT shapes where each case is a specific malformation, so "
         "the bytes are the assertion",

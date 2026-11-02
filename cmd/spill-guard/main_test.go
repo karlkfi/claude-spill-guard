@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 	"github.com/karlkfi/claude-spill-guard/internal/version"
 )
 
@@ -73,7 +74,7 @@ func TestRunEscapesControlCharactersInTheCommandItRejects(t *testing.T) {
 // `hook` that ignored stdin would pass every other test in this file.
 func TestRunHookReadsThePayloadFromStdin(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	payload := `{"hook_event_name":"UserPromptSubmit","prompt":"AKIA0123456789ABCDEF"}`
+	payload := `{"hook_event_name":"UserPromptSubmit","prompt":"` + testvec.Load(t).Get(t, "aws-access-key-id") + `"}`
 	if code := run([]string{"hook"}, strings.NewReader(payload), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr.String())
 	}

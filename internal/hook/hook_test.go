@@ -3,6 +3,7 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,17 +12,23 @@ import (
 	"unicode/utf16"
 
 	"github.com/karlkfi/claude-spill-guard/internal/scan"
+	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 )
 
-// A counting sequence and the first six hex letters, so a reader meeting it in
-// a public repo can see it is synthetic without taking a comment's word for
-// it. internal/rules/capture_test.go already uses it, which is where it comes
-// from; it matches the rule and clears the entropy floor.
-//
-// Not AWS's own documented example key: a rule that drops what a vendor
-// publishes as an example is one this repo wants, and it would leave every
-// test below passing while asserting nothing.
-const secret = "AKIA0123456789ABCDEF"
+// The credential every block assertion in this package is written against,
+// loaded once in TestMain from the vectors file. A package-level var rather
+// than a value each test loads: dozens of assertions read it, and threading a
+// *testing.T through the name would rewrite all of them to say nothing new.
+var secret string
+
+// fatal adapts testvec's TB to TestMain, which has no *testing.T to fail. A
+// vectors file this package cannot read takes the binary down where the problem
+// is, since every assertion below would otherwise run against an empty string.
+type fatal struct{}
+
+func (fatal) Helper() {}
+
+func (fatal) Fatalf(format string, args ...any) { panic(fmt.Sprintf(format, args...)) }
 
 // drive runs the hook over one payload and hands back everything a caller of
 // the process would see.
@@ -813,6 +820,7 @@ func TestABinaryPromptTargetIsMatchedWhereAReadOfItIsNot(t *testing.T) {
 // gets forgotten. This package reaches hook.Run through drive and driveRaw, and a future test
 // that calls it another way is covered here and would not be there.
 func TestMain(m *testing.M) {
+	secret = testvec.Load(fatal{}).Get(fatal{}, "aws-access-key-id")
 	dir, err := os.MkdirTemp("", "spill-guard-teststate")
 	if err != nil {
 		panic(err)
