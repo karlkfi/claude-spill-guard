@@ -1008,15 +1008,13 @@ func TestACompoundInAPipelineOrAFunctionBodyKeepsItsMove(t *testing.T) {
 		{"if true; then cd w; fi | cat; cat x", "x"},
 		{"for i in 1; do cd w; done & wait; cat x", "x"},
 		{"case a in a) cd w;; esac | cat; cat x", "x"},
-		{"f() { cd w; }; cat x", "x"},
-		{"function f { cd w; }; cat x", "x"},
 		{"f() { cd w; cat x; }; f", "w/x"},
+		// A substitution written in the body is read with it, and the
+		// body's own definition does not arm what the body runs.
+		{`f() { cd w; echo "$(cat x)"; }; f`, "w/x"},
 		// A body in a subshell moves nothing its caller runs, so the call
 		// keeps the directory.
 		{"f() ( cd w ); f; cat x", "x"},
-		// The call inside the subshell is lost; the restore at its close is
-		// not.
-		{"f() { cd w; }; (f; cat x); cat x", "x"},
 		// Unpiped, a compound is the current shell, and its move stands.
 		{"while false; do :; done; { cd w; }; cat x", "w/x"},
 	} {
@@ -1035,6 +1033,11 @@ func TestACompoundInAPipelineOrAFunctionBodyKeepsItsMove(t *testing.T) {
 		})
 	}
 	for _, command := range []string{
+		// Past a moving definition nothing is followed, called or not:
+		// TestAMoveThroughAWordTheHookCannotNameIsNotFollowed says why.
+		"f() { cd w; }; cat x",
+		"function f { cd w; }; cat x",
+		"f() { cd w; }; (f; cat x); cat x",
 		"f() { cd w; }; f; cat x",
 		"function f { cd w; }; f; cat x",
 		"f() { cd w; }; g() { f; }; g; cat x",
@@ -1055,20 +1058,26 @@ func TestACompoundInAPipelineOrAFunctionBodyKeepsItsMove(t *testing.T) {
 }
 
 // A moving function can be run by a word that does not name it -- `eval f`,
-// `${g:-f}`, a sourced file, a DEBUG trap, `mapfile -C` -- and a function can
-// take the name `cd` itself, after which `cd w` runs the body and not the
-// builtin. Either way the move is not the one the tracker would follow, so
-// the directory is lost and the operand after it deferred. Found in review
-// of Q212: until a call had to name the function, main followed the body's
-// `cd` at the definition and so happened to read the right file.
+// `${g:-f}`, `${ f; }` in an argument, a sourced file, a DEBUG trap,
+// `mapfile -C`, `compgen -F` -- and a function can take the name `cd` itself,
+// after which `cd w` runs the body and not the builtin. Review of Q212 found
+// these in two rounds, so no path is enumerated: past a moving definition
+// every operand after it defers, which is pastDefinition's rule.
 //
 // Each row is driven on bash 5.3.15 as the test above is, with the key in the
 // file bash reads, so a row resolved against the directory the tracker would
-// have kept allows silently instead of deferring. The controls are the same
-// words with no moving function defined, which still block where bash reads.
+// have kept allows silently instead of deferring. ROOT is the tree. The
+// controls are the same words with no moving function defined, which still
+// block where bash reads.
 func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 	tree := func(t *testing.T, key string) string {
-		root := t.TempDir()
+		// Not t.TempDir, whose path carries the subtest's name -- `(`, `{`
+		// and all -- so `cd ROOT` would not be a literal the tracker follows.
+		root, err := os.MkdirTemp("", "spill-guard-q212-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.RemoveAll(root) })
 		for _, f := range []string{"x", "w/x", "v/x", "s.sh", "l.txt"} {
 			path := filepath.Join(root, filepath.FromSlash(f))
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1106,10 +1115,26 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"pushd() { :; }; pushd w >/dev/null; cat x", "x"},
 		{`cd() { :; }; echo "$(cd w; cat x)"`, "x"},
 		{`cd() { :; }; cd w; echo "$(cat x)"`, "x"},
+		{"f() { cd w; }; echo ${ f; }; cat x", "w/x"},
+		{"f() { cd w; }; echo ${| f; }; cat x", "w/x"},
+		{"f() { cd w; }; compgen -F f x >/dev/null 2>&1; cat x", "w/x"},
+		{"cd () ( : ); cd w; cat x", "x"},
+		{"function cd ( : ); cd w; cat x", "x"},
+		{"pushd () ( : ); pushd w >/dev/null; cat x", "x"},
+		// No path is asked about, so these defer too, where bash reads
+		// the file the tracker would have reached: the cost of the rule.
+		// A substitution is placed past the definition, and a body that
+		// follows a move of its own still inherits the rule.
+		{`f() { cd w; }; eval f; echo "$(cat x)"`, "w/x"},
+		{`f() { cd w; }; echo "$(cd ROOT; eval f; cat x)"`, "w/x"},
+		{"f() { cd w; }; cd ROOT; cat x", "x"},
+		{"cd() { :; }; builtin cd w; cat x", "w/x"},
+		{"f() { cd w; }; builtin f; cat x", "x"},
 	} {
 		t.Run(tc.command+" defers", func(t *testing.T) {
 			root := tree(t, tc.key)
-			code, stdout, stderr := drive(t, bashCall(t, tc.command, root))
+			command := strings.ReplaceAll(tc.command, "ROOT", root)
+			code, stdout, stderr := drive(t, bashCall(t, command, root))
 			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
 				t.Errorf("coverage reason = %q, want the move unfollowed", reason)
 			}
@@ -1122,10 +1147,9 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"cd w; ${g:-true}; cat x", "w/x"},
 		{"cd w; . ./s.sh 2>/dev/null; cat x", "w/x"},
 		{"f() { :; }; cd w; eval f; cat x", "w/x"},
-		// `builtin` runs no function: the first is the real cd, and the
-		// second is `not a shell builtin` and moves nothing.
-		{"cd() { :; }; builtin cd w; cat x", "w/x"},
-		{"f() { cd w; }; builtin f; cat x", "x"},
+		// A definition that does not move arms nothing.
+		{"f() { :; }; cd w; f; cat x", "w/x"},
+		{"f() ( cd v ); cd w; f; cat x", "w/x"},
 	} {
 		t.Run(tc.command+" blocks", func(t *testing.T) {
 			root := tree(t, tc.key)

@@ -360,9 +360,9 @@ it and dropped at its close, so `(cd w && cat x)` reads `w/x` and `(cd w);
 cat x` reads `./x`, as bash 5.3 does: `Segment.Shells` numbers the subshells a
 segment sits in and `enterShell` restores the directory on the way out, both
 upstream's Q173. So is a `{ … }`, loop, `if` or `case` piped or backgrounded
-as a whole, and a function body, whose `cd` moves nothing until a call to it
-loses the directory -- upstream's Q272 and Q265, ported by Q212, with the last
-pipeline stage losing it too wherever `lastpipe` may be on. `classifyCd` and `follow` in
+as a whole, and a function body, whose `cd` moves nothing; past a moving
+definition a relative operand defers, as a call need not name it -- upstream's Q272
+and Q265, ported by Q212, a `lastpipe` last stage losing it too. `classifyCd` and `follow` in
 `internal/hook/bash.go` are the port of workspace-guard's tracker and say at
 each arm where this one loses the directory and upstream does not. A
 command-substitution body is resolved where it was **written** rather than where the string ended, so `cd sub &&

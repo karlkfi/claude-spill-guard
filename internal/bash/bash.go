@@ -165,6 +165,11 @@ type Segment struct {
 	// there moves the rest of the body and not what follows the definition;
 	// a call to it is what moves the caller. Upstream's function_scope.
 	Function string
+	// Body names the innermost function whose body this segment sits in at
+	// any depth, so it is Function or the function a subshell inside a body
+	// belongs to: `cd () ( : )` defines cd, though none of its segments sits
+	// directly in the body. This port's, and upstream has no field for it.
+	Body string
 }
 
 // compoundClosers maps the reserved word that opens each compound command to
@@ -309,7 +314,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				segs = append(segs, Segment{cur, curRedir, curInputs, persists,
 					conditional(prevSep), inCaseArm(clauses), pipe, curQF,
 					append([]int(nil), shells...), forked(lead, t),
-					lastStage(lead, t, lastClose), ""})
+					lastStage(lead, t, lastClose), "", ""})
 				cur, curQF, curRedir, curInputs = nil, nil, nil, nil
 			}
 			lastClose = false
@@ -492,11 +497,15 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && !isPipe(prevSep),
 			conditional(prevSep), inCaseArm(clauses), pipe, curQF,
 			append([]int(nil), shells...), forked(lead, ""),
-			lastStage(lead, "", lastClose), ""})
+			lastStage(lead, "", lastClose), "", ""})
 	}
 	for k := range segs {
-		if n := len(segs[k].Shells); n > 0 {
-			segs[k].Function = fnNames[segs[k].Shells[n-1]]
+		shells := segs[k].Shells
+		if n := len(shells); n > 0 {
+			segs[k].Function = fnNames[shells[n-1]]
+		}
+		for n := len(shells) - 1; n >= 0 && segs[k].Body == ""; n-- {
+			segs[k].Body = fnNames[shells[n]]
 		}
 	}
 	return segs, nil
