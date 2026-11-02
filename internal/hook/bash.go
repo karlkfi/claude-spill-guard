@@ -223,7 +223,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 			}
 			tokens := argv
 			if len(tokens) == 0 {
-				continue
+				if !readsBareInput(segment, cur.depth > 0 && len(segments) == 1) {
+					continue
+				}
+				// bash documents `$(< f)` as the faster `$(cat f)`, so it is
+				// read as that, inputs and all.
+				tokens = []string{"cat"}
 			}
 			// The command a wrapper runs is judged rather than the wrapper:
 			// `command cat f`, `nice cat f` and `sudo cat f` each print f, and
@@ -965,6 +970,25 @@ func classifyCd(tokens []string) (kind, arg string) {
 		return "arg", t
 	}
 	return "unknown", "" // bare `cd` -> $HOME
+}
+
+// readsBareInput reports whether a segment with no command word sends its `<`
+// target anyway. bash does it only for a substitution body that is one bare
+// redirect -- `$(<f)`, `$( < f )`, `$(<f;)` -- and a second redirect, a pipe,
+// a `&`, a `!`, a `( )` or a `{ }` makes it an empty command that prints
+// nothing; driven on 5.3.15. zsh runs $READNULLCMD on the file wherever the
+// command word is missing, `<f` at the top level and `! <f` included, unless
+// an output redirect takes what it prints; driven under `zsh -f`. Segments
+// drops the digit of `3<f`, so that one is read where neither shell does.
+func readsBareInput(segment bash.Segment, wholeBody bool) bool {
+	if len(segment.Inputs) == 0 || len(segment.Redirects) != len(segment.Inputs) {
+		return false
+	}
+	if toolShellIsZsh() {
+		return true
+	}
+	return wholeBody && len(segment.Tokens) == 0 && len(segment.Inputs) == 1 &&
+		!segment.Forked && len(segment.Shells) == 0
 }
 
 // A savedShell is one subshell entered and not yet left, holding the directory
