@@ -2036,6 +2036,14 @@ func TestASplitValueIsTheCommandItCarries(t *testing.T) {
 		`V="cat ` + name + `"; V=y $V`,
 		// A builtin the split names runs like one written plainly.
 		`V="cd w"; $V; cat x`,
+		// A body is read by this walk, so these reach the split above.
+		`echo "$(V="cat ` + name + `"; $V)"`,
+		`echo "$(V="cd w"; $V; cat x)"`,
+		`V="cat ` + name + `"; echo "$($V)"`,
+		// The directory a body starts in comes from substStates, which
+		// splits on its own copy: the move has to be read there too.
+		`V="cd w"; $V; echo "$(cat x)"`,
+		`echo "$(V="cd w"; $V; echo "$(cat x)")"`,
 	} {
 		t.Run(command+" blocks", func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
@@ -2056,6 +2064,7 @@ func TestASplitValueIsTheCommandItCarries(t *testing.T) {
 		`V="LC_ALL=C cat ` + name + `"; $V`,
 		`(V="cat ` + name + `"); $V`,
 		`V="cat ` + name + `" true; $V`,
+		`echo "$(V="LC_ALL=C cat ` + name + `"; $V)"`,
 	} {
 		t.Run(command+" reads nothing", func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
