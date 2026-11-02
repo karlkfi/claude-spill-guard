@@ -104,9 +104,7 @@ func consumeHeredocBody(text string, i int, delim string, stripTabs bool) (int, 
 // An assignment's subscript is copied whole, since bash reads `FOO[a #b]=x` as
 // one word and no comment starts inside it (claude-bouncer Q217). Only a
 // subscript followed by `=` or `+=` is, because outside an assignment bash does
-// start one there. subscriptEnd does not skip a quoted `]` the way upstream's
-// does, which is Q185; such a subscript closes early, finds no `=`, and is read
-// as before.
+// start one there. subscriptEnd skips a quoted `]` as upstream's does (Q185).
 //
 // The close of a `$(…)`, `<(…)`, `>(…)` or `$((…))` does not end a word, so a
 // `#` straight after one is text: bash reads `$(a)#b` as one word, where

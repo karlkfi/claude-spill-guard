@@ -331,10 +331,10 @@ target` does not search where `CDPATH=<dir>` and `CDPATH+=:<dir>` both do.
 Standing alone it does search, and so does any spelling of CDPATH assigned
 earlier in the string -- `export`, `declare`, a heredoc's substitution --
 which `vars.noteCDPATH` records so `follow` loses the directory, where before
-the cd went to the local copy while bash read the CDPATH one (Q186). What
-is left open is a subscript the lexer cannot keep whole -- one carrying
-whitespace, shell punctuation, or a quoted `]` -- which is still under-peeled
-and is Q185.
+the cd went to the local copy while bash read the CDPATH one (Q186). A
+subscript holding whitespace, shell punctuation, a quote or an expansion is a
+prefix too: in command position the lexer reads `NAME[...]` from the raw text
+as bash does, claude-bouncer Q217's lexer half, ported by Q185.
 A quoted **operator** is not one
 either, on the same reading and ported the same way from #138: `cat ';' f` hands
 `;` to `cat`, and splitting there left `cat` no operands and read `f` as a

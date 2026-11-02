@@ -22,8 +22,8 @@
 // claude-bouncer Q257 (abc788e) is ported: requote's double-quote hold and the matching arm
 // in StripComments. So are the comment stripper's claude-bouncer Q254
 // (e82fe12), Q264 (ea64a90) and Q217 (a3c9052) arms, read at 784fc36 (Q210).
-// Q217's lexer half -- keeping `NAME[...]` whole in command position -- is not,
-// and is Q185 here. requote's ANSI-C decode and backtick rewrite
+// Q217's lexer half -- keeping `NAME[...]` whole in command position -- is
+// ported too, read at 00c94bc (Q185). requote's ANSI-C decode and backtick rewrite
 // (claude-bouncer Q225, b0e3fdc, and Q274, f440dbd) and StripComments' `$'…'`
 // arm are ported too, from the same revision (Q211).
 //

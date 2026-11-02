@@ -408,45 +408,36 @@ func TestQuotingDisarmsASubscriptedAssignment(t *testing.T) {
 	}
 }
 
-// Four subscripts bash peels and this does not, all for one reason: bash scans
-// for the closing `]` over the word as WRITTEN, and this scans what the lexer
-// left of it.
-//
-// The lexer splits a word on whitespace and on shell punctuation, and removes
-// quotes before anything asks what the word is. So a subscript holding any of
-// those either arrives as several tokens, or arrives as one token whose quotes
-// are gone and whose provenance is a single offset -- which says where quoting
-// began and cannot say which `]` it covered. Each row is read as a command
-// name, and a reader behind such a prefix has its operands go unscanned:
-// under-peeling, the fail-open direction, and the one Q175 closed for the
-// ordinary spelling.
-//
-// Closing these means keeping `NAME[...]` whole in the lexer, quotes and all,
-// which closes all four at once -- one mechanism, so one row: Q185.
-//
-// Every word below peels in bash and prints the file, driven 2026-09-19 on
-// 5.3.15 the same way as the tables above. The rows are here so the gap is a
-// failing expectation somebody has to delete rather than a case nobody wrote.
-func TestASubscriptTheLexerCannotKeepWholeIsUnderPeeled(t *testing.T) {
-	for _, tc := range []struct {
-		word string
-		why  string
-	}{
-		{`FOO[$((1+1))]=x`, "the parens are punctuation, so the word lexes as five tokens"},
-		{`FOO[a b]=x`, "the space splits the word in two"},
-		{`FOO["a]b"]=x`, "the quoted `]` closes the subscript once the quotes are gone"},
-		{`FOO[a\]b]=x`, "the escaped `]` closes it the same way"},
+// A subscript bash scans over the word as WRITTEN, which the lexer now hands
+// over whole in command position (Q185, claude-bouncer Q217): whitespace, shell
+// punctuation, quotes and expansions inside one no longer split the word or
+// close it early. Every word below peels in bash 5.3.15 and prints the file
+// behind it. Outside command position the same text is still split, as bash
+// splits it: `echo FOO[a;b]` is two commands.
+func TestASubscriptIsKeptWholeInCommandPosition(t *testing.T) {
+	for _, word := range []string{
+		`FOO[$((1+1))]=x`, `FOO[a b]=x`, `FOO["a]b"]=x`, `FOO[a\]b]=x`,
+		`FOO['a b']=x`, `FOO[$(echo ])]=x`, `FOO[${y:-]}]=x`,
 	} {
-		t.Run(tc.word, func(t *testing.T) {
-			toks, qf, err := lex(tc.word)
+		t.Run(word, func(t *testing.T) {
+			toks, qf, err := lex(word + " cat f")
 			if err != nil {
-				t.Fatalf("lex(%q): %v", tc.word, err)
+				t.Fatalf("lex(%q): %v", word, err)
 			}
-			if len(toks) == 1 && isAssignment(toks[0], qf[0]) {
-				t.Errorf("%q now reads as an assignment, which is bash's own answer"+
-					" -- Q185 has closed, so drop this row (%s)", tc.word, tc.why)
+			if len(toks) != 3 || toks[0] != word || !isAssignment(toks[0], qf[0]) {
+				t.Errorf("lex(%q) = %q, want the subscript whole and read as an assignment", word+" cat f", toks)
 			}
 		})
+	}
+	for _, tc := range []struct{ in, word string }{
+		{"echo FOO[a;b]=x", "FOO[a"},
+		{"cat f FOO[a b]=x", "FOO[a"},
+		{"diff <(true) FOO[a;b]=x", "FOO[a"},
+		{"case FOO[a b] in x) :;; esac", "FOO[a"},
+	} {
+		if got := tokenize(t, tc.in); !slices.Contains(got, tc.word) {
+			t.Errorf("tokenize(%q) = %q, want it split at %q as bash splits it", tc.in, got, tc.word)
+		}
 	}
 }
 

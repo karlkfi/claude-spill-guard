@@ -1652,6 +1652,23 @@ func TestASubscriptedPrefixIsPeeledAndTheOperandScanned(t *testing.T) {
 		{"subscripted and appending", "FOO[0]+=x cat " + name},
 		{"a subscripted prefix after a plain one", "LANG=C FOO[0]=x cat " + name},
 		{"a subscripted prefix behind a keyword", "time FOO[0]=x cat " + name},
+		// Q185: a subscript the lexer used to split or strip, kept whole in
+		// command position as bash keeps it. Each row is driven on 5.3.15.
+		{"arithmetic in the subscript", "FOO[$((1+1))]=x cat " + name},
+		{"a space in the subscript", "FOO[a b]=x cat " + name},
+		{"a quoted ]", `FOO["a]b"]=x cat ` + name},
+		{"an escaped ]", `FOO[a\]b]=x cat ` + name},
+		{"a single-quoted space", "FOO['a b']=x cat " + name},
+		{"a ] inside a substitution", "FOO[$(echo ])]=x cat " + name},
+		{"a ] inside a parameter expansion", "FOO[${y:-]}]=x cat " + name},
+		{"after a plain prefix", "A=1 FOO[a b]=x cat " + name},
+		{"behind !", "! FOO[a b]=x cat " + name},
+		{"behind if", "if FOO[a b]=x cat " + name + "; then :; fi"},
+		{"in a group", "{ FOO[a b]=x cat " + name + "; }"},
+		{"after a redirect", "2>/dev/null FOO[a b]=x cat " + name},
+		{"a pipeline stage", "true | FOO[a b]=x cat " + name},
+		{"in a substitution", "echo $(FOO[a b]=x cat " + name + ")"},
+		{"in a case arm", "case q in q) FOO[a b]=x cat " + name + ";; esac"},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
@@ -1688,6 +1705,9 @@ func TestAWordBashReadsAsACommandNameIsNotPeeled(t *testing.T) {
 		{"nothing closes the subscript", "FOO[0=x cat " + name},
 		{"the brackets do not balance", "FOO[a[b]=x cat " + name},
 		{"quoted, so bash assigns nothing", "'FOO[0]=x' cat " + name},
+		// Kept whole as bash keeps it, and still no `=` behind the subscript:
+		// `FOO[a b]x: command not found`.
+		{"a whole subscript with no =", "FOO[a b]x cat " + name},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))

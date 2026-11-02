@@ -100,17 +100,22 @@ func assignmentEnd(tok string) int {
 // runs. The first `]` at depth 0 closes, so `FOO[a]b]=x` and `FOO[]]=x` are
 // command names -- driven, both report `command not found` and read no file.
 //
-// It reads the token the lexer already stripped quotes from, which is where
-// this stops short of bash: `FOO["a]b"]=x` is an assignment to bash, whose
-// scan sees the quotes, and the `]` inside them closes the subscript here. The
-// token's quote provenance says only where quoting FIRST appeared, so it
-// cannot say which `]` was quoted, and isAssignment refuses the whole token on
-// that offset -- the under-peeling direction, which leaves such a call
-// unscanned. Q185 carries it.
+// A `]` that is quoted, escaped, or inside a `$(…)`, `${…}` or backtick
+// expansion does not count, so `FOO["a]b"]=x`, `FOO[a\]b]=x` and
+// `FOO[${x:-]}]=x` each close at their last `]`. That needs the word as
+// written, which in command position the lexer hands over whole (Q185);
+// elsewhere the token is the stripped one. Upstream's _subscript_end.
 func subscriptEnd(tok string, open int) int {
 	depth := 0
-	for i := open; i < len(tok); i++ {
-		switch tok[i] {
+	for i := open; i < len(tok); {
+		c := tok[i]
+		if strings.IndexByte("\\'\"`$", c) >= 0 {
+			if i = skipQuoted(tok, i); i < 0 {
+				return -1
+			}
+			continue
+		}
+		switch c {
 		case '[':
 			depth++
 		case ']':
@@ -119,8 +124,77 @@ func subscriptEnd(tok string, open int) int {
 				return i + 1
 			}
 		}
+		i++
 	}
 	return -1
+}
+
+// skipQuoted steps over the escape, quoted run or expansion starting at
+// text[i], returning the index just past it or -1 when it never closes. A `$`
+// that opens nothing is one character, as it is to bash, and so is the `$` of
+// a `$'` inside double quotes. Upstream's _skip_quoted.
+func skipQuoted(text string, i int) int {
+	n, c := len(text), text[i]
+	switch {
+	case c == '\\':
+		return min(i+2, n)
+	case strings.HasPrefix(text[i:], "$'"):
+		return ansiCEnd(text, i)
+	case c == '\'':
+		j := strings.IndexByte(text[i+1:], '\'')
+		if j < 0 {
+			return -1
+		}
+		return i + j + 2
+	case c == '`':
+		if _, end, ok := scanBackticks(text, i+1); ok {
+			return end
+		}
+		return -1
+	case c == '"':
+		for i++; i < n; {
+			if text[i] == '"' {
+				return i + 1
+			}
+			if strings.IndexByte("\\`$", text[i]) >= 0 && !strings.HasPrefix(text[i:], "$'") {
+				if i = skipQuoted(text, i); i < 0 {
+					return -1
+				}
+				continue
+			}
+			i++
+		}
+		return -1
+	case strings.HasPrefix(text[i:], "$(("):
+		return skipBalancedParens(text, i+1)
+	case strings.HasPrefix(text[i:], "$("):
+		if _, end, ok := scanDollarParen(text, i+2); ok {
+			return end
+		}
+		return -1
+	case strings.HasPrefix(text[i:], "${"):
+		depth := 0
+		for i++; i < n; {
+			if strings.IndexByte("\\'\"`$", text[i]) >= 0 {
+				if i = skipQuoted(text, i); i < 0 {
+					return -1
+				}
+				continue
+			}
+			switch text[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					return i + 1
+				}
+			}
+			i++
+		}
+		return -1
+	}
+	return i + 1
 }
 
 // NotQuoted is the QuotedFrom of a word no quoting or escaping touched.
@@ -168,9 +242,25 @@ func Unquoted(n int) []int {
 // program. Comparing offsets rather than asking whether the word was quoted at
 // all is the whole of the distinction -- `SP='a reason'` is quoted and is an
 // assignment, and it is how the override's own documented form is written.
+//
+// A subscript is the exception to quoting before the `=` disarming it: bash
+// peels `FOO["0"]=x` and `FOO['a']=x`, so quoting that starts strictly inside
+// the subscript still assigns. Whether it ran on past the `]` is not recorded,
+// so `FOO["0]"=x`, a syntax error to bash 5.3.15, peels here too -- the
+// over-peel direction, which reads a command that never runs. Upstream's.
 func isAssignment(tok string, quotedFrom int) bool {
 	end := assignmentEnd(tok)
-	return end >= 0 && quotedFrom >= end
+	if end < 0 {
+		return false
+	}
+	if quotedFrom >= end {
+		return true
+	}
+	open := len(nameRE.FindString(tok))
+	if tok[open] != '[' {
+		return false
+	}
+	return open < quotedFrom && quotedFrom < subscriptEnd(tok, open)-1
 }
 
 // AssignForm is how an assignment token spells itself, which is what decides
@@ -279,6 +369,13 @@ var cmdPosKeywords = map[string]bool{
 	"while": true, "until": true, "do": true, "time": true,
 }
 
+// assignPosKeywords is that set for the lexer deciding whether an assignment
+// word can follow: `! FOO[a b]=x cat f` and `{ FOO[a b]=x cat f; }` both peel.
+var assignPosKeywords = map[string]bool{
+	"if": true, "then": true, "elif": true, "else": true,
+	"while": true, "until": true, "do": true, "time": true, "!": true, "{": true,
+}
+
 // What lex reports where the Python raises ValueError. Every caller treats
 // either as "defer": a command the lexer cannot read is one no scanner should
 // judge, so the two are distinguished for the reader and never for the
@@ -338,7 +435,7 @@ const (
 // the current token. Invalid UTF-8 therefore survives byte for byte, where a
 // []rune conversion would substitute U+FFFD and change the token.
 func lex(text string) ([]string, []int, error) {
-	l := &lexer{src: requote(text), state: stateSpace}
+	l := &lexer{src: requote(text), state: stateSpace, cmdPos: true}
 	var out []string
 	var quotedFrom []int
 	for {
@@ -504,6 +601,25 @@ type lexer struct {
 	// shlex's _pushback_chars: one character the word scanner read past and
 	// the next token has to start from. A stack, as there.
 	pushback []byte
+	// Upstream's command-position tracking (its Q217): whether an assignment
+	// word may stand next, whether the next word is a redirect's target,
+	// the open `(` and `case` constructs, and whether a `time` just ran.
+	cmdPos      bool
+	redirTarget bool
+	frames      []lexFrame
+	afterTime   bool
+}
+
+// A lexFrame is an open `(`, holding the command position to restore at its
+// `)`, or an open `case`, reading its head: state is "subject", "in", "pat"
+// or "body", atStart whether a pattern has a word yet, and depth the parens an
+// extglob opened inside one.
+type lexFrame struct {
+	isCase  bool
+	saved   bool
+	state   string
+	atStart bool
+	depth   int
 }
 
 // next is shlex's `instream.read(1)`, with ok=false for the empty string it
@@ -522,7 +638,184 @@ func (l *lexer) next() (byte, bool) {
 	return c, true
 }
 
+// readToken is upstream's QuoteTrackingLexer.read_token over readWord, which is
+// shlex's.
+//
+// bash keeps `NAME[...]` one word wherever an assignment can stand, however
+// many spaces, operators or quotes the subscript holds (claude-bouncer Q217).
+// shlex splits on those first, so the subscript is read here from the raw text
+// before readWord sees it, and only in command position: `echo FOO[a;b]` is
+// two commands to bash. The subscript keeps its quotes, which is what lets
+// subscriptEnd close it where bash does; the rest of the word is readWord's,
+// and its provenance is offset past the subscript.
 func (l *lexer) readToken() (string, int, bool, error) {
+	prefix := ""
+	if l.cmdPos {
+		prefix = l.readSubscript()
+	}
+	tok, from := "", NotQuoted
+	if prefix == "" || l.wordContinues() {
+		t, f, eof, err := l.readWord()
+		if err != nil {
+			return "", NotQuoted, false, err
+		}
+		if eof && prefix == "" {
+			return "", NotQuoted, true, nil
+		}
+		tok, from = t, f
+	}
+	if from != NotQuoted {
+		from += len(prefix)
+	}
+	glued := len(l.pushback) > 0
+	if prefix != "" && tok == "" {
+		glued = l.pos < len(l.src) && isPunct(l.src[l.pos])
+	}
+	out := prefix + tok
+	l.trackCmdPos(out, from, glued)
+	return out, from, false, nil
+}
+
+// readSubscript takes a `NAME[...]` from the raw text at the next word, or
+// returns "" and moves nothing when no subscript stands there.
+func (l *lexer) readSubscript() string {
+	if l.state != stateSpace {
+		return ""
+	}
+	pos := l.pos - len(l.pushback)
+	for pos < len(l.src) && isSpace(l.src[pos]) {
+		pos++
+	}
+	name := nameRE.FindString(l.src[pos:])
+	open := pos + len(name)
+	if name == "" || open >= len(l.src) || l.src[open] != '[' {
+		return ""
+	}
+	end := subscriptEnd(l.src, open)
+	if end < 0 {
+		return ""
+	}
+	l.pushback = l.pushback[:0]
+	l.pos = end
+	return l.src[pos:end]
+}
+
+func (l *lexer) wordContinues() bool {
+	return l.pos < len(l.src) && !isSpace(l.src[l.pos]) && !isPunct(l.src[l.pos])
+}
+
+// trackCmdPos is upstream's _track_cmd_pos. One stack holds both kinds of
+// frame: a `(` keeps the position to restore at its `)`, so `diff <(true)
+// FOO[a;b]` leaves FOO an operand, and a `case` reads its patterns, whose
+// closing `)` has no opener and must not pop one.
+func (l *lexer) trackCmdPos(tok string, quotedFrom int, glued bool) {
+	top := len(l.frames) - 1
+	isCase := top >= 0 && l.frames[top].isCase
+	punct := quotedFrom == NotQuoted && tok != "" && allPunct(tok)
+	if isCase && l.frames[top].state != "body" {
+		l.trackCaseHead(top, tok, quotedFrom, punct)
+		return
+	}
+	if punct {
+		for i := 0; i < len(tok); i++ {
+			switch tok[i] {
+			case '(':
+				l.frames = append(l.frames, lexFrame{saved: l.cmdPos})
+				l.cmdPos, l.redirTarget = true, false
+			case ')':
+				if n := len(l.frames); n > 0 && !l.frames[n-1].isCase {
+					l.cmdPos = l.frames[n-1].saved
+					l.frames = l.frames[:n-1]
+				} else {
+					l.cmdPos = true
+				}
+			}
+		}
+		if isCase && (tok == ";;" || tok == ";&" || tok == ";;&") {
+			l.frames[top].state, l.frames[top].atStart, l.frames[top].depth = "pat", true, 0
+		}
+		if strings.ContainsAny(tok, ";|\n") || tok == "&" || tok == "&&" {
+			l.cmdPos, l.redirTarget = true, false
+		} else if strings.ContainsAny(tok, "<>") && !strings.Contains(tok, "(") {
+			l.redirTarget = true
+		}
+		l.afterTime = false
+		return
+	}
+	if l.redirTarget {
+		l.redirTarget = false
+		return
+	}
+	if isDigits(tok) && glued { // the fd of `2>f`
+		return
+	}
+	if l.afterTime && (tok == "-p" || tok == "--") { // `time -p FOO[a;b]=x cmd`
+		return
+	}
+	reserved := isReservedWord(tok, quotedFrom)
+	if l.cmdPos && reserved {
+		if tok == "case" {
+			l.frames = append(l.frames, lexFrame{isCase: true, state: "subject"})
+			l.cmdPos = false
+			return
+		}
+		if tok == "esac" && isCase {
+			l.frames = l.frames[:top]
+			l.cmdPos = false
+			return
+		}
+	}
+	l.afterTime = l.cmdPos && tok == "time" && reserved
+	l.cmdPos = l.cmdPos && (isAssignment(tok, quotedFrom) || reserved && assignPosKeywords[tok])
+}
+
+// trackCaseHead is upstream's _track_case_head: the words of a `case` before
+// a clause body -- the subject, `in`, and each pattern list up to the `)` that
+// ends it.
+func (l *lexer) trackCaseHead(at int, tok string, quotedFrom int, punct bool) {
+	f := &l.frames[at]
+	l.cmdPos = false
+	if !punct {
+		reserved := isReservedWord(tok, quotedFrom)
+		switch {
+		case f.state == "subject":
+			f.state = "in"
+		case f.state == "in" && reserved && tok == "in":
+			f.state, f.atStart, f.depth = "pat", true, 0
+		case f.state == "pat" && f.atStart && reserved && tok == "esac":
+			l.frames = l.frames[:at]
+		case f.state == "pat":
+			f.atStart = false
+		}
+		return
+	}
+	if f.state != "pat" {
+		return
+	}
+	for i := 0; i < len(tok); i++ {
+		switch tok[i] {
+		case '(':
+			if f.atStart {
+				f.atStart = false // `(x)`: the optional opener
+			} else {
+				f.depth++ // an extglob's own parens
+			}
+		case ')':
+			if f.depth > 0 {
+				f.depth--
+			} else {
+				f.state = "body"
+				l.cmdPos = true
+				return
+			}
+		case '|':
+			f.atStart = false
+		}
+	}
+}
+
+// readWord is shlex's read_token.
+func (l *lexer) readWord() (string, int, bool, error) {
 	quoted := false
 	escapedState := byte(stateSpace)
 	// Where quoting or escaping first appears in the word being built, as an
