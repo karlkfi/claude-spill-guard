@@ -127,10 +127,11 @@ type bashInput struct {
 	Command *string `json:"command"`
 }
 
-// grepToolInput is the Grep tool's arguments as the model guesses them. All 161
-// Grep calls in this machine's transcripts to 2026-10-01 came back `No such
-// tool available`, so these names are what the model wrote and not a schema
-// the harness was seen to accept; Q207 owns establishing it.
+// grepToolInput is the Grep tool's arguments, as a hook received them from
+// Claude Code 2.1.290 and as that build's input schema names them. The tool's
+// other fields -- `glob`, `type`, `-A`, `head_limit` and the rest -- narrow or
+// trim what it returns and never turn a mode that prints no lines into one
+// that does, so nothing here reads them.
 type grepToolInput struct {
 	Pattern    *string `json:"pattern"`
 	Path       *string `json:"path"`

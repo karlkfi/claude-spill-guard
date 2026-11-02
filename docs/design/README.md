@@ -830,8 +830,8 @@ the parent's `session_id` and carrying an `agent_id` the parent's own calls do
 not have. [What this is not](#what-it-is-not) named a skill or subagent load as
 one uncovered member. It is two, and only one of them was ever uncovered.
 
-**The search tool is the member that cannot be bounded, and this machine has
-none.** A search takes a pattern and a root and returns matching lines from
+**The search tool is the member that cannot be bounded, and this machine's
+default tool set has none.** A search takes a pattern and a root and returns matching lines from
 files it chooses, so bounding it means scanning the tree, which is not
 something a `PreToolUse` hook can do per call. The drive does not touch that
 argument. What it adds is that neither `Grep` nor `Glob` was in the tool set at
@@ -840,22 +840,29 @@ all: a session asked to search file contents reached `ToolSearch` for
 affordance that is present is the `Explore` subagent, which is the paragraph
 above.
 
-**The hook matches `Grep` anyway, ahead of any evidence the tool exists.** A
-walk of this machine's 2,346 transcripts on 2026-10-01 found 161 `Grep`
-`tool_use` blocks between 2026-08-02 and that evening, and every one came back
-`No such tool available: Grep` — the model reaching for a tool this harness
-did not offer. So the absence the drive above recorded holds on every session
-this machine has kept, and those calls establish neither that the tool exists
-anywhere nor what its payload looks like: their keys are the model's guesses.
-The hook matches it so that where it does exist, a search over a tree is not a
-crossing nothing is pointed at. It cannot bound the search any more than
-before, so it does not try: a `content` search over a directory is refused
-and the reason names the `grep` that pipes the same search through the
-filter, `files_with_matches` and `count` pass, and a `path` naming one file is
-scanned whole the way a `Read` of it is. An absent mode is read as `content`,
-which costs a turn where the other reading would let lines cross. Q207 owns
-whether the tool exists and what its payload carries; until then every field
-name here is assumed.
+**The tool exists, outside the default set, and the hook matches it.** A walk
+of this machine's 2,346 transcripts on 2026-10-01 found 161 `Grep` `tool_use`
+blocks between 2026-08-02 and that evening, and every one came back `No such
+tool available: Grep`. That is the default set: driven 2026-11-01 on Claude
+Code 2.1.290, a `claude -p` session lists neither `Grep` nor `Glob` in its
+init event, and one started with `--tools Grep` lists it and runs it. With a
+`PreToolUse` hook matching `Grep` and logging stdin, the payload's
+`tool_input` carried `pattern`, `path` and `output_mode` under the names the
+model had been writing. The build's own input schema, read out of the binary,
+gives `output_mode` the values `content`, `files_with_matches` and `count` and
+defaults it to `files_with_matches`, and a call driven with no mode returned a
+path list. Its other fields — `glob`, `type`, `-A`, `-B`, `-C`, `-n`, `-o`,
+`head_limit`, `offset`, `multiline` — filter or trim, and the context and
+line-number ones are ignored outside `content`.
+
+So a search over a tree is a crossing the hook is pointed at, and it still
+cannot bound one, so it does not try: a `content` search over a directory is
+refused and the reason names the `grep` that pipes the same search through the
+filter, `files_with_matches` and `count` pass, an absent mode passes as the
+default it is, and a `path` naming one file is scanned whole the way a `Read`
+of it is. Driven through the built hook in that session, the refusal arrived
+in the transcript as an `is_error` tool result carrying the whole reason, so
+the model reads it as it reads a `Bash` deny.
 
 **The fourth member is driven, and it splits inside one server.** Three
 readings settle a candidate, in this order, because each is cheap only where

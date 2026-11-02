@@ -349,9 +349,9 @@ func allFiltered(command string) bool {
 // that needs no walk at all, so that file is read and scanned whole, the way a
 // Read of it is.
 //
-// An absent mode is read as `content`: nothing here knows the tool's default,
-// and refusing costs a turn where the other reading would let a search's
-// lines cross unread.
+// An absent mode is `files_with_matches`, which is the default the tool's own
+// schema declares in Claude Code 2.1.290, and a call driven without one there
+// returned a path list.
 //
 // The pattern is scanned, as a Bash command string is: it is text the call
 // carries, and a key typed into one is a key in the transcript.
@@ -360,7 +360,7 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 	if in.Pattern != nil {
 		targets = append(targets, target{patternLabel, []byte(*in.Pattern)})
 	}
-	mode := "content"
+	mode := "files_with_matches"
 	if in.OutputMode != nil && *in.OutputMode != "" {
 		mode = *in.OutputMode
 	}

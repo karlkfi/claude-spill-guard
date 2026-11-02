@@ -236,10 +236,9 @@ func grepToolCall(t *testing.T, cwd string, fields map[string]string) string {
 func TestTheGrepToolInContentModeOverADirectoryIsRefused(t *testing.T) {
 	dir := grepTree(t)
 	for name, fields := range map[string]map[string]string{
-		"content over a path":      {"pattern": "foo", "path": dir, "output_mode": "content"},
-		"content over the cwd":     {"pattern": "foo", "output_mode": "content"},
-		"a relative directory":     {"pattern": "foo", "path": "sub", "output_mode": "content"},
-		"no mode, read as content": {"pattern": "foo", "path": dir},
+		"content over a path":  {"pattern": "foo", "path": dir, "output_mode": "content"},
+		"content over the cwd": {"pattern": "foo", "output_mode": "content"},
+		"a relative directory": {"pattern": "foo", "path": "sub", "output_mode": "content"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			reason := denyReason(t, grepToolCall(t, dir, fields))
@@ -253,12 +252,17 @@ func TestTheGrepToolInContentModeOverADirectoryIsRefused(t *testing.T) {
 	}
 }
 
+// No mode is `files_with_matches`, the default the tool's schema declares.
 func TestTheGrepToolModesThatReturnNoContentAreAllowed(t *testing.T) {
 	dir := grepTree(t)
-	for _, mode := range []string{"files_with_matches", "count"} {
-		t.Run(mode, func(t *testing.T) {
-			allowed(t, grepToolCall(t, dir,
-				map[string]string{"pattern": "foo", "path": dir, "output_mode": mode}))
+	for name, fields := range map[string]map[string]string{
+		"files_with_matches": {"pattern": "foo", "path": dir, "output_mode": "files_with_matches"},
+		"count":              {"pattern": "foo", "path": dir, "output_mode": "count"},
+		"no mode":            {"pattern": "foo", "path": dir},
+		"no mode or path":    {"pattern": "foo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			allowed(t, grepToolCall(t, dir, fields))
 		})
 	}
 }
