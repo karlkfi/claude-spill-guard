@@ -220,10 +220,14 @@ fire says nothing, and this one fires on every planted case while declining
 cut -d= -f1` segments into a bare `env` and a `cut`, so nothing in the `env`
 segment's own tokens tells it apart from a dump. What does is whether anything
 consumes its output: a stage after it is being written to, and nothing after it
-means the tool result is. That is what `Segment.Pipe` is read for. Redirects are
-not consulted, because `Segment.Redirects` records the target and not the
-descriptor — reading any redirect as a filter would wave through `env
-2>/dev/null`, and `env > vars.txt` is refused instead.
+means the tool result is. That is what `Segment.Pipe` is read for, with
+`Segment.StdoutAway` beside it: a later stage is a filter only where the dump's
+stdout reaches it. `env >&2 | cut -d= -f1` is refused, because the dump goes to
+stderr and the tool returns that, and `env 2>&1 | cut -d= -f1` is not. A
+redirect to a file is not read as a filter, so `env > vars.txt` is refused too.
+Re-taken with that reading on 2026-11-01, over 241,535 real `Bash` calls from
+2026-07-26 to 2026-11-02, no verdict moved; 16 driven control rows moved 5, and
+19 commands the segmenter could not split were left out.
 
 **Only the bare form of each command**: `env`, `printenv`, `set`, `export`,
 `export -p`, `declare -p`, `typeset -p`, and an inline `python`/`node` script

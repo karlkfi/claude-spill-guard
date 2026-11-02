@@ -176,6 +176,20 @@ func TestPositionInThePipelineDecidesIt(t *testing.T) {
 		"env | cut -d= -f1":       false,
 		"cat /etc/hosts | env":    true,
 		"env | cut -d= -f1 | env": true,
+		// A stage after the dump is a filter only where the dump's stdout
+		// reaches it; each of these puts it on stderr, which the tool returns.
+		"env >&2 | cut -d= -f1":            true,
+		"env >/dev/stderr | cut -d= -f1":   true,
+		"{ env >&2; } | cut -d= -f1":       true,
+		"{ env; } >&2 | cut -d= -f1":       true,
+		"(env) >&2 | cut -d= -f1":          true,
+		"(env >&2) | cut -d= -f1":          true,
+		"{ export -p >&2; } | cut -d= -f1": true,
+		"{ printenv; } >&2 | cut -d= -f1":  true,
+		"env 2>&1 | cut -d= -f1":           false,
+		"env >&2 2>&1 | cut -d= -f1":       true,
+		"{ env; } | cut -d= -f1":           false,
+		"(env) | cut -d= -f1":              false,
 	} {
 		t.Run(command, func(t *testing.T) {
 			_, stdout, _ := drive(t, bashCall(t, command, t.TempDir()))

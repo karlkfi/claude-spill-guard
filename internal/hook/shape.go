@@ -134,11 +134,15 @@ func envDumped(segments []bash.Segment) string {
 // and one with nothing after it is writing to the tool result, which is the
 // crossing this refuses.
 //
-// Redirects are not consulted, so `env > vars.txt` fires. Segment.Redirects
-// records the target and not which descriptor was redirected, so `env
-// 2>/dev/null` is indistinguishable from it -- and reading any redirect as a
-// filter would wave through the commonest careless spelling there is.
+// A redirect to a file is not read as a filter, so `env > vars.txt` fires.
+// One that leaves stdout on stderr also fires, whatever comes after it:
+// `env >&2 | cut -d= -f1` puts the dump in the tool result and gives cut
+// nothing. Segment.StdoutAway is that reading, and a compound piped as a
+// whole carries its closer's, so `{ env; } >&2 | cut` fires too.
 func lastInPipeline(segments []bash.Segment, i int) bool {
+	if segments[i].StdoutAway {
+		return true
+	}
 	for _, later := range segments[i+1:] {
 		if later.Pipe == segments[i].Pipe {
 			return false
