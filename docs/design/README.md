@@ -2445,7 +2445,7 @@ against the 2026-09-05 measurement that made coverage failures defer.
 | `grep -rn pat dir` | denied; the reason carries `set -o pipefail; grep -rn pat dir \| <binary> filter` |
 | `grep -rn pat` | the same: a recursive grep with no operand searches `.`, and used to cross with nothing recorded |
 | `grep -rn pat dir \| spill-guard filter` | allowed; the directory is not read here, because the filter reads what the walk produced |
-| `grep -rl`, `-L`, `-c`, `-q` | allowed bare: no matched text crosses, and these are the forms whose exit status a session tests |
+| `grep -rl`, `-L`, `-c`, `-q`, ahead of the pattern | allowed bare: no matched text crosses, and these are the forms whose exit status a session tests |
 | `grep -n pat dir` | unchanged: no recursion, so the directory reason above |
 | `rg pat dir` | unchanged: not offered the filter until the coverage log says it is worth a turn |
 
@@ -2453,9 +2453,33 @@ against the 2026-09-05 measurement that made coverage failures defer.
 after the grep in its own pipeline is the careful form; one in a different
 pipeline of the same string filters nothing of this one's. The recursion flags
 are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`,
-`--dereference-recursive`, `-d recurse` — and both GNU grep and the BSD grep
-macOS ships permute, so a flag after an operand counts: driven, `grep hello d -r
--l` on BSD grep 2.6.0 lists the file.
+`--dereference-recursive`, `-d recurse`, and a digit option such as `-2` —
+and a recursion flag after an operand counts, because the greps permute:
+driven, `grep hello d -r -l` on BSD grep 2.6.0 lists the file. A quiet flag
+counts only before the first operand, because GNU grep with `POSIXLY_CORRECT`
+set stops reading options there and takes `-l` for a file, and the hook cannot
+read the command's environment.
+
+**Three greps are read at once, because `grep` in Claude Code's Bash tool is
+not always grep.** Driven 2026-11-01 on Claude Code 2.1.290, the shell snapshot
+each `Bash` call sources defines `grep` as a function that runs ugrep 7.8.4
+out of the Claude Code binary itself. The function's text is a string in that
+binary, and no shell startup file on the machine defines it. Which installs
+turn it on is not measured here. ugrep reads two shapes differently from GNU
+and BSD grep, and both are read its way:
+
+| Command, no file operand | GNU and BSD grep | ugrep 7.8.4 | Read as |
+|---|---|---|---|
+| `grep -2 pat` | `-2` is a context width; reads stdin | `-2` is a depth and turns on recursion; walks `.` | recursive |
+| `grep --context -r pat` | BSD 2.6.0 takes `--context`'s value only after `=`, so walks `.` | `-r` is the value; exits 2 | both ways, so recursive |
+
+The first costs a turn on a machine whose `grep` is GNU or BSD:
+`cmd | grep -2 pat` is refused there and offered the filtered rewrite, though
+it reads only the pipe. Where the function is in place, the same command reads
+the pipe *and* walks the working directory, which is the crossing this refusal
+exists for, written by a session that asked for two lines of context. An unknown
+long option stays refused for the same reason: `grep --depth=3 pat` walks `.`
+on ugrep, and the table of options this reads holds GNU's and BSD's.
 
 **The rewrite is checked before it is offered.** Appending a stage pipes the
 string's last pipeline, so `echo $(grep -r x .)` produced a rewrite this hook
