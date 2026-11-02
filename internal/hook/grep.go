@@ -266,6 +266,11 @@ func grepFiles(tokens []string) (files []string, none bool) {
 // the absolute path a reason writes is recognised, and the tokens are peeled
 // the way envDumped peels them.
 func filteredLater(segments []bash.Segment, i int) bool {
+	// `grep -r x d >&2 | filter` sends the matches to stderr, which the tool
+	// result carries, and the filter reads nothing.
+	if segments[i].StdoutAway {
+		return false
+	}
 	for _, later := range segments[i+1:] {
 		if later.Pipe != segments[i].Pipe {
 			continue

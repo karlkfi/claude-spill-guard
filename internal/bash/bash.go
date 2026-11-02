@@ -70,6 +70,7 @@
 package bash
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 )
@@ -170,6 +171,14 @@ type Segment struct {
 	// belongs to: `cd () ( : )` defines cd, though none of its segments sits
 	// directly in the body. This port's, and upstream has no field for it.
 	Body string
+	// StdoutAway is true when the redirects beside this segment leave fd 1 on
+	// the shell's stderr, or on a descriptor this cannot follow, so the next
+	// pipeline stage does not read what it prints: `>&2`, `1>&2`, `>&2 2>&1`
+	// and `>/dev/stderr` all do, and `2>&1 >&2` and `>file` do not. They are
+	// read left to right, as bash applies them. A compound piped as a whole
+	// takes its closer's. This port's, and upstream has no question that
+	// turns on where stdout goes.
+	StdoutAway bool
 }
 
 // definitionPrefix is whether a function definition can stand behind word:
@@ -207,6 +216,61 @@ type compound struct {
 	scope       int
 	first       int
 	depth       int
+}
+
+// descriptors is where fd 1 and fd 2 point while one segment's redirects are
+// read: "pipe" and "err" for where they started, the next stage and the
+// shell's stderr, "file" for a file or a closed descriptor, and "other" for a
+// descriptor this cannot follow. The zero value is the start. Only those two
+// are tracked, because only where fd 1 lands decides StdoutAway.
+type descriptors struct{ out, err string }
+
+func (d descriptors) stdout() string { return cmp.Or(d.out, "pipe") }
+func (d descriptors) stderr() string { return cmp.Or(d.err, "err") }
+
+func (d descriptors) away() bool { return d.stdout() == "err" || d.stdout() == "other" }
+
+// apply reads one redirect, fd being the digit written before op or "".
+func (d *descriptors) apply(fd, op, target string) {
+	var v string
+	switch {
+	case op == "&>" || op == "&>>" || op == ">&" && fd == "" && !isDigits(target) && target != "-":
+		// `>&file` is `&>file`.
+		d.out = d.dest(target)
+		d.err = d.out
+		return
+	case op == ">" || op == ">>" || op == ">|":
+		v = d.dest(target)
+	case op == ">&" && target == "1":
+		v = d.stdout()
+	case op == ">&" && target == "2":
+		v = d.stderr()
+	case op == ">&" && target == "-":
+		v = "file"
+	case op == ">&":
+		v = "other"
+	default:
+		return
+	}
+	switch fd {
+	case "", "1":
+		d.out = v
+	case "2":
+		d.err = v
+	}
+}
+
+// dest is where a redirect to path leaves a descriptor: on whatever fd 2 or
+// fd 1 holds, for the device names bash and the kernel both serve, and on a
+// file otherwise.
+func (d descriptors) dest(path string) string {
+	switch path {
+	case "/dev/stderr", "/dev/fd/2":
+		return d.stderr()
+	case "/dev/stdout", "/dev/fd/1":
+		return d.stdout()
+	}
+	return "file"
 }
 
 // conditional is the Conditional field for a segment reached through sep.
@@ -305,6 +369,13 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		lastClose   bool
 		compoundPos = true
 		fnNames     = map[int]string{}
+		// Where fd 1 and fd 2 point for the segment being read, and the
+		// subshells open at this point -- the segment each began at, or -1
+		// for a process substitution -- with those just closed, which the
+		// separator after them pipes or does not.
+		fds          = descriptors{}
+		parenFirst   []int
+		closedParens []int
 	)
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
@@ -328,13 +399,14 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		}
 		if isOperator(t, quotedFrom[i], separators) {
 			empty := len(cur) == 0 && len(curRedir) == 0
+			substituted := false
 			if !empty {
 				persists := paren == 0 && !isPipe(prevSep) &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
 				segs = append(segs, Segment{cur, curRedir, curInputs, persists,
 					conditional(prevSep), inCaseArm(clauses), pipe, curQF,
 					append([]int(nil), shells...), forked(lead, t),
-					lastStage(lead, t, lastClose), "", ""})
+					lastStage(lead, t, lastClose), "", "", fds.away()})
 				cur, curQF, curRedir, curInputs = nil, nil, nil, nil
 			}
 			lastClose = false
@@ -349,6 +421,26 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 					}
 				}
 			}
+			// A compound or subshell piped as a whole is one stage, so every
+			// command in it writes to the next: `{ grep -r x d; } | f` and
+			// `(a; grep -r x d) | f` feed f from grep, and a redirect on the
+			// closer moves them all.
+			if isPipe(t) {
+				firsts := slices.Clone(closedParens)
+				for _, c := range closed {
+					firsts = append(firsts, c.first)
+				}
+				for _, first := range firsts {
+					for k := first; k < len(segs); k++ {
+						segs[k].Pipe = pipe
+						segs[k].StdoutAway = segs[k].StdoutAway || fds.away()
+					}
+				}
+			}
+			if t != ")" {
+				closedParens = nil
+			}
+			fds = descriptors{}
 			closed = nil
 			n := len(clauses)
 			pattern := n > 0 && (clauses[n-1] == "pat" || clauses[n-1] == "next")
@@ -371,6 +463,17 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				// is not itself marked.
 				clauses[n-1] = "body"
 			case t == "(":
+				// A `$(` body is a substitution, whose output is the command's
+				// words rather than its stdout, so it numbers its own pipe. So
+				// is the `(` of a `> >(…)` or `< <(…)`, which the redirect
+				// before it took as its target: `grep -r x d 2> >(f)` sends
+				// the matches past f.
+				if i > 0 && (tokens[i-1] == "$(" || tokens[i-1] == ">" || tokens[i-1] == "<") {
+					parenFirst = append(parenFirst, -1)
+					substituted = true
+				} else {
+					parenFirst = append(parenFirst, len(segs))
+				}
 				if fn != "" { // `f () ( … )`
 					opened++
 					shells = append(shells, opened)
@@ -384,6 +487,14 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			case t == ")":
 				if paren > 0 {
 					paren--
+				}
+				if n := len(parenFirst); n > 0 {
+					if first := parenFirst[n-1]; first >= 0 {
+						closedParens = append(closedParens, first)
+					} else {
+						substituted = true
+					}
+					parenFirst = parenFirst[:n-1]
 				}
 				if len(shells) > 0 {
 					if f := len(frames); f > 0 && frames[f-1].closerShell == shells[len(shells)-1] {
@@ -399,7 +510,12 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				clauses[n-1] = "next"
 				patDepth, patStarted = 0, false
 			}
-			if !isPipe(t) {
+			// A subshell's parens open and close no pipeline: `f | (g)` pipes
+			// f into g, and `(grep -r x d) | f` grep into f. A substitution's
+			// still do, because its body's output reaches the command as a
+			// file or as words rather than down the pipe: `grep -r x d <(f)`
+			// is not filtered by f.
+			if !isPipe(t) && (t != "(" && t != ")" || substituted) {
 				pipe++
 			}
 			prevSep, lead = t, t
@@ -414,8 +530,13 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			// as the previous token; pop it so it does not leak as a positional
 			// file argument. (A literal file NAMED `2` right before a redirect
 			// is indistinguishable post-tokenization.)
+			fd := ""
 			if n := len(cur); n > 0 && isDigits(cur[n-1]) {
+				fd = cur[n-1]
 				cur, curQF = cur[:n-1], curQF[:n-1]
+			}
+			if i+1 < len(tokens) {
+				fds.apply(fd, t, tokens[i+1])
 			}
 			if dup[t] {
 				// `2>&1`, `2>&-`, `<&3`: the target is a bare fd number or `-`
@@ -455,6 +576,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 					paren++
 					opened++
 					shells = append(shells, opened)
+					parenFirst = append(parenFirst, -1)
 				}
 				i += 2
 				continue
@@ -517,7 +639,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && !isPipe(prevSep),
 			conditional(prevSep), inCaseArm(clauses), pipe, curQF,
 			append([]int(nil), shells...), forked(lead, ""),
-			lastStage(lead, "", lastClose), "", ""})
+			lastStage(lead, "", lastClose), "", "", fds.away()})
 	}
 	for k := range segs {
 		shells := segs[k].Shells

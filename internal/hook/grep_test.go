@@ -277,6 +277,53 @@ func TestAFilterElsewhereInTheStringDoesNotCount(t *testing.T) {
 	}
 }
 
+// A filter counts where grep's stdout reaches it, and only there (Q208). Each
+// shape was driven on bash 5.3.15 with a stand-in filter that prints a line
+// count: the refused ones printed the key, to stderr or past the filter, and
+// the allowed ones printed only the count. Main allowed the first group
+// silently and refused the second.
+func TestAFilterCountsWhereGrepsStdoutReachesIt(t *testing.T) {
+	dir := grepTree(t)
+	for _, command := range []string{
+		"grep -rn foo . >&2 | spill-guard filter",
+		"grep -rn foo . 1>&2 | spill-guard filter",
+		"grep -rn foo . >&2 2>&1 | spill-guard filter",
+		"grep -rn foo . >/dev/stderr | spill-guard filter",
+		"grep -rn foo . >/dev/fd/2 | spill-guard filter",
+		"grep -rn foo . &>/dev/stderr | spill-guard filter",
+		"exec 3>&2; grep -rn foo . >&3 | spill-guard filter",
+		"{ grep -rn foo . >&2; } | spill-guard filter",
+		"{ grep -rn foo .; } >&2 | spill-guard filter",
+		"( grep -rn foo . ) >&2 | spill-guard filter",
+		"grep -rn foo . | (cat; spill-guard filter)",
+		"grep -rn foo . 2> >(spill-guard filter)",
+		"grep -rn foo . <(spill-guard filter)",
+	} {
+		t.Run(command+" is refused", func(t *testing.T) {
+			denyReason(t, bashCall(t, command, dir))
+		})
+	}
+	for _, command := range []string{
+		"grep -rn foo . 2>&1 | spill-guard filter",
+		"grep -rn foo . 2>&1 >&2 | spill-guard filter",
+		"grep -rn foo . 2>/dev/null | spill-guard filter",
+		"grep -rn foo . |& spill-guard filter",
+		"{ grep -rn foo .; } | spill-guard filter",
+		"{ grep -rn foo .; echo; } | spill-guard filter",
+		"( grep -rn foo . ) | spill-guard filter",
+		"(grep -rn foo .; true) | spill-guard filter",
+		"for x in .; do grep -rn foo $x; done | spill-guard filter",
+		"if true; then grep -rn foo .; fi | spill-guard filter",
+		"grep -rn foo . | (spill-guard filter)",
+		"grep -rn foo . | (spill-guard filter; cat)",
+		"grep -rn foo . | { spill-guard filter; }",
+	} {
+		t.Run(command+" is allowed", func(t *testing.T) {
+			allowed(t, bashCall(t, command, dir))
+		})
+	}
+}
+
 // The hatch reaches this refusal like the others: a confirmation, not an allow.
 func TestTheOverrideDowngradesAGrepRefusal(t *testing.T) {
 	code, stdout, stderr := drive(t, bashCall(t,

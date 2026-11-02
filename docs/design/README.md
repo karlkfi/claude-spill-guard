@@ -2451,7 +2451,12 @@ against the 2026-09-05 measurement that made coverage failures defer.
 
 **Position in the pipeline is the test, as it is for `env`.** A filter stage
 after the grep in its own pipeline is the careful form; one in a different
-pipeline of the same string filters nothing of this one's. The recursion flags
+pipeline of the same string filters nothing of this one's. It counts only
+where grep's stdout still reaches it. `grep -rn pat dir >&2 | spill-guard
+filter` sends the matches to stderr, which the tool result carries, so
+`Segment.StdoutAway` reads the redirects in order and the filter is not
+counted. A `{ …; }`, loop or subshell piped as a whole is one stage, so a grep
+inside one is filtered by the stage it feeds. Driven on bash 5.3.15 (Q208). The recursion flags
 are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`,
 `--dereference-recursive`, `-d recurse`, and a digit option such as `-2` —
 and a flag after an operand counts, because the greps permute: driven,
