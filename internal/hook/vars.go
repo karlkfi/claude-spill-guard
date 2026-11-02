@@ -143,7 +143,12 @@ type vars struct {
 	// from m as upstream keeps it: the two poison each other, since a name
 	// assigned a scalar is no longer a loop variable and a name a `for` binds
 	// is no longer a scalar.
-	loops     map[string][]string
+	loops map[string][]string
+	// words holds a value whose only impurity is default-IFS whitespace, as
+	// the fields bash splits an unquoted `$NAME` into (Q188). Kept apart from
+	// m so no other reading of a value sees it: only a word that is the whole
+	// expansion, unquoted, is split, and splitWords is the one reader.
+	words     map[string][]string
 	propagate bool
 	// cdpath is whether anything earlier in the string may have assigned
 	// CDPATH, in any spelling and at any depth. bash searches it before the
@@ -155,7 +160,8 @@ type vars struct {
 }
 
 func newVars() *vars {
-	return &vars{m: map[string]string{}, loops: map[string][]string{}, propagate: true}
+	return &vars{m: map[string]string{}, loops: map[string][]string{},
+		words: map[string][]string{}, propagate: true}
 }
 
 // clone is the map as it stands, for a queued body to start from. A snapshot
@@ -165,6 +171,7 @@ func (v *vars) clone() *vars {
 	c := &vars{
 		m:         make(map[string]string, len(v.m)),
 		loops:     make(map[string][]string, len(v.loops)),
+		words:     make(map[string][]string, len(v.words)),
 		propagate: v.propagate,
 		cdpath:    v.cdpath,
 	}
@@ -173,6 +180,9 @@ func (v *vars) clone() *vars {
 	}
 	for name, values := range v.loops {
 		c.loops[name] = slices.Clone(values)
+	}
+	for name, fields := range v.words {
+		c.words[name] = slices.Clone(fields)
 	}
 	return c
 }
@@ -213,7 +223,7 @@ func (v *vars) observe(raw, sub []string, quotedFrom []int, persists, binds bool
 	if !v.propagate {
 		return nil, observedCommand
 	}
-	if names, ok := applyAssignmentGroup(raw, quotedFrom, v.m, persists); ok {
+	if names, ok := applyAssignmentGroup(raw, quotedFrom, v.m, v.words, persists); ok {
 		for _, name := range names {
 			delete(v.loops, name) // a name set as a scalar is no longer a loop variable
 			if name == "IFS" {
@@ -228,6 +238,7 @@ func (v *vars) observe(raw, sub []string, quotedFrom []int, persists, binds bool
 	// (Q167). The list items still come from sub, which is what bash iterates.
 	if name, values, ok := forLoopBinding(sub[bash.ShKeywordPeel(raw, quotedFrom):], v.loops); ok {
 		delete(v.m, name) // and a loop variable is not a scalar
+		delete(v.words, name)
 		if values == nil || !binds {
 			delete(v.loops, name)
 		} else {
@@ -240,6 +251,7 @@ func (v *vars) observe(raw, sub []string, quotedFrom []int, persists, binds bool
 	} else {
 		poisonVars(raw, sub, quotedFrom, v.m)
 		poisonVars(raw, sub, quotedFrom, v.loops) // the same rules invalidate a binding
+		poisonVars(raw, sub, quotedFrom, v.words)
 	}
 	return nil, observedCommand
 }
@@ -333,6 +345,7 @@ func (l *andOr) close(v *vars, dirUnknown *bool) {
 	if !l.settled {
 		for _, name := range l.tentative {
 			delete(v.m, name)
+			delete(v.words, name)
 		}
 		if l.tentativeDir {
 			*dirUnknown = true
@@ -397,6 +410,7 @@ func (l *andOr) ran() { l.settled = false }
 func (v *vars) stop() {
 	clear(v.m)
 	clear(v.loops)
+	clear(v.words)
 	v.propagate = false
 }
 
@@ -438,6 +452,51 @@ func literalAssignmentValue(raw string, allowGlob bool) (string, bool) {
 		return "", false
 	}
 	return raw, true
+}
+
+// literalFields is the fields an unquoted `$NAME` splits into, for a value
+// literalAssignmentValue refused only for its default-IFS whitespace, or false.
+// Each field is subject to pathname expansion and to nothing else, so a glob
+// is kept as the pattern for glob.go, as a loop item's is, and a `~` refuses
+// the value, because bash does not tilde-expand what a split produced: driven
+// on 5.3.15, `V="cat ~/x"; $V` reports `~/x: No such file or directory`.
+func literalFields(raw string) ([]string, bool) {
+	if !strings.ContainsAny(raw, " \t\n") {
+		return nil, false
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' })
+	for _, f := range fields {
+		if strings.HasPrefix(f, "~") {
+			return nil, false
+		}
+		if _, ok := literalAssignmentValue(f, true); !ok {
+			return nil, false
+		}
+	}
+	return fields, len(fields) > 0
+}
+
+// splitWords is bash's word splitting over the tokens after a segment's head
+// peel: a token that is the whole of an unquoted `$NAME` or `${NAME}`, for a
+// name words holds, becomes its fields, and every other token is sub's.
+// After the peel because bash settles what an assignment is before it
+// expands, so `V="LC_ALL=C cat f"; $V` runs a program named `LC_ALL=C`; and
+// read off raw and its provenance, because a quoted `"$V"` is one word.
+func (v *vars) splitWords(raw []string, quotedFrom []int, sub []string) []string {
+	if len(v.words) == 0 {
+		return sub
+	}
+	var out []string
+	for i, t := range raw {
+		name := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(t, "${"), "$"), "}")
+		fields, ok := v.words[name]
+		if ok && quotedFrom[i] == bash.NotQuoted && (t == "$"+name || t == "${"+name+"}") {
+			out = append(out, fields...)
+			continue
+		}
+		out = append(out, sub[i])
+	}
+	return out
 }
 
 // literalLoopItem is the literal a `for NAME in <list>` item resolves to, or
@@ -615,7 +674,7 @@ func substituteVars(tok string, varmap map[string]string) string {
 // subshell, a pipeline stage, a background job), or when bash treats the name
 // specially. A bare `export NAME` re-exports without changing the value, so
 // it neither sets nor drops.
-func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]string, persists bool) ([]string, bool) {
+func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]string, words map[string][]string, persists bool) ([]string, bool) {
 	var pairs []string
 	if len(tokens) > 0 && tokens[0] == "export" {
 		for i, t := range tokens[1:] {
@@ -659,8 +718,13 @@ func applyAssignmentGroup(tokens []string, quotedFrom []int, varmap map[string]s
 		// bash 5.3.15 -- and the subscript can be arithmetic, which nothing
 		// here evaluates. Recording v would resolve an operand to a path the
 		// command opens only when the subscript happens to be 0.
+		delete(words, name)
 		if !ok || form != bash.AssignPlain || !persists || neverPropagate[name] {
 			delete(varmap, name)
+			if fields, split := literalFields(substituteVars(raw, varmap)); split &&
+				form == bash.AssignPlain && persists && !neverPropagate[name] {
+				words[name] = fields
+			}
 		} else {
 			varmap[name] = val
 		}

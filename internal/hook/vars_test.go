@@ -306,7 +306,7 @@ func TestApplyAssignmentGroup(t *testing.T) {
 			for k, v := range c.before {
 				m[k] = v
 			}
-			names, ok := applyAssignmentGroup(c.tokens, bash.Unquoted(len(c.tokens)), m, c.persists)
+			names, ok := applyAssignmentGroup(c.tokens, bash.Unquoted(len(c.tokens)), m, map[string][]string{}, c.persists)
 			if ok != c.ok {
 				t.Fatalf("ok = %v, want %v", ok, c.ok)
 			}

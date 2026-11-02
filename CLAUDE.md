@@ -290,10 +290,10 @@ being token-for-token. Six sites take it -- the two head peels, `poisonVars`,
 does the same thing for a different reason, that its substituted tokens lose
 quote provenance entirely where this port carries it alongside. It is a
 precision fix and not a fail-open: nothing crossed that should not have.
-What is still unread is the word splitting that peel rests on --
-`V="cat <key>"; $V` reads the file in bash and is allowed silently here,
-because a substituted value is one token however many words bash makes of it,
-which is Q188. `NAME+=value` is an assignment
+The word splitting that peel rests on is read after it: an unquoted `$V`
+whose value holds only default-IFS whitespace becomes the words bash makes of
+it, so `V="cat <key>"; $V` gets its verdict, as `V="LC_ALL=C cat <key>"; $V`
+does not (Q188). `NAME+=value` is an assignment
 on the same reading and was not one until Q168: the regex wanted the `=` to
 follow the name directly, so `LC_ALL+=C cat <key>` put the prefix in the
 command head, found no reader row for it, contributed no operands and allowed
