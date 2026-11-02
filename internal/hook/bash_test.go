@@ -968,6 +968,92 @@ func TestAMoveInASubshellReachesTheCommandsInsideIt(t *testing.T) {
 	}
 }
 
+// A compound piped or backgrounded as a whole runs in a subshell, and a
+// function body runs only when called (Q212), which are upstream's Q272 and
+// Q265. Before it both were read as the current shell, so a `cd` in either
+// moved the operands after it and `{ cd w; cat x; } | cat; cat x` scanned
+// `w/x` twice where bash reads `x` the second time.
+//
+// Each row is driven on bash 5.3.15 the way the subshell test above is, the
+// key in the file bash reads and clean text everywhere else. The block rows
+// are the scopes; the deferred rows are where bash's move cannot be followed --
+// a call to a function whose body moves, and a last stage `lastpipe` runs in
+// this shell -- and each plants the key where bash reads it, so a row resolved
+// against the wrong directory allows silently instead of deferring.
+func TestACompoundInAPipelineOrAFunctionBodyKeepsItsMove(t *testing.T) {
+	tree := func(t *testing.T, key string) string {
+		root := t.TempDir()
+		for _, f := range []string{"x", "w/x"} {
+			path := filepath.Join(root, filepath.FromSlash(f))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			body := "nothing here\n"
+			if f == key {
+				body = "AWS_ACCESS_KEY_ID=" + secret + "\n"
+			}
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return root
+	}
+	for _, tc := range []struct{ command, key string }{
+		{"{ cd w; cat x; } | cat; cat x", "x"},
+		{"{ cd w; cat x; } | cat; cat x", "w/x"},
+		{"cat x | { cd w; cat x; }; cat x", "w/x"},
+		{"cat /dev/null | { true; cd w; }; cat x", "x"},
+		{"{ cd w; } & wait; cat x", "x"},
+		{"{ { cd w; }; } | cat; cat x", "x"},
+		{"if true; then cd w; fi | cat; cat x", "x"},
+		{"for i in 1; do cd w; done & wait; cat x", "x"},
+		{"case a in a) cd w;; esac | cat; cat x", "x"},
+		{"f() { cd w; }; cat x", "x"},
+		{"function f { cd w; }; cat x", "x"},
+		{"f() { cd w; cat x; }; f", "w/x"},
+		// A body in a subshell moves nothing its caller runs, so the call
+		// keeps the directory.
+		{"f() ( cd w ); f; cat x", "x"},
+		// The call inside the subshell is lost; the restore at its close is
+		// not.
+		{"f() { cd w; }; (f; cat x); cat x", "x"},
+		// Unpiped, a compound is the current shell, and its move stands.
+		{"while false; do :; done; { cd w; }; cat x", "w/x"},
+	} {
+		t.Run(tc.command+" reads "+tc.key, func(t *testing.T) {
+			root := tree(t, tc.key)
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, root))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout == "" {
+				t.Fatalf("allowed with no verdict, want a block naming %s (stderr: %q)", tc.key, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, filepath.Join(root, filepath.FromSlash(tc.key))) {
+				t.Errorf("reason = %q, want the file at %s", reason, tc.key)
+			}
+		})
+	}
+	for _, command := range []string{
+		"f() { cd w; }; f; cat x",
+		"function f { cd w; }; f; cat x",
+		"f() { cd w; }; g() { f; }; g; cat x",
+		// A backtick body is not flattened into the parent's segments, so
+		// only the set it inherits knows f moves.
+		"f() { cd w; }; echo `f; cat x`",
+		"shopt -s lastpipe; true | { cd w; }; cat x",
+		"shopt -s lastpipe; f() { true | { cd w; }; }; f; cat x",
+	} {
+		t.Run(command+" defers", func(t *testing.T) {
+			root := tree(t, "w/x")
+			code, stdout, stderr := drive(t, bashCall(t, command, root))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+				t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+			}
+		})
+	}
+}
+
 // The moves whose destination is not the literal, or not a literal at all.
 // Each leaves the directory unknown and the relative operand after it
 // recorded rather than resolved -- which is also what every one of them did

@@ -25,7 +25,9 @@
 // Q217's lexer half -- keeping `NAME[...]` whole in command position -- is
 // ported too, read at 00c94bc (Q185). requote's ANSI-C decode and backtick rewrite
 // (claude-bouncer Q225, b0e3fdc, and Q274, f440dbd) and StripComments' `$'…'`
-// arm are ported too, from the same revision (Q211).
+// arm are ported too, from the same revision (Q211). split_groups' compound
+// and function scopes (claude-bouncer Q272 and Q265) are ported, read at
+// 00c94bc, with its `lastpipe` reading moved to the caller (Q212).
 //
 // Structural identity is the point, and it is a rule this repo states rather
 // than a preference (CLAUDE.md, "Do not hand-roll shell parsing"). A segmenter
@@ -67,7 +69,10 @@
 // Nothing here needs them, so they are not ported.
 package bash
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // A Segment is one simple command in a chain, with the redirect targets written
 // beside it.
@@ -138,9 +143,9 @@ type Segment struct {
 	// bare `$(` reaches here as `$(` then `(`, so a substitution counts too,
 	// and so does a process substitution's `<(`. Upstream's `shells`, which it
 	// returns through split_groups' `scopes` out-parameter (its Q173); a field
-	// here for the reason Pipe is one. Upstream's other scopes are not ported:
-	// a `{ … }`, loop, `if` or `case` piped or backgrounded as a whole (its
-	// Q272) and a function body (its Q265), which Q212 carries. The process
+	// here for the reason Pipe is one. A `{ … }`, loop, `if` or `case` piped
+	// or backgrounded as a whole is a shell too (its Q272), and so is a
+	// function body (its Q265), whose number Function names. The process
 	// substitution is this port's, and upstream has no shell for it.
 	Shells []int
 	// Forked is true for a pipeline stage or a backgrounded command, which
@@ -148,6 +153,42 @@ type Segment struct {
 	// the next segment runs in. Upstream's `own`, negated so the zero value is
 	// the common case.
 	Forked bool
+	// LastStage is true for a pipeline's last stage, and for the closer of a
+	// compound that was one: `shopt -s lastpipe` runs that stage in the
+	// current shell, so a `cd` there may move what follows. Upstream folds it
+	// into `own`, as None while `lastpipe` may be on; it is a field here so
+	// the caller decides whether it may be, which takes the environment as
+	// well as the string (Q212).
+	LastStage bool
+	// Function names the function whose body this segment sits directly in,
+	// and is empty otherwise. Defining one runs none of its body, so a `cd`
+	// there moves the rest of the body and not what follows the definition;
+	// a call to it is what moves the caller. Upstream's function_scope.
+	Function string
+}
+
+// compoundClosers maps the reserved word that opens each compound command to
+// its closer. `for` and `select` are too, though shKeywords leaves them out.
+var compoundClosers = map[string]string{"{": "}", "if": "fi", "case": "esac",
+	"for": "done", "select": "done", "while": "done", "until": "done"}
+
+// leadingWords are the reserved words after which the next word is still in
+// command position. A closer is one too: `{ { a; } }` and `then { a; } fi` are
+// both valid bash. Upstream's LEADING_WORDS; cmdPosKeywords is narrower
+// because scanDollarParen's `case` reading is keyed on it.
+var leadingWords = map[string]bool{"if": true, "then": true, "else": true,
+	"elif": true, "do": true, "while": true, "until": true, "!": true,
+	"time": true, "{": true, "}": true, "fi": true, "esac": true, "done": true}
+
+// A compound is one compound command still open: upstream's frame. scope is
+// the shell it opened, if any, and closerShell is set instead of closer for a
+// function body written as `f () ( … )`, which the paren closes.
+type compound struct {
+	closer      string
+	closerShell int
+	scope       int
+	first       int
+	depth       int
 }
 
 // conditional is the Conditional field for a segment reached through sep.
@@ -233,9 +274,33 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		// in `echo case` stays an operand. cmdPosKeywords is the same set
 		// scanDollarParen keys on.
 		cmdPos = true
+		// Upstream's compound tracking (its Q265 and Q272): the compounds
+		// still open, the function whose header has been read and whose body
+		// has not opened, the separator Forked judges a segment by -- which a
+		// compound opening the segment takes over -- the compounds closed in
+		// this segment, whose subshell the next separator decides, whether one
+		// closed was a later stage, and upstream's cmd_pos.
+		frames      []compound
+		fn          string
+		lead        string
+		closed      []compound
+		lastClose   bool
+		compoundPos = true
+		fnNames     = map[int]string{}
 	)
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
+		if t == "(" && i+1 < len(tokens) && tokens[i+1] == ")" &&
+			isOperator(t, quotedFrom[i], separators) &&
+			isOperator(tokens[i+1], quotedFrom[i+1], separators) &&
+			len(cur) == 1 && len(curRedir) == 0 && !inPattern(clauses) &&
+			!isReservedWord(cur[0], curQF[0]) && !strings.ContainsAny(cur[0], "=$`(") {
+			// `f ()` heads a definition, and runs nothing.
+			fn, cur, curQF = cur[0], nil, nil
+			i += 2
+			cmdPos, compoundPos = true, true
+			continue
+		}
 		if isOperator(t, quotedFrom[i], separators) {
 			empty := len(cur) == 0 && len(curRedir) == 0
 			if !empty {
@@ -243,9 +308,23 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
 				segs = append(segs, Segment{cur, curRedir, curInputs, persists,
 					conditional(prevSep), inCaseArm(clauses), pipe, curQF,
-					append([]int(nil), shells...), forked(prevSep, t)})
+					append([]int(nil), shells...), forked(lead, t),
+					lastStage(lead, t, lastClose), ""})
 				cur, curQF, curRedir, curInputs = nil, nil, nil, nil
 			}
+			lastClose = false
+			if isPipe(t) || t == "&" {
+				// A compound piped or backgrounded as a whole runs in a
+				// subshell, which only the separator after its closer says.
+				for _, c := range closed {
+					opened++
+					for k := c.first; k < len(segs); k++ {
+						sh := segs[k].Shells
+						segs[k].Shells = slices.Insert(sh, min(c.depth, len(sh)), opened)
+					}
+				}
+			}
+			closed = nil
 			n := len(clauses)
 			pattern := n > 0 && (clauses[n-1] == "pat" || clauses[n-1] == "next")
 			switch {
@@ -267,6 +346,13 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				// is not itself marked.
 				clauses[n-1] = "body"
 			case t == "(":
+				if fn != "" { // `f () ( … )`
+					opened++
+					shells = append(shells, opened)
+					fnNames[opened] = fn
+					frames = append(frames, compound{closerShell: opened + 1})
+					fn = ""
+				}
 				paren++
 				opened++
 				shells = append(shells, opened)
@@ -275,6 +361,10 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 					paren--
 				}
 				if len(shells) > 0 {
+					if f := len(frames); f > 0 && frames[f-1].closerShell == shells[len(shells)-1] {
+						shells = shells[:len(shells)-1]
+						frames = frames[:f-1]
+					}
 					shells = shells[:len(shells)-1]
 				}
 			case empty && prevSep == ";" && (t == ";" || t == "&") &&
@@ -287,8 +377,8 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			if !isPipe(t) {
 				pipe++
 			}
-			prevSep = t
-			cmdPos = true
+			prevSep, lead = t, t
+			cmdPos, compoundPos = true, true
 			i++
 			continue
 		}
@@ -347,6 +437,49 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			i++
 			continue
 		}
+		// A pattern word runs nothing, so only the `esac` ending one can
+		// close anything.
+		if compoundPos && quotedFrom[i] == NotQuoted && (!inPattern(clauses) || t == "esac") &&
+			(shKeywords[t] || t == "for" || t == "select") {
+			if t == "function" && i+1 < len(tokens) {
+				fn = tokens[i+1] // `function f [()]`
+				if i+3 < len(tokens) && tokens[i+2] == "(" && tokens[i+3] == ")" {
+					i += 4
+				} else {
+					i += 2
+				}
+				continue
+			}
+			if closer, ok := compoundClosers[t]; ok {
+				c := compound{closer: closer, first: len(segs), depth: len(shells)}
+				if fn != "" || isPipe(lead) {
+					// A function body, or a later pipeline stage, which is the
+					// subshell itself: the segment it opens is no stage of its
+					// own.
+					opened++
+					shells = append(shells, opened)
+					c.scope = opened
+					if fn != "" {
+						fnNames[opened] = fn
+					}
+				}
+				frames = append(frames, c)
+				lead = ""
+			} else if f := len(frames); f > 0 && frames[f-1].closer == t {
+				c := frames[f-1]
+				frames = frames[:f-1]
+				if j := slices.Index(shells, c.scope); c.scope != 0 && j >= 0 {
+					shells = shells[:j]
+					lastClose = lastClose || fnNames[c.scope] == ""
+				} else if c.scope == 0 {
+					closed = append(closed, c)
+				}
+			}
+			fn = ""
+			compoundPos = leadingWords[t]
+		} else {
+			fn, compoundPos = "", false
+		}
 		cur = append(cur, t)
 		curQF = append(curQF, quotedFrom[i])
 		opening := len(clauses) > 0 && clauses[len(clauses)-1] == "in"
@@ -358,16 +491,33 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	if len(cur) > 0 || len(curRedir) > 0 {
 		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && !isPipe(prevSep),
 			conditional(prevSep), inCaseArm(clauses), pipe, curQF,
-			append([]int(nil), shells...), forked(prevSep, "")})
+			append([]int(nil), shells...), forked(lead, ""),
+			lastStage(lead, "", lastClose), ""})
+	}
+	for k := range segs {
+		if n := len(segs[k].Shells); n > 0 {
+			segs[k].Function = fnNames[segs[k].Shells[n-1]]
+		}
 	}
 	return segs, nil
 }
 
-// forked is the Forked field for a segment reached through lead and ended by
-// sep, upstream's stage_own without the `lastpipe` arm: a `cd` that arm says
-// may move the current shell is one the caller loses track of either way.
+// forked and lastStage are upstream's stage_own, split: forked is the Forked
+// field for a segment reached through lead and ended by sep, and lastStage
+// the arm it returns None from while `lastpipe` may be on. lastClose says the
+// segment closes a compound that was a later stage.
 func forked(lead, sep string) bool {
 	return isPipe(sep) || sep == "&" || isPipe(lead)
+}
+
+func lastStage(lead, sep string, lastClose bool) bool {
+	return !isPipe(sep) && sep != "&" && (isPipe(lead) || lastClose)
+}
+
+// inPattern reports whether the innermost open `case` is reading a pattern.
+func inPattern(clauses []string) bool {
+	n := len(clauses)
+	return n > 0 && (clauses[n-1] == "pat" || clauses[n-1] == "next")
 }
 
 // isPipe is upstream's PIPE_OPS. `|&` is `2>&1 |`, so its right side is a

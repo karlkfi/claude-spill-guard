@@ -46,7 +46,7 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 			[]bool{false, false, false}},
 		{"a subshell", "(cd x); P=1", []bool{false, false}},
 		{"a function definition", "f() { echo hi; }; P=1",
-			[]bool{false, false, false, false}},
+			[]bool{false, false, false}},
 		{"a substitution", "echo $(cat y); P=1", []bool{false, false, false}},
 		// The command-position gate, which needs a `)` at depth 0 after it to
 		// bite: the operand pushes a clause, the `in` promotes it to a
@@ -81,7 +81,7 @@ func TestSegments(t *testing.T) {
 		want     []Segment
 	}{
 		{"one command", "cat a b",
-			[]Segment{{[]string{"cat", "a", "b"}, nil, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat", "a", "b"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 
 		// A redirect target is collected into the segment it textually appears
 		// in, so it later resolves against THAT segment's working directory --
@@ -89,130 +89,130 @@ func TestSegments(t *testing.T) {
 		{"a redirect belongs to the segment it was written in",
 			"cd /tmp && cat /dev/null > evil",
 			[]Segment{
-				{[]string{"cd", "/tmp"}, nil, nil, true, "", false, 0, nil, nil, false},
-				{[]string{"cat", "/dev/null"}, []string{"evil"}, nil, true, "&&", false, 1, nil, nil, false},
+				{[]string{"cd", "/tmp"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""},
+				{[]string{"cat", "/dev/null"}, []string{"evil"}, nil, true, "&&", false, 1, nil, nil, false, false, ""},
 			}},
 
 		// `pipe` advances on every separator except `|`, so the stages of one
 		// pipeline share a number and nothing else does.
 		{"a pipeline's stages share a number", "a | b | c",
 			[]Segment{
-				{[]string{"a"}, nil, nil, false, "", false, 0, nil, nil, true},
-				{[]string{"b"}, nil, nil, false, "", false, 0, nil, nil, true},
-				{[]string{"c"}, nil, nil, false, "", false, 0, nil, nil, true},
+				{[]string{"a"}, nil, nil, false, "", false, 0, nil, nil, true, false, ""},
+				{[]string{"b"}, nil, nil, false, "", false, 0, nil, nil, true, false, ""},
+				{[]string{"c"}, nil, nil, false, "", false, 0, nil, nil, true, false, ""},
 			}},
 
 		// Persistence: an assignment survives at paren depth 0, outside a
 		// pipeline stage, and not backgrounded.
 		{"an assignment at the top level persists", "f=x; cat $f",
 			[]Segment{
-				{[]string{"f=x"}, nil, nil, true, "", false, 0, nil, nil, false},
-				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false},
+				{[]string{"f=x"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""},
+				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false, false, ""},
 			}},
 		{"one in a subshell does not", "(f=x); cat $f",
 			[]Segment{
-				{[]string{"f=x"}, nil, nil, false, "", false, 1, nil, []int{1}, false},
-				{[]string{"cat", "$f"}, nil, nil, true, "", false, 3, nil, nil, false},
+				{[]string{"f=x"}, nil, nil, false, "", false, 1, nil, []int{1}, false, false, ""},
+				{[]string{"cat", "$f"}, nil, nil, true, "", false, 3, nil, nil, false, false, ""},
 			}},
 		{"a backgrounded one does not", "f=x & cat $f",
 			[]Segment{
-				{[]string{"f=x"}, nil, nil, false, "", false, 0, nil, nil, true},
-				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false},
+				{[]string{"f=x"}, nil, nil, false, "", false, 0, nil, nil, true, false, ""},
+				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false, false, ""},
 			}},
 		{"nor one in a |& stage", "a |& f=x; cat $f",
 			[]Segment{
-				{[]string{"a"}, nil, nil, false, "", false, 0, nil, nil, true},
-				{[]string{"f=x"}, nil, nil, false, "", false, 0, nil, nil, true},
-				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false},
+				{[]string{"a"}, nil, nil, false, "", false, 0, nil, nil, true, false, ""},
+				{[]string{"f=x"}, nil, nil, false, "", false, 0, nil, nil, true, false, ""},
+				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false, false, ""},
 			}},
 		{"one in a pipeline stage does not", "a | f=x; cat $f",
 			[]Segment{
-				{[]string{"a"}, nil, nil, false, "", false, 0, nil, nil, true},
-				{[]string{"f=x"}, nil, nil, false, "", false, 0, nil, nil, true},
-				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false},
+				{[]string{"a"}, nil, nil, false, "", false, 0, nil, nil, true, false, ""},
+				{[]string{"f=x"}, nil, nil, false, "", false, 0, nil, nil, true, false, ""},
+				{[]string{"cat", "$f"}, nil, nil, true, "", false, 1, nil, nil, false, false, ""},
 			}},
 
 		// An fd number glued to a redirect operator lands as the previous
 		// token; popped, so it does not leak as a positional file argument.
 		{"an fd number before a redirect is not an operand", "cat x 2> err",
-			[]Segment{{[]string{"cat", "x"}, []string{"err"}, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat", "x"}, []string{"err"}, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		// A duplication target is an fd or `-`, not a path.
 		{"a dup target is not a path", "cat x 2>&1",
-			[]Segment{{[]string{"cat", "x"}, nil, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat", "x"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		{"nor a close", "cat x 2>&-",
-			[]Segment{{[]string{"cat", "x"}, nil, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat", "x"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		{"nor an input dup", "cat x <&3",
-			[]Segment{{[]string{"cat", "x"}, nil, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat", "x"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		// But `>&file` -- target is not a bare fd -- redirects to a file.
 		{"a dup operator with a filename target does name a path", "cat x >&out",
-			[]Segment{{[]string{"cat", "x"}, []string{"out"}, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat", "x"}, []string{"out"}, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		// The documented limitation: a file literally named `2` written right
 		// before a redirect is indistinguishable post-tokenization.
 		{"a file named 2 before a redirect is lost, as upstream loses it",
 			"cat 2 > out",
-			[]Segment{{[]string{"cat"}, []string{"out"}, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat"}, []string{"out"}, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		{"every target of a multiply-redirected command", "sort <in >out 2>err",
-			[]Segment{{[]string{"sort"}, []string{"in", "out", "err"}, []string{"in"}, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"sort"}, []string{"in", "out", "err"}, []string{"in"}, true, "", false, 0, nil, nil, false, false, ""}}},
 		{"the three-character redirect operators", "a &>> both",
-			[]Segment{{[]string{"a"}, []string{"both"}, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"a"}, []string{"both"}, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		{"a clobbering redirect", "a >| clobber",
-			[]Segment{{[]string{"a"}, []string{"clobber"}, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"a"}, []string{"clobber"}, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		{"a redirect with nothing after it names nothing", "echo hi >",
-			[]Segment{{[]string{"echo", "hi"}, nil, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"echo", "hi"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 
 		// A heredoc delimiter and a here-string's content are not paths.
 		{"a heredoc delimiter is not a redirect target",
 			"cat <<TAG\nx\nTAG\n> after",
 			[]Segment{
-				{[]string{"cat"}, nil, nil, true, "", false, 0, nil, nil, false},
-				{nil, []string{"after"}, nil, true, "", false, 1, nil, nil, false},
+				{[]string{"cat"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""},
+				{nil, []string{"after"}, nil, true, "", false, 1, nil, nil, false, false, ""},
 			}},
 		{"a here-string's content is not one either", `cat x <<<"here string"`,
-			[]Segment{{[]string{"cat", "x"}, nil, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat", "x"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 
 		// A newline is a command boundary. Left as whitespace it merges the
 		// commands on either side, and the second one's operands are read as
 		// arguments to the first.
 		{"a newline separates two commands", "echo one\necho two",
 			[]Segment{
-				{[]string{"echo", "one"}, nil, nil, true, "", false, 0, nil, nil, false},
-				{[]string{"echo", "two"}, nil, nil, true, "", false, 1, nil, nil, false},
+				{[]string{"echo", "one"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""},
+				{[]string{"echo", "two"}, nil, nil, true, "", false, 1, nil, nil, false, false, ""},
 			}},
 		{"and a comment does not eat it", "echo hi # note\ncat x",
 			[]Segment{
-				{[]string{"echo", "hi"}, nil, nil, true, "", false, 0, nil, nil, false},
-				{[]string{"cat", "x"}, nil, nil, true, "", false, 1, nil, nil, false},
+				{[]string{"echo", "hi"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""},
+				{[]string{"cat", "x"}, nil, nil, true, "", false, 1, nil, nil, false, false, ""},
 			}},
 
 		{"a subshell's parens are separators", "(cd x); echo done",
 			[]Segment{
-				{[]string{"cd", "x"}, nil, nil, false, "", false, 1, nil, []int{1}, false},
-				{[]string{"echo", "done"}, nil, nil, true, "", false, 3, nil, nil, false},
+				{[]string{"cd", "x"}, nil, nil, false, "", false, 1, nil, []int{1}, false, false, ""},
+				{[]string{"echo", "done"}, nil, nil, true, "", false, 3, nil, nil, false, false, ""},
 			}},
 
 		// Keywords and the env prefix stay in the segment; finding the real
 		// command word is StripShKeywords and StripEnvPrefix, per segment.
 		{"a compound statement keeps its keywords", "until LC_ALL=C grep x f; do :; done",
 			[]Segment{
-				{[]string{"until", "LC_ALL=C", "grep", "x", "f"}, nil, nil, true, "", false, 0, nil, nil, false},
-				{[]string{"do", ":"}, nil, nil, true, "", false, 1, nil, nil, false},
-				{[]string{"done"}, nil, nil, true, "", false, 2, nil, nil, false},
+				{[]string{"until", "LC_ALL=C", "grep", "x", "f"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""},
+				{[]string{"do", ":"}, nil, nil, true, "", false, 1, nil, nil, false, false, ""},
+				{[]string{"done"}, nil, nil, true, "", false, 2, nil, nil, false, false, ""},
 			}},
 
 		// Inputs is the `<` subset of Redirects, and it is this repo's field:
 		// upstream asks whether a target is outside the workspace, which a
 		// read and a write answer alike, so it never needed the operator.
 		{"an input redirect is recorded as one", "cat < in",
-			[]Segment{{[]string{"cat"}, []string{"in"}, []string{"in"}, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat"}, []string{"in"}, []string{"in"}, true, "", false, 0, nil, nil, false, false, ""}}},
 		{"glued to its target as well", "cat <in",
-			[]Segment{{[]string{"cat"}, []string{"in"}, []string{"in"}, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat"}, []string{"in"}, []string{"in"}, true, "", false, 0, nil, nil, false, false, ""}}},
 		// The descriptor is popped like any other and the target is still an
 		// input: `0<in` is `<in` spelled out, and `3<in` opens in for reading
 		// whether or not the command reads fd 3.
 		{"with an explicit descriptor", "cat 0<in",
-			[]Segment{{[]string{"cat"}, []string{"in"}, []string{"in"}, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat"}, []string{"in"}, []string{"in"}, true, "", false, 0, nil, nil, false, false, ""}}},
 		{"an output redirect is not an input", "cat x > out",
-			[]Segment{{[]string{"cat", "x"}, []string{"out"}, nil, true, "", false, 0, nil, nil, false}}},
+			[]Segment{{[]string{"cat", "x"}, []string{"out"}, nil, true, "", false, 0, nil, nil, false, false, ""}}},
 		// `<(cmd)` lexes as `<` then `(`. Upstream records the paren as a
 		// target, absorbs the substitution's tokens into the command, and
 		// splits on the closing paren -- all kept here -- but the paren is not
@@ -221,8 +221,8 @@ func TestSegments(t *testing.T) {
 		{"a process substitution is a redirect target and not an input",
 			"diff <(sort a) <(sort b)",
 			[]Segment{
-				{[]string{"diff", "sort", "a"}, []string{"("}, nil, false, "", false, 0, nil, []int{1}, false},
-				{[]string{"sort", "b"}, []string{"("}, nil, false, "", false, 1, nil, []int{2}, false},
+				{[]string{"diff", "sort", "a"}, []string{"("}, nil, false, "", false, 0, nil, []int{1}, false, false, ""},
+				{[]string{"sort", "b"}, []string{"("}, nil, false, "", false, 1, nil, []int{2}, false, false, ""},
 			}},
 
 		// The operator a segment is reached through, which Persists never
@@ -232,10 +232,10 @@ func TestSegments(t *testing.T) {
 		{"a segment reached through && or || says so",
 			"false && P=/x || cat $P/f; cat g",
 			[]Segment{
-				{[]string{"false"}, nil, nil, true, "", false, 0, nil, nil, false},
-				{[]string{"P=/x"}, nil, nil, true, "&&", false, 1, nil, nil, false},
-				{[]string{"cat", "$P/f"}, nil, nil, true, "||", false, 2, nil, nil, false},
-				{[]string{"cat", "g"}, nil, nil, true, "", false, 3, nil, nil, false},
+				{[]string{"false"}, nil, nil, true, "", false, 0, nil, nil, false, false, ""},
+				{[]string{"P=/x"}, nil, nil, true, "&&", false, 1, nil, nil, false, false, ""},
+				{[]string{"cat", "$P/f"}, nil, nil, true, "||", false, 2, nil, nil, false, false, ""},
+				{[]string{"cat", "g"}, nil, nil, true, "", false, 3, nil, nil, false, false, ""},
 			}},
 		{"an empty command has no segments", "   ", nil},
 	} {
@@ -307,6 +307,24 @@ func TestSegmentsNumbersTheShellsASegmentRunsIn(t *testing.T) {
 			[]want{{nil, true}, {nil, false}}},
 		{"a subshell piped as a whole is a shell, not a stage", "(cd a) | cat x",
 			[]want{{[]int{1}, false}, {nil, true}}},
+		// Upstream's Q272: a compound piped or backgrounded as a whole is a
+		// shell, numbered once its closer's separator says so, and as a later
+		// stage from its opener, whose segment is then no stage of its own.
+		{"a group piped as a whole", "{ cd w; cat x; } | cat; cat x",
+			[]want{{[]int{1}, false}, {[]int{1}, false}, {[]int{1}, true},
+				{nil, true}, {nil, false}}},
+		{"a group as a later stage", "cat | { cd w; }; cat x",
+			[]want{{nil, true}, {[]int{1}, false}, {nil, false}, {nil, false}}},
+		{"a backgrounded loop inside a subshell", "(for i in 1; do cd w; done &)",
+			[]want{{[]int{1, 2}, false}, {[]int{1, 2}, false}, {[]int{1, 2}, true}}},
+		{"an unpiped group is the current shell", "{ cd w; }; cat x",
+			[]want{{nil, false}, {nil, false}, {nil, false}}},
+		// Upstream's Q265: a function body is a shell, and its header is no
+		// segment at all.
+		{"a function body", "f() { cd w; }; cat x",
+			[]want{{[]int{1}, false}, {nil, false}, {nil, false}}},
+		{"a function body in parens", "f() ( cd w ); cat x",
+			[]want{{[]int{1, 2}, false}, {nil, false}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			segs, err := Segments(tc.in)
@@ -320,6 +338,47 @@ func TestSegmentsNumbersTheShellsASegmentRunsIn(t *testing.T) {
 				if !slices.Equal(segs[i].Shells, w.shells) || segs[i].Forked != w.forked {
 					t.Errorf("segment %d %q: Shells, Forked = %v, %v, want %v, %v",
 						i, segs[i].Tokens, segs[i].Shells, segs[i].Forked, w.shells, w.forked)
+				}
+			}
+		})
+	}
+}
+
+// Function names the body a segment sits directly in and no other, and
+// LastStage marks the stage `lastpipe` would run in the current shell: a last
+// stage, and the closer of a compound that was one.
+func TestSegmentsNameTheFunctionAndTheLastStage(t *testing.T) {
+	type want struct {
+		function  string
+		lastStage bool
+	}
+	for _, tc := range []struct {
+		name, in string
+		want     []want
+	}{
+		{"a body", "f() { cd w; }; f", []want{{"f", false}, {"", false}, {"", false}}},
+		{"the function keyword", "function g { cd w; }",
+			[]want{{"g", false}, {"", false}}},
+		{"a subshell inside one is not directly in it", "f() { (cd w); }",
+			[]want{{"f", false}, {"", false}, {"", false}}},
+		{"a plain pipeline", "a | b", []want{{"", false}, {"", true}}},
+		{"a later-stage group's closer", "a | { cd w; }",
+			[]want{{"", false}, {"", false}, {"", true}}},
+		{"a quoted name, whose body bash rejects unrun", "'f'() { cd w; }",
+			[]want{{"f", false}, {"", false}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			segs, err := Segments(tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(segs) != len(tc.want) {
+				t.Fatalf("got %d segments, want %d: %+v", len(segs), len(tc.want), segs)
+			}
+			for i, w := range tc.want {
+				if segs[i].Function != w.function || segs[i].LastStage != w.lastStage {
+					t.Errorf("segment %d %q: Function, LastStage = %q, %v, want %q, %v",
+						i, segs[i].Tokens, segs[i].Function, segs[i].LastStage, w.function, w.lastStage)
 				}
 			}
 		})

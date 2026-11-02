@@ -25,10 +25,11 @@ sandboxed home directory — and fails until this file agrees with all four.
 | `PreToolUse` | `Grep` | the `pattern`, and the file a `path` names when it names one file |
 | `UserPromptSubmit` | every prompt | the prompt, and the files its `@` tokens name |
 
-The binary reads `CDPATH`, `CLAUDE_CODE_SHELL`, `GIT_CEILING_DIRECTORIES`,
-`GIT_DIR`, `GIT_WORK_TREE`, `HOME`, `SHELL`, `TMPDIR` and `XDG_STATE_HOME` from
-its environment, and nothing else. The launcher, `hooks/run-spill-guard.cmd`,
-reads `HOME`, `LOCALAPPDATA`, `PATH` and `SPILL_GUARD_BIN`.
+The binary reads `BASHOPTS`, `CDPATH`, `CLAUDE_CODE_SHELL`,
+`GIT_CEILING_DIRECTORIES`, `GIT_DIR`, `GIT_WORK_TREE`, `HOME`, `SHELL`,
+`TMPDIR` and `XDG_STATE_HOME` from its environment, and nothing else. The
+launcher, `hooks/run-spill-guard.cmd`, reads `HOME`, `LOCALAPPDATA`, `PATH` and
+`SPILL_GUARD_BIN`.
 
 Driven in a sandboxed home directory, the hook wrote one file, and only on a
 call it could not scan: `$XDG_STATE_HOME/spill-guard/coverage.jsonl`, or
