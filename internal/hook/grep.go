@@ -36,10 +36,9 @@ import (
 //
 // Position in the pipeline is the test, as it is for the `env` refusal: a
 // filter stage after the grep in its own pipeline is the careful form. And the
-// forms that print no matched text -- -q, -l, -L, -c, ahead of the pattern --
-// are allowed bare, because nothing of a file's content crosses through them
-// and they are the forms whose exit status a session tests, which a pipe would
-// replace.
+// forms that print no matched text -- -q, -l, -L, -c -- are allowed bare,
+// because nothing of a file's content crosses through them and they are the
+// forms whose exit status a session tests, which a pipe would replace.
 //
 // A recursive grep with no file operand searches the working directory. It
 // used to contribute no operands and cross silently, with nothing recorded;
@@ -118,13 +117,13 @@ var grepQuietLong = map[string]bool{
 // and ugrep, which is what `grep` runs in Claude Code's Bash tool on a machine
 // whose shell snapshot carries its grep function.
 //
-// A recursion flag counts wherever it sits, because all three permute: driven
-// 2026-10-01, `grep hello d -r -l` on BSD grep 2.6.0 lists the file. A quiet
-// flag counts only before the first operand, because GNU grep with
-// POSIXLY_CORRECT set stops reading options there and takes `-l` for a file,
-// and nothing here can read the environment the command runs in.
+// A flag counts wherever it sits, because all three permute: driven
+// 2026-10-01, `grep hello d -r -l` on BSD grep 2.6.0 lists the file, and
+// 2026-11-01 ugrep 7.8.4 did the same. GNU grep with POSIXLY_CORRECT set stops
+// at the first operand and would take that `-l` for a file; honouring it
+// anyway is a measured choice, argued in docs/design/README.md.
 func grepMode(tokens []string) (recursive, quiet bool) {
-	unsure, operand := false, false
+	unsure := false
 	defer func() {
 		if unsure {
 			recursive, quiet = true, false
@@ -151,7 +150,7 @@ func grepMode(tokens []string) (recursive, quiet bool) {
 			case name == "--recursive" || name == "--dereference-recursive":
 				recursive = true
 			case grepQuietLong[name]:
-				quiet = quiet || !operand
+				quiet = true
 			case name == "--directories":
 				if !inline && i+1 < len(tokens) {
 					value = tokens[i+1]
@@ -169,17 +168,16 @@ func grepMode(tokens []string) (recursive, quiet bool) {
 			continue
 		}
 		if !strings.HasPrefix(tok, "-") || tok == "-" {
-			operand = true
 			continue
 		}
 		for j := 1; j < len(tok); j++ {
 			c := tok[j]
-			switch {
-			case c == 'r' || c == 'R':
+			switch c {
+			case 'r', 'R':
 				recursive = true
-			case c == 'q' || c == 'l' || c == 'L' || c == 'c':
-				quiet = quiet || !operand
-			case c >= '0' && c <= '9':
+			case 'q', 'l', 'L', 'c':
+				quiet = true
+			case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 				// A context width in GNU and BSD grep, and a depth in ugrep,
 				// which turns recursion on: driven 2026-11-01, `grep -2 x`
 				// with no operand walked `.` on ugrep 7.8.4.

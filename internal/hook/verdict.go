@@ -368,8 +368,7 @@ func walked(command, rewrite string) string {
 		"so nothing here can read them first. Nothing was sent. To have the "+
 		"output scanned, %s: the filter writes the output when no rule matches "+
 		"it and withholds all of it, naming the rule and line, when one does. "+
-		"`-l`, `-L`, `-c` and `-q` print no matched text and are not refused "+
-		"when they come before the pattern.",
+		"`-l`, `-L`, `-c` and `-q` print no matched text and are not refused.",
 		command, fix)
 }
 

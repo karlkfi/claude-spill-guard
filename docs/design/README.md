@@ -2445,7 +2445,7 @@ against the 2026-09-05 measurement that made coverage failures defer.
 | `grep -rn pat dir` | denied; the reason carries `set -o pipefail; grep -rn pat dir \| <binary> filter` |
 | `grep -rn pat` | the same: a recursive grep with no operand searches `.`, and used to cross with nothing recorded |
 | `grep -rn pat dir \| spill-guard filter` | allowed; the directory is not read here, because the filter reads what the walk produced |
-| `grep -rl`, `-L`, `-c`, `-q`, ahead of the pattern | allowed bare: no matched text crosses, and these are the forms whose exit status a session tests |
+| `grep -rl`, `-L`, `-c`, `-q` | allowed bare: no matched text crosses, and these are the forms whose exit status a session tests |
 | `grep -n pat dir` | unchanged: no recursion, so the directory reason above |
 | `rg pat dir` | unchanged: not offered the filter until the coverage log says it is worth a turn |
 
@@ -2454,11 +2454,22 @@ after the grep in its own pipeline is the careful form; one in a different
 pipeline of the same string filters nothing of this one's. The recursion flags
 are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`,
 `--dereference-recursive`, `-d recurse`, and a digit option such as `-2` —
-and a recursion flag after an operand counts, because the greps permute:
-driven, `grep hello d -r -l` on BSD grep 2.6.0 lists the file. A quiet flag
-counts only before the first operand, because GNU grep with `POSIXLY_CORRECT`
-set stops reading options there and takes `-l` for a file, and the hook cannot
-read the command's environment.
+and a flag after an operand counts, because the greps permute: driven,
+`grep hello d -r -l` on BSD grep 2.6.0 and on ugrep 7.8.4 lists the file.
+
+**A quiet flag after an operand is honoured, and that is a measured trade.**
+GNU grep with `POSIXLY_CORRECT` set stops reading options at the first operand,
+so its `grep -rn pat dir -l` takes `-l` for a file and prints matched lines,
+and the hook cannot read the command's environment. Refusing a quiet flag in
+that position was built and replayed on 2026-11-01 over this machine's
+transcripts: 240,204 `Bash` calls, of which 42,448 distinct commands mention
+`grep` beside a flag it reads and still have their working directory. 86
+changed verdict, every one from allowed to refused, all of them this rule —
+shapes such as `grep -rn pat . --include='*.go' -l`, which ugrep and BSD grep
+answer with file names only. Of the 240,859 `Bash` calls on record when the
+next count was taken, 11 name `POSIXLY_CORRECT`, and all 11 are this repo's
+own probes of and notes on this case. So the flag is honoured, and the case it
+misses is GNU-only and needs an environment no session here has set.
 
 **Three greps are read at once, because `grep` in Claude Code's Bash tool is
 not always grep.** Driven 2026-11-01 on Claude Code 2.1.290, the shell snapshot
@@ -2475,7 +2486,9 @@ and BSD grep, and both are read its way:
 
 The first costs a turn on a machine whose `grep` is GNU or BSD:
 `cmd | grep -2 pat` is refused there and offered the filtered rewrite, though
-it reads only the pipe. Where the function is in place, the same command reads
+it reads only the pipe. In the replay described above, neither this reading
+nor the `--context` one changed the verdict on any recorded command. Where the
+function is in place, the same command reads
 the pipe *and* walks the working directory, which is the crossing this refusal
 exists for, written by a session that asked for two lines of context. An unknown
 long option stays refused for the same reason: `grep --depth=3 pat` walks `.`

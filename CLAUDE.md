@@ -411,7 +411,7 @@ rather than walking past it.** Both arguments above are about reading the
 cross silently — is denied, and the reason carries the same command with `set
 -o pipefail;` ahead of it and `<this binary> filter` as its last stage. Position
 in the pipeline is the test, as for `env`; `-l`, `-L`, `-c` and `-q` print no
-matched text and stay allowed bare ahead of the pattern. The filter blocks on a finding and writes
+matched text and stay allowed bare. The filter blocks on a finding and writes
 nothing, exit 3, so pipefail reports it apart from grep's 0, 1 and 2; `--redact`
 replaces each value with its rule's name instead. The rewrite is checked
 against the same test before it is offered, because a rewrite this hook then

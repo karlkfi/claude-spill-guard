@@ -58,11 +58,10 @@ func TestGrepMode(t *testing.T) {
 		{"grep -d rec pat .", true, false},
 		{"grep --directories=rec pat .", true, false},
 		{"grep --dir=read pat .", false, false},
-		// A quiet flag after the first operand is a file to GNU grep under
-		// POSIXLY_CORRECT, so it is not read as quiet.
-		{"grep -r pat . -l", true, false},
-		{"grep pat . -r --count", true, false},
-		{"grep -e pat -r -l .", true, true},
+		// A quiet flag after an operand is honoured, POSIXLY_CORRECT
+		// notwithstanding: refusing it was measured as the larger cost.
+		{"grep -r pat . -l", true, true},
+		{"grep pat . -r --count", true, true},
 		// `--context` takes the next token on GNU grep and ugrep and only
 		// after `=` on BSD grep, so the token is read both ways.
 		{"grep --context -r pat", true, false},
