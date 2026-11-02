@@ -826,7 +826,7 @@ wrong reason. Padding the mutation to raise the drift made it worse, because it
 moved the file further from 7,214 rather than nearer.
 
 **A mutation is only valid against the artifact it was measured on**, and
-nothing anywhere said the reconstruction was a reconstruction. Q103 carries the
+nothing anywhere said the reconstruction was a reconstruction. Q110 carries the
 byte table and the class. Where no such case exists, build one,
 and give any probe whose answer matters when it is *empty* a positive control
 proving it can come back non-empty.

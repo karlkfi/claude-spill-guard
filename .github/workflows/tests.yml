@@ -527,7 +527,8 @@ jobs:
       # instead of passing. That is this control landing on the right side of
       # its own class: it asserts the mutation had its EFFECT rather than that
       # it happened, which is why it caught a change nobody was thinking about
-      # when they made it. Q103 has the sibling that did not.
+      # when they made it. The `test` control's "exit zero on a bad command"
+      # step has the sibling whose precondition drifted without failing.
       #
       # So a new subcommand reaching the pipeline belongs in this list. The
       # precondition is what says so, loudly, rather than this comment.
