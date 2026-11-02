@@ -161,6 +161,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 		list := andOr{settled: true}
 		var saved []savedShell
 		funcs := cdFunctions(segments, cur.state.funcs, lastpipe)
+		arms := definitionArms(segments, funcs)
 		reached := maps.Clone(cur.state.reached)
 		if reached == nil {
 			reached = map[string]bool{}
@@ -178,7 +179,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			if body == "" {
 				body = cur.state.within
 			}
-			if pastDefinition(reached, funcs, body) {
+			if pastDefinition(reached, arms[i], body) {
 				moved, dirUnknown = true, true
 			}
 			sub := v.expand(segment.Tokens)
@@ -578,12 +579,13 @@ func substStates(text string, subs []bash.Substitution, entry substState, lastpi
 	list := andOr{settled: true}
 	var saved []savedShell
 	funcs := cdFunctions(segments, entry.funcs, lastpipe)
+	arms := definitionArms(segments, funcs)
 	reached := maps.Clone(entry.reached)
 	if reached == nil {
 		reached = map[string]bool{}
 	}
 	leftUnknown := false
-	for _, segment := range segments {
+	for i, segment := range segments {
 		unknown = unknown || leftUnknown
 		leftUnknown = lastpipe && segment.LastStage
 		// A restored copy, and everything below reads it rather than the marked
@@ -615,7 +617,7 @@ func substStates(text string, subs []bash.Substitution, entry substState, lastpi
 		if body == "" {
 			body = entry.within
 		}
-		pastDefinition(reached, funcs, body)
+		pastDefinition(reached, arms[i], body)
 		// Read the positions before this segment's own `cd`, assignments and
 		// glob change apply, off the MARKED tokens, which are the only ones a
 		// marker survives in. A substitution is expanded to build the command
@@ -716,18 +718,18 @@ func callsCdFunction(wrap readers.Peel, funcs map[string]bool) bool {
 	return !wrap.External && len(wrap.Argv) > 0 && funcs[wrap.Argv[0]]
 }
 
-// pastDefinition records body's function, where it is one of funcs, among the
-// definitions the walk has reached, and reports whether one other than body's
-// own had been reached already. Past such a definition no segment's move is
-// followed, because a call need not name the function: review of Q212 found
-// `eval f`, `${g:-f}`, `${ f; }` in an argument, `compgen -F f`, `trap f
-// DEBUG` and `mapfile -C f`, each run on bash 5.3.15, in two rounds. Bash
-// cannot run a function before its definition, so position is the one reading
-// no new path gets past. Measured 2026-11-01 over 235,553 real Bash calls: 10
-// define a moving function and 1 has a relative operand after it.
-func pastDefinition(reached, funcs map[string]bool, body string) bool {
-	if funcs[body] {
-		reached[body] = true
+// pastDefinition adds the definitions arms says are reached at this segment,
+// and reports whether one other than body's own had been reached. Past such a
+// definition no segment's move is followed, because a call need not name the
+// function: review of Q212 found `eval f`, `${g:-f}`, `${ f; }` in an
+// argument, `compgen -F f`, `trap f DEBUG` and `mapfile -C f`, each run on
+// bash 5.3.15, in two rounds. Bash cannot run a function before its
+// definition is reached, so position is the one reading no new path gets
+// past. Measured 2026-11-01 over 235,553 real Bash calls: 10 define a moving
+// function and 1 has a relative operand after it.
+func pastDefinition(reached map[string]bool, arms []string, body string) bool {
+	for _, name := range arms {
+		reached[name] = true
 	}
 	for name := range reached {
 		if name != body {
@@ -735,6 +737,42 @@ func pastDefinition(reached, funcs map[string]bool, body string) bool {
 		}
 	}
 	return false
+}
+
+// definitionArms is where each definition of funcs counts as reached, by
+// segment index: at the definition, or inside a for, while, until or select
+// body at the first segment of the outermost loop around it, since a later
+// pass runs what sits before it in the text. `for i in 1 2; do eval f; cat x;
+// f() { cd w; }; done` reads w/x on its second pass (review of Q212, driven
+// on bash 5.3.15, with `while`, `until` and `select` alike).
+func definitionArms(segments []bash.Segment, funcs map[string]bool) map[int][]string {
+	arms := map[int][]string{}
+	var loops []int
+	for i, seg := range segments {
+		k := bash.ShKeywordPeel(seg.Tokens, seg.QuotedFrom)
+		for _, t := range seg.Tokens[:k] {
+			switch t {
+			case "while", "until":
+				loops = append(loops, i)
+			case "done":
+				if len(loops) > 0 {
+					loops = loops[:len(loops)-1]
+				}
+			}
+		}
+		if k < len(seg.Tokens) && seg.QuotedFrom[k] == bash.NotQuoted &&
+			(seg.Tokens[k] == "for" || seg.Tokens[k] == "select") {
+			loops = append(loops, i)
+		}
+		if funcs[seg.Body] {
+			at := i
+			if len(loops) > 0 {
+				at = loops[0]
+			}
+			arms[at] = append(arms[at], seg.Body)
+		}
+	}
+	return arms
 }
 
 // mayLastpipe reports whether `shopt -s lastpipe` may be on for this command:

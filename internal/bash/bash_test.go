@@ -397,6 +397,11 @@ func TestSegmentsNameTheBodyAtAnyDepth(t *testing.T) {
 		{"f() { (cd w); }", []string{"f", "", ""}, []string{"f", "f", ""}},
 		{"f() { cd w; }; f", []string{"f", "", ""}, []string{"f", "", ""}},
 		{"a | { cd w; }", []string{"", "", ""}, []string{"", "", ""}},
+		// Behind a list opener the header is still read (Q212); a quoted
+		// 'do' is a command name and heads none.
+		{"if true; then f() { cd w; }; fi", []string{"", "f", "", ""}, []string{"", "f", "", ""}},
+		{"{ f() { cd w; }; }", []string{"f", "", ""}, []string{"f", "", ""}},
+		{"for i in 1; do 'do' f() { :; }; done", []string{"", "", "", "", ""}, []string{"", "", "", "", ""}},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
 			segs, err := Segments(tc.in)

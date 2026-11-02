@@ -1009,6 +1009,7 @@ func TestACompoundInAPipelineOrAFunctionBodyKeepsItsMove(t *testing.T) {
 		{"for i in 1; do cd w; done & wait; cat x", "x"},
 		{"case a in a) cd w;; esac | cat; cat x", "x"},
 		{"f() { cd w; cat x; }; f", "w/x"},
+		{"if true; then f() { cd w; cat x; }; fi; f", "w/x"},
 		// A substitution written in the body is read with it, and the
 		// body's own definition does not arm what the body runs.
 		{`f() { cd w; echo "$(cat x)"; }; f`, "w/x"},
@@ -1127,6 +1128,17 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		// follows a move of its own still inherits the rule.
 		{`f() { cd w; }; eval f; echo "$(cat x)"`, "w/x"},
 		{`f() { cd w; }; echo "$(cd ROOT; eval f; cat x)"`, "w/x"},
+		// A later pass of a loop runs what sits before the definition in
+		// the text, so the outermost loop around it is where it counts from.
+		{"for i in 1 2; do eval f 2>/dev/null; cat x; f() { cd w; }; done", "w/x"},
+		{"i=0; while [ $i -lt 2 ]; do eval f 2>/dev/null; cat x; f() { cd w; }; i=$((i+1)); done", "w/x"},
+		{"i=0; until [ $i -ge 2 ]; do eval f 2>/dev/null; cat x; f() { cd w; }; i=$((i+1)); done", "w/x"},
+		{`select i in a; do eval f 2>/dev/null; cat x; f() { cd w; }; [ -n "$d" ] && break; d=1; done <<< $'1\n1'`, "w/x"},
+		{"for i in 1 2; do eval f 2>/dev/null; cat x; for j in 1; do f() { cd w; }; done; done", "w/x"},
+		{"for i in 1 2; do f() { cd w; }; done; cat x", "x"},
+		{"if true; then f() { cd w; }; fi; cat x", "x"},
+		{"if false; then :; else f() { cd w; }; fi; cat x", "x"},
+		{"{ f() { cd w; }; }; cat x", "x"},
 		{"f() { cd w; }; cd ROOT; cat x", "x"},
 		{"cd() { :; }; builtin cd w; cat x", "w/x"},
 		{"f() { cd w; }; builtin f; cat x", "x"},
@@ -1147,6 +1159,8 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"cd w; ${g:-true}; cat x", "w/x"},
 		{"cd w; . ./s.sh 2>/dev/null; cat x", "w/x"},
 		{"f() { :; }; cd w; eval f; cat x", "w/x"},
+		// A loop that ends before the definition is not reached by it.
+		{"for i in 1; do cat x; done; f() { cd w; }", "x"},
 		// A definition that does not move arms nothing.
 		{"f() { :; }; cd w; f; cat x", "w/x"},
 		{"f() ( cd v ); cd w; f; cat x", "w/x"},

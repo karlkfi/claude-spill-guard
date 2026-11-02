@@ -172,6 +172,10 @@ type Segment struct {
 	Body string
 }
 
+// listOpeners are the reserved words a command list follows, and so the ones
+// a function definition can stand behind.
+var listOpeners = map[string]bool{"do": true, "then": true, "else": true, "{": true}
+
 // compoundClosers maps the reserved word that opens each compound command to
 // its closer. `for` and `select` are too, though shKeywords leaves them out.
 var compoundClosers = map[string]string{"{": "}", "if": "fi", "case": "esac",
@@ -295,13 +299,20 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	)
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
+		// A list opener ahead of the name is still command position, so
+		// `then f () { … }` is a definition; upstream's `len(cur) == 1` reads
+		// it as a call and the body as the current shell (Q212).
+		k := 0
+		for k < len(cur) && listOpeners[cur[k]] && curQF[k] == NotQuoted {
+			k++
+		}
 		if t == "(" && i+1 < len(tokens) && tokens[i+1] == ")" &&
 			isOperator(t, quotedFrom[i], separators) &&
 			isOperator(tokens[i+1], quotedFrom[i+1], separators) &&
-			len(cur) == 1 && len(curRedir) == 0 && !inPattern(clauses) &&
-			!isReservedWord(cur[0], curQF[0]) && !strings.ContainsAny(cur[0], "=$`(") {
+			len(cur) == k+1 && len(curRedir) == 0 && !inPattern(clauses) &&
+			!isReservedWord(cur[k], curQF[k]) && !strings.ContainsAny(cur[k], "=$`(") {
 			// `f ()` heads a definition, and runs nothing.
-			fn, cur, curQF = cur[0], nil, nil
+			fn, cur, curQF = cur[k], cur[:k], curQF[:k]
 			i += 2
 			cmdPos, compoundPos = true, true
 			continue
