@@ -216,7 +216,7 @@ jobs:
         run: |
           sed -i 's|^        run: make docs$|        run: python3 scripts/check-doc-links.py|' \
             .github/workflows/tests.yml
-          if git diff --quiet; then
+          if git diff --quiet -- .github/workflows/tests.yml; then
             echo "::error::the mutation changed nothing -- the docs job no longer matches" >&2
             exit 1
           fi
@@ -269,7 +269,7 @@ jobs:
       - name: A stale generated table must fail the check
         run: |
           sed -i 's#gofmt, go vet and go test#gofmt and go vet#' CLAUDE.md
-          if git diff --quiet; then
+          if git diff --quiet -- CLAUDE.md; then
             echo "::error::the mutation changed nothing -- the table no longer matches" >&2
             exit 1
           fi
@@ -1166,7 +1166,7 @@ jobs:
       - name: A hook with no shebang must fail the gate
         run: |
           sed -i '1{/^#!/d}' .githooks/pre-commit
-          if git diff --quiet; then
+          if git diff --quiet -- .githooks/pre-commit; then
             echo "::error::the mutation changed nothing -- the hook has no shebang to strip" >&2
             exit 1
           fi
@@ -3765,7 +3765,7 @@ jobs:
         run: |
           sed -i 's|actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1|actions/checkout@v7|' \
             .github/workflows/tests.yml
-          if git diff --quiet; then
+          if git diff --quiet -- .github/workflows/tests.yml; then
             echo "::error::the mutation changed nothing -- the checkout pin no longer matches" >&2
             exit 1
           fi
@@ -3888,7 +3888,7 @@ jobs:
         run: |
           sed -i 's|"-C", str(ROOT), "./..."|"-db", "https://127.0.0.1:1/nope", "-C", str(ROOT), "./..."|' \
             scripts/check-vulns.py
-          if git diff --quiet; then
+          if git diff --quiet -- scripts/check-vulns.py; then
             echo "::error::the mutation changed nothing -- check-vulns.py no longer matches" >&2
             exit 1
           fi
