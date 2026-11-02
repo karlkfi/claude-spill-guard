@@ -227,3 +227,11 @@ require (
 	mvdan.cc/gofumpt v0.11.0 // indirect
 	mvdan.cc/unparam v0.0.0-20260823230713-2fa3d841b0c8 // indirect
 )
+
+// actionlint v1.7.12 is written against yaml/v4 rc.3 and fails to compile
+// against rc.6, which golangci-lint's gosec asks for; a require line cannot
+// settle that, so this pins the one both build against. Drop it when
+// actionlint ships against a later rc, and run
+// `go -C tools build -o /dev/null github.com/rhysd/actionlint/cmd/actionlint`
+// to find out.
+replace go.yaml.in/yaml/v4 => go.yaml.in/yaml/v4 v4.0.0-rc.3

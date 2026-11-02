@@ -583,8 +583,8 @@ on the import graph.
 The pinned linters do not bend this, because they are not in the module. Go's
 tool-dependency pattern puts them in [`tools/`](tools/), which carries its own
 `go.mod`, so `go list -deps ./...` at the root never reaches them and the root
-`go.mod` keeps no `require` block at all. Run one with `cd tools && go run
-<path>`. Pinning a linter in the runtime module is the shape to refuse: it is
+`go.mod` keeps no `require` block at all. Build one from `tools/`
+and run the result, as `tools/tools.go` shows. Pinning a linter in the runtime module is the shape to refuse: it is
 obviously reasonable, and the `require` block it adds is not obviously the
 thing this project promised not to have.
 

@@ -11,9 +11,15 @@
 // pinned there would take that promise away in exchange for something that
 // only ever runs in CI.
 //
-// Run one at its pinned version with:
+// Build one at its pinned version, then run what was built:
 //
-//	cd tools && go run github.com/rhysd/actionlint/cmd/actionlint ../.github/workflows/*.yml
+//	go -C tools build -o "$OUT" github.com/rhysd/actionlint/cmd/actionlint
+//	"$OUT" .github/workflows/*.yml
+//
+// Build first rather than `go run`, which reports any non-zero exit from its
+// child as 1: govulncheck's 3 (a vulnerability was found) arrives as the tool
+// failing. All three build as of this pin; a new one is worth a
+// `go -C tools build -o /dev/null <path>` before a doc says it runs.
 //
 // The pattern is the Go wiki's: https://go.dev/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
 package tools

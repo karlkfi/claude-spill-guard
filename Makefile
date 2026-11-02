@@ -149,7 +149,7 @@ hooks:
 # Runs `command -v` and nothing else, so it works on a fresh clone with none
 # of the tools present -- which is the point of it and the easy half to lose.
 # The pinned linters are not in its list: they live in tools/go.mod and run
-# through `cd tools && go run <path>`, so Go is what a contributor needs.
+# from a build in `tools/` (see tools/tools.go), so Go is what a contributor needs.
 doctor:
 	bash scripts/check-tools.sh
 
