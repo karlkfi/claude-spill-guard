@@ -639,7 +639,7 @@ Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
 | `@~/.zshrc` | Expands, and reaches outside the project |
 | `@~user/.zshrc` | Nothing, on a run whose `@~/.zshrc` reached that same file. One record came back, and the harness does not dedup — `@x` and `@./x` give two records for one path — so one record there is one splice rather than two collapsed |
 | A 5,001-line file | 2,000 lines. The splice is bounded, and the marker on the last line did not cross |
-| A file over 256 KiB | Nothing, no attachment of any type. Driven 2026-11-01 on 2.1.290: 255 KiB arrives as 2,000 lines and 257 KiB as nothing |
+| A file over 256 KiB, and some under it | Nothing, no attachment of any type. Driven 2026-11-01 on 2.1.290: 255 KiB of real text arrives as 2,000 lines and 257 KiB as nothing; 64 KiB of 80-column lines arrives whole and 128 KiB as nothing |
 | `@logo.png` | A `file` attachment whose `content.type` is `image`, carrying no text |
 | `@heap.dump`, a NUL in its first bytes | A `file` attachment whose `content.type` is `text`, carrying the whole file — NUL included, and a marker placed after it crossed |
 
@@ -2221,11 +2221,21 @@ killed at 60.143s, the verdict discarded, the prompt through, and no record
 from this hook anywhere. The third is what the budget replaced it with. The
 walls include the harness's own startup, about ten seconds at that load.
 
-**And the harness spliced none of the six.** Over 256 KiB, an `@` file is not
-attached at all: on the same version, 255 KiB arrived as 2,000 lines and 257
-KiB arrived as nothing. So on this surface a prompt reaches the budget only on
-bytes the harness was not going to send, and the record it writes is about a
-gap nobody could have spilled through. That does not move
+**And the harness spliced none of the six.** On the same version, 255 KiB of
+real text arrived as 2,000 lines and 257 KiB arrived as nothing, and a smaller
+file can be refused as well: 64 KiB of 80-column lines arrived whole and 128
+KiB of them arrived as nothing. The bytes that ran the scan past its budget
+were therefore bytes the harness was not going to send.
+
+**That does not make the record harmless, because an overrun discards the
+findings already made.** A small file named beside the big ones is attached
+unscanned. Driven on the same version with a build of `162fcf9` at the shipped
+budget, load 115: the six fixtures and `@notes.txt`, a copy of the planted key
+file, ran for 49.702s, and the prompt proceeded with `notes.txt` attached and
+its key in the attachment. The same binary blocks that file on its own. That is
+Q227, and it is a defect on `main` rather than in this measurement.
+
+None of this moves
 [the over-read](#a-buffer-whose-bytes-cross-anyway-measured): the limit is the
 harness's, measured on one version, and reading less than the harness sends is
 the only direction that can report a clean result for something that crossed.
@@ -2259,22 +2269,25 @@ and the largest session transcript on the author's machine is 35.4 MiB, which
 is 5.4 seconds.
 
 **Over real text the scan costs 60–73 MiB/s of CPU, and load moves the
-crossing further than content does.** Measured 2026-11-01 on a binary built
-from `162fcf9`, `Read` surface, warm page cache, Apple M5 Max, Go 1.27.1. The
-fixtures are text files from the Go module cache, concatenated in sorted order,
-each file used once and none carrying a NUL; the first 128 MiB is 15,266
-files. Real text already clears the prefilter: with nothing planted but the key
+wall-clock crossing by several times that.** Measured 2026-11-01 on a binary
+built from `162fcf9`, `Read` surface, warm page cache, Apple M5 Max, Go 1.27.1.
+The fixtures are text files from the Go module cache, concatenated in sorted
+order, each file used once and none carrying a NUL; the first 128 MiB was
+15,266 files when cut, and the cache grows, so a rebuild cuts differently. Real text already clears the prefilter: with nothing planted but the key
 at its end, that 128 MiB holds 35 findings, and planting one of each keyword moved its CPU time
 from 2.082s to 2.115s. Six disjoint 400 MiB parts ran at 60.4–73.3 MiB/s of CPU
 time, with the budget lifted so each one finished, and on every part both
-binaries finished they report the same match count.
+binaries finished they report the same match count. Each part is one run, and
+the 21% spread between them does not separate content from core placement: the
+same 128 MiB took 2.097–2.156s of CPU by default and 2.393–2.593s under
+`taskpolicy -b`, which keeps it on the efficiency cores.
 
 The budget charges wall clock, and on this machine wall clock was not the
 CPU's. At a load average of 73–84 from parallel sessions on 18 cores, the same
 six parts took 1.2x to 11.4x their CPU time, 6.9s to 66.4s. Through the shipped
 binary at 58–119, one part was recorded at the budget on all three runs, and
-two others on one run and two runs of three. The least-loaded runs taken, while
-load climbed from 10 to 42, put the two 128 MiB fixtures at 2.214–2.472s wall. So
+two others on one run and two runs of three. The earliest runs, with load at
+9.5 before them and 42 after, put the two 128 MiB fixtures at 2.220–2.472s wall. So
 the slower-machine argument below arrives on the fastest machine here as load.
 
 Two readings are still untaken. Every run here is on a warm page cache: macOS
