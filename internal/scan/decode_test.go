@@ -188,8 +188,9 @@ func TestUTF16SourceAgreesWithTheDecodeAtEveryByte(t *testing.T) {
 	}
 }
 
-// utf16FixtureKey is the planted UTF-16 file's own value, and it is deliberately
-// not the one in aws-access-key-id.env beside it. Two fixtures sharing a literal
+// utf16FixtureKey is the planted UTF-16 file's own value, loaded by TestMain
+// from the aws-access-key-id-utf16le vector, and it is deliberately not the one
+// in aws-access-key-id.env beside it. Two fixtures sharing a literal
 // makes every edit to one a silent break in the other, and testdata/corpus's own
 // convention is a fabricated value per file.
 //
@@ -208,7 +209,7 @@ func TestUTF16SourceAgreesWithTheDecodeAtEveryByte(t *testing.T) {
 //
 // Shannon 3.7842 against the rule's floor of 3.0, and no EXAMPLE suffix, so
 // aws-placeholder passes it once that check lands.
-const utf16FixtureKey = "AKIA0SPILLGUARD98107"
+var utf16FixtureKey string
 
 // The corpus half of the same assertion, over a file on disk rather than a
 // fixture assembled in memory. The gate walks this file too; what it cannot see

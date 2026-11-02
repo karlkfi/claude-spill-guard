@@ -83,6 +83,7 @@ func TestMain(m *testing.M) {
 	vec := testvec.Load(fatal{})
 	key = vec.Get(fatal{}, "aws-iam-example")
 	stsKey = vec.Get(fatal{}, "aws-sts-example")
+	utf16FixtureKey = vec.Get(fatal{}, "aws-access-key-id-utf16le")
 	os.Exit(m.Run())
 }
 

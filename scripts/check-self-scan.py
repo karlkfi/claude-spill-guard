@@ -97,14 +97,7 @@ ALLOWED = {
         "the canary is compiled in rather than read from a file, because a "
         "canary a broken install fails to find is one whose absence looks "
         "like a pass. Shipped source, so it cannot read testdata either way",
-    # The two below are decisions about bytes the assertion is made of. The
-    # value in each either must equal a planted file's own bytes or is one
-    # shape of a table, so a lookup in testvec would put it far from its case.
-    "internal/scan/decode_test.go":
-        "the key the planted UTF-16 fixture is built around, and the test "
-        "asserts a finding's offset lands on those exact bytes in that file. "
-        "It is deliberately not a vector: a vector's value is shared with "
-        "other fixtures, and an edit to either would break the other silently",
+    # The one below is a decision about bytes the assertion is made of.
     "internal/validate/jwt_test.go":
         "a table of JWT shapes where each case is a specific malformation, so "
         "the bytes are the assertion",
