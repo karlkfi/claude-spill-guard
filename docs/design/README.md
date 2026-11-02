@@ -860,7 +860,9 @@ cannot bound one, so it does not try: a `content` search over a directory is
 refused and the reason names the `grep` that pipes the same search through the
 filter, `files_with_matches` and `count` pass, an absent mode passes as the
 default it is, and a `path` naming one file is scanned whole the way a `Read`
-of it is. Driven through the built hook in that session, the refusal arrived
+of it is. That pass is only as good as the default it reads: a build that
+changed it to `content` would send a no-mode search's lines over a directory
+with no block and no coverage record, and nothing in CI re-takes the reading. Driven through the built hook in that session, the refusal arrived
 in the transcript as an `is_error` tool result carrying the whole reason, so
 the model reads it as it reads a `Bash` deny.
 
