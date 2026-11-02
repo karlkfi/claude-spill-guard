@@ -45,6 +45,13 @@
 //     spill through. `sed -i 's/x/y/' f` therefore keeps f as a read. That
 //     over-scans a command whose output goes to a file rather than to the
 //     model, which is the safe direction and the only one this project accepts.
+//   - grep's row consumes the nine long options that take their value from the
+//     next token on GNU, BSD and ugrep alike, which upstream's lacks, and does
+//     not consume `--color` or `--colour`, which take one only after `=`.
+//     Upstream's version costs it a prompt; here it read a pattern as the file
+//     operand, so `grep --color id key.env` printed the key and the hook
+//     allowed it unread (driven 2026-11-01). `--context` is in neither list:
+//     the greps disagree, and internal/hook/grep.go reads it both ways.
 //
 // A program or pattern file -- `grep -f patterns`, `sed -f script`, `awk -f
 // prog` -- is kept as a read for the same reason. Its contents reach the tool
@@ -128,7 +135,7 @@ var specs = map[string]spec{
 		firstOutput: -1,
 	},
 	"grep": {
-		consume:      map[string]int{"--binary-files": 1, "--color": 1, "--colour": 1, "--exclude": 1, "--include": 1, "--max-count": 1, "--regexp": 1, "-A": 1, "-B": 1, "-C": 1, "-D": 1, "-d": 1, "-e": 1, "-m": 1},
+		consume:      map[string]int{"--after-context": 1, "--before-context": 1, "--binary-files": 1, "--devices": 1, "--directories": 1, "--exclude": 1, "--exclude-dir": 1, "--exclude-from": 1, "--group-separator": 1, "--include": 1, "--include-dir": 1, "--label": 1, "--max-count": 1, "--regexp": 1, "-A": 1, "-B": 1, "-C": 1, "-D": 1, "-d": 1, "-e": 1, "-m": 1},
 		fileFlags:    map[string]flagFiles{"--file": {1, []int{0}}, "-f": {1, []int{0}}},
 		prog:         1,
 		suppressProg: []string{"-e", "--regexp", "-f", "--file"},

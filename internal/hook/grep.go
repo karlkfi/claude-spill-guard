@@ -206,6 +206,58 @@ func recurses(value string) bool {
 	return value != "read" && value != "skip"
 }
 
+// grepFiles is readers.Files for a grep, read the way grepMode reads it: a
+// long option abbreviated to a unique prefix is spelled out first, because the
+// table matches names exactly and `--exclude-d node_modules x` otherwise read
+// node_modules as the pattern and x as the file, and a disputed option's next
+// token is read both ways. The files are the union of the readings, and none
+// is true when either reading has none, which is the case a recursive grep
+// searches `.` in. Driven 2026-11-01: `grep --context id key.env` prints the
+// key on BSD grep 2.6.0, and `grep -r --context 3 x` walks `.` on ugrep 7.8.4.
+func grepFiles(tokens []string) (files []string, none bool) {
+	spelled := make([]string, len(tokens))
+	copy(spelled, tokens)
+	disputed := -1
+	for i := 1; i < len(spelled); i++ {
+		tok := spelled[i]
+		if tok == "--" {
+			break
+		}
+		if !strings.HasPrefix(tok, "--") {
+			continue
+		}
+		key, value, inline := strings.Cut(tok, "=")
+		name := resolveLong(key)
+		switch {
+		case name == "":
+		case inline:
+			spelled[i] = name + "=" + value
+		default:
+			spelled[i] = name
+			if grepLongDisputed[name] && disputed < 0 && i+1 < len(spelled) {
+				disputed = i
+			}
+		}
+	}
+	readings := [][]string{spelled}
+	if disputed >= 0 {
+		consumed := append(spelled[:disputed+1:disputed+1], spelled[disputed+2:]...)
+		readings = append(readings, consumed)
+	}
+	seen := map[string]bool{}
+	for _, r := range readings {
+		got, _ := readers.Files(r)
+		none = none || len(got) == 0
+		for _, f := range got {
+			if !seen[f] {
+				seen[f] = true
+				files = append(files, f)
+			}
+		}
+	}
+	return files, none
+}
+
 // filteredLater reports whether a stage after segment i in its own pipeline is
 // `spill-guard filter`, with or without its flags.
 //

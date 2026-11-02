@@ -142,6 +142,13 @@ func TestARecursiveGrepIsRefusedAndItsRewriteIsAllowed(t *testing.T) {
 		"cd sub && grep -r foo .",
 		"grep -rn foo . ;",
 		"grep -r --exclude-d -l foo .",
+		// The value after a long option is not the pattern, so the pattern
+		// is not a file and the walk is of `.`.
+		"grep -r --exclude-dir node_modules foo",
+		"grep -r --exclude-d node_modules foo",
+		"grep -r --after-context 2 foo",
+		"grep -r --context 3 foo",
+		"grep -2 foo",
 	} {
 		t.Run(command, func(t *testing.T) {
 			reason := denyReason(t, bashCall(t, command, dir))
@@ -154,6 +161,51 @@ func TestARecursiveGrepIsRefusedAndItsRewriteIsAllowed(t *testing.T) {
 				t.Errorf("rewrite = %q, want pipefail ahead and the filter last", rewrite)
 			}
 			allowed(t, bashCall(t, rewrite, dir))
+		})
+	}
+}
+
+// grepFiles and grepMode have to agree on which long options take the next
+// token, or a value is read as the pattern and the pattern as the file. The
+// reader table lacked nine that grepLong consumes and consumed `--color`,
+// which grepLong does not.
+func TestGrepFilesConsumesWhatGrepModeDoes(t *testing.T) {
+	for name, consumes := range grepLong {
+		if name == "--file" || name == "--regexp" {
+			continue // each names the pattern, so P is a file too; pinned in readers
+		}
+		want := []string{"P", "F"}
+		if consumes && !grepLongDisputed[name] {
+			want = []string{"F"}
+		}
+		t.Run(name, func(t *testing.T) {
+			files, none := grepFiles([]string{"grep", name, "V", "P", "F"})
+			if strings.Join(files, " ") != strings.Join(want, " ") || none {
+				t.Errorf("grepFiles = %q, %v; want %q, false", files, none, want)
+			}
+		})
+	}
+}
+
+// A file named after an option the table misread is still scanned.
+func TestAGrepOfAKeyFileIsBlockedWhateverTheOptions(t *testing.T) {
+	dir := grepTree(t)
+	key := testvec.Load(t).Get(t, "aws-access-key-id")
+	if err := os.WriteFile(filepath.Join(dir, "k.txt"), []byte("id = "+key+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{
+		"grep --color id k.txt",
+		"grep --colour id k.txt",
+		"grep --context id k.txt",
+		"grep --context 3 id k.txt",
+		"grep --exclude-d x id k.txt",
+	} {
+		t.Run(command, func(t *testing.T) {
+			reason := denyReason(t, bashCall(t, command, dir))
+			if !strings.Contains(reason, `"aws-access-key-id"`) {
+				t.Errorf("the reason does not name the rule: %q", reason)
+			}
 		})
 	}
 }

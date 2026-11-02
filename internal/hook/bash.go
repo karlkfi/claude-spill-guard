@@ -266,16 +266,20 @@ func bashTargets(command, cwd string) ([]target, error) {
 			for _, d := range wrap.Chdirs {
 				cmdDir, cmdDirUnknown = chdirTo(d, cmdDir, cmdDirUnknown)
 			}
+			isGrep := grepNames[filepath.Base(tokens[0])]
+			noneRead := false
+			if isGrep {
+				operands, noneRead = grepFiles(tokens)
+			}
 			fileOperands := len(operands)
 			// grep.go carries the argument for both: a recursive grep with no
 			// operand reads `.`, and one whose output is filtered or carries no
 			// matched text sends nothing a directory operand would need read.
-			isGrep := grepNames[filepath.Base(tokens[0])]
 			recursive, quiet := false, false
 			if isGrep {
 				recursive, quiet = grepMode(tokens)
-				if recursive && len(operands) == 0 {
-					operands = []string{"."}
+				if recursive && noneRead {
+					operands = append(operands, ".")
 				}
 			}
 			// A `<` target is a file the reader reads that Files cannot see:

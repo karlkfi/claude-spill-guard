@@ -2494,6 +2494,15 @@ exists for, written by a session that asked for two lines of context. An unknown
 long option stays refused for the same reason: `grep --depth=3 pat` walks `.`
 on ugrep, and the table of options this reads holds GNU's and BSD's.
 
+**Which tokens are files is read by the same rules.** `internal/readers` keeps
+its own table of the options that take a value, and its grep row disagreed
+with this one in twelve places: ten options it did not consume and two it did. So `grep --color id key.env` read `id` as the
+value and `key.env` as the pattern, and the hook allowed a call that printed
+the key on both greps, driven 2026-11-01. `grepFiles` in
+`internal/hook/grep.go` now spells a long-option prefix out and reads
+`--context` both ways before asking that table, and a test holds the two tables
+in step option by option.
+
 **The rewrite is checked before it is offered.** Appending a stage pipes the
 string's last pipeline, so `echo $(grep -r x .)` produced a rewrite this hook
 refused in turn — driven, before the check existed — and a model following it
