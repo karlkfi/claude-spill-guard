@@ -13,8 +13,12 @@
 //
 // Build one at its pinned version, then run what was built:
 //
+//	OUT="$(mktemp -d)/actionlint"
 //	go -C tools build -o "$OUT" github.com/rhysd/actionlint/cmd/actionlint
 //	"$OUT" .github/workflows/*.yml
+//
+// OUT has to be absolute: `go -C tools` resolves a relative -o under tools/,
+// so a second line run from the repository root would not find it.
 //
 // Build first rather than `go run`, which reports any non-zero exit from its
 // child as 1: govulncheck's 3 (a vulnerability was found) arrives as the tool

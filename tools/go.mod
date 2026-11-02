@@ -230,7 +230,8 @@ require (
 
 // actionlint v1.7.12 is written against yaml/v4 rc.3 and fails to compile
 // against rc.6, which golangci-lint's gosec asks for; a require line cannot
-// settle that, so this pins the one both build against. Drop it when
+// settle that, so this pins the one both build against. golangci-lint's own
+// binary imports no yaml/v4, so gosec is unaffected. Drop it when
 // actionlint ships against a later rc, and run
 // `go -C tools build -o /dev/null github.com/rhysd/actionlint/cmd/actionlint`
 // to find out.
