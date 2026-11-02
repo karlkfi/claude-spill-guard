@@ -1,0 +1,96 @@
+name: release-note
+
+# Every pull request body carries the `release-note` block the template asks
+# for, so a release's change list is collected rather than reconstructed. See
+# docs/releases/README.md, "Where the contents come from", and the docstring of
+# scripts/check-release-note.py for the measurement that made it a check.
+#
+# It is not a `make` gate. The body exists only in the event payload, so a gate
+# on a fresh clone would have nothing to read. The script is read from the
+# payload file rather than from an interpolated `${{ }}` expression, because a
+# body is text anybody opening a pull request writes, and an expression is
+# pasted into the shell before it runs.
+
+on:
+  pull_request:
+    # `edited` is the one that matters: adding the block to the body is the
+    # fix, and without it the red check stays red until the next push.
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.13'
+
+jobs:
+  release-note:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The body carries a release-note block
+        run: python3 scripts/check-release-note.py --event "$GITHUB_EVENT_PATH"
+
+  # A check whose only output is "this body is missing a field" reads the same
+  # when it accepts everything. So each refusal is driven, and each acceptance:
+  # the template as GitHub pre-fills it is the `NONE` case, which proves the
+  # template and the check agree on what a block is.
+  release-note-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Mutation control -- every refusal for its own reason, and both answers pass
+        run: |
+          fixtures=testdata/release-note
+          log="$RUNNER_TEMP/release-note.log"
+
+          # The web form submits CRLF, and it reaches the script only through
+          # the payload: reading a file folds `\r\n` before the check sees it,
+          # so a CRLF fixture file would test LF again. The assert is what says
+          # the CR survived into the JSON.
+          python3 - <<'PY'
+          import json, os, pathlib
+          temp = pathlib.Path(os.environ["RUNNER_TEMP"])
+          body = pathlib.Path(".github/pull_request_template.md").read_text().replace("\n", "\r\n")
+          (temp / "crlf.json").write_text(json.dumps({"pull_request": {"body": body}}))
+          (temp / "null.json").write_text(json.dumps({"pull_request": {"body": None}}))
+          assert "\r\n" in json.loads((temp / "crlf.json").read_text())["pull_request"]["body"]
+          PY
+
+          for source in "--body-file .github/pull_request_template.md" \
+                        "--body-file $fixtures/sentence.md" \
+                        "--event $RUNNER_TEMP/crlf.json"; do
+            # Word-split on purpose: each entry is a flag and its path.
+            if ! python3 scripts/check-release-note.py $source > "$log" 2>&1; then
+              cat "$log"
+              echo "$source holds an answer and was refused" >&2
+              exit 1
+            fi
+          done
+
+          refuse() {
+            if python3 scripts/check-release-note.py "$@" > "$log" 2>&1; then
+              cat "$log"
+              echo "$* was accepted and must be refused" >&2
+              exit 1
+            fi
+            if ! grep -q "$reason" "$log"; then
+              cat "$log"
+              echo "$* was refused, but not for \"$reason\"" >&2
+              exit 1
+            fi
+          }
+          reason="has no \`\`\`release-note block"
+          refuse --body-file "$fixtures/missing.md"
+          refuse --body-file "$fixtures/commented.md"
+          refuse --event "$RUNNER_TEMP/null.json"
+          reason="is empty"
+          refuse --body-file "$fixtures/empty.md"
+          reason="never closes"
+          refuse --body-file "$fixtures/unclosed.md"

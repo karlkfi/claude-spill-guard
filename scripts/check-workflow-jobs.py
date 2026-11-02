@@ -89,6 +89,15 @@ DECLARED = {
             "a workflow rather than a make gate because Claude Code is not in "
             "the tier `make doctor` requires",
     },
+    ".github/workflows/release-note.yml": {
+        "release-note":
+            "fails a pull request whose body has no `release-note` block, so a "
+            "release's change list is collected rather than reconstructed; a "
+            "workflow because the body exists only in the event payload",
+        "release-note-mutation-control":
+            "requires a body with no block, an empty one and an unclosed one "
+            "to fail, and the template's `NONE` and a sentence to pass",
+    },
 }
 
 

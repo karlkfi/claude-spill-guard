@@ -14,6 +14,9 @@ Say `NONE` for anything that ships in no artifact: tests, CI, docs, refactors.
 That is a real answer, not a skipped field.
 
 Open with `action required:` if upgrading needs a manual step.
+
+The `release-note` check fails a body without this block, so a body written
+with `gh pr create --body-file` has to carry it too.
 -->
 
 ```release-note

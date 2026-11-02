@@ -38,6 +38,15 @@ and diffs — is the expensive half of cutting a release. It also under-reports:
 commit subjects name what was changed, not what it does to someone on the
 previous version.
 
+The `release-note` workflow fails a pull request whose body has no such block,
+or an empty one, and re-runs when the body is edited. `NONE` passes. The check
+exists because the field was skipped more often than filled: 1 of the 17 pull
+requests merged between v0.6.0 and v0.6.1 carried a block, and that one said
+`NONE`. The likely cause is `gh pr create --body-file`, which never shows the
+template.
+[`check-release-note.py`](../../scripts/check-release-note.py) runs it locally
+against a body saved to a file.
+
 ## A file here can precede its tag
 
 The workflow refuses to run without `docs/releases/<tag>.md`, so the notes are
