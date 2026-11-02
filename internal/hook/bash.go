@@ -942,7 +942,7 @@ func classifyCd(tokens []string) (kind, arg string) {
 	if name == "popd" {
 		return "unknown", "" // stack not tracked
 	}
-	for _, t := range tokens[1:] {
+	for i, t := range tokens[1:] {
 		if strings.HasPrefix(t, "-") {
 			if strings.Contains(t, "P") || (name == "pushd" && strings.Contains(t, "n")) {
 				return "unknown", ""
@@ -953,7 +953,9 @@ func classifyCd(tokens []string) (kind, arg string) {
 			return "subst", sub
 		}
 		t = expandTilde(t) // `cd ~/proj` tracks via home
-		if strings.HasPrefix(t, "+") || strings.HasPrefix(t, "~") || strings.ContainsAny(t, "$`") {
+		// bash refuses `cd w x` with "too many arguments" and stays put; zsh
+		// reads it as `cd old new` and moves somewhere else entirely.
+		if strings.HasPrefix(t, "+") || strings.HasPrefix(t, "~") || strings.ContainsAny(t, "$`") || i+2 < len(tokens) {
 			return "unknown", ""
 		}
 		return "arg", t

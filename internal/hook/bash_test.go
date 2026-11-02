@@ -2044,6 +2044,13 @@ func TestASplitValueIsTheCommandItCarries(t *testing.T) {
 		// splits on its own copy: the move has to be read there too.
 		`V="cd w"; $V; echo "$(cat x)"`,
 		`echo "$(V="cd w"; $V; echo "$(cat x)")"`,
+		// An empty or blank value is zero words, and bash drops the word.
+		`V=; $V cat ` + name,
+		`V=""; $V cat ` + name,
+		`V=" "; $V cat ` + name,
+		`V=''; ${V} cat ` + name,
+		`V=; $V $V cat ` + name,
+		`V=; cd $V w; cat x`,
 	} {
 		t.Run(command+" blocks", func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
@@ -2065,6 +2072,8 @@ func TestASplitValueIsTheCommandItCarries(t *testing.T) {
 		`(V="cat ` + name + `"); $V`,
 		`V="cat ` + name + `" true; $V`,
 		`echo "$(V="LC_ALL=C cat ` + name + `"; $V)"`,
+		// A quoted empty word is a command named '' and runs nothing.
+		`V=; "$V" cat ` + name,
 	} {
 		t.Run(command+" reads nothing", func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
@@ -2073,6 +2082,24 @@ func TestASplitValueIsTheCommandItCarries(t *testing.T) {
 			}
 			if stdout != "" {
 				t.Errorf("verdict = %q, want none -- bash opens no file here", stdout)
+			}
+		})
+	}
+	// A cd with a second operand is refused by bash and read by zsh as `cd old
+	// new`, so the operand after it has no directory to resolve in. The split
+	// routes `$V` there, and the literal spelling is the same reading.
+	for _, command := range []string{
+		`V="cd w x"; $V; cat ` + name,
+		`V="cd w"; $V x; cat ` + name,
+		`cd w x; cat ` + name,
+		`pushd w x; cat ` + name,
+		`cd w ''; cat ` + name,
+		`cd -L w x; cat ` + name,
+	} {
+		t.Run(command+" defers", func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+				t.Errorf("coverage reason = %q, want it to say cannot follow", reason)
 			}
 		})
 	}

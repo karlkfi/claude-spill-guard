@@ -460,8 +460,12 @@ func literalAssignmentValue(raw string, allowGlob bool) (string, bool) {
 // is kept as the pattern for glob.go, as a loop item's is, and a `~` refuses
 // the value, because bash does not tilde-expand what a split produced: driven
 // on 5.3.15, `V="cat ~/x"; $V` reports `~/x: No such file or directory`.
+//
+// An empty or blank value is zero fields, and bash drops the word: `V=; $V cat
+// x` runs cat. A bare `V=` may be the head of `V=(a b)`, whose `$V` is `a`,
+// and reading it as empty can only read a file the command does not.
 func literalFields(raw string) ([]string, bool) {
-	if !strings.ContainsAny(raw, " \t\n") {
+	if raw != "" && !strings.ContainsAny(raw, " \t\n") {
 		return nil, false
 	}
 	fields := strings.FieldsFunc(raw, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' })
@@ -473,7 +477,7 @@ func literalFields(raw string) ([]string, bool) {
 			return nil, false
 		}
 	}
-	return fields, len(fields) > 0
+	return fields, true
 }
 
 // splitWords is bash's word splitting over the tokens after a segment's head
