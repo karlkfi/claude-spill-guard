@@ -3561,6 +3561,10 @@ jobs:
           fi
       - name: An allowlist entry naming a file that is not tracked must fail the gate
         run: |
+          if ! grep -q '^    "internal/validate/jwt_test.go":$' scripts/check-self-scan.py; then
+            echo "::error::the target is not an ALLOWED entry -- this control has nothing to orphan" >&2
+            exit 1
+          fi
           git rm -q --cached internal/validate/jwt_test.go
           if git ls-files --error-unmatch internal/validate/jwt_test.go > /dev/null 2>&1; then
             echo "::error::the mutation changed nothing -- the file is still tracked" >&2
