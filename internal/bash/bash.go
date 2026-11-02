@@ -172,12 +172,17 @@ type Segment struct {
 	Body string
 }
 
-// definitionPrefixes are the reserved words a function definition can stand
-// behind: the ones a command list follows, and `!` and `time`, which take a
-// pipeline -- `! f () { cd w; }` defines f, driven on bash 5.3.15. `time -p`
-// is Q223's, and stops the run at `-p`.
-var definitionPrefixes = map[string]bool{
-	"do": true, "then": true, "else": true, "{": true, "!": true, "time": true,
+// definitionPrefix is whether a function definition can stand behind word:
+// any of leadingWords but a closer, which ends a command rather than leading
+// one. `if f () { cd w; }; then` and `! f () { cd w; }` both define f, driven
+// on bash 5.3.15. `time -p` is Q223's, and stops the run at `-p`.
+func definitionPrefix(word string) bool {
+	for _, closer := range compoundClosers {
+		if word == closer {
+			return false
+		}
+	}
+	return leadingWords[word]
 }
 
 // compoundClosers maps the reserved word that opens each compound command to
@@ -307,7 +312,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		// so `then f () { … }` is a definition; upstream's `len(cur) == 1` reads
 		// it as a call and the body as the current shell (Q212).
 		k := 0
-		for k < len(cur) && definitionPrefixes[cur[k]] && curQF[k] == NotQuoted {
+		for k < len(cur) && definitionPrefix(cur[k]) && curQF[k] == NotQuoted {
 			k++
 		}
 		if t == "(" && i+1 < len(tokens) && tokens[i+1] == ")" &&
