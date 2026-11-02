@@ -172,9 +172,13 @@ type Segment struct {
 	Body string
 }
 
-// listOpeners are the reserved words a command list follows, and so the ones
-// a function definition can stand behind.
-var listOpeners = map[string]bool{"do": true, "then": true, "else": true, "{": true}
+// definitionPrefixes are the reserved words a function definition can stand
+// behind: the ones a command list follows, and `!` and `time`, which take a
+// pipeline -- `! f () { cd w; }` defines f, driven on bash 5.3.15. `time -p`
+// is Q223's, and stops the run at `-p`.
+var definitionPrefixes = map[string]bool{
+	"do": true, "then": true, "else": true, "{": true, "!": true, "time": true,
+}
 
 // compoundClosers maps the reserved word that opens each compound command to
 // its closer. `for` and `select` are too, though shKeywords leaves them out.
@@ -299,11 +303,11 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	)
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
-		// A list opener ahead of the name is still command position, so
-		// `then f () { … }` is a definition; upstream's `len(cur) == 1` reads
+		// A reserved word ahead of the name can leave it in command position,
+		// so `then f () { … }` is a definition; upstream's `len(cur) == 1` reads
 		// it as a call and the body as the current shell (Q212).
 		k := 0
-		for k < len(cur) && listOpeners[cur[k]] && curQF[k] == NotQuoted {
+		for k < len(cur) && definitionPrefixes[cur[k]] && curQF[k] == NotQuoted {
 			k++
 		}
 		if t == "(" && i+1 < len(tokens) && tokens[i+1] == ")" &&
