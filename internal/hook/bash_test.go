@@ -1054,6 +1054,95 @@ func TestACompoundInAPipelineOrAFunctionBodyKeepsItsMove(t *testing.T) {
 	}
 }
 
+// A moving function can be run by a word that does not name it -- `eval f`,
+// `${g:-f}`, a sourced file, a DEBUG trap, `mapfile -C` -- and a function can
+// take the name `cd` itself, after which `cd w` runs the body and not the
+// builtin. Either way the move is not the one the tracker would follow, so
+// the directory is lost and the operand after it deferred. Found in review
+// of Q212: until a call had to name the function, main followed the body's
+// `cd` at the definition and so happened to read the right file.
+//
+// Each row is driven on bash 5.3.15 as the test above is, with the key in the
+// file bash reads, so a row resolved against the directory the tracker would
+// have kept allows silently instead of deferring. The controls are the same
+// words with no moving function defined, which still block where bash reads.
+func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
+	tree := func(t *testing.T, key string) string {
+		root := t.TempDir()
+		for _, f := range []string{"x", "w/x", "v/x", "s.sh", "l.txt"} {
+			path := filepath.Join(root, filepath.FromSlash(f))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			body := "nothing here\n"
+			switch {
+			case f == key:
+				body = "AWS_ACCESS_KEY_ID=" + secret + "\n"
+			case f == "s.sh":
+				body = "f\n"
+			}
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return root
+	}
+	for _, tc := range []struct{ command, key string }{
+		{"f() { cd w; }; eval f; cat x", "w/x"},
+		{"f() { cd w; }; eval 'f'; cat x", "w/x"},
+		{"f() { cd w; }; builtin eval f; cat x", "w/x"},
+		{"f() { cd w; }; command eval f; cat x", "w/x"},
+		{"f() { cd w; }; ${g:-f}; cat x", "w/x"},
+		{"f() { cd w; }; `echo f`; cat x", "w/x"},
+		{`f() { cd w; }; "$(echo f)"; cat x`, "w/x"},
+		{"f() { cd w; }; . ./s.sh; cat x", "w/x"},
+		{"f() { cd w; }; source ./s.sh; cat x", "w/x"},
+		{"f() { cd w; }; trap f DEBUG; cat x", "w/x"},
+		{"f() { cd w; }; mapfile -C f -c 1 a < l.txt; cat x", "w/x"},
+		{"f() { cd w; }; g() { eval f; }; g; cat x", "w/x"},
+		{"cd() { :; }; cd w; cat x", "x"},
+		{"function cd { :; }; cd w; cat x", "x"},
+		{"cd() { builtin cd v; }; cd w; cat x", "v/x"},
+		{"pushd() { :; }; pushd w >/dev/null; cat x", "x"},
+		{`cd() { :; }; echo "$(cd w; cat x)"`, "x"},
+		{`cd() { :; }; cd w; echo "$(cat x)"`, "x"},
+	} {
+		t.Run(tc.command+" defers", func(t *testing.T) {
+			root := tree(t, tc.key)
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, root))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+				t.Errorf("coverage reason = %q, want the move unfollowed", reason)
+			}
+		})
+	}
+	for _, tc := range []struct{ command, key string }{
+		// The cd goes first: one after an eval or a source is lost anyway,
+		// since either may have assigned CDPATH.
+		{"cd w; eval true; cat x", "w/x"},
+		{"cd w; ${g:-true}; cat x", "w/x"},
+		{"cd w; . ./s.sh 2>/dev/null; cat x", "w/x"},
+		{"f() { :; }; cd w; eval f; cat x", "w/x"},
+		// `builtin` runs no function: the first is the real cd, and the
+		// second is `not a shell builtin` and moves nothing.
+		{"cd() { :; }; builtin cd w; cat x", "w/x"},
+		{"f() { cd w; }; builtin f; cat x", "x"},
+	} {
+		t.Run(tc.command+" blocks", func(t *testing.T) {
+			root := tree(t, tc.key)
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, root))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout == "" {
+				t.Fatalf("allowed with no verdict, want a block naming %s (stderr: %q)", tc.key, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, filepath.Join(root, filepath.FromSlash(tc.key))) {
+				t.Errorf("reason = %q, want the file at %s", reason, tc.key)
+			}
+		})
+	}
+}
+
 // The moves whose destination is not the literal, or not a literal at all.
 // Each leaves the directory unknown and the relative operand after it
 // recorded rather than resolved -- which is also what every one of them did

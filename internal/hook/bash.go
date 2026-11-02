@@ -216,7 +216,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// A cd run by a separate program, `env cd x`, moves nothing in the
 			// shell; `command cd x` and `builtin cd x` move it like a bare one.
 			wrap := readers.PeelWrappers(tokens)
-			if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
+			if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External && !callsCdFunction(wrap, funcs) {
 				moved = true
 				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment, v.cdpath)
 				list.moved(segment, dirUnknown)
@@ -627,7 +627,7 @@ func substStates(text string, subs []bash.Substitution, entry substState, lastpi
 			continue
 		}
 		wrap := readers.PeelWrappers(tokens)
-		if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
+		if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External && !callsCdFunction(wrap, funcs) {
 			dir, unknown = follow(kind, arg, dir, unknown, seg, v.cdpath)
 			list.moved(seg, unknown)
 			continue
@@ -652,6 +652,13 @@ func cdFunctions(segments []bash.Segment, known map[string]bool, lastpipe bool) 
 	if funcs == nil {
 		funcs = map[string]bool{}
 	}
+	// A function named for the cd family runs in place of the builtin, so
+	// `cd() { :; }; cd w` moves nowhere and `cd w` is a call like any other.
+	for _, seg := range segments {
+		if seg.Function == "cd" || seg.Function == "pushd" || seg.Function == "popd" {
+			funcs[seg.Function] = true
+		}
+	}
 	for grew := true; grew; {
 		grew = false
 		for _, seg := range segments {
@@ -665,7 +672,7 @@ func cdFunctions(segments []bash.Segment, known map[string]bool, lastpipe bool) 
 				if wrap.External || len(wrap.Argv) == 0 {
 					continue
 				}
-				if kind, _ := classifyCd(wrap.Argv); kind == "" && !funcs[wrap.Argv[0]] {
+				if kind, _ := classifyCd(wrap.Argv); kind == "" && !callsCdFunction(wrap, funcs) {
 					continue
 				}
 			}
@@ -677,16 +684,36 @@ func cdFunctions(segments []bash.Segment, known map[string]bool, lastpipe bool) 
 
 // callsCdFunction is upstream's calls_cd_function: whether a peeled segment
 // runs a function from cdFunctions. The call leaves the directory unknown
-// rather than followed, as upstream does.
+// rather than followed, as upstream does. Upstream wants the function's name
+// at the head, which misses a call through a word that runs code -- `eval f`,
+// `. ./s` holding `f`, `trap f DEBUG`, `mapfile -C f` -- or a head this cannot
+// read, `${g:-f}`; with a moving function defined, either may be one, so each
+// counts. `builtin` runs no function, so `builtin cd w` is the builtin even
+// where cd is not.
 func callsCdFunction(wrap readers.Peel, funcs map[string]bool) bool {
-	return !wrap.External && len(wrap.Argv) > 0 && funcs[wrap.Argv[0]]
+	if wrap.External || len(wrap.Argv) == 0 || len(funcs) == 0 {
+		return false
+	}
+	name := wrap.Argv[0]
+	if runsCode[name] || strings.ContainsAny(name, "$`") {
+		return true
+	}
+	return funcs[name] && !wrap.Builtin
+}
+
+// runsCode are the builtins that run a word as code in the caller's shell,
+// each driven on bash 5.3.15 running a moving f's cd.
+var runsCode = map[string]bool{
+	"eval": true, "source": true, ".": true, "trap": true, "mapfile": true, "readarray": true,
 }
 
 // mayLastpipe reports whether `shopt -s lastpipe` may be on for this command:
-// set anywhere in the string, or inherited through BASHOPTS, which the hook and
-// the tool both take from Claude Code. Upstream reads the `shopt` positionally
-// and from the string alone; a substring is the superset of both, and costs a
-// verdict only on a command that names the option.
+// set anywhere in the string, or in BASHOPTS. The hook's BASHOPTS is not the
+// tool shell's options, so reading it can only add a deferral; what bounds the
+// tool shell is its snapshot, and the Q212 review counted 196 of 197 on this
+// machine running `shopt -u lastpipe`, none setting it. Upstream reads the
+// `shopt` positionally and from the string alone; a substring is the superset
+// of both, and costs a verdict only on a command that names the option.
 func mayLastpipe(command string) bool {
 	return strings.Contains(command, "lastpipe") ||
 		strings.Contains(os.Getenv("BASHOPTS"), "lastpipe")
