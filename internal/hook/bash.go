@@ -977,18 +977,20 @@ func classifyCd(tokens []string) (kind, arg string) {
 // redirect -- `$(<f)`, `$( < f )`, `$(<f;)` -- and a second redirect, a pipe,
 // a `&`, a `!`, a `( )` or a `{ }` makes it an empty command that prints
 // nothing; driven on 5.3.15. zsh runs $READNULLCMD on the file wherever the
-// command word is missing, `<f` at the top level and `! <f` included, unless
-// an output redirect takes what it prints; driven under `zsh -f`. Segments
-// drops the digit of `3<f`, so that one is read where neither shell does.
+// command word is missing, `<f` at the top level and `! <f` included; driven
+// under `zsh -f` 5.9. Only an fd-1 redirect to a file keeps that output in,
+// and Segments drops descriptors, so `<a >b` is read alongside `<a 2>/dev/null`
+// and `<a >&2`, which both cross. It drops the digit of `3<f` too, so that one
+// is read where neither shell does.
 func readsBareInput(segment bash.Segment, wholeBody bool) bool {
-	if len(segment.Inputs) == 0 || len(segment.Redirects) != len(segment.Inputs) {
+	if len(segment.Inputs) == 0 {
 		return false
 	}
 	if toolShellIsZsh() {
 		return true
 	}
-	return wholeBody && len(segment.Tokens) == 0 && len(segment.Inputs) == 1 &&
-		!segment.Forked && len(segment.Shells) == 0
+	return wholeBody && len(segment.Tokens) == 0 && len(segment.Redirects) == 1 &&
+		len(segment.Inputs) == 1 && !segment.Forked && len(segment.Shells) == 0
 }
 
 // A savedShell is one subshell entered and not yet left, holding the directory

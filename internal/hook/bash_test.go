@@ -2166,9 +2166,8 @@ func TestTheSubstitutionBodyPeelsOnItsOwnTokensToo(t *testing.T) {
 // bash does it for a substitution body that is one bare redirect, its short
 // form of `$(cat f)`, and zsh does it wherever the command word is missing, by
 // running $READNULLCMD. Each block row printed the key under its shell and
-// each quiet row printed nothing -- bash 5.3.15 and `zsh -f`, driven
-// 2026-11-01 -- except `$(3<f)`, which neither shell prints: Segments drops
-// the digit, so it is read as `<f`, which errs toward reading.
+// each quiet row printed nothing -- bash 5.3.15 and `zsh -f` 5.9, driven
+// 2026-11-01 -- except two over-reads, each marked where it sits.
 func TestABareInputRedirectIsReadWhereTheShellSendsIt(t *testing.T) {
 	dir, name := planted(t)
 	for _, tc := range []struct {
@@ -2185,6 +2184,7 @@ func TestABareInputRedirectIsReadWhereTheShellSendsIt(t *testing.T) {
 			`echo $(<"` + name + `")`,
 			`F=` + name + `; echo $(<$F)`,
 			`printf %s "$(<` + name + `)"`,
+			// Neither shell prints this: Segments drops the digit.
 			`echo $(3<` + name + `)`,
 			// The controls, which denied before.
 			`echo $(cat ` + name + `)`,
@@ -2203,6 +2203,11 @@ func TestABareInputRedirectIsReadWhereTheShellSendsIt(t *testing.T) {
 			`echo $( (<` + name + `) )`,
 			`echo $({ <` + name + `; })`,
 			`echo "$(echo; <` + name + `)"`,
+			`<` + name + ` 2>/dev/null`,
+			`echo $(<` + name + ` 2>/dev/null)`,
+			`echo $(2>/dev/null <` + name + `)`,
+			`echo $(<` + name + ` 3>/dev/null)`,
+			`echo $(< ` + name + ` >/dev/stdout)`,
 		}},
 		{"zsh", []string{
 			`echo $(<` + name + `)`,
@@ -2213,8 +2218,17 @@ func TestABareInputRedirectIsReadWhereTheShellSendsIt(t *testing.T) {
 			`{ <` + name + `; }`,
 			`echo $(<` + name + ` | cat)`,
 			`echo "$(echo; <` + name + `)"`,
-		}, []string{
+			// Only an fd-1 redirect to a file keeps the output in, and
+			// Segments drops descriptors, so every one of these is read.
+			`<` + name + ` 2>/dev/null`,
+			`<` + name + ` >&2`,
+			`echo $(<` + name + ` 2>/dev/null)`,
+			`echo $(2>/dev/null <` + name + `)`,
+			`echo $(<` + name + ` 3>/dev/null)`,
+			`echo $(< ` + name + ` >/dev/stdout)`,
+			// Which makes this one an over-read: zsh prints nothing.
 			`<` + name + ` >/dev/null`,
+		}, []string{
 			`X=1 <` + name,
 		}},
 	} {
