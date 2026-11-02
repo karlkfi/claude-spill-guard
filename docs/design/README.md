@@ -639,6 +639,7 @@ Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
 | `@~/.zshrc` | Expands, and reaches outside the project |
 | `@~user/.zshrc` | Nothing, on a run whose `@~/.zshrc` reached that same file. One record came back, and the harness does not dedup — `@x` and `@./x` give two records for one path — so one record there is one splice rather than two collapsed |
 | A 5,001-line file | 2,000 lines. The splice is bounded, and the marker on the last line did not cross |
+| A file over 256 KiB | Nothing, no attachment of any type. Driven 2026-11-01 on 2.1.290: 255 KiB arrives as 2,000 lines and 257 KiB as nothing |
 | `@logo.png` | A `file` attachment whose `content.type` is `image`, carrying no text |
 | `@heap.dump`, a NUL in its first bytes | A `file` attachment whose `content.type` is `text`, carrying the whole file — NUL included, and a marker placed after it crossed |
 
@@ -2127,7 +2128,7 @@ what this whole file is about.
 
 **A size cap is the cheaper half and is not the fix.** A cap answers before
 reading and a deadline answers during, and three things walk past the first.
-Cost is not a function of size: [Q122](../queue/Q122.md) measured the same 64
+Cost is not a function of size: Q122, since completed, measured the same 64
 MiB at 9,746 MiB/s as binary, 1,055 MiB/s as text no rule gates on, and 6.5
 MiB/s as text carrying every keyword — the third now 32.84, which narrows the
 spread from 1,500x to 300x and leaves the argument where it was — so a cap
@@ -2196,17 +2197,43 @@ against a budget already spent, on all three surfaces, and is untouched here.
 A fixture that does reach the budget, and the table re-taken beside it, is
 [Q132](../queue/Q132.md).
 
-**What happens to that 68.130s under Claude Code is composed rather than
-observed, and the composition is the same one Q122 declined to make.** These are
-hook-process wall times; that the harness kills a hook at its timeout and lets
-the call through is the measurement above, taken separately. Nothing here has
-driven a real session at the crossing — [Q122](../queue/Q122.md) carries that as
-owed work, and it is owed after this change as much as before it.
+**What Claude Code does past the budget, and past the timeout, is observed now
+rather than composed.** The rows above are hook-process wall times, and the
+kill at 60 seconds was a separate measurement. Driven 2026-11-01 against Claude
+Code 2.1.290 under `claude -p` with a clean `HOME`, the credential-free route
+[`check-prompt-oracle.py`](../../scripts/check-prompt-oracle.py) uses. A
+built binary was the only `UserPromptSubmit` hook, at `timeout: 60`. One prompt
+named six fixtures of 400 MiB each, 2,404 MiB in all, cut from real text as
+described under [What 45 costs](#what-45-costs-and-why-it-is-not-smaller), each
+ending in the planted key. Load average was 96–130 on 18 cores.
 
-Two numbers fall out of the pair. The deadline lands within **11ms** of the
+| Binary | Wall | Transcript | Coverage log | The prompt |
+|---|---|---|---|---|
+| this tree, `@k.env` alone | 11.492s | — | — | blocked, naming `aws-access-key-id` |
+| budget raised to 600s, `@k.env` alone | 12.050s | — | — | blocked, naming `aws-access-key-id` |
+| this tree, the six fixtures | 54.855s | no hook attachment | one record, the 45s budget | proceeds |
+| budget raised to 600s, the six fixtures | 64.607s | `hook_cancelled`, `durationMs` 60143, `timedOut` true | nothing | proceeds |
+
+The first two rows are the controls: both binaries are wired and block, so the
+two rows under them are binaries that ran rather than ones that never started.
+The fourth is the fail-open this section was written against, now seen whole:
+killed at 60.143s, the verdict discarded, the prompt through, and no record
+from this hook anywhere. The third is what the budget replaced it with. The
+walls include the harness's own startup, about ten seconds at that load.
+
+**And the harness spliced none of the six.** Over 256 KiB, an `@` file is not
+attached at all: on the same version, 255 KiB arrived as 2,000 lines and 257
+KiB arrived as nothing. So on this surface a prompt reaches the budget only on
+bytes the harness was not going to send, and the record it writes is about a
+gap nobody could have spilled through. That does not move
+[the over-read](#a-buffer-whose-bytes-cross-anyway-measured): the limit is the
+harness's, measured on one version, and reading less than the harness sends is
+the only direction that can report a clean result for something that crossed.
+
+Two numbers fall out of the first table's pair of builds. The deadline lands within **11ms** of the
 budget measured from process spawn, so the launcher, this binary's startup, the
 timer's lateness and the write together are 11ms of the 15,000 the margin holds.
-And this fixture runs at 7.34 MiB/s where [Q122](../queue/Q122.md) measured 6.5
+And this fixture runs at 7.34 MiB/s where Q122, since completed, measured 6.5
 and [#92](https://github.com/karlkfi/claude-spill-guard/pull/92)'s session
 measured 6.8 — three fixtures, three rates, a 60-second crossing anywhere from
 390 to 440 MiB. That spread is not noise to average away. It is the reason the
@@ -2230,6 +2257,29 @@ to between 293 and 390 MiB. Nothing in the two populations this repo has counted
 comes near either end: nothing outside `.git` in this worktree exceeds 5 MiB,
 and the largest session transcript on the author's machine is 35.4 MiB, which
 is 5.4 seconds.
+
+**Over real text the scan costs 60–73 MiB/s of CPU, and load moves the
+crossing further than content does.** Measured 2026-11-01 on a binary built
+from `162fcf9`, `Read` surface, warm page cache, Apple M5 Max, Go 1.27.1. The
+fixtures are text files from the Go module cache, concatenated in sorted order,
+each file used once and none carrying a NUL; the first 128 MiB is 15,266
+files. Real text already clears the prefilter: with nothing planted but the key
+at its end, that 128 MiB holds 35 findings, and planting one of each keyword moved its CPU time
+from 2.082s to 2.115s. Six disjoint 400 MiB parts ran at 60.4–73.3 MiB/s of CPU
+time, with the budget lifted so each one finished, and on every part both
+binaries finished they report the same match count.
+
+The budget charges wall clock, and on this machine wall clock was not the
+CPU's. At a load average of 73–84 from parallel sessions on 18 cores, the same
+six parts took 1.2x to 11.4x their CPU time, 6.9s to 66.4s. Through the shipped
+binary at 58–119, one part was recorded at the budget on all three runs, and
+two others on one run and two runs of three. The least-loaded runs taken, while
+load climbed from 10 to 42, put the two 128 MiB fixtures at 2.214–2.472s wall. So
+the slower-machine argument below arrives on the fastest machine here as load.
+
+Two readings are still untaken. Every run here is on a warm page cache: macOS
+evicts it only through `purge`, which needs root, so a cold read was not tried.
+And every figure is this one machine, which no benchmark here retires.
 
 A smaller budget is the change to argue for rather than against, and the
 argument that stops it is the slower machine. 45 seconds is a wall clock, so it
@@ -3320,9 +3370,11 @@ For `Read` and `Bash`, what stands in:
   holding a credential, on both events, and are re-taken the same way. Their
   dates are in the sections that carry them, which is the only currency such a
   measurement has.
-- The scanner's own budget and what the harness does past it were composed
-  from two measurements rather than observed in one; [Q122](../queue/Q122.md)
-  owns the drive that would close that, and it sits behind this same boundary.
+- The scanner's own budget and what the harness does past it were observed
+  in one drive on the prompt surface, by hand on 2026-11-01 and [recorded under
+  the budget](#driven-end-to-end-on-built-binaries). On `Read` and `Bash` they
+  are still composed from two measurements, because a tool call reaches the
+  hook only after an API call, and that sits behind this same boundary.
 
 A stated limitation is worth more than a gate that cannot fail. A `PreToolUse`
 job that ran with no credential would fire nothing and report no check, which

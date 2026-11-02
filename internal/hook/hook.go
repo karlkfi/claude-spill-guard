@@ -116,7 +116,7 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// also where a secret is most likely to be sitting unexamined. It
 		// defers anyway, for consistency with the rule the other two follow:
 		// the alternative is a prompt on the one call a person has least
-		// context to judge. The performance defect underneath it is Q122.
+		// context to judge. Its rates are in docs/design/README.md, "What 45 costs".
 		return abstain(stdout, stderr, call, event, overran(budget), nil)
 	}
 	findings, skips, err := got.findings, got.skips, got.err

@@ -176,9 +176,9 @@ deadline outruns the work rather than cancelling it. Driven on built binaries
 — a 500 MiB fixture that took 68.130s on `main`, 8s past the ceiling, blocked
 at 45.011s, while a 128 MiB one denies on the same rule either side. That
 fixture no longer reaches the budget at all: since rules run at their keyword
-positions it denies at 14.9–17.7s, and Q132 owes one that does. What the
-harness does with that 68.130s is still composed from two measurements rather
-than observed in one, which is Q122's first residual and is unchanged.
+positions it denies at 14.9–17.7s, and Q132 owes one that does. Past each
+limit the harness is observed now, on the prompt surface: at the budget the
+record is written and the prompt proceeds; past 60s it is `hook_cancelled`.
 `internal/hook/deadline.go` carries the argument and `docs/design/README.md`
 under *The scanner's own budget* carries the table.
 
