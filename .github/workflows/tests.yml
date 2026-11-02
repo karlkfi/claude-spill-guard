@@ -3561,20 +3561,20 @@ jobs:
           fi
       - name: An allowlist entry naming a file that is not tracked must fail the gate
         run: |
-          git rm -q --cached internal/scan/decode_test.go
-          if git ls-files --error-unmatch internal/scan/decode_test.go > /dev/null 2>&1; then
+          git rm -q --cached internal/validate/jwt_test.go
+          if git ls-files --error-unmatch internal/validate/jwt_test.go > /dev/null 2>&1; then
             echo "::error::the mutation changed nothing -- the file is still tracked" >&2
             exit 1
           fi
           make self-scan > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
-          git reset -q HEAD internal/scan/decode_test.go
+          git reset -q HEAD internal/validate/jwt_test.go
           if [ "$rc" -eq 0 ]; then
             echo "::error::self-scan passed with an allowlist entry for an untracked file" >&2
             exit 1
           fi
-          if ! grep -q 'decode_test.go is on the allowlist and is not tracked' mutant.log; then
+          if ! grep -q 'jwt_test.go is on the allowlist and is not tracked' mutant.log; then
             echo "::error::self-scan failed, but not on the orphan entry" >&2
             exit 1
           fi
