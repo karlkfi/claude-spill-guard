@@ -490,10 +490,8 @@ func toolTargets(call payload) ([]target, error) {
 			// The path is not named, for the reason bash.go's resolve does not
 			// name an operand. The design allows a reason to carry a path this
 			// binary resolved and attempted to open, and a relative file_path
-			// is neither: nothing was scanned before this refusal, so quoting
-			// it would send content the scan never examined. That `file_path`
-			// is a path by contract where an operand is a command-string token
-			// does not change what has happened to it here, which is nothing.
+			// is neither. That `file_path` is a path by contract where an
+			// operand is a command-string token does not change that.
 			return text, unresolved{*in.FilePath, errors.New("the Read call names " +
 				"a relative file_path, which this cannot resolve to the file the " +
 				"tool would open")}

@@ -452,7 +452,7 @@ func failed(err error) string {
 	if errors.As(err, &part) {
 		switch part.label {
 		case filePathLabel:
-			// The path was matched and nothing it names was opened.
+			opening = "The file_path was read as text and matched no rule, but the scan"
 		case commandLabel:
 			opening = "The command string was read and matched no rule, but the scan"
 		case promptLabel:

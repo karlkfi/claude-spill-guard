@@ -271,23 +271,68 @@ func TestAKeyInACallsOwnStringsBlocks(t *testing.T) {
 		}
 	}
 	absent := filepath.Join(dir, "absent")
+	// Each holds the key as a name, so the path is the only place it is written.
+	opens := filepath.Join(dir, "opens")
+	for _, sub := range []string{opens, filepath.Join(dir, "isdir", secret)} {
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(opens, secret), []byte("nothing here\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sealed := filepath.Join(dir, "sealed")
+	if err := os.Mkdir(sealed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sealed, secret), []byte("x\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	shut := filepath.Join(dir, "shut")
+	if err := os.Mkdir(shut, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	device := filepath.Join(dir, "device")
+	if err := os.Mkdir(device, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(os.DevNull, filepath.Join(device, secret)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	under := func(parent string) func(string) string {
+		return func(v string) string { return read(filepath.Join(parent, v)) }
+	}
+	// Windows ignores the modes and has no /dev/null to link, and root opens
+	// anything, so those arms would read a file rather than the case they name.
+	unshut := runtime.GOOS == "windows" || os.Geteuid() == 0
 	for _, tc := range []struct {
 		name, label string
 		call        func(string) string
+		skip        bool
 	}{
-		{"Grep glob, count over a directory", "<glob>", grep("glob", "count", dir)},
-		{"Grep glob, content over a file", "<glob>", grep("glob", "content", notes)},
-		{"Grep type, count over a directory", "<type>", grep("type", "count", dir)},
-		{"Grep path, absent, count", "<path>", func(v string) string {
+		{name: "Read, a file that opens", label: filePathLabel, call: under(opens)},
+		{name: "Read, a directory", label: filePathLabel, call: under(filepath.Join(dir, "isdir"))},
+		{name: "Read, not a regular file", label: filePathLabel, call: under(device), skip: runtime.GOOS == "windows"},
+		{name: "Read, will not stat", label: filePathLabel, call: under(shut), skip: unshut},
+		{name: "Read, will not open", label: filePathLabel, call: under(sealed), skip: unshut},
+		{name: "Grep glob, count over a directory", label: "<glob>", call: grep("glob", "count", dir)},
+		{name: "Grep glob, content over a file", label: "<glob>", call: grep("glob", "content", notes)},
+		{name: "Grep type, count over a directory", label: "<type>", call: grep("type", "count", dir)},
+		{name: "Grep path, absent, count", label: "<path>", call: func(v string) string {
 			return grep("path", "count", "")(filepath.Join(absent, v))
 		}},
-		{"Grep path, absent, content", "<path>", func(v string) string {
+		{name: "Grep path, absent, content", label: "<path>", call: func(v string) string {
 			return grep("path", "content", "")(filepath.Join(absent, v))
 		}},
-		{"Read, absent", filePathLabel, func(v string) string { return read(filepath.Join(absent, v)) }},
-		{"Read, relative", filePathLabel, read},
+		{name: "Read, absent", label: filePathLabel, call: under(absent)},
+		{name: "Read, relative", label: filePathLabel, call: read},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.skip {
+				t.Skip("nothing stops this path being opened here")
+			}
 			code, stdout, stderr := drive(t, tc.call(secret))
 			if code != 0 || stdout == "" {
 				t.Fatalf("exit %d, stdout %q, stderr %q, want a deny", code, stdout, stderr)
@@ -757,6 +802,7 @@ func TestACoverageRecordSaysWhatWasRead(t *testing.T) {
 		prompt  = "The prompt text was read and matched no rule"
 		part    = "Part of this call was read and matched no rule"
 		nothing = "Nothing in this call was decoded"
+		path    = "The file_path was read as text and matched no rule"
 	)
 	for _, tc := range []struct {
 		name, payload, want string
@@ -771,7 +817,7 @@ func TestACoverageRecordSaysWhatWasRead(t *testing.T) {
 		{"PowerShell holding a NUL", powershellCall(t, "Get-Date \x00"), nothing},
 		{"a prompt holding a NUL", `{"hook_event_name":"UserPromptSubmit","prompt":"\u0000 look at @deploy.env"}`, nothing},
 		{"a Read of a directory", `{"hook_event_name":"PreToolUse","tool_name":"Read",` +
-			`"tool_input":{"file_path":` + quote(t, dir) + `}}`, nothing},
+			`"tool_input":{"file_path":` + quote(t, dir) + `}}`, path},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, tc.payload)
