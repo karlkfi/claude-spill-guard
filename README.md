@@ -88,14 +88,12 @@ curl.exe -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/do
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-**[PENDING: whether `brew install` exists.]**
-
 Two steps rather than one. Piping the script into a shell works, and it is a
 strange way to open for a tool whose whole pitch is that nothing leaves your
 machine. Download it, read it, run it. It checks the download's signature with
 `cosign` or `gh`, and it refuses if you have neither.
 [`docs/installing.md`](docs/installing.md) has what it verifies, the `go install`
-route, and what `spill-guard selftest` reports.
+route for a machine with neither, and what `spill-guard selftest` reports.
 
 **The plugin**, once the binary is there:
 

@@ -14,10 +14,10 @@ installed it **refuses**.
 
 The sha256 is not the fallback it looks like. `checksums.txt` comes from the same
 place the archive did, so it answers corruption and not substitution, and
-authenticity needs a verifier. **[PENDING: whether `brew install` exists.]** A
-machine with no verifier is what the planned Homebrew tap and Scoop bucket are
-for, since both pin the sha256 themselves and ask you for no tool at all.
-[`design/distribution.md`](design/distribution.md) has the whole argument.
+authenticity needs a verifier. On a machine with neither tool,
+[`go install`](#without-the-install-script) needs no verifier. A Homebrew tap and
+a Scoop bucket are designed in
+[`design/distribution.md`](design/distribution.md), and neither is built.
 
 `sh install.sh --verifier` answers which tool you have without downloading
 anything. A successful run names the one it used, and a run that names neither
