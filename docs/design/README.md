@@ -2080,7 +2080,7 @@ Five spellings were driven, on Linux, macOS and Windows with and without Git Bas
 | `"<path>" hook` | scans | **scans nothing** | The defect |
 | exec form, `args: ["hook"]` | **scans nothing** | **scans nothing** | `ENOEXEC` on the shebang-less launcher, `EINVAL` spawning a `.cmd` on Windows, and neither blocks |
 | `& "<path>" hook` | **blocks every call** | scans | A leading `&` is a bash syntax error, exit 2 |
-| a second entry with `shell: powershell` | scans | scans | A non-blocking hook error on every call and prompt on a machine with no PowerShell, and two scans on Windows with Git Bash |
+| a second entry with `shell: powershell` | scans | scans | A non-blocking hook error on every call and prompt on a machine with no PowerShell, and on Windows with Git Bash both entries would run, which was not separately measured |
 | one command that parses under both | scans | scans | Shipped |
 
 What ships is one string that each shell reads differently:
