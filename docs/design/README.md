@@ -2333,6 +2333,15 @@ None of this moves
 harness's, measured on one version, and reading less than the harness sends is
 the only direction that can report a clean result for something that crossed.
 
+Two numbers fall out of the first table's pair of builds. The deadline lands within **11ms** of the
+budget measured from process spawn, so the launcher, this binary's startup, the
+timer's lateness and the write together are 11ms of the 15,000 the margin holds.
+And this fixture runs at 7.34 MiB/s where Q122, since completed, measured 6.5
+and [#92](https://github.com/karlkfi/claude-spill-guard/pull/92)'s session
+measured 6.8 — three fixtures, three rates, a 60-second crossing anywhere from
+390 to 440 MiB. That spread is not noise to average away. It is the reason the
+bound is a clock and not a byte count.
+
 #### The order the budget spends
 
 An overrun used to reach no verdict on any buffer in the call, so a small file
@@ -2409,15 +2418,6 @@ Three things it does not close:
   with a record.
 - **The wait.** The scan runs to the deadline to name every match, so these blocks
   arrive at 45 seconds rather than at the first finding.
-
-Two numbers fall out of the first table's pair of builds. The deadline lands within **11ms** of the
-budget measured from process spawn, so the launcher, this binary's startup, the
-timer's lateness and the write together are 11ms of the 15,000 the margin holds.
-And this fixture runs at 7.34 MiB/s where Q122, since completed, measured 6.5
-and [#92](https://github.com/karlkfi/claude-spill-guard/pull/92)'s session
-measured 6.8 — three fixtures, three rates, a 60-second crossing anywhere from
-390 to 440 MiB. That spread is not noise to average away. It is the reason the
-bound is a clock and not a byte count.
 
 #### What 45 costs, and why it is not smaller
 
