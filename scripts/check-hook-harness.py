@@ -249,10 +249,12 @@ def arms(claude, plugin, cwd, binary, no_git_bash):
         print(f"{what}: {got}")
         if not got.called:
             findings.append(f"{what}: the fake never got the tool call -- {got}")
-        elif got.crossed or got.state or not any("InputValidationError" in result
-                                                 for result in got.results):
+        elif got.crossed or got.state or not any(
+                "InputValidationError" in result and "control characters" in result
+                for result in got.results):
             findings.append(f"{what}: Claude Code did not refuse it ahead of the hook, "
-                            f"so the event on docs/queue/Q246.md has fired -- {got}")
+                            f"or reworded the refusal. If it did not refuse, the event "
+                            f"on docs/queue/Q246.md has fired -- {got}")
 
     clean = drive(claude, plugin, cwd, read("clean.txt"), env_extra=real)
     print(f"Read of a clean file: {clean}")
