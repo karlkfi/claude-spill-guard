@@ -29,12 +29,12 @@ is a short list worth reading before you rely on it.
 The other four are `~/.netrc`, `~/.git-credentials`, `~/.docker/config.json` and
 `~/.kube/config`. The path refusals exist because most of what those files hold
 matches no rule.
-No rule in v0.6.1 recognises an AWS secret access key, a netrc password or a
+No rule recognises an AWS secret access key, a netrc password or a
 base64 registry auth, so a clean scan of one of those files would report a safety
 the scan is not providing.
 
-This is what comes back, from v0.6.1. The line breaks are added and the path is
-shortened. The rest is verbatim.
+This is what comes back. The line breaks are added and the path is shortened. The
+rest is verbatim.
 
 ```text
 > cat deploy.log
@@ -83,9 +83,7 @@ curl -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/downlo
 sh install.sh
 ```
 
-On Windows, as of v0.6.1, spill-guard needs Git for Windows. Without it Claude
-Code runs hooks under PowerShell, the hook command does not parse, and nothing is
-scanned or refused, so run the live check below.
+On Windows:
 
 ```powershell
 curl.exe -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/download/install.ps1
@@ -108,6 +106,10 @@ claude plugin install spill-guard@spill-guard
 
 Hooks are read when a session starts, so start a new one.
 
+On Windows without Git for Windows, Claude's shell is PowerShell. spill-guard
+scans `Read`, prompts and PowerShell command strings there, but not the files a
+PowerShell command opens. Those calls are recorded.
+
 ### Check that the hook is live
 
 A scanner that enforces nothing and a session with no secrets in it produce the
@@ -124,7 +126,8 @@ live, and nothing leaked, because the file is empty.
 The file has to exist, since a missing `.env` is allowed. This check also says
 nothing about prompts: `@.env` is allowed, because the path refusal does not
 reach that surface. `spill-guard selftest` drives a prompt through the scanner,
-in-process rather than through Claude Code.
+in-process rather than through Claude Code. On Windows without Git for Windows only
+the `Read` half blocks, for the reason under the plugin install.
 
 **A key you plant yourself will probably come back allowed**, with nothing said.
 AWS's documented example key and anything else ending in `EXAMPLE` are refused
@@ -137,7 +140,7 @@ reach for.
 ## What it does not catch
 
 The threat model is the accident. These go straight through, each driven through
-the v0.6.1 binary unless it says otherwise:
+the binary unless it says otherwise:
 
 - **An interpreter.** `python3 -c 'print(open(".env").read())'` and the `node`
   equivalent pass, because the hook knows which argument of `cat` is a file and
@@ -146,7 +149,8 @@ the v0.6.1 binary unless it says otherwise:
   `aws configure get aws_secret_access_key` all pass. The hook decides before
   the call runs, so it never sees the output.
 - **An MCP file reader.** By the manifest rather than a drive: `hooks/hooks.json`
-  matches `Read`, `Bash` and `Grep`, so an `mcp__…` tool never reaches the hook.
+  matches `Read`, `Bash`, `Grep` and `PowerShell`, so an `mcp__…` tool never reaches
+  the hook.
 - **A value no rule knows.** A password in `deploy.env` passes `cat`, because the
   path refusal covers `.env` and the credential files above rather than every
   name with `env` in it. A `@.env` in a prompt gets the content scan and not the
@@ -172,18 +176,17 @@ than findings, and after 505 of those 509 the session got a clean call through
 within four attempts by reading the same tree another way. The refusal was not
 withholding the bytes. It charged a turn.
 
-A broken install still blocks, with the Windows exception under
-[Install](#install). A missing binary is refused by the launcher, and a payload
-the binary cannot decode exits 2.
+A broken install still blocks. A missing binary is refused by the launcher, and a
+payload the binary cannot decode exits 2.
 
 ## What it costs
 
-About 10 ms per hook call. Medians ranged from 8.9 ms to 10.8 ms across two runs
+About 10 ms per hook call. Medians ranged from 9.5 ms to 10.1 ms across two runs
 of 40 calls each, for a `Bash` `ls`, a `Read` of a 1.2 KB file and a short prompt.
-That is v0.6.1 through the plugin's launcher, on one Apple M5 Max on 2026-11-03,
-with small inputs. About 2 ms of it is the cost of spawning any process from the
-measuring script. A larger file costs more: the binary alone, without the
-launcher, took 4.2 to 4.6 ms on those inputs and 5.0 to 5.4 ms on a 68 KB file.
+That is a pre-release build of v0.7.0 through the command `hooks/hooks.json` runs,
+on one Apple M5 Max on 2026-11-03, with small inputs. About 2 ms of it is the cost
+of spawning any process from the measuring script. A larger file costs more: the
+binary alone took 4.6 to 5.4 ms on those inputs and 7.0 to 7.2 ms on a 68 KB file.
 Your machine will differ.
 
 ## How it is built
