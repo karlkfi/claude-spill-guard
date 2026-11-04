@@ -165,12 +165,22 @@ the binary unless it says otherwise:
 
 ## A finding blocks, a gap does not
 
-A rule match blocks, and so does a refused shape. A call the scanner could not
-read does not: an operand it cannot resolve (`cat "$X"`), a directory it will
-not walk (`rg password .`), a buffer it cannot decode, or a scan past its
-45-second budget. The hook writes no verdict, so your normal permission rules
-run unchanged, and the gap is recorded. `spill-guard coverage` counts those
-records, grouped by reason.
+A rule match blocks, and so does a refused shape. A gap does not: an operand the
+scanner cannot resolve (`cat "$X"`), a directory it will not walk (`rg password
+.`), a buffer it cannot decode, or a scan past its 45-second budget. The hook
+writes no verdict, so your normal permission rules run unchanged, and the gap is
+recorded. `spill-guard coverage` counts those records, grouped by reason.
+
+A gap does not normally hide a match beside it. `cat "$X" key.txt` is denied on
+what it could read, and so is `cat` of an undecodable file beside one holding a
+key. Three open bugs let a match through anyway:
+
+- A scan past its budget reaches no verdict on anything in the call, including a
+  small file holding a key ([Q227](docs/queue/Q227.md)).
+- A `Grep` tool call loses a key in its pattern when its `path` cannot be resolved
+  ([Q245](docs/queue/Q245.md)).
+- A command string with a NUL in its first 8 KiB is skipped as binary, so a key in
+  it is never matched ([Q246](docs/queue/Q246.md)).
 
 That was a block until 2026-09-05, and the measurement is what changed it. Over
 one week and 100 sessions on one machine, 509 of 540 blocks were gaps rather
