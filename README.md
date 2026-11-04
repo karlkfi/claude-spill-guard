@@ -80,8 +80,9 @@ curl -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/downlo
 sh install.sh
 ```
 
-**[PENDING, Windows stream: the Windows sentence.]** The commands, as v0.6.1
-ships them:
+On Windows, as of v0.6.1, spill-guard needs Git for Windows. Without it Claude
+Code runs hooks under PowerShell, the hook command does not parse, and nothing is
+scanned or refused, so run the live check below.
 
 ```powershell
 curl.exe -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/download/install.ps1
@@ -168,8 +169,9 @@ than findings, and after 505 of those 509 the session got a clean call through
 within four attempts by reading the same tree another way. The refusal was not
 withholding the bytes. It charged a turn.
 
-A broken install still blocks. A missing binary is refused by the launcher, and
-a payload the binary cannot decode exits 2.
+A broken install still blocks, with the Windows exception under
+[Install](#install). A missing binary is refused by the launcher, and a payload
+the binary cannot decode exits 2.
 
 ## What it costs
 
