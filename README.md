@@ -185,12 +185,12 @@ with a hook error on record.
 
 ## What it costs
 
-About 10 ms per hook call. Medians ranged from 9.5 ms to 10.1 ms across two runs
+About 10 ms per hook call. Medians ranged from 8.9 ms to 10.1 ms across four runs
 of 40 calls each, for a `Bash` `ls`, a `Read` of a 1.2 KB file and a short prompt.
 That is a pre-release build of v0.7.0 through the command `hooks/hooks.json` runs,
 on one Apple M5 Max on 2026-11-03, with small inputs. About 2 ms of it is the cost
 of spawning any process from the measuring script. A larger file costs more: the
-binary alone took 4.6 to 5.4 ms on those inputs and 7.0 to 7.2 ms on a 68 KB file.
+binary alone took 4.2 to 5.7 ms on those inputs and 6.6 to 7.2 ms on a 68 KB file.
 Your machine will differ.
 
 ## How it is built
