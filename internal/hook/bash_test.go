@@ -320,8 +320,8 @@ func TestAnAbsentOperandIsNotAnError(t *testing.T) {
 // unknown. That is a coverage failure like any other, so it defers and records.
 func TestACommandThatCannotBeSegmentedDefers(t *testing.T) {
 	code, stdout, stderr := drive(t, bashCall(t, `cat "unbalanced`, t.TempDir()))
-	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "could not be read") {
-		t.Errorf("coverage reason = %q, want it to say the command could not be read", reason)
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "could not be parsed") {
+		t.Errorf("coverage reason = %q, want it to say the command could not be parsed", reason)
 	}
 }
 

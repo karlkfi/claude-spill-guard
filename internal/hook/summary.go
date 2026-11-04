@@ -118,7 +118,7 @@ func Summarize(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, "The log is empty.\n")
 		return 0
 	}
-	fmt.Fprintf(stdout, "%d call(s) this scanner could not read, %s to %s.\n\n",
+	fmt.Fprintf(stdout, "%d call(s) this scanner could not read all of, %s to %s.\n\n",
 		t.total, t.first.Local().Format(time.DateOnly), t.last.Local().Format(time.DateOnly))
 
 	type row struct {
@@ -143,9 +143,12 @@ func Summarize(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "\n%d line(s) did not parse, which is what a rotation "+
 			"mid-write leaves behind.\n", t.unparsed)
 	}
-	fmt.Fprint(stdout, "\nEach of these is a call that proceeded with nothing "+
-		"scanned. They are not findings: a rule that matched would have stopped "+
-		"the call and is not written here.\n")
+	// It covers every build whose records are in the log, so no arm's wording
+	// fits: an older record's reason can claim less was read than was. And it
+	// rules out no match, for Q227's overrun and Q244's undecodable buffer.
+	fmt.Fprint(stdout, "\nEach of these is a call that proceeded with no verdict, "+
+		"because some or all of what it might send went unread. A record names no "+
+		"finding and rules none out.\n")
 	return 0
 }
 

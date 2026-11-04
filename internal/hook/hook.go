@@ -123,8 +123,8 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 	findings, skips, err := got.findings, got.skips, got.err
 	if err != nil {
 		// A refusal is not a scan that failed, and failed() would say it was:
-		// its sentence is that nothing scanned this call, which is true here
-		// and is not the reason. The call was stopped for what it would do, so
+		// its sentence is that the scan could not be completed, and that is not
+		// the reason. The call was stopped for what it would do, so
 		// the body has to say so and name what the caller can do instead --
 		// shape.go and guarded.go carry the two arguments.
 		var refused refusal
@@ -149,9 +149,9 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 			return decide(stdout, stderr, call, event, overridden, found(findings), notice)
 		}
 		// Nothing matched in what could be read, so nothing here is a reason
-		// to stop the call, and failed() says nothing scanned it: true of the
-		// call as a whole, which is the claim a coverage record makes. No
-		// notice for the skips, which keeps this branch what it was.
+		// to stop the call, and failed() says what was read and that the scan
+		// stopped short of the rest, which is the claim a coverage record makes.
+		// No notice for the skips, which keeps this branch what it was.
 		//
 		// This is the class the measurement in coverage.go is about -- an
 		// operand carrying a `$`, a glob, a directory, a relative path after a
@@ -319,6 +319,7 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 	}
 	var findings []scan.Finding
 	var skips []skipped
+	decoded := ""
 	for _, t := range buffers {
 		got, err := read(t.label, t.buf, set)
 		if err != nil {
@@ -329,8 +330,13 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 		// different questions and only the second is about coverage.
 		if got.Skipped != scan.Scanned {
 			skips = append(skips, skipped{t.label, got.Skipped})
+		} else if decoded == "" {
+			decoded = t.label
 		}
 		findings = append(findings, got.Findings...)
+	}
+	if gap != nil && decoded != "" {
+		gap = partlyDecoded{decoded, gap}
 	}
 	return findings, skips, gap
 }

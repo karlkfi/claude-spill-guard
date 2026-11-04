@@ -16,8 +16,8 @@ import "errors"
 // apart is the table this does not have, and getting it wrong in the quiet
 // direction is a file read with no record anywhere, so the coverage log takes
 // the noise. It lands only on the machines this tool runs on.
-var errPowerShellOperands = errors.New("the PowerShell command string was read, " +
-	"and which files the command opens cannot be determined here")
+var errPowerShellOperands = errors.New("which files this PowerShell command " +
+	"opens cannot be determined here")
 
 // powershellTargets is the command string, with the gap beside it. scanCall
 // scans what comes back and a match there blocks; otherwise the call defers.

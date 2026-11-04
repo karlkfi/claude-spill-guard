@@ -120,7 +120,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 
 		segments, err := bash.Segments(cur.text)
 		if err != nil {
-			note(fmt.Errorf("the Bash command could not be read, so what "+
+			note(fmt.Errorf("the Bash command could not be parsed, so what "+
 				"it would send is unknown: %w", err))
 			continue
 		}

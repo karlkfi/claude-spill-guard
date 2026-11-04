@@ -19,7 +19,7 @@ import (
 // is the reader table's keys. A shell path in the same span is still elided.
 func TestClassKeepsTheReasonAndTheCommandName(t *testing.T) {
 	reason := func(command, clause string) string {
-		return `Nothing scanned this call for secrets, because the scan could not ` +
+		return `The command string was read and matched no rule, but the scan could not ` +
 			`be completed: "in the \"` + command + `\" here, a file operand ` + clause +
 			`". The call was not stopped.`
 	}
@@ -58,7 +58,7 @@ func TestClassKeepsTheReasonAndTheCommandName(t *testing.T) {
 
 	t.Run("a shell path in the inner span is elided", func(t *testing.T) {
 		shell := func(path string) string {
-			return `Nothing scanned this call for secrets, because the scan could not ` +
+			return `The command string was read and matched no rule, but the scan could not ` +
 				`be completed: "in the \"cat\" here, a file operand is a glob and the ` +
 				`Bash tool's shell is \"` + path + `\" rather than bash". The call was not stopped.`
 		}
@@ -176,6 +176,32 @@ func TestSinceLeavesOutEarlierRecordsAndCountsThem(t *testing.T) {
 	rc, out, _ = summarize(t, "--since", "2026-09-21")
 	if rc != 0 || !strings.Contains(out, "Nothing was recorded since then.") {
 		t.Errorf("exit %d, want the empty-window report:\n%s", rc, out)
+	}
+}
+
+// The closing line speaks for every record in the log, and a build before this
+// wording wrote "Nothing scanned this call" over a call whose command string was
+// read. The row stays as written, since a log is a record, and the line has to
+// stay true beside it.
+func TestTheClosingLineHoldsOfAnOlderBuildsRecord(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "spill-guard")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := "Nothing scanned this call for secrets, because the scan could not be completed"
+	log := `{"time":"2026-09-20T12:00:00Z","event":"PreToolUse","version":"0.6.1","reason":"` + old + `"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "coverage.jsonl"), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, out, errs := summarize(t)
+	if rc != 0 {
+		t.Fatalf("exit %d, stderr %q", rc, errs)
+	}
+	assertHas(t, out, old, "some or all of what it might send went unread", "rules none out")
+	if strings.Contains(out, "proceeded with nothing") {
+		t.Errorf("the closing line still says nothing was read of every call:\n%s", out)
 	}
 }
 

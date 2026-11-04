@@ -87,8 +87,8 @@ import (
 // convention, refused before anything opened it.
 //
 // It travels as an error for shapeRefusal's reason and is separated from a
-// failed scan the same way -- failed() says nothing scanned this call, which
-// is true here and is not why the call stopped.
+// failed scan the same way -- failed() says the scan could not be completed,
+// which is not why the call stopped.
 type pathRefusal struct{ path, class string }
 
 func (r *pathRefusal) Error() string {

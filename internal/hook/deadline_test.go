@@ -117,8 +117,8 @@ func TestAScanThatOverrunsItsBudgetDefers(t *testing.T) {
 			if !strings.Contains(reason, "did not finish inside its") {
 				t.Errorf("coverage reason = %q, want it to say the scan ran out of budget", reason)
 			}
-			if !strings.Contains(reason, "went unread") {
-				t.Errorf("coverage reason = %q, want it to say what the call would have sent went unread", reason)
+			if !strings.Contains(reason, "reached no verdict") {
+				t.Errorf("coverage reason = %q, want it to say what the call would have sent reached no verdict", reason)
 			}
 
 			// The control for the three above, and without it a hook that

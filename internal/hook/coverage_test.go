@@ -407,3 +407,44 @@ func TestARefusalPastAnUnresolvedOperandStillRefuses(t *testing.T) {
 		t.Errorf("reason = %q, want the guarded-path refusal", reason)
 	}
 }
+
+// A record says what was read, because the same gap leaves different things
+// behind it. The opening is decided per call, so each arm is driven rather than
+// the sentence being read: a command string holding a NUL is the case where
+// "the command string was read" would be false of a record that looks like the
+// one beside it.
+func TestACoverageRecordSaysWhatWasRead(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("nothing here\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		command = "The command string was read and matched no rule"
+		prompt  = "The prompt text was read and matched no rule"
+		part    = "Part of this call was read and matched no rule"
+		nothing = "Nothing in this call was decoded"
+	)
+	for _, tc := range []struct {
+		name, payload, want string
+	}{
+		{"a Bash operand", bashCall(t, `cat "$X"`, dir), command},
+		{"a Bash operand beside a file", bashCall(t, `cat notes.txt "$X"`, dir), command},
+		{"a command that will not parse", bashCall(t, `cat "unbalanced`, dir), command},
+		{"PowerShell", powershellCall(t, "Get-Content notes.txt"), command},
+		{"a prompt", `{"hook_event_name":"UserPromptSubmit","prompt":"look at @deploy.env"}`, prompt},
+		{"a command holding a NUL, beside a file", bashCall(t, `cat notes.txt "$X" `+"\x00", dir), part},
+		{"a command holding a NUL", bashCall(t, `cat "$X" `+"\x00", dir), nothing},
+		{"PowerShell holding a NUL", powershellCall(t, "Get-Date \x00"), nothing},
+		{"a prompt holding a NUL", `{"hook_event_name":"UserPromptSubmit","prompt":"\u0000 look at @deploy.env"}`, nothing},
+		{"a Read of a directory", `{"hook_event_name":"PreToolUse","tool_name":"Read",` +
+			`"tool_input":{"file_path":` + quote(t, dir) + `}}`, nothing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, tc.payload)
+			reason := deferred(t, code, stdout, stderr)
+			if !strings.Contains(reason, tc.want) {
+				t.Errorf("record = %q, want it to open %q", reason, tc.want)
+			}
+		})
+	}
+}
