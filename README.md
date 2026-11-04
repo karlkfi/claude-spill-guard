@@ -64,10 +64,11 @@ forward lands where the command gets rewritten.
 It matches AWS key IDs, GitHub tokens of both kinds, Slack tokens and webhooks,
 Stripe live keys, OpenAI, Anthropic and Google API keys, PEM private keys and
 JWTs. It also matches US Social Security numbers, in one narrow form: written
-`###-##-####`, with `ssn` or `social security` within 64 bytes before. Nine bare
-digits do not match, and neither does a label after the number or the snake_case
-`social_security`. How many real numbers that finds is unmeasured. Payment cards,
-Chinese resident IDs and public IPv4 addresses ship disabled.
+`###-##-####`, with `ssn` or `social security` within 64 bytes before, in any case
+and spelled with a space, hyphen, underscore or nothing. Nine bare digits do not
+match, and neither does a label after the number. How many real numbers that finds
+is unmeasured. Payment cards, Chinese resident IDs and public IPv4 addresses ship
+disabled.
 [`rules/README.md`](rules/README.md) has what keeps each one quiet.
 
 ## Install
