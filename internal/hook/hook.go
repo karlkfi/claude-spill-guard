@@ -478,6 +478,9 @@ func toolTargets(call payload) ([]target, error) {
 		if in.FilePath == nil || *in.FilePath == "" {
 			return nil, errors.New("the Read call names no file_path")
 		}
+		// The path is text the call carries, as grepToolTargets scans a Grep
+		// path, so a key in it blocks whether or not it opens.
+		text := []target{{filePathLabel, []byte(*in.FilePath)}}
 		// Claude Code sends an absolute path -- driven 2026-08-27 against
 		// 2.1.238, where it resolved one the model had only named. A relative
 		// one would resolve against this process's directory rather than the
@@ -491,7 +494,7 @@ func toolTargets(call payload) ([]target, error) {
 			// it would send content the scan never examined. That `file_path`
 			// is a path by contract where an operand is a command-string token
 			// does not change what has happened to it here, which is nothing.
-			return nil, unresolved{*in.FilePath, errors.New("the Read call names " +
+			return text, unresolved{*in.FilePath, errors.New("the Read call names " +
 				"a relative file_path, which this cannot resolve to the file the " +
 				"tool would open")}
 		}
@@ -502,9 +505,9 @@ func toolTargets(call payload) ([]target, error) {
 				// claims no safety that is missing -- the tool reports its own
 				// error, which is more use than this one's. Every other read
 				// failure is a file that exists and went unchecked.
-				return nil, nil
+				return text, nil
 			}
-			return nil, unresolved{*in.FilePath,
+			return text, unresolved{*in.FilePath,
 				fmt.Errorf("reading the file this call would send: %w", osCause(err))}
 		}
 		// Only a regular file, for bash.go's reason: os.ReadFile on a fifo
@@ -524,12 +527,12 @@ func toolTargets(call payload) ([]target, error) {
 		// actually meets, and one reason for every mode would say less than
 		// the OS error this replaced.
 		if info.IsDir() {
-			return nil, unresolved{*in.FilePath, errors.New("the Read call names " +
+			return text, unresolved{*in.FilePath, errors.New("the Read call names " +
 				"a directory, and this reads files rather than listing them, so " +
 				"what it would send was not read")}
 		}
 		if !info.Mode().IsRegular() {
-			return nil, unresolved{*in.FilePath, errors.New("the Read call names " +
+			return text, unresolved{*in.FilePath, errors.New("the Read call names " +
 				"something that is neither a file nor a directory, so what it " +
 				"would send cannot be read here")}
 		}
@@ -543,10 +546,10 @@ func toolTargets(call payload) ([]target, error) {
 		}
 		buf, err := os.ReadFile(*in.FilePath)
 		if err != nil {
-			return nil, unresolved{*in.FilePath,
+			return text, unresolved{*in.FilePath,
 				fmt.Errorf("reading the file this call would send: %w", osCause(err))}
 		}
-		return []target{{*in.FilePath, buf}}, nil
+		return append(text, target{*in.FilePath, buf}), nil
 	case ToolBash:
 		var in bashInput
 		if err := unmarshalToolInput(ToolBash, call.ToolInput, &in); err != nil {
@@ -581,6 +584,9 @@ func toolTargets(call payload) ([]target, error) {
 		return nil, nil
 	}
 }
+
+// What a finding in a Read call's own file_path is reported against.
+const filePathLabel = "<file_path>"
 
 // deny writes the event's block encoding, which blocks whatever this then
 // exits with. Exit 0 is deliberate: on exit 2 stdout is discarded and the

@@ -499,6 +499,7 @@ on the first:
 | `PreToolUse` `Read.file_path` → the file the hook opens | the filesystem | No | **Yes** |
 | `PreToolUse` `Bash.command` → resolved read operands, opened by the hook | the filesystem | No | **Yes** |
 | `PreToolUse` `Bash.command`, the string itself | the model — see below | Yes | **Yes** |
+| `PreToolUse` `Read.file_path` and `Grep`'s `pattern`, `path`, `glob`, `type`, as text | the model — see below | Yes | **Yes** |
 | `PreToolUse` `Bash.description` | the model | Yes | No |
 | `PreToolUse` `Write.content` | the model | Yes | No |
 | `PreToolUse` `Edit.old_string`, `Edit.new_string` | the model | Yes | No |
@@ -533,10 +534,21 @@ imagined for and leaves the exception standing, because nothing has enumerated
 the routes.
 
 None of that reopens the axis. Crossing decides what is worth scanning and
-authorship is not a second test — this one field is a fail-closed carve-out
-named as such, and correcting the evidence under it changes what the carve-out
-rests on rather than what the rule is. A measurement about who typed something
-is about the size of this exception and about nothing else in the table above.
+authorship is not a second test — the carve-out is fail-closed and named as
+such, and correcting the evidence under it changes what the carve-out rests on
+rather than what the rule is. A measurement about who typed something is about
+the size of this exception and about nothing else in the table above.
+
+**The carve-out holds the arguments of a call that reads, and not the body of a
+call that writes.** A path through `cat` sits in the command string and blocks,
+so the same path through `Read` or `Grep` was the one spelling that exited 0
+unread. These fields are short and name what to fetch. `Write.content` and
+`Edit` stay out because they repeat what an earlier hop returned, which is the
+noise this section exists to delete, and a block on any of these still unsends
+nothing. Measured 2026-11-04 over 2,925 transcripts on one machine, 2026-07-26
+onward, each list carrying a planted key that fired: the shipped rules match 0
+of 10,075 distinct `Read` `file_path` values, 0 of 387 `Grep` `path` and 0 of 69
+`glob`. No call carried `type`. A clean corpus file holds the same shapes.
 
 **Dedup on the content hash is not the mechanism, and would cost more than the
 repetition it removes.** The repetition it targets is real — the same secret at

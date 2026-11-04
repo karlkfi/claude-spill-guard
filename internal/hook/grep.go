@@ -442,6 +442,16 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 	if in.Pattern != nil {
 		targets = append(targets, target{patternLabel, []byte(*in.Pattern)})
 	}
+	// The call's other strings are text it carries too, and a path is matched
+	// here ahead of being opened.
+	for _, f := range []struct {
+		label string
+		text  *string
+	}{{"<path>", in.Path}, {"<glob>", in.Glob}, {"<type>", in.Type}} {
+		if f.text != nil {
+			targets = append(targets, target{f.label, []byte(*f.text)})
+		}
+	}
 	mode := "files_with_matches"
 	if in.OutputMode != nil && *in.OutputMode != "" {
 		mode = *in.OutputMode

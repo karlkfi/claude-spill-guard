@@ -1,0 +1,30 @@
+Strings of the shape a Read or Grep call carries in file_path, path, glob and
+type. Each is scanned as text, so a long identifier in a path must not read as a
+credential. The shapes are taken from real calls; the names are invented.
+
+/home/dev/.claude/projects/-home-dev-work-api/8d65e0a1-d81e-41d2-a22f-c2f3d2a3c1e5.jsonl
+/home/dev/.claude/projects/-home-dev-work-api/8d65e0a1-d81e-41d2-a22f-c2f3d2a3c1e5/subagents/agent-a4f0c9e2b7d13856.jsonl
+/tmp/claude-501/-home-dev-work-api--claude-worktrees-q248-q247-path-keys-733fa3/8d65e0a1-d81e-41d2-a22f-c2f3d2a3c1e5/scratchpad/out.log
+/home/dev/.claude/plugins/cache/some-market/some-plugin/0.12.0/scripts/watch.sh
+/home/dev/work/api/.claude/worktrees/sharp-hopper-5e934f/internal/hook/grep.go
+/home/dev/go/pkg/mod/golang.org/x/vuln@v1.9.0/internal/scan/run.go
+/home/dev/go/pkg/mod/github.com/some-org/some-lib@v0.0.0-20240314150926-3c4e5f6a7b8d/client.go
+/home/dev/work/web/node_modules/.pnpm/esbuild@0.25.1/node_modules/esbuild/bin/esbuild
+/home/dev/work/web/.next/static/chunks/app/[id]/page-4f9a2c7e81b3d056.js
+/home/dev/work/web/dist/assets/index-BxT7kQ2m.css
+/home/dev/work/api/testdata/fixtures/sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.bin
+/home/dev/Downloads/invoice-2026-11-04-000123.pdf
+/home/dev/work/api/migrations/20261104093012_add_sessions.sql
+/home/dev/work/api/docs/adr/0042-disk-containerd-ask-review.md
+
+**/*.go
+**/*_test.go
+docs/queue/*.md
+internal/{hook,scan}/**/*.go
+*.{ts,tsx}
+src/**/!(*.spec).ts
+
+go
+py
+rust
+ts

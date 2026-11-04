@@ -136,13 +136,15 @@ type powershellInput struct {
 }
 
 // grepToolInput is the Grep tool's arguments, as a hook received them from
-// Claude Code 2.1.290 and as that build's input schema names them. The tool's
-// other fields -- `glob`, `type`, `-A`, `head_limit` and the rest -- narrow or
-// trim what it returns and never turn a mode that prints no lines into one
-// that does, so nothing here reads them.
+// Claude Code 2.1.290 and as that build's input schema names them. `glob` and
+// `type` hold no path and are read only as text. The rest -- `-A`, `head_limit`
+// and the like -- are numbers and flags, and 0 of the string values among them
+// in this machine's transcripts match a rule.
 type grepToolInput struct {
 	Pattern    *string `json:"pattern"`
 	Path       *string `json:"path"`
+	Glob       *string `json:"glob"`
+	Type       *string `json:"type"`
 	OutputMode *string `json:"output_mode"`
 }
 

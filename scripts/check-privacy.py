@@ -81,8 +81,8 @@ SURFACES = {
     ("PreToolUse", "Bash"): "the command string, and the files its readers "
                             "are pointed at",
     ("PreToolUse", "Read"): "the `file_path`, and the file it names",
-    ("PreToolUse", "Grep"): "the `pattern`, and the file a `path` names when "
-                            "it names one file",
+    ("PreToolUse", "Grep"): "the `pattern`, `path`, `glob` and `type`, and "
+                            "the file a `path` names when it names one file",
     ("PreToolUse", "PowerShell"): "the command string, and not the files it opens",
     ("UserPromptSubmit", None): "the prompt, and the files its `@` tokens name",
 }
