@@ -21,12 +21,14 @@ is a short list worth reading before you rely on it.
 | `cat deploy.log`, a `Read` of it, or `@deploy.log` in a prompt, with a key in the file | Blocked, naming the rule and byte offset and never the value |
 | A prompt with a key pasted into it | Blocked the same way |
 | `cat .env`, or a `Read` of `.env` | Blocked on the path alone, whatever the file holds |
-| `cat ~/.aws/credentials`, `~/.netrc`, `~/.git-credentials`, `~/.docker/config.json`, `~/.kube/config` | Blocked on the path alone |
+| `cat ~/.aws/credentials`, or four other credential files | Blocked on the path alone |
 | `env`, `printenv` | Blocked, offering `env \| cut -d= -f1` for the names |
 | `grep -r password .` | Blocked, offering the same command with the output scanned |
 | `cat go.mod` | Allowed, and nothing is said |
 
-The path refusals exist because most of what those files hold matches no rule.
+The other four are `~/.netrc`, `~/.git-credentials`, `~/.docker/config.json` and
+`~/.kube/config`. The path refusals exist because most of what those files hold
+matches no rule.
 No rule in v0.6.1 recognises an AWS secret access key, a netrc password or a
 base64 registry auth, so a clean scan of one of those files would report a safety
 the scan is not providing.
