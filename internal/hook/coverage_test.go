@@ -151,9 +151,10 @@ func TestACoverageRecordCarriesNoScannedValue(t *testing.T) {
 
 // An os error's text holds the path it was given, so a reason wrapping one
 // repeated a key the path carried: on stderr, which rides into the transcript,
-// and in the log. Before Q248 every arm here put the key on both. The Bash arms
-// assemble or glob the path, because the command string is scanned and a key
-// written whole there blocks before anything is opened.
+// and in the log. Before Q248 every arm here put the key on both. No arm can
+// write the key whole where a call's own text is scanned: that blocks before
+// anything is opened (TestAKeyInACallsOwnStringsBlocks). So Bash assembles or
+// globs it, a NUL takes the binary skip, and the clean names below pin the rest.
 func TestACoverageRecordCarriesNoPathItCouldNotOpen(t *testing.T) {
 	dir := t.TempDir()
 	shut := filepath.Join(dir, "shut")
@@ -178,18 +179,12 @@ func TestACoverageRecordCarriesNoPathItCouldNotOpen(t *testing.T) {
 		return grepToolCall(t, dir, map[string]string{
 			"pattern": "foo", "path": path, "output_mode": "content"})
 	}
-	unstat := filepath.Join(shut, secret)
-	unopen := filepath.Join(leaf, secret)
 	nul := filepath.Join(dir, secret+"\x00x")
 	for _, tc := range []struct {
 		name, payload string
 		needsMode     bool
 	}{
-		{"Read, a path that will not stat", read(unstat), true},
-		{"Read, a file that will not open", read(unopen), true},
 		{"Read, a NUL in the path", read(nul), false},
-		{"Grep, a path that will not stat", grep(unstat), true},
-		{"Grep, a file that will not open", grep(unopen), true},
 		{"Grep, a NUL in the path", grep(nul), false},
 		{"Bash, an assembled path that will not stat", bashCall(t,
 			"A="+secret[:10]+"; B="+secret[10:]+"; cat shut/$A$B", dir), true},
@@ -216,10 +211,18 @@ func TestACoverageRecordCarriesNoPathItCouldNotOpen(t *testing.T) {
 	}
 	// The other half: the reason names the failure and the operand keeps the
 	// path, which is where a person finds it.
-	for _, tc := range []struct{ name, payload string }{
-		{"Read", read(filepath.Join(shut, "plain"))},
-		{"Grep", grep(filepath.Join(shut, "plain"))},
-		{"Bash", bashCall(t, "cat shut/plain", dir)},
+	sealed := filepath.Join(dir, "sealed.txt")
+	if err := os.WriteFile(sealed, []byte("x\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	unstat := filepath.Join(shut, "plain")
+	for _, tc := range []struct{ name, payload, want string }{
+		{"Read, will not stat", read(unstat), unstat},
+		{"Read, will not open", read(sealed), sealed},
+		{"Grep, will not stat", grep(unstat), unstat},
+		{"Grep, will not open", grep(sealed), sealed},
+		{"Bash, will not stat", bashCall(t, "cat shut/plain", dir), unstat},
+		{"Bash, will not open", bashCall(t, "cat sealed.txt", dir), sealed},
 	} {
 		t.Run(tc.name+", the operand keeps a path no rule matches", func(t *testing.T) {
 			if opens {
@@ -238,9 +241,75 @@ func TestACoverageRecordCarriesNoPathItCouldNotOpen(t *testing.T) {
 			if len(got) != before+1 {
 				t.Fatalf("wrote %d records, want 1", len(got)-before)
 			}
-			want := filepath.Join(shut, "plain")
-			if ops := got[before].Operands; len(ops) != 1 || ops[0] != want {
+			if ops := got[before].Operands; len(ops) != 1 || ops[0] != tc.want {
 				t.Errorf("operands = %q, want the path", ops)
+			}
+		})
+	}
+}
+
+// A call's own strings are text it carries, so a key in one blocks whatever the
+// path turns out to be. Before Q247 every keyed arm exited 0: no verdict on the
+// ones that opened or were absent, a record on the ones that would not open.
+func TestAKeyInACallsOwnStringsBlocks(t *testing.T) {
+	dir := t.TempDir()
+	notes := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(notes, []byte("nothing here\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := func(value string) string {
+		return `{"hook_event_name":"PreToolUse","tool_name":"Read","cwd":` + quote(t, dir) +
+			`,"tool_input":{"file_path":` + quote(t, value) + `}}`
+	}
+	grep := func(field, mode, path string) func(string) string {
+		return func(value string) string {
+			fields := map[string]string{"pattern": "foo", "output_mode": mode, field: value}
+			if path != "" {
+				fields["path"] = path
+			}
+			return grepToolCall(t, dir, fields)
+		}
+	}
+	absent := filepath.Join(dir, "absent")
+	for _, tc := range []struct {
+		name, label string
+		call        func(string) string
+	}{
+		{"Grep glob, count over a directory", "<glob>", grep("glob", "count", dir)},
+		{"Grep glob, content over a file", "<glob>", grep("glob", "content", notes)},
+		{"Grep type, count over a directory", "<type>", grep("type", "count", dir)},
+		{"Grep path, absent, count", "<path>", func(v string) string {
+			return grep("path", "count", "")(filepath.Join(absent, v))
+		}},
+		{"Grep path, absent, content", "<path>", func(v string) string {
+			return grep("path", "content", "")(filepath.Join(absent, v))
+		}},
+		{"Read, absent", filePathLabel, func(v string) string { return read(filepath.Join(absent, v)) }},
+		{"Read, relative", filePathLabel, read},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, tc.call(secret))
+			if code != 0 || stdout == "" {
+				t.Fatalf("exit %d, stdout %q, stderr %q, want a deny", code, stdout, stderr)
+			}
+			if got := verdictOf(t, stdout); got != "deny" {
+				t.Fatalf("permissionDecision = %q, want deny", got)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, `"aws-access-key-id"`) || !strings.Contains(reason, tc.label) {
+				t.Errorf("reason = %q, want the rule in %s", reason, tc.label)
+			}
+			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+				t.Error("the verdict carries the value")
+			}
+			if got := readCoverage(t); len(got) != 0 {
+				t.Errorf("a block wrote %d coverage record(s): %+v", len(got), got)
+			}
+		})
+		t.Run(tc.name+", nothing in it", func(t *testing.T) {
+			_, stdout, _ := drive(t, tc.call("docs"))
+			if stdout != "" && verdictOf(t, stdout) == "deny" {
+				t.Errorf("a clean value was refused: %q", stdout)
 			}
 		})
 	}
