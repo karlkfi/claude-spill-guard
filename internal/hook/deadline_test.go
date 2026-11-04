@@ -219,6 +219,10 @@ func TestAnOverrunStillBlocksOnTheBuffersItGotThrough(t *testing.T) {
 	}
 	write("notes.txt", "AWS_ACCESS_KEY_ID="+secret+"\n")
 	write("big.log", strings.Repeat("the quick brown fox jumps over the lazy dog\n", 1024))
+	if err := os.Mkdir(filepath.Join(dir, secret), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(secret, "big.log"), strings.Repeat("hello\n", 1024))
 
 	prompt := func(text string) string {
 		return `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
@@ -239,6 +243,8 @@ func TestAnOverrunStillBlocksOnTheBuffersItGotThrough(t *testing.T) {
 		{"Grep, key in the pattern", `{"hook_event_name":"PreToolUse","tool_name":"Grep","tool_input":{` +
 			`"pattern":` + quote(t, secret) + `,"output_mode":"content",` +
 			`"path":` + quote(t, filepath.Join(dir, "big.log")) + `}}`},
+		{"Read, key in the file_path", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{` +
+			`"file_path":` + quote(t, filepath.Join(dir, secret, "big.log")) + `}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := overrunAt(t, "big.log", tc.payload)
