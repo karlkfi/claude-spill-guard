@@ -48,7 +48,7 @@ and the model's context.
   the accident, not a wall against intent.
 - **Not remote anything.** No telemetry, no update check, no shared rule
   source, no daemon.
-- **Not a recall play.** Ten precise rules beat seventy noisy ones. The
+- **Not a recall play.** Twelve precise rules beat seventy noisy ones. The
   inherited ruleset's defect was precision, not coverage — 27.6% of real files
   flagged, 5,679 matches, zero of them credentials
   ([`language-choice.md` §3](language-choice.md)).

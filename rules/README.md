@@ -64,12 +64,12 @@ and [TruffleHog](https://github.com/trufflesecurity/trufflehog/blob/main/pkg/det
 both match the two prefixes here, 93 bytes of `[A-Za-z0-9_-]` and a closing `AA`,
 and TruffleHog verifies a hit against the live API.
 [OpenRouter's guardrail docs](https://openrouter.ai/docs/guides/features/guardrails/secret-formats.md)
-name the same prefixes and tail with no length. One source disagrees:
-[a keyhog pull request](https://github.com/santhsecurity/keyhog/pull/7) widens the
-body to 80–120 bytes and says the fixed layout misses revoked real keys, with no
-sample count or distribution behind it. So a key of another length goes
-unreported here, and so does every other `sk-ant-` prefix, which is the rule's
-stated limit rather than a judgement that they are harmless.
+name the same prefixes and tail with no length.
+[keyhog](https://github.com/santhreal/keyhog/pull/7) moved from a different fixed
+layout, with a hyphen before its last six bytes, to 80–120 bytes, which contains
+this one, so it is no evidence against it. A key of another length goes unreported
+here, and so does every other `sk-ant-` prefix, which is the rule's stated limit
+rather than a judgement that they are harmless.
 
 **`slack-webhook-url` reports the last path segment rather than the URL.** The
 entropy check reads the captured group, and a webhook URL is mostly a literal
