@@ -283,7 +283,7 @@ the rest of the file is most of it. Driven 2026-09-04 on a binary built from
 The shipped set is fifteen high-precision shapes, and not one of them matches
 an AWS secret access key, a netrc password, a base64 registry auth or a
 kubeconfig's `client-key-data`. That is what this class holds. So a clean scan
-of one of these files is a report on the eleven of those shapes enabled by default
+of one of these files is a report on the twelve of those shapes enabled by default
 and not a report on the file, and allowing the read on the strength of it is
 the shape of claim this whole document exists to refuse.
 
@@ -1039,8 +1039,8 @@ not need to do.
    Use word boundaries, not `strings.Contains`: naive matching finds `sk-`
    inside `disk-containerd-…`, and one broad keyword (`AC`) took the file hit
    rate from 1.2% to 18.9% on real files. The prefilter gates the credential
-   family only. Numeric PII rules have no literal to anchor on, which is one
-   reason they ship disabled.
+   family only. Numeric PII rules have no literal to anchor on, so `us-ssn`,
+   the one that ships enabled, pays a pass over every buffer.
 
 4. **Match, one rule at a time.** Never fold the patterns into a single
    alternation. Measured at 0.5x in Go and 0.7x in Rust: the DFA state space
@@ -1049,7 +1049,7 @@ not need to do.
 
    **Where every match a rule can produce begins at one of its keywords, it
    runs at the positions step 3 found rather than over the buffer.** Nine of
-   the eleven enabled rules open on `\b`, which is an empty-width op at the head
+   the eleven credential rules open on `\b`, which is an empty-width op at the head
    of the compiled program: `regexp` derives no literal prefix from it, so it
    has nothing to skip towards and runs the NFA over every byte to arrive back
    at positions the prefilter had already found and thrown away. Deleting the
@@ -1221,19 +1221,19 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
   "id": "us-ssn",
   "family": "pii",
   "description": "US Social Security number",
-  "regex": "\\b(\\d{3}-?\\d{2}-?\\d{4})\\b",
+  "regex": "\\b([0-8]\\d{2}-\\d{2}-\\d{4})\\b",
   "group": 1,
   "keywords": [],
-  "labels": ["ssn", "social security"],
+  "labels": ["ssn", "social security", "social-security", "socialsecurity"],
   "validators": ["context-label"],
-  "enabled": false
+  "enabled": true
 }
 ```
 
 | Field | What it does |
 |---|---|
 | `id` | Stable identifier. Appears in findings and in the friction report. |
-| `family` | `credential` or `pii`. The `pii` family defaults to disabled. |
+| `family` | `credential` or `pii`. `us-ssn` is the only `pii` rule that ships enabled. |
 | `description` | What the rule matches, in a few words. It reaches a terminal, so it is escaped like a path. |
 | `regex` | RE2. Compiled at startup; a rule that does not compile is a startup failure, not a skipped rule. |
 | `group` | Which capture group holds the candidate. Lets a rule capture a wider window than it reports. |
@@ -1242,14 +1242,14 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `entropy` | Minimum Shannon bits per character over the captured group — over what the `extent` returned, where a rule names one. Omitted means no floor, and omitting it while naming the `entropy` check is a startup failure: Shannon is never negative, so a floor of zero gates nothing. A floor above what the group can reach is a startup failure too, not a quiet rule. |
 | `validators` | Names from the validator table above, all of which must pass. |
 | `extent` | Names a walk that says where the match really ends, run before the validators and widening the group they read. Omitted for every rule but `jwt`; see [Pipeline](#pipeline), step 4. |
-| `enabled` | Ships `false` for every `pii` rule. |
+| `enabled` | Ships `true` for every `credential` rule and for `us-ssn`, `false` for the other `pii` rules. |
 
 `labels` and `keywords` are both word-boundary literal lists and they are not
 interchangeable. `keywords` runs before the regex and gates the credential
 family; `labels` is read by the context-proximity check after a match, and
 gates nothing. Spending `keywords` on a numeric rule's labels would hand that
 rule the prefilter [the pipeline](#pipeline) says it does not have, and that
-absence is one of the reasons the family ships disabled. So the loader refuses
+absence is what an enabled `pii` rule pays for on every buffer. So the loader refuses
 them there, naming the family: an author who writes keywords onto a `pii` rule
 has asked for a literal gate and would otherwise be given the ungated
 full-corpus pass the prefilter exists to avoid, with nothing in the output to

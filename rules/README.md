@@ -1,7 +1,7 @@
 # The shipped ruleset
 
-`spill-guard.json` is the v1 ruleset: eleven credential rules, and four numeric
-PII rules that ship off. It is the only ruleset. `rules/embed.go` compiles it
+`spill-guard.json` is the v1 ruleset: eleven credential rules, `us-ssn`, and three
+more numeric PII rules that ship off. It is the only ruleset. `rules/embed.go` compiles it
 into the binary and `internal/rules` loads nothing else — there is no project
 file layered over it, and a rule that is too noisy is turned off here, in a
 change somebody reviews. The schema and what the loader refuses are in
@@ -643,29 +643,70 @@ floor is reachable at all.
 [`internal/scan/jwt_extent_test.go`](../internal/scan/jwt_extent_test.go)
 carries the end-to-end arms, against the ruleset as Q133 shipped it.
 
-## The numeric PII family ships disabled
+## Numeric PII: `us-ssn` ships on, the other three stay off
 
-Every one of the 5,679 inherited false positives came from numeric PII rules.
-Shipping the family off is the finding rather than a deferral, and the four
-rules here are written as they would have to be if anyone turned them on:
+Every one of the 5,679 inherited false positives came from numeric PII rules, so
+the family shipped off from the start. All four are written as they would have to
+be if anyone turned them on:
 
-| Rule | Validators |
-|---|---|
-| `payment-card` | `luhn`, `card-placeholder`, `context-label` |
-| `us-ssn` | `context-label` |
-| `cn-resident-id` | `mod-11`, `context-label` |
-| `ipv4-public` | `reserved-range` |
+| Rule | Validators | Ships |
+|---|---|---|
+| `us-ssn` | `context-label` | **on** |
+| `payment-card` | `luhn`, `card-placeholder`, `context-label` | off, measured below |
+| `cn-resident-id` | `mod-11`, `context-label` | off |
+| `ipv4-public` | `reserved-range` | off |
 
-Forced on, they report nothing over the clean corpus — the checksums, the
-reserved ranges and the label proximity are exactly what the inherited family
-had none of. That is one small corpus and not a case for enabling them: the
-family also has no prefilter, so every one of these rules costs a full regex
-pass over every buffer, which is the second reason
-[the design](../docs/design/README.md#pipeline) gives for the default.
+**What `us-ssn` finds is narrow, and that is the sentence to repeat.** A value
+written `###-##-####`, area below 900, with `ssn`, `social security`,
+`social-security` or `socialsecurity` in the 64 bytes before it, in any case. A bare
+nine digits is not read, because `\b\d{3}-?\d{2}-?\d{4}\b` is an order number, a
+phone number and a serial. Neither is a label after the value, or a column header
+further back than the window, so most rows of a CSV go unreported.
+`TestUSSSNShapes` holds each of those.
 
-`us-ssn` requires the hyphens. `\b\d{3}-?\d{2}-?\d{4}\b` is a nine-digit run
-with optional punctuation, which is an order number, a phone number and a
-serial; the hyphenated form is what people actually write an SSN as.
+**Karl chose `us-ssn` alone on 2026-11-03, on this reading.** Nothing re-runs it, and
+it is a reading of how often each rule fires on clean text rather than a precision
+ratio: no population was expected to hold a real value and no hit was identified as
+one, so every hit counts as a false positive by construction. Files deduplicated by
+content within each population, binaries skipped, `.git` and worktrees not walked,
+files over 64 MiB skipped.
+
+| Population | Files | `us-ssn` files | `payment-card` files |
+|---|---|---|---|
+| `~/go/pkg/mod` | 136,126 | 10 | 2 |
+| `~/workspace`, this machine | 64,538 | 1 | 0 |
+| `/opt/homebrew` | 25,235 | 0 | 0 |
+| `~/Library/Logs`, `/var/log` | 117 | 0 | 0 |
+| public payment projects, 9 | 49,611 | 1 | 318 |
+| public infrastructure, 4 | 33,248 | 1 | 0 |
+| public data sets, 3 | 912 | 0 | 1 |
+| public applications, 3 | 85,729 | 0 | 11 |
+| **Those eight** | **395,516** | **13, 0.003%** | **332, 0.08%** |
+| public PII tooling, 4 | 5,724 | 17 | 16 |
+
+The public projects were shallow clones picked to be adversarial, so their rates do
+not generalise. The last reading is the traffic: 5.00 GB of this machine's Claude
+Code transcripts, 521,519 distinct prompts, commands and tool results, where neither
+rule fires on anything the hook scans. `payment-card` fires 6 times there, on what
+reads as Stripe's page of test numbers, from a tool whose results no hook reads.
+
+**`payment-card` fires where a payment integration lives.** 308 of the 864 files in
+`active_merchant`, 35.6%, are gateway test numbers the 34-entry denylist does not
+hold, and the label gate cannot help, because a fixture is labelled exactly as a real
+card would be: `credit_card('…')` holds `card`. Each of those files would be a denied
+`Read`, and `Read` has no override. The clean corpus reads 0 on this rule throughout,
+which is why that zero carries no weight. [Q33](../docs/queue/Q33.md) has the rest.
+**`us-ssn` hits are fixtures too**, format tests and docs mostly. Its rate is what
+kept it on the table.
+
+What this leaves out: `~/Documents`, `~/Downloads` and mail, deliberately, so recall
+on real values is unmeasured; non-English text; and exports beyond those data sets.
+
+**The other half of the decision is cost, because no prefilter gates this family.**
+One thread, 20,000 real text files, 312 MB, minimum of three, on `efac304`, on a
+machine other sessions were using: 97.75 MB/s for the shipped set, 38.40 with
+`us-ssn`, 2.55x. Process start did not move with both PII rules on, at 4.5ms. The
+worst case tried is 32 MiB of synthetic grouped digits, 23ms to 1.357s.
 
 ## Adding a rule
 

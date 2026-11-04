@@ -49,6 +49,11 @@ They are here as literals rather than assembled at scan time because the thing
 under test is a buffer, and a fixture that only exists inside a test is a
 fixture nobody can read.
 
+`us-ssn.txt` is the one value here that is not a credential. Its area, 666, is one
+the Social Security Administration has never issued, so it cannot be anyone's
+number, and `clean/customer-export.txt` uses the same area for the shapes the rule
+has to leave alone.
+
 Two files carry `anthropic-api-key`, one per prefix, and both hold a value marked
 `0SPILLGUARD`. `clean/env.example` holds the padded placeholder the rule has to
 drop.

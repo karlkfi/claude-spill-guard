@@ -76,7 +76,7 @@ BINARY_SRC = "./cmd/spill-guard"
 # that starts matching is a precision regression this gate should catch.
 REGIONS = {
     "testdata/corpus/planted/":
-        "one fabricated credential per shipped rule -- matching is what the "
+        "one fabricated value per shipped rule -- matching is what the "
         "fixture is for, and `precision` fails if one stops",
     "testdata/corpus/vectors/":
         "the values the unit tests assert on, kept in one place so a string "

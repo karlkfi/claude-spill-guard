@@ -335,8 +335,8 @@ func budget(n, reach int) int {
 // docs/design/language-choice.md section 2.
 func matchRule(path string, text []byte, source func(int) int, rule rules.Rule) ([]Finding, error) {
 	// The prefilter gates the credential family and nothing else. A pii rule is
-	// pure-numeric with no literal to anchor on, which is one of the reasons
-	// that family ships disabled.
+	// pure-numeric with no literal to anchor on, so one that ships enabled pays
+	// a pass over every buffer.
 	//
 	// The loader now refuses keywords on any other family, so no rule file
 	// reaches the first arm. It stays for the reason gates() gives for the
@@ -350,7 +350,7 @@ func matchRule(path string, text []byte, source func(int) int, rule rules.Rule) 
 	// Where the loader settled that every match this rule can produce starts at
 	// one of its keywords, the hits are the whole list of places to look, and
 	// the pass that would find them again is work already done. What makes that
-	// pass expensive is the \b nine of the eleven enabled rules open on: an
+	// pass expensive is the \b nine of the eleven credential rules open on: an
 	// empty-width op at the head of the compiled program, so regexp derives no
 	// literal prefix, has nothing to skip towards, and runs the NFA over every
 	// byte of the buffer to arrive back at the positions this already holds.

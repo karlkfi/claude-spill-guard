@@ -1,0 +1,13 @@
+# Support export, trimmed. The middle column is the ticket system's own
+# reference, which happens to be written three, two and four digits.
+ticket,reference,status
+4471,666-41-1193,closed
+4472,666-52-8840,open
+4473,666528840,open
+
+# Identity checks are handled elsewhere, and this export carries no such field.
+#
+# A number written after the word is not read as that word's value:
+4474,666-63-2201,"no ssn on file"
+
+last four only, which is how a support tool shows one -- ssn: ***-**-6789

@@ -737,7 +737,7 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
   `disk-containerd-…`, and one bad keyword (`AC`) took the file hit rate from
   1.2% to 18.9%.
 - **Its positions are the match loop's input, not a yes-or-no.** Nine of the
-  eleven enabled rules open on `\b`, which is an empty-width op at the head of the
+  eleven credential rules open on `\b`, which is an empty-width op at the head of the
   compiled program, so `regexp` derives no literal prefix and runs the NFA over
   every byte to find positions the prefilter already had. Running them there
   instead is 4.5x over the shipped set on this repo's own text. Deleting the
@@ -763,6 +763,10 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
   cannot carry more than log2(11) = 3.459 bits — so the loader checks that
   floor against the extent's alphabet and not the pattern's capture, which is
   the one direction that would refuse a rule that works.
+- **One rule now pays a pass over every buffer.** `us-ssn` has no literal to
+  prefilter on: 97.75 to 38.40 MB/s over 312 MB of real text, on `efac304`. The
+  shipped-set rates and budget timings in this file predate it and were not
+  re-taken.
 - **RE2 has no lookaround and caps bounded repetition at 1000.** Nine inherited
   rules need rewriting; `{1,1024}` becomes `{1,1000}`.
 - **Skip binaries.** NUL in the first 8 KiB. One PNG was 55% of the benchmark

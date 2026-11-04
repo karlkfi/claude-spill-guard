@@ -41,7 +41,7 @@ TESTS = (
     "TestCleanCorpusWouldFlagUnderTheInheritedRules",
     "TestEveryPlantedSecretIsFoundExactlyOnce",
     "TestEveryEnabledRuleHasAPlantedFile",
-    "TestNumericPIIFamilyShipsDisabled",
+    "TestThePIIFamilyShipsOnlyWhatWasDecided",
 )
 
 RESULT = re.compile(r"^\s*--- (PASS|FAIL|SKIP): (\w+)", re.M)

@@ -141,7 +141,7 @@
       "keywords": [],
       "labels": ["ssn", "social security", "social-security", "socialsecurity"],
       "validators": ["context-label"],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "cn-resident-id",
