@@ -105,7 +105,7 @@ does to it on checkout — so `TestPrivateKeyBlockAcrossThePEMLayouts` in
 A corpus gate pinned at zero is worth exactly what its clean half is worth, and
 a bland clean half reports zero for a reason that has nothing to do with the
 ruleset. So the clean files are checked against two of the rules that produced
-the inherited 5,679 —
+the inherited false positives —
 [`docs/design/language-choice.md`](../../docs/design/language-choice.md) §3 has
 them — and both still have to fire:
 

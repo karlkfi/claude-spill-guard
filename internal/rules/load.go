@@ -207,8 +207,8 @@ func compile(e entry) (Rule, error) {
 	// nothing else, so a pii rule's keywords reach no stage at all. An author
 	// who writes them has said "gate this on a literal" and been handed the
 	// ungated full-corpus pass the prefilter exists to avoid -- the shape that
-	// produced 5,679 matches and no credentials on the inherited ruleset --
-	// with nothing in the output telling the two apart.
+	// produced more than 5,600 matches and no credentials on the inherited
+	// ruleset -- with nothing in the output telling the two apart.
 	//
 	// It reads namesALiteral rather than a length, which is the same question
 	// the credential clause above asks of the same field. A list holding

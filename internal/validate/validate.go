@@ -1,8 +1,8 @@
 // Package validate holds the checks that decide whether a regex match is a
 // finding. This is where precision comes from: on 257 real files the inherited
-// ruleset produced 5,679 matches across 9 rules with zero credential hits, and
-// every one of those rules was numeric-only. A numeric pattern cannot be made
-// precise by regex alone -- see docs/design/language-choice.md section 3.
+// ruleset produced more than 5,600 matches across 9 rules with zero credential
+// hits, and every one of those rules was numeric-only. A numeric pattern cannot
+// be made precise by regex alone -- see docs/design/language-choice.md section 3.
 //
 // Every check here answers "does this candidate survive?", so true means the
 // match is reported and false means it is dropped. Malformed input is dropped

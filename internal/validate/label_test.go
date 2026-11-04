@@ -45,7 +45,7 @@ func TestNearLabel(t *testing.T) {
 			"ssn" + strings.Repeat(".", 7) + "1", "1", 10, true},
 
 		// Everything below is a numeric run in real text with no label near it.
-		// These are the 5,679 inherited matches, in miniature.
+		// These are the inherited matches, in miniature.
 		{"a buffer constant", "const bufSize = 65536", "65536", DefaultLabelWindow, false},
 		{"a Kubernetes NodePort", "  nodePort: 30443", "30443", DefaultLabelWindow, false},
 		{"another NodePort", "  nodePort: 30080", "30080", DefaultLabelWindow, false},
@@ -98,7 +98,7 @@ func TestNearLabelDoesNotDemandABoundaryPunctuationAlreadyGives(t *testing.T) {
 
 // A rule with nothing to look for reports nothing. Asserted rather than
 // assumed, because the other reading -- treat an empty list as "no gate" and
-// admit everything -- turns one misconfigured rule back into the 5,679-match
+// admit everything -- turns one misconfigured rule back into the inherited
 // ruleset.
 func TestNearLabelWithNoUsableLabelsReportsNothing(t *testing.T) {
 	buf := []byte("ssn: 123456789")

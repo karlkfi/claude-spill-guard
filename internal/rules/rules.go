@@ -33,9 +33,9 @@ const (
 // floor and `context-label` reads its labels. Presence and configuration are
 // deliberately separate. A numeric rule whose author wrote the labels and left
 // the validator off is an ungated numeric regex, which is the shape that
-// produced 5,679 matches and no credentials on the inherited ruleset, so
-// naming the check is what turns that omission into a startup error instead of
-// a silent one.
+// produced more than 5,600 matches and no credentials on the inherited ruleset,
+// so naming the check is what turns that omission into a startup error instead
+// of a silent one.
 type Validator string
 
 const (

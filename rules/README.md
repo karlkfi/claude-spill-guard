@@ -19,8 +19,8 @@ JSON has no comments, so the reasoning is here.
 
 ## Eleven credential rules, not seventy
 
-The predecessor's ruleset flagged 27.6% of 257 real files and produced 5,679
-matches with zero credentials in them. That is a precision failure, not a
+The predecessor's ruleset flagged 27.6% of 257 real files and produced more
+than 5,600 matches with zero credentials in them. That is a precision failure, not a
 coverage one, so v1 does not aim at gitleaks-level breadth. Every rule below
 anchors on a literal a scanner can prefilter on, and every one of them is
 carried by a planted fixture in
@@ -645,7 +645,7 @@ carries the end-to-end arms, against the ruleset as Q133 shipped it.
 
 ## Numeric PII: `us-ssn` ships on, the other three stay off
 
-Every one of the 5,679 inherited false positives came from numeric PII rules, so
+Every one of the inherited false positives came from numeric PII rules, so
 the family shipped off from the start. All four are written as they would have to
 be if anyone turned them on:
 

@@ -4,7 +4,9 @@ Kept as written, on 2026-08-20, before this repo existed. It is the input the
 design in [`README.md`](README.md) responds to, not a plan of record — where the
 two disagree, the design is the later thinking. `secret-scanner-analysis.md`,
 which it refers to as sitting alongside it, is now
-[`language-choice.md`](language-choice.md).
+[`language-choice.md`](language-choice.md). The 5,679 below disagrees by 5 with the
+table in [that file's §3](language-choice.md#3-the-actual-defect-the-ruleset), which
+says why neither figure can be settled.
 
 ---
 

@@ -140,7 +140,7 @@ func TestShippedRulesetFlagsNothingInTheCleanCorpus(t *testing.T) {
 	}
 }
 
-// inherited is two of the rules that produced the 5,679, verbatim from
+// inherited is two of the rules behind the inherited matches, verbatim from
 // docs/design/language-choice.md section 3. They have no validator and no
 // prefilter, so they fire on the NodePorts, the buffer constants and the
 // amdgpu string the clean half exists to hold -- which is what stops the zero
@@ -311,7 +311,7 @@ func TestEveryEnabledRuleHasAPlantedFile(t *testing.T) {
 }
 
 // piiShippedOn is every numeric PII rule that ships enabled, because every one
-// of the 5,679 inherited false positives came from that family. Adding to it is
+// of the inherited false positives came from that family. Adding to it is
 // a decision with a measurement behind it, and rules/README.md carries the one
 // that put us-ssn here and kept payment-card out.
 var piiShippedOn = map[string]bool{"us-ssn": true}

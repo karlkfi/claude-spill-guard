@@ -50,7 +50,7 @@ and the model's context.
   source, no daemon.
 - **Not a recall play.** Twelve precise rules beat seventy noisy ones. The
   inherited ruleset's defect was precision, not coverage — 27.6% of real files
-  flagged, 5,679 matches, zero of them credentials
+  flagged, more than 5,600 matches, zero of them credentials
   ([`language-choice.md` §3](language-choice.md)).
 - **Not every reader in the class it defends.** v1 covers the three that are
   measured — a `Read` path, a `Bash` reader's resolved operands, and an
@@ -1283,9 +1283,9 @@ A rule names every check that has to pass, including the two that read a field
 of its own — `entropy` reads the rule's floor and `context-label` reads its
 labels. Presence and configuration are separate on purpose. A numeric rule
 whose author wrote the labels and left the validator off is an ungated numeric
-regex, which is the shape that produced 5,679 matches and no credentials, so
-naming the check is what turns that omission into a startup error. The loader
-rejects a rule carrying configuration no check reads. `keywords` on a
+regex, which is the shape that produced more than 5,600 matches and no
+credentials, so naming the check is what turns that omission into a startup
+error. The loader rejects a rule carrying configuration no check reads. `keywords` on a
 non-credential family is the same rejection reached without a validator name:
 the stage that would read it is the prefilter rather than a check, and it reads
 one family.
@@ -3595,8 +3595,8 @@ from it. `make check` runs the lot.
 The `precision` job is the one that matters most. Recall regressions are
 visible — somebody reports a missed secret. Precision regressions are invisible
 until the noise has trained everyone to ignore the tool, which is how the
-inherited ruleset arrived at 5,679 matches and zero true positives. It runs the
-shipped ruleset over `testdata/corpus/`, pins the false-positive count on the
+inherited ruleset arrived at more than 5,600 matches and zero true positives. It
+runs the shipped ruleset over `testdata/corpus/`, pins the false-positive count on the
 clean half at zero, and requires each planted file to produce exactly one
 finding.
 
