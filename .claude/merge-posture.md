@@ -59,7 +59,7 @@ to the maintainer. Add one to narrow the grant.
 
 ## Re-taking the readings
 
-    python3 ~/.claude/skills/session-orchestrator/scripts/merge-posture.py \
+    python3 ~/.claude/skills/session-review-mode/scripts/merge-posture.py \
       karlkfi/claude-spill-guard
 
 It reports branch protection, CODEOWNERS, distinct authors, merge velocity, and
