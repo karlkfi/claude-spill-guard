@@ -713,7 +713,8 @@ a test-, example- or docs-shaped path. Each is a denied `Read`, with no override
 a session working there. The peak is 44x below `active_merchant`. By the harness's
 flags, not driven through a validator, 45 of the 81 hold nothing but placeholder
 values no check drops, and so do all 10 in `~/go/pkg/mod`;
-[Q242](../docs/queue/Q242.md) has that.
+[Q242](../docs/queue/Q242.md) has that. Shown this row, Karl kept the rule as it is and
+left Q242 for later.
 
 What this leaves out: `~/Documents`, `~/Downloads` and mail, deliberately, so recall
 on real values is unmeasured; non-English text; exports beyond those data sets; and
