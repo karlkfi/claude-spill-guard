@@ -3,11 +3,14 @@ package hook
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/karlkfi/claude-spill-guard/internal/scan"
 	"github.com/karlkfi/claude-spill-guard/internal/version"
 )
 
@@ -143,6 +146,158 @@ func TestACoverageRecordCarriesNoScannedValue(t *testing.T) {
 	if len(got[0].Operands) != 0 {
 		t.Errorf("the coverage record carries the operand holding the value: %q",
 			got[0].Operands)
+	}
+}
+
+// An os error's text holds the path it was given, so a reason wrapping one
+// repeated a key the path carried: on stderr, which rides into the transcript,
+// and in the log. Before Q248 every arm here put the key on both. The Bash arms
+// assemble or glob the path, because the command string is scanned and a key
+// written whole there blocks before anything is opened.
+func TestACoverageRecordCarriesNoPathItCouldNotOpen(t *testing.T) {
+	dir := t.TempDir()
+	shut := filepath.Join(dir, "shut")
+	if err := os.Mkdir(shut, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	leaf := filepath.Join(dir, "leaf")
+	if err := os.Mkdir(leaf, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leaf, secret), []byte("x\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	// Root opens both and Windows ignores the modes, so those arms read a file
+	// and record nothing, which is not this case failing but it never running.
+	opens := runtime.GOOS == "windows" || os.Geteuid() == 0
+	read := func(path string) string {
+		return `{"hook_event_name":"PreToolUse","tool_name":"Read","cwd":` + quote(t, dir) +
+			`,"tool_input":{"file_path":` + quote(t, path) + `}}`
+	}
+	grep := func(path string) string {
+		return grepToolCall(t, dir, map[string]string{
+			"pattern": "foo", "path": path, "output_mode": "content"})
+	}
+	unstat := filepath.Join(shut, secret)
+	unopen := filepath.Join(leaf, secret)
+	nul := filepath.Join(dir, secret+"\x00x")
+	for _, tc := range []struct {
+		name, payload string
+		needsMode     bool
+	}{
+		{"Read, a path that will not stat", read(unstat), true},
+		{"Read, a file that will not open", read(unopen), true},
+		{"Read, a NUL in the path", read(nul), false},
+		{"Grep, a path that will not stat", grep(unstat), true},
+		{"Grep, a file that will not open", grep(unopen), true},
+		{"Grep, a NUL in the path", grep(nul), false},
+		{"Bash, an assembled path that will not stat", bashCall(t,
+			"A="+secret[:10]+"; B="+secret[10:]+"; cat shut/$A$B", dir), true},
+		{"Bash, a globbed file that will not open", bashCall(t, "cat leaf/*", dir), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.needsMode && opens {
+				t.Skip("nothing stops this path being opened here")
+			}
+			before := len(readCoverage(t))
+			code, stdout, stderr := drive(t, tc.payload)
+			deferred(t, code, stdout, stderr)
+			got := readCoverage(t)
+			if len(got) != before+1 {
+				t.Fatalf("wrote %d records, want 1", len(got)-before)
+			}
+			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+				t.Errorf("a stream carries the key:\nstdout %q\nstderr %q", stdout, stderr)
+			}
+			if s := fmt.Sprintf("%+v", got[before]); strings.Contains(s, secret) {
+				t.Errorf("the record carries the key: %s", s)
+			}
+		})
+	}
+	// The other half: the reason names the failure and the operand keeps the
+	// path, which is where a person finds it.
+	for _, tc := range []struct{ name, payload string }{
+		{"Read", read(filepath.Join(shut, "plain"))},
+		{"Grep", grep(filepath.Join(shut, "plain"))},
+		{"Bash", bashCall(t, "cat shut/plain", dir)},
+	} {
+		t.Run(tc.name+", the operand keeps a path no rule matches", func(t *testing.T) {
+			if opens {
+				t.Skip("nothing stops this path being opened here")
+			}
+			before := len(readCoverage(t))
+			code, stdout, stderr := drive(t, tc.payload)
+			reason := deferred(t, code, stdout, stderr)
+			if strings.Contains(stderr, dir) {
+				t.Errorf("stderr names the path: %q", stderr)
+			}
+			if !strings.Contains(reason, fs.ErrPermission.Error()) {
+				t.Errorf("reason = %q, want the failure", reason)
+			}
+			got := readCoverage(t)
+			if len(got) != before+1 {
+				t.Fatalf("wrote %d records, want 1", len(got)-before)
+			}
+			want := filepath.Join(shut, "plain")
+			if ops := got[before].Operands; len(ops) != 1 || ops[0] != want {
+				t.Errorf("operands = %q, want the path", ops)
+			}
+		})
+	}
+}
+
+// A glob opens a file whose name the model has never seen, so a verdict naming
+// that file is where the key in the name would first reach the API. Before Q248
+// every arm here printed it. The rule or the skip reason still has to be there,
+// or the arm reached nothing.
+func TestAVerdictWithholdsAFileNameARuleMatches(t *testing.T) {
+	dir := t.TempDir()
+	put := func(sub string, content []byte) string {
+		t.Helper()
+		if err := os.Mkdir(filepath.Join(dir, sub), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, sub, secret)
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	hot := put("hot", []byte("AWS_ACCESS_KEY_ID="+secret+"\n"))
+	put("bin", []byte("\x00binary\n"))
+	put("u32", append([]byte{0xFF, 0xFE, 0, 0}, 't', 0, 0, 0))
+	if err := os.MkdirAll(filepath.Join(dir, "env", secret), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "env", secret, ".env"), []byte("A=b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, payload, want string }{
+		{"Bash, a finding", bashCall(t, "cat hot/*", dir), "aws-access-key-id"},
+		{"Bash, a binary", bashCall(t, "cat bin/*", dir), string(scan.SkippedBinary)},
+		{"Bash, a guarded path", bashCall(t, "cat env/*/.env", dir), "a dotenv file"},
+		{"Read, a finding", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":` +
+			quote(t, hot) + `}}`, "aws-access-key-id"},
+		{"Grep, a finding", grepToolCall(t, dir, map[string]string{
+			"pattern": "x", "path": hot, "output_mode": "content"}), "aws-access-key-id"},
+		{"Bash, UTF-32, on the record", bashCall(t, "cat u32/*", dir), string(scan.SkippedUTF32)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := len(readCoverage(t))
+			_, stdout, stderr := drive(t, tc.payload)
+			if !strings.Contains(stdout+stderr, tc.want) {
+				t.Fatalf("want %q, so this reached nothing:\nstdout %q\nstderr %q", tc.want, stdout, stderr)
+			}
+			if !strings.Contains(stdout+stderr, withheldLabel) {
+				t.Errorf("no stand-in for the name:\nstdout %q\nstderr %q", stdout, stderr)
+			}
+			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+				t.Errorf("a stream carries the key:\nstdout %q\nstderr %q", stdout, stderr)
+			}
+			if s := fmt.Sprintf("%+v", readCoverage(t)[before:]); strings.Contains(s, secret) {
+				t.Errorf("the log carries the key: %s", s)
+			}
+		})
 	}
 }
 
@@ -423,7 +578,7 @@ func TestTheCoverageLogRotatesAtTheCap(t *testing.T) {
 	}
 }
 
-// The log is 0600. The reasons name paths on this machine, which is somebody's
+// The log is 0600. The operands name paths on this machine, which is somebody's
 // directory layout even though no value is in there.
 func TestTheCoverageLogIsNotWorldReadable(t *testing.T) {
 	dir := t.TempDir()

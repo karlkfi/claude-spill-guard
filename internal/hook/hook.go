@@ -505,7 +505,7 @@ func toolTargets(call payload) ([]target, error) {
 				return nil, nil
 			}
 			return nil, unresolved{*in.FilePath,
-				fmt.Errorf("reading the file this call would send: %w", err)}
+				fmt.Errorf("reading the file this call would send: %w", osCause(err))}
 		}
 		// Only a regular file, for bash.go's reason: os.ReadFile on a fifo
 		// blocks until something writes it, which hangs the call instead of
@@ -544,7 +544,7 @@ func toolTargets(call payload) ([]target, error) {
 		buf, err := os.ReadFile(*in.FilePath)
 		if err != nil {
 			return nil, unresolved{*in.FilePath,
-				fmt.Errorf("reading the file this call would send: %w", err)}
+				fmt.Errorf("reading the file this call would send: %w", osCause(err))}
 		}
 		return []target{{*in.FilePath, buf}}, nil
 	case ToolBash:

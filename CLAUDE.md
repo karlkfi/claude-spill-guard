@@ -709,6 +709,8 @@ predecessor's `Finding` carried `secretValue` beside `matchRedacted`; it was
 used only as a dedup key and never printed, and the field's existence was still
 a standing hazard. Carry a truncated hash instead. Emit rule ID, path, and
 offset — no fragment, not even a redacted one, because stderr reaches the API.
+A path the rules match is withheld too: a glob can open a file named for a key
+the model has never seen, so `named` in `internal/hook/coverage.go` stands in.
 
 **No in-band bypass tag.** A magic string that disables the scanner is a
 prompt-injection surface: any content the model reads can contain it, including
