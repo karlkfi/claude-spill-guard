@@ -330,6 +330,7 @@ func TestWhichShippedRulesRunFromTheirKeywordPositions(t *testing.T) {
 		"slack-token":             {true, 95},
 		"stripe-live-secret-key":  {true, 107},
 		"openai-api-key":          {true, 171},
+		"anthropic-api-key":       {true, 110},
 		"google-api-key":          {true, 39},
 
 		// The two the whole-buffer pass already costs nothing for: regexp

@@ -27,10 +27,10 @@ import (
 //	cat .aws/credentials (an AWS secret)  | exit 0, silent
 //	Read unmatched.env                    | exit 0, silent
 //
-// The shipped set is 14 high-precision shapes and none of them matches an AWS
+// The shipped set is 15 high-precision shapes and none of them matches an AWS
 // *secret* access key, a netrc password, a base64 registry auth or a
 // kubeconfig's client-key-data. Those are the contents of this class, so a
-// clean scan of one of these files is a report about the ten of those shapes
+// clean scan of one of these files is a report about the eleven of those shapes
 // enabled by default and not about the file.
 //
 // # What is in the class, and what is deliberately out

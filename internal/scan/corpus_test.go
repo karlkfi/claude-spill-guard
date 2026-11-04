@@ -204,8 +204,12 @@ var planted = map[string]string{
 	"slack-webhook-url.yaml":      "slack-webhook-url",
 	"stripe-live-secret-key.env":  "stripe-live-secret-key",
 	"openai-api-key.py":           "openai-api-key",
-	"google-api-key.js":           "google-api-key",
-	"private-key-block.pem":       "private-key-block",
+	// Two, because the rule has two prefixes and either alone could be deleted
+	// with the corpus still reading green.
+	"anthropic-api-key.env":      "anthropic-api-key",
+	"anthropic-admin-api-key.sh": "anthropic-api-key",
+	"google-api-key.js":          "google-api-key",
+	"private-key-block.pem":      "private-key-block",
 	// And again, for the same reason one file down: this one is an RFC 1421
 	// encrypted key, which puts Proc-Type and DEK-Info between the header and
 	// the body -- the shape the body-line clause missed until it learned to

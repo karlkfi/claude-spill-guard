@@ -442,7 +442,7 @@ there is nothing to match*, has the sweep and its positive control.
 rather than the same one applied to files.** A read of `.env`,
 `~/.aws/credentials`, `.netrc`, `.git-credentials`, `~/.docker/config.json` or
 a kubeconfig is refused before the file is opened, because the shipped set is
-fourteen high-precision shapes and none of them matches an AWS *secret* access
+fifteen high-precision shapes and none of them matches an AWS *secret* access
 key, a netrc password or a base64 registry auth — driven, `cat .aws/credentials`
 over such a file exits 0 silent today. So the deny covers the values no rule
 knows, and nothing else. Three things about it are settled. It refuses reads and
@@ -736,8 +736,8 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
 - **The prefilter needs word boundaries.** `strings.Contains` finds `sk-` inside
   `disk-containerd-…`, and one bad keyword (`AC`) took the file hit rate from
   1.2% to 18.9%.
-- **Its positions are the match loop's input, not a yes-or-no.** Eight of the
-  ten enabled rules open on `\b`, which is an empty-width op at the head of the
+- **Its positions are the match loop's input, not a yes-or-no.** Nine of the
+  eleven enabled rules open on `\b`, which is an empty-width op at the head of the
   compiled program, so `regexp` derives no literal prefix and runs the NFA over
   every byte to find positions the prefilter already had. Running them there
   instead is 4.5x over the shipped set on this repo's own text. Deleting the

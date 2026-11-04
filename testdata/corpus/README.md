@@ -49,6 +49,10 @@ They are here as literals rather than assembled at scan time because the thing
 under test is a buffer, and a fixture that only exists inside a test is a
 fixture nobody can read.
 
+Two files carry `anthropic-api-key`, one per prefix, and both hold a value marked
+`0SPILLGUARD`. `clean/env.example` holds the padded placeholder the rule has to
+drop.
+
 Six files carry `private-key-block`, because the rule has six layouts to
 reach. `private-key-block.pem` is a body on the line after the header;
 `private-key-block-rfc1421.pem` is the encrypted PKCS#1 form, with `Proc-Type:`

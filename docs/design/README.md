@@ -280,10 +280,10 @@ the rest of the file is most of it. Driven 2026-09-04 on a binary built from
 | `cat .aws/credentials` — an AWS **secret** access key | exit 0, silent |
 | a `Read` of that same file | exit 0, silent |
 
-The shipped set is fourteen high-precision shapes, and not one of them matches
+The shipped set is fifteen high-precision shapes, and not one of them matches
 an AWS secret access key, a netrc password, a base64 registry auth or a
 kubeconfig's `client-key-data`. That is what this class holds. So a clean scan
-of one of these files is a report on the ten of those shapes enabled by default
+of one of these files is a report on the eleven of those shapes enabled by default
 and not a report on the file, and allowing the read on the strength of it is
 the shape of claim this whole document exists to refuse.
 
@@ -1048,8 +1048,8 @@ not need to do.
    same result.
 
    **Where every match a rule can produce begins at one of its keywords, it
-   runs at the positions step 3 found rather than over the buffer.** Eight of
-   the ten enabled rules open on `\b`, which is an empty-width op at the head
+   runs at the positions step 3 found rather than over the buffer.** Nine of
+   the eleven enabled rules open on `\b`, which is an empty-width op at the head
    of the compiled program: `regexp` derives no literal prefix from it, so it
    has nothing to skip towards and runs the NFA over every byte to arrive back
    at positions the prefilter had already found and thrown away. Deleting the

@@ -1,6 +1,6 @@
 # The shipped ruleset
 
-`spill-guard.json` is the v1 ruleset: ten credential rules, and four numeric
+`spill-guard.json` is the v1 ruleset: eleven credential rules, and four numeric
 PII rules that ship off. It is the only ruleset. `rules/embed.go` compiles it
 into the binary and `internal/rules` loads nothing else — there is no project
 file layered over it, and a rule that is too noisy is turned off here, in a
@@ -17,7 +17,7 @@ reviewed diff rather than a flag.
 
 JSON has no comments, so the reasoning is here.
 
-## Ten credential rules, not seventy
+## Eleven credential rules, not seventy
 
 The predecessor's ruleset flagged 27.6% of 257 real files and produced 5,679
 matches with zero credentials in them. That is a precision failure, not a
@@ -35,6 +35,7 @@ carried by a planted fixture in
 | `slack-webhook-url` | `hooks.slack.com` | the host and both path segments are literal; the floor reads the last segment only |
 | `stripe-live-secret-key` | `sk_live_` `rk_live_` | live keys only — see below |
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
+| `anthropic-api-key` | `sk-ant-api03-` `sk-ant-admin01-` | 108 or 110 fixed characters closing `AA`, floor 3.0 — see below |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
 | `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not, behind a unified diff's `+` or `-`, and behind grep's `path:N:` or `path-N-` |
 | `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, measured by an extent rather than capped, floor 3.5, and no published sample signature |
@@ -45,9 +46,9 @@ same shape to a regex; the padded one carries 1.0219 bits per byte against a
 floor of 3.0, so it goes. What a floor cannot reach is a published example
 written to look like a key. AWS's own measures 3.6842 and clears the floor by
 design, and the jwt.io sample token measures 5.4441 against 3.5 — the two
-rules below carry a second check for exactly that. Four of the ten rules match
+rules below carry a second check for exactly that. Five of the eleven rules match
 [`testdata/corpus/clean/env.example`](../testdata/corpus/clean/env.example) and
-none of the four survives its own validator.
+none of the five survives its own validator.
 
 **`sk_test_` is not a credential and is not matched.** A Stripe test key is
 published by the integrator in their own README, works against nothing, and
@@ -56,13 +57,27 @@ no recall that matters and removes a whole class of file from the output.
 [`testdata/corpus/clean/payments.md`](../testdata/corpus/clean/payments.md) is
 that file.
 
+**`anthropic-api-key`'s length is another detector's reading, because Anthropic
+publishes no format.** Read 2026-11-03:
+[gitleaks](https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml)
+and [TruffleHog](https://github.com/trufflesecurity/trufflehog/blob/main/pkg/detectors/anthropic/anthropic.go)
+both match the two prefixes here, 93 bytes of `[A-Za-z0-9_-]` and a closing `AA`,
+and TruffleHog verifies a hit against the live API.
+[OpenRouter's guardrail docs](https://openrouter.ai/docs/guides/features/guardrails/secret-formats.md)
+name the same prefixes and tail with no length. One source disagrees:
+[a keyhog pull request](https://github.com/santhsecurity/keyhog/pull/7) widens the
+body to 80–120 bytes and says the fixed layout misses revoked real keys, with no
+sample count or distribution behind it. So a key of another length goes
+unreported here, and so does every other `sk-ant-` prefix, which is the rule's
+stated limit rather than a judgement that they are harmless.
+
 **`slack-webhook-url` reports the last path segment rather than the URL.** The
 entropy check reads the captured group, and a webhook URL is mostly a literal
 host, so capturing the whole thing would put a floor over text that is the same
 in every match. Capturing the secret tail lets the floor drop
 `.../B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` without dropping a real one.
 
-**Nine of the ten carry an entropy floor. The tenth is structural instead.**
+**Ten of the eleven carry an entropy floor. The eleventh is structural instead.**
 `private-key-block` matches a PEM header, which is a fixed string, and a floor
 over a constant is not a check — so the rule requires one base64 body line
 after the header, stepping over `Proc-Type:` and `DEK-Info:` if the key is an
