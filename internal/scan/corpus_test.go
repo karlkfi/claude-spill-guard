@@ -204,8 +204,15 @@ var planted = map[string]string{
 	"slack-webhook-url.yaml":      "slack-webhook-url",
 	"stripe-live-secret-key.env":  "stripe-live-secret-key",
 	"openai-api-key.py":           "openai-api-key",
-	"google-api-key.js":           "google-api-key",
-	"private-key-block.pem":       "private-key-block",
+	// The one numeric PII rule that ships on. Its value is in an area the
+	// Social Security Administration has never issued.
+	"us-ssn.txt": "us-ssn",
+	// Two, because the rule has two prefixes and either alone could be deleted
+	// with the corpus still reading green.
+	"anthropic-api-key.env":      "anthropic-api-key",
+	"anthropic-admin-api-key.sh": "anthropic-api-key",
+	"google-api-key.js":          "google-api-key",
+	"private-key-block.pem":      "private-key-block",
 	// And again, for the same reason one file down: this one is an RFC 1421
 	// encrypted key, which puts Proc-Type and DEK-Info between the header and
 	// the body -- the shape the body-line clause missed until it learned to
@@ -303,33 +310,51 @@ func TestEveryEnabledRuleHasAPlantedFile(t *testing.T) {
 	}
 }
 
-// Every one of the 5,679 inherited false positives came from the numeric PII
-// family, so shipping it off is the finding rather than a deferral. Flipping
-// one back on is a one-word edit in a data file that nothing else would catch.
-func TestNumericPIIFamilyShipsDisabled(t *testing.T) {
+// piiShippedOn is every numeric PII rule that ships enabled, because every one
+// of the 5,679 inherited false positives came from that family. Adding to it is
+// a decision with a measurement behind it, and rules/README.md carries the one
+// that put us-ssn here and kept payment-card out.
+var piiShippedOn = map[string]bool{"us-ssn": true}
+
+// Flipping one of these is a one-word edit in a data file that nothing else
+// would catch, in either direction: a rule turned on with no measurement, or the
+// one the PII claim rests on turned off.
+func TestThePIIFamilyShipsOnlyWhatWasDecided(t *testing.T) {
 	set := loadShipped(t)
-	forced := make([]rules.Rule, 0, len(set))
+	var off []rules.Rule
+	found := map[string]bool{}
 	for _, rule := range set {
-		if rule.Family == rules.PII {
-			if rule.Enabled {
-				t.Errorf("%q is a pii rule and ships enabled", rule.ID)
-			}
+		if rule.Family != rules.PII {
+			continue
+		}
+		found[rule.ID] = true
+		if rule.Enabled != piiShippedOn[rule.ID] {
+			t.Errorf("%q is a pii rule with enabled=%v, want %v",
+				rule.ID, rule.Enabled, piiShippedOn[rule.ID])
+		}
+		if !rule.Enabled {
 			rule.Enabled = true
-			forced = append(forced, rule)
+			off = append(off, rule)
 		}
 	}
-	if len(forced) == 0 {
-		t.Fatal("the shipped ruleset carries no pii rule, so this test asserts nothing")
+	for id := range piiShippedOn {
+		if !found[id] {
+			t.Errorf("%q is meant to ship enabled and the ruleset does not carry it", id)
+		}
+	}
+	if len(off) == 0 {
+		t.Fatal("no pii rule ships off, so the half below asserts nothing")
 	}
 
-	// What turning the family on would cost today. Zero is the checksums, the
-	// reserved ranges and the label proximity working, over one small corpus --
-	// which is not enough to ship the family on.
-	got := walk(t, "clean", forced)
-	t.Logf("the pii family, force-enabled, reports %d finding(s) on the clean corpus: %v",
+	// What turning the rest on would report here. Zero is the checksums, the
+	// reserved ranges and the label proximity working over one small corpus,
+	// which is not a case for enabling them: payment-card reads zero on this
+	// line and fires on 35.6% of one real payments repository's files.
+	got := walk(t, "clean", off)
+	t.Logf("the pii rules that ship off, force-enabled, report %d finding(s) on the clean corpus: %v",
 		len(got.findings), got.byRule())
 	if len(got.findings) != 0 {
-		t.Errorf("the pii family reports %d finding(s) on clean files:\n%s",
+		t.Errorf("the pii rules that ship off report %d finding(s) on clean files:\n%s",
 			len(got.findings), report(got.findings))
 	}
 }

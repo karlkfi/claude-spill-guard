@@ -401,6 +401,27 @@ func arms(planted, quiet, undecodable, binary, dotenv string) []arm {
 			},
 		},
 		{
+			name: "a PowerShell command carrying the canary",
+			want: blocks,
+			payload: map[string]any{
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "PowerShell",
+				"tool_input":      map[string]any{"command": "Write-Output " + canary},
+			},
+		},
+		{
+			// Defers rather than allows, because nothing here reads its file
+			// operands. A clean command is a record, not a clean result.
+			name: "a PowerShell command with nothing in it",
+			want: defers,
+			by:   "PowerShell",
+			payload: map[string]any{
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "PowerShell",
+				"tool_input":      map[string]any{"command": "Get-Date"},
+			},
+		},
+		{
 			// A verdict with no finding behind it, which nothing else here
 			// reaches. A UTF-32 mark is a declaration this build cannot
 			// decode, so hook.Run takes the `len(skips) > 0` arm that sits

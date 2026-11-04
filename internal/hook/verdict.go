@@ -2,6 +2,7 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -256,11 +257,11 @@ func found(findings []scan.Finding) string {
 // unread is the body for a call carrying a buffer the pipeline declined to
 // read.
 //
-// It is not failed(), which says nothing scanned this call: here the rest of the
-// call was scanned, and a verdict that misreports its own coverage is the shape
-// this package exists to refuse. It is not found() either, whose sentence names
-// the matches in what this call would have sent -- true only of a call every
-// buffer of which was read, which is why hook.go writes this one ahead of it.
+// It is not failed(), which reports a scan that stopped short: here the walk
+// finished and names each buffer, and a verdict that misreports its own coverage
+// is the shape this package exists to refuse. It is not found() either, whose
+// sentence names the matches in what this call would have sent: this is the call
+// where nothing matched, and where one did, alsoUnread carries these buffers.
 //
 // The label comes out of the call, so %q escapes it; the reason is this
 // package's own fixed text and is not escaped.
@@ -311,7 +312,7 @@ func unread(skips []skipped) string {
 // like one that was read and held none.
 func overran(budget time.Duration) string {
 	return fmt.Sprintf("the scan did not finish inside its %s budget, so what "+
-		"this call would have sent went unread. The budget stops short of this "+
+		"this call would have sent reached no verdict. The budget stops short of this "+
 		"hook's %s timeout on purpose: past that this process is killed and "+
 		"not even this record survives.", budget, hookTimeout)
 }
@@ -439,11 +440,28 @@ func guarded(path, class string) string {
 // not repeated here. This string is written on the order of five hundred times
 // a week, and `spill-guard coverage` is where a reader meets the explanation
 // once.
+//
+// The opening says what was read, because a gap in a file operand leaves the
+// command string read: `cat "$X"` with a key in the string is denied. A command
+// string or prompt holding a NUL is not, so it takes the "Part of" arm when a
+// file was read beside it and the "Nothing" arm when none was. "Decoded" there
+// for alsoUnread's reason: such a prompt still goes through the match loop raw.
 func failed(err error) string {
-	return fmt.Sprintf("Nothing scanned this call for secrets, because the scan "+
-		"could not be completed: %q. The call was not stopped; this is recorded "+
-		"so the gap can be closed. See `spill-guard coverage`.",
-		err.Error())
+	opening := "Nothing in this call was decoded, and the scan"
+	var part partlyDecoded
+	if errors.As(err, &part) {
+		switch part.label {
+		case commandLabel:
+			opening = "The command string was read and matched no rule, but the scan"
+		case promptLabel:
+			opening = "The prompt text was read and matched no rule, but the scan"
+		default:
+			opening = "Part of this call was read and matched no rule, but the scan"
+		}
+	}
+	return fmt.Sprintf("%s could not be completed: %q. The call was not stopped; "+
+		"this is recorded so the gap can be closed. See `spill-guard coverage`.",
+		opening, err.Error())
 }
 
 // noticeVerdict is text for the person, on a call this hook is allowing.

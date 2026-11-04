@@ -58,9 +58,10 @@ import (
 // that runs and scans nothing is the failure this project indicts its
 // predecessor for.
 const (
-	ToolRead = "Read"
-	ToolBash = "Bash"
-	ToolGrep = "Grep"
+	ToolRead       = "Read"
+	ToolBash       = "Bash"
+	ToolGrep       = "Grep"
+	ToolPowerShell = "PowerShell"
 )
 
 // What a finding is reported against when there is no file. The design lets a
@@ -122,8 +123,8 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 	findings, skips, err := got.findings, got.skips, got.err
 	if err != nil {
 		// A refusal is not a scan that failed, and failed() would say it was:
-		// its sentence is that nothing scanned this call, which is true here
-		// and is not the reason. The call was stopped for what it would do, so
+		// its sentence is that the scan could not be completed, and that is not
+		// the reason. The call was stopped for what it would do, so
 		// the body has to say so and name what the caller can do instead --
 		// shape.go and guarded.go carry the two arguments.
 		var refused refusal
@@ -148,18 +149,20 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 			return decide(stdout, stderr, call, event, overridden, found(findings), notice)
 		}
 		// Nothing matched in what could be read, so nothing here is a reason
-		// to stop the call, and failed() says nothing scanned it: true of the
-		// call as a whole, which is the claim a coverage record makes. No
-		// notice for the skips, which keeps this branch what it was.
+		// to stop the call, and failed() says what was read and that the scan
+		// stopped short of the rest, which is the claim a coverage record makes.
+		// No notice for the skips, which keeps this branch what it was.
 		//
 		// This is the class the measurement in coverage.go is about -- an
 		// operand carrying a `$`, a glob, a directory, a relative path after a
 		// `cd`. It is 94.3% of what this hook used to block and it defers.
 		return abstain(stdout, stderr, call, event, failed(err), operandOf(err))
 	}
-	// Ahead of the findings, because found() says what the matches in this call
-	// are, and a buffer nothing opened makes that a claim about coverage rather
-	// than a report of one.
+	// Ahead of the skips, because a buffer nothing decoded is no reason to wave
+	// through one that matched. found() says what the matches in this call
+	// are, so every buffer it does not reach goes in the notice, whichever way
+	// that buffer would have gone alone. No coverage record, for the reason the
+	// walk's failure above writes none.
 	//
 	// Through decide, not deny: every other block this package writes can be
 	// downgraded to a confirmation, and one that cannot is a class of refusal
@@ -170,11 +173,14 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 	// carry picks for the event. A multi-buffer call is where that matters: a
 	// Bash segment naming a .env and a .png blocks on the first, and without
 	// this the person never learns nothing opened the second.
-	blocking, allowed := partition(skips)
-	notice := ""
-	if len(allowed) > 0 {
-		notice = alsoUnread(allowed)
+	if len(findings) > 0 {
+		notice := ""
+		if len(skips) > 0 {
+			notice = alsoUnread(skips)
+		}
+		return decide(stdout, stderr, call, event, overridden, found(findings), notice)
 	}
+	blocking, allowed := partition(skips)
 	if len(blocking) > 0 {
 		// A buffer that declared an encoding nothing here decodes. Coverage,
 		// not content, so it defers -- and the allowed skips beside it still
@@ -182,9 +188,6 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// act on.
 		return abstain(stdout, stderr, call, event, unread(blocking),
 			skippedOperands(blocking), allowed...)
-	}
-	if len(findings) > 0 {
-		return decide(stdout, stderr, call, event, overridden, found(findings), notice)
 	}
 	// An allowed skip, and nothing else to say. The design's step 6 has every
 	// path that declines to read name its reason and the caller carry that as
@@ -318,6 +321,7 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 	}
 	var findings []scan.Finding
 	var skips []skipped
+	decoded := ""
 	for _, t := range buffers {
 		got, err := read(t.label, t.buf, set)
 		if err != nil {
@@ -328,8 +332,13 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 		// different questions and only the second is about coverage.
 		if got.Skipped != scan.Scanned {
 			skips = append(skips, skipped{t.label, got.Skipped})
+		} else if decoded == "" {
+			decoded = t.label
 		}
 		findings = append(findings, got.Findings...)
+	}
+	if gap != nil && decoded != "" {
+		gap = partlyDecoded{decoded, gap}
 	}
 	return findings, skips, gap
 }
@@ -555,6 +564,15 @@ func toolTargets(call payload) ([]target, error) {
 			return nil, err
 		}
 		return grepToolTargets(in, call.CWD)
+	case ToolPowerShell:
+		var in powershellInput
+		if err := unmarshalToolInput(ToolPowerShell, call.ToolInput, &in); err != nil {
+			return nil, err
+		}
+		if in.Command == nil {
+			return nil, errors.New("the PowerShell call names no command")
+		}
+		return powershellTargets(*in.Command)
 	default:
 		// Not a tool this package scans. The set above is closed and named so
 		// that hooks.json's matcher can be held to it; a tool arriving here is

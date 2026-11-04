@@ -829,7 +829,7 @@ jobs:
       # arguments the page never mentions reading.
       - name: A tool added to the matcher must fail the check
         run: |
-          sed -i 's/"matcher": "Read|Bash|Grep"/"matcher": "Read|Bash|Grep|Write"/' hooks/hooks.json
+          sed -i 's/"matcher": "Read|Bash|Grep|PowerShell"/"matcher": "Read|Bash|Grep|PowerShell|Write"/' hooks/hooks.json
           if git diff --quiet -- hooks/hooks.json; then
             echo "::error::the mutation changed nothing, so this step tested nothing" >&2
             exit 1
@@ -1339,6 +1339,119 @@ jobs:
           fi
           if ! grep -q 'cannot find the batch label' mutant.log; then
             echo "::error::cmd.exe did not report a lost label, so this is not the failure that was measured" >&2
+            exit 1
+          fi
+
+      # The launcher can be perfect and never start. Under PowerShell a quoted
+      # path followed by a word is a parse error, exit 1, and only exit 2 blocks,
+      # so this wiring scanned nothing on a Windows machine with no Git Bash.
+      # Measured 2026-11-04 in check-hook-harness.py's control, which is what
+      # the fixture is the wiring from; the grep is what says the mutation bit.
+      - name: A hook command PowerShell cannot parse must fail the gate
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cp testdata/launcher/hooks-shell-form.json hooks/hooks.json
+          if git diff --quiet -- hooks/hooks.json; then
+            echo "::error::the fixture is identical to hooks.json, so this step tested nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/hooks.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a hook command PowerShell cannot parse" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not reach the binary under powershell' mutant.log; then
+            echo "::error::the gate failed, but not on the shell this is about" >&2
+            exit 1
+          fi
+          if ! grep -q 'Unexpected token' mutant.log; then
+            echo "::error::PowerShell did not report a parse error, so this is not the failure that was measured" >&2
+            exit 1
+          fi
+
+      # The spelling that parses can still lose the one exit code that blocks:
+      # with no `exit $LASTEXITCODE`, -Command reports 1 for any failing native
+      # command.
+      - name: A hook command that flattens exit 2 must fail the gate
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sed -i "s/ hook; if .* #'/ hook #'/" hooks/hooks.json
+          if git diff --quiet -- hooks/hooks.json; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/hooks.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a hook command that turns exit 2 into 1" >&2
+            exit 1
+          fi
+          if ! grep -q "exit 2 arrived as exit 1" mutant.log; then
+            echo "::error::the gate failed, but not on the exit status" >&2
+            exit 1
+          fi
+
+      # `exit $null` is exit 0, so with no guard a launcher PowerShell could not
+      # start would mean no scan and no hook error, where bash exits 127.
+      - name: A hook command that exits 0 with no launcher must fail the gate
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sed -i 's/if (\$null -eq \$LASTEXITCODE) { exit 127 }; //' hooks/hooks.json
+          if git diff --quiet -- hooks/hooks.json; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/hooks.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a hook command that exits 0 with no launcher" >&2
+            exit 1
+          fi
+          if ! grep -q 'under powershell with no launcher at that path, .* exited 0' mutant.log; then
+            echo "::error::the gate failed, but not because PowerShell exited 0" >&2
+            exit 1
+          fi
+
+      # zsh parses the whole string first, so `&` on a line sh never reaches is a
+      # parse error that runs nothing: exit 1, and a key crosses. The fixture is
+      # the wiring that was measured failing, 2026-11-04 on 2.1.290, under a zsh
+      # CLAUDE_CODE_SHELL_PREFIX.
+      - name: A hook command zsh cannot parse must fail the gate
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v zsh > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq zsh
+          fi
+          cp testdata/launcher/hooks-zsh-parse-error.json hooks/hooks.json
+          if git diff --quiet -- hooks/hooks.json; then
+            echo "::error::the fixture is identical to hooks.json, so this step tested nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/hooks.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a hook command zsh cannot parse" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not reach the binary under zsh' mutant.log; then
+            echo "::error::the gate failed, but not on zsh" >&2
+            exit 1
+          fi
+          if ! grep -q 'parse error' mutant.log; then
+            echo "::error::zsh did not report a parse error, so this is not the failure that was measured" >&2
             exit 1
           fi
 

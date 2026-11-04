@@ -1,7 +1,7 @@
 # The shipped ruleset
 
-`spill-guard.json` is the v1 ruleset: ten credential rules, and four numeric
-PII rules that ship off. It is the only ruleset. `rules/embed.go` compiles it
+`spill-guard.json` is the v1 ruleset: eleven credential rules, `us-ssn`, and three
+more numeric PII rules that ship off. It is the only ruleset. `rules/embed.go` compiles it
 into the binary and `internal/rules` loads nothing else — there is no project
 file layered over it, and a rule that is too noisy is turned off here, in a
 change somebody reviews. The schema and what the loader refuses are in
@@ -17,7 +17,7 @@ reviewed diff rather than a flag.
 
 JSON has no comments, so the reasoning is here.
 
-## Ten credential rules, not seventy
+## Eleven credential rules, not seventy
 
 The predecessor's ruleset flagged 27.6% of 257 real files and produced 5,679
 matches with zero credentials in them. That is a precision failure, not a
@@ -35,6 +35,7 @@ carried by a planted fixture in
 | `slack-webhook-url` | `hooks.slack.com` | the host and both path segments are literal; the floor reads the last segment only |
 | `stripe-live-secret-key` | `sk_live_` `rk_live_` | live keys only — see below |
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
+| `anthropic-api-key` | `sk-ant-api03-` `sk-ant-admin01-` | 108 or 110 fixed characters closing `AA`, floor 3.0 — see below |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
 | `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not, behind a unified diff's `+` or `-`, and behind grep's `path:N:` or `path-N-` |
 | `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, measured by an extent rather than capped, floor 3.5, and no published sample signature |
@@ -45,9 +46,9 @@ same shape to a regex; the padded one carries 1.0219 bits per byte against a
 floor of 3.0, so it goes. What a floor cannot reach is a published example
 written to look like a key. AWS's own measures 3.6842 and clears the floor by
 design, and the jwt.io sample token measures 5.4441 against 3.5 — the two
-rules below carry a second check for exactly that. Four of the ten rules match
+rules below carry a second check for exactly that. Five of the eleven rules match
 [`testdata/corpus/clean/env.example`](../testdata/corpus/clean/env.example) and
-none of the four survives its own validator.
+none of the five survives its own validator.
 
 **`sk_test_` is not a credential and is not matched.** A Stripe test key is
 published by the integrator in their own README, works against nothing, and
@@ -56,13 +57,27 @@ no recall that matters and removes a whole class of file from the output.
 [`testdata/corpus/clean/payments.md`](../testdata/corpus/clean/payments.md) is
 that file.
 
+**`anthropic-api-key`'s length is another detector's reading, because Anthropic
+publishes no format.** Read 2026-11-03:
+[gitleaks](https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml)
+and [TruffleHog](https://github.com/trufflesecurity/trufflehog/blob/main/pkg/detectors/anthropic/anthropic.go)
+both match the two prefixes here, 93 bytes of `[A-Za-z0-9_-]` and a closing `AA`,
+and TruffleHog verifies a hit against the live API.
+[OpenRouter's guardrail docs](https://openrouter.ai/docs/guides/features/guardrails/secret-formats.md)
+name the same prefixes and tail with no length.
+[keyhog](https://github.com/santhreal/keyhog/pull/7) moved from a different fixed
+layout, with a hyphen before its last six bytes, to 80–120 bytes, which contains
+this one, so it is no evidence against it. A key of another length goes unreported
+here, and so does every other `sk-ant-` prefix, which is the rule's stated limit
+rather than a judgement that they are harmless.
+
 **`slack-webhook-url` reports the last path segment rather than the URL.** The
 entropy check reads the captured group, and a webhook URL is mostly a literal
 host, so capturing the whole thing would put a floor over text that is the same
 in every match. Capturing the secret tail lets the floor drop
 `.../B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` without dropping a real one.
 
-**Nine of the ten carry an entropy floor. The tenth is structural instead.**
+**Ten of the eleven carry an entropy floor. The eleventh is structural instead.**
 `private-key-block` matches a PEM header, which is a fixed string, and a floor
 over a constant is not a check — so the rule requires one base64 body line
 after the header, stepping over `Proc-Type:` and `DEK-Info:` if the key is an
@@ -628,29 +643,89 @@ floor is reachable at all.
 [`internal/scan/jwt_extent_test.go`](../internal/scan/jwt_extent_test.go)
 carries the end-to-end arms, against the ruleset as Q133 shipped it.
 
-## The numeric PII family ships disabled
+## Numeric PII: `us-ssn` ships on, the other three stay off
 
-Every one of the 5,679 inherited false positives came from numeric PII rules.
-Shipping the family off is the finding rather than a deferral, and the four
-rules here are written as they would have to be if anyone turned them on:
+Every one of the 5,679 inherited false positives came from numeric PII rules, so
+the family shipped off from the start. All four are written as they would have to
+be if anyone turned them on:
 
-| Rule | Validators |
-|---|---|
-| `payment-card` | `luhn`, `card-placeholder`, `context-label` |
-| `us-ssn` | `context-label` |
-| `cn-resident-id` | `mod-11`, `context-label` |
-| `ipv4-public` | `reserved-range` |
+| Rule | Validators | Ships |
+|---|---|---|
+| `us-ssn` | `context-label` | **on** |
+| `payment-card` | `luhn`, `card-placeholder`, `context-label` | off, measured below |
+| `cn-resident-id` | `mod-11`, `context-label` | off |
+| `ipv4-public` | `reserved-range` | off |
 
-Forced on, they report nothing over the clean corpus — the checksums, the
-reserved ranges and the label proximity are exactly what the inherited family
-had none of. That is one small corpus and not a case for enabling them: the
-family also has no prefilter, so every one of these rules costs a full regex
-pass over every buffer, which is the second reason
-[the design](../docs/design/README.md#pipeline) gives for the default.
+**What `us-ssn` finds is narrow, and that is the sentence to repeat.** A value
+written `###-##-####`, area below 900, with `ssn` or `social security` in the 64
+bytes before it, in any case and spelled with a space, a hyphen, an underscore or
+nothing. A bare nine digits is not read, because `\b\d{3}-?\d{2}-?\d{4}\b` is an order number, a
+phone number and a serial. Neither is a label after the value, or a column header
+further back than the window, so most rows of a CSV go unreported.
+`TestUSSSNShapes` holds each of those.
 
-`us-ssn` requires the hyphens. `\b\d{3}-?\d{2}-?\d{4}\b` is a nine-digit run
-with optional punctuation, which is an order number, a phone number and a
-serial; the hyphenated form is what people actually write an SSN as.
+The snake_case and camelCase field names are in the list because a value under
+`social_security_number` or `socialSecurityNumber` went unreported, the second past
+the label's own word boundary. Over the populations below, each of the two labels
+newly fires on nothing but the control written to test it.
+
+**Karl chose `us-ssn` alone on 2026-11-03, on this reading.** Nothing re-runs it, and
+it is a reading of how often each rule fires on clean text rather than a precision
+ratio: no population was expected to hold a real value and no hit was identified as
+one, so every hit counts as a false positive by construction. Files deduplicated by
+content within each population, binaries skipped, `.git` and worktrees not walked,
+files over 64 MiB skipped.
+
+| Population | Files | `us-ssn` files | `payment-card` files |
+|---|---|---|---|
+| `~/go/pkg/mod` | 136,126 | 10 | 2 |
+| `~/workspace`, this machine | 64,538 | 1 | 0 |
+| `/opt/homebrew` | 25,235 | 0 | 0 |
+| `~/Library/Logs`, `/var/log` | 117 | 0 | 0 |
+| public payment projects, 9 | 49,611 | 1 | 318 |
+| public infrastructure, 4 | 33,248 | 1 | 0 |
+| public data sets, 3 | 912 | 0 | 1 |
+| public applications, 3 | 85,729 | 0 | 11 |
+| **Those eight** | **395,516** | **13, 0.003%** | **332, 0.08%** |
+| public PII tooling, 4 | 5,724 | 17 | 16 |
+| public projects where an SSN field belongs, 17 | 60,637 | 81, 0.13% | 1 |
+
+The public projects were shallow clones picked to be adversarial, so their rates do
+not generalise. The last reading is the traffic: 5.00 GB of this machine's Claude
+Code transcripts, 521,519 distinct prompts, commands and tool results, where neither
+rule fires on anything the hook scans. `payment-card` fires 6 times there, on what
+reads as Stripe's page of test numbers, from a tool whose results no hook reads.
+
+**`payment-card` fires where a payment integration lives.** 308 of the 864 files in
+`active_merchant`, 35.6%, are gateway test numbers the 34-entry denylist does not
+hold, and the label gate cannot help, because a fixture is labelled exactly as a real
+card would be: `credit_card('…')` holds `card`. Each of those files would be a denied
+`Read`, and `Read` has no override. The clean corpus reads 0 on this rule throughout,
+which is why that zero carries no weight. [Q33](../docs/queue/Q33.md) has the rest.
+
+**`us-ssn` fires where an SSN field lives, at a rate the 0.003% does not show.** No
+population behind that figure holds such a project, so the table's last row was
+swept after Karl's choice: HR, health records, tax, government identity and
+validators. `18F/identity-idp` reads 39 of 4,814 files, 0.81%,
+`codeforamerica/vita-min` 20 of 4,359, 0.46%, and 8 of the 17 read none. The mechanism
+is `payment-card`'s: a fixture is labelled as a real record is, and 72 of the 81 have
+a test-, example- or docs-shaped path. Each is a denied `Read`, with no override, for
+a session working there. The peak is 44x below `active_merchant`. By the harness's
+flags, not driven through a validator, 45 of the 81 hold nothing but placeholder
+values no check drops, and so do all 10 in `~/go/pkg/mod`;
+[Q242](../docs/queue/Q242.md) has that. Shown this row, Karl kept the rule as it is and
+left Q242 for later.
+
+What this leaves out: `~/Documents`, `~/Downloads` and mail, deliberately, so recall
+on real values is unmeasured; non-English text; exports beyond those data sets; and
+four more projects of that last kind, `vets-api`, `vets-website`, `mymove` and
+`moov-node`, whose clones returned `Repository not found`.
+
+**The other half of the decision is cost, because no prefilter gates this family.**
+One thread, 20,000 real text files, 312 MB, minimum of three, on `efac304`, on a
+machine other sessions were using: 97.75 MB/s for the shipped set, 38.40 with
+`us-ssn`, 2.55x. Process start did not move with both PII rules on, at 4.5ms. The
+worst case tried is 32 MiB of synthetic grouped digits, 23ms to 1.357s.
 
 ## Adding a rule
 

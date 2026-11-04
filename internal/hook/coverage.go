@@ -73,6 +73,17 @@ type unresolved struct {
 func (u unresolved) Error() string { return u.err.Error() }
 func (u unresolved) Unwrap() error { return u.err }
 
+// partlyDecoded is a coverage failure on a call some of which was read: label
+// names the first buffer that was decoded and matched, and failed() says so
+// rather than reporting the gap as the whole call.
+type partlyDecoded struct {
+	label string
+	err   error
+}
+
+func (p partlyDecoded) Error() string { return p.err.Error() }
+func (p partlyDecoded) Unwrap() error { return p.err }
+
 // operandOf is the operand a failed scan was about, or nothing.
 func operandOf(err error) []string {
 	var u unresolved

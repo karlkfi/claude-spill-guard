@@ -32,7 +32,7 @@ measured.
 | `internal/testvec/` | The loader for `testdata/corpus/vectors/`. Test-only, linked into no binary, and it takes a `TB` rather than `*testing.T` so nothing outside a test imports `testing`. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. The JSON is data; `embed.go` beside it is the `go:embed` that compiles it in, which has to live here because the directive reaches only its own directory. |
 | `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. `vectors/` is neither: it is the credential-shaped strings the unit tests read. `.github/secret_scanning.yml` is what keeps the whole corpus out of GitHub's push protection; spill-guard has no path arm and refuses these files like any other, which is what `self-scan` accounts for. |
-| `scripts/` | The gate scripts CI runs, the two only a workflow can run -- `check-install-scripts.py` in the release workflow, `check-prompt-oracle.py` which re-takes the harness census -- and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
+| `scripts/` | The gate scripts CI runs, the three only a workflow can run -- `check-install-scripts.py` in the release workflow, `check-prompt-oracle.py` which re-takes the harness census, `check-hook-harness.py` which drives the plugin through a real `claude` -- and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
 | `hooks/` | Not those. `hooks.json`, the wiring Claude Code reads, and the launcher it names — which resolves the binary and denies when it cannot find one. |
@@ -142,7 +142,7 @@ fire.
 **The matcher is held to the Go constants, not kept in step by hand.**
 `internal/hook/manifest_test.go` reads `hooks/hooks.json` and asserts set
 equality both ways against `PreToolUse`/`UserPromptSubmit` and
-`ToolRead`/`ToolBash`/`ToolGrep`. Containment would only catch the loud direction. A
+`ToolRead`/`ToolBash`/`ToolGrep`/`ToolPowerShell`. Containment would only catch the loud direction. A
 matcher wider than the scanner delivers calls the hook returns clean on, and
 the hook still runs; an event the scanner handles and the manifest omits fires
 nothing at all — no payload, no verdict, no line in the transcript — so the
@@ -154,6 +154,20 @@ events it registered, and the first run of it reported `Hooks (0)` — the
 marketplace entry names a GitHub source, so the install cloned `main`, which
 had no manifests. That failing arm is what makes the `Hooks (2) PreToolUse,
 UserPromptSubmit` beside it worth anything.
+
+**The command in `hooks.json` is one string two shells read differently, and it
+is not simplifiable.** Claude Code runs a hook under PowerShell on Windows with no
+Git Bash, where the plain `"<path>" hook` is a parse error, exit 1, and scans
+nothing with nothing blocking: driven 2026-11-04, a planted key crossed. Exec form
+fails on every platform, a leading `&` blocks every call under bash, and a second
+entry with `shell: powershell` raises a hook error on every call on a Mac. zsh, which
+`CLAUDE_CODE_SHELL_PREFIX` can bring in, parses the whole string before running any
+of it, so the trailing `: '` and `#'` are load-bearing too. The table
+is in `docs/design/README.md` under *The hook command has to parse under two shells*,
+`make launcher` drives the string under each shell, and `hook-harness.yml` drives it
+through a real `claude` and a loopback fake of the API, which needs no credential.
+The `PowerShell` tool's command string is scanned; its file operands are not, and
+every such call is a coverage record.
 
 The timeout is 60 seconds, matching branch-guard, and **expiry allows the
 call** — driven 2026-09-03 on 2.1.251, both events. The hook is killed, its
@@ -443,7 +457,7 @@ there is nothing to match*, has the sweep and its positive control.
 rather than the same one applied to files.** A read of `.env`,
 `~/.aws/credentials`, `.netrc`, `.git-credentials`, `~/.docker/config.json` or
 a kubeconfig is refused before the file is opened, because the shipped set is
-fourteen high-precision shapes and none of them matches an AWS *secret* access
+fifteen high-precision shapes and none of them matches an AWS *secret* access
 key, a netrc password or a base64 registry auth — driven, `cat .aws/credentials`
 over such a file exits 0 silent today. So the deny covers the values no rule
 knows, and nothing else. Three things about it are settled. It refuses reads and
@@ -508,7 +522,7 @@ saying which shape arrived. The split is *inside* one server, so membership
 cannot be decided per server or per protocol either — a per-server rule would
 owe these two tools opposite answers — which is this repo's rejection of the
 payload-shape test arriving from a new direction. And stoppable is not scanned:
-`hooks.json` matches `Read|Bash|Grep`, which no `mcp__…` name matches, so the hook
+`hooks.json` matches `Read|Bash|Grep|PowerShell`, which no `mcp__…` name matches, so the hook
 is not powerless on that surface, it is not pointed at it. The design states
 that rather than fixing it.
 
@@ -622,7 +636,9 @@ this hook runs unchanged. An explicit `allow` would suppress the user's own
 rules; this has no opinion to spend on them, because it could not read the
 call. **A gap does not hide a finding beside it**: the walk goes on past an
 operand it cannot settle, what it did read is scanned, and a match there
-blocks (Q204).
+blocks (Q204), naming a buffer nothing decoded beside it in the notice and
+writing no record (Q244). The exceptions are a scan past its budget (Q227) and
+a `Grep` pattern beside a path that will not resolve (Q245).
 
 Why, measured over the week to 2026-09-05 across 100 sessions on one machine:
 
@@ -737,8 +753,8 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
 - **The prefilter needs word boundaries.** `strings.Contains` finds `sk-` inside
   `disk-containerd-…`, and one bad keyword (`AC`) took the file hit rate from
   1.2% to 18.9%.
-- **Its positions are the match loop's input, not a yes-or-no.** Eight of the
-  ten enabled rules open on `\b`, which is an empty-width op at the head of the
+- **Its positions are the match loop's input, not a yes-or-no.** Nine of the
+  eleven credential rules open on `\b`, which is an empty-width op at the head of the
   compiled program, so `regexp` derives no literal prefix and runs the NFA over
   every byte to find positions the prefilter already had. Running them there
   instead is 4.5x over the shipped set on this repo's own text. Deleting the
@@ -764,6 +780,10 @@ From [`docs/design/language-choice.md`](docs/design/language-choice.md):
   cannot carry more than log2(11) = 3.459 bits — so the loader checks that
   floor against the extent's alphabet and not the pattern's capture, which is
   the one direction that would refuse a rule that works.
+- **One rule now pays a pass over every buffer.** `us-ssn` has no literal to
+  prefilter on: 97.75 to 38.40 MB/s over 312 MB of real text, on `efac304`. The
+  shipped-set rates and budget timings in this file predate it and were not
+  re-taken.
 - **RE2 has no lookaround and caps bounded repetition at 1000.** Nine inherited
   rules need rewriting; `{1,1024}` becomes `{1,1000}`.
 - **Skip binaries.** NUL in the first 8 KiB. One PNG was 55% of the benchmark

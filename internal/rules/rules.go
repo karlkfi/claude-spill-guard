@@ -18,7 +18,7 @@ import "regexp"
 
 // Family is which half of the ruleset a rule belongs to. The prefilter gates
 // credential rules on their keywords; pii rules have no literal to anchor on,
-// which is one of the reasons they ship disabled.
+// so one that ships enabled pays a pass over every buffer.
 type Family string
 
 const (

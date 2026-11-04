@@ -110,9 +110,9 @@ func TestTheRefusalNamesTheFilteredForm(t *testing.T) {
 		t.Errorf("the reason is not the body with one opener on it:\n got %q\nwant %q",
 			reason, want)
 	}
-	// Not failed()'s sentence. That one says nothing scanned this call, which
-	// is true here and is not why the call was refused; a reader who meets it
-	// goes looking for a scan that broke.
+	// Not failed()'s sentence. That one says the scan could not be completed,
+	// which is not why the call was refused; a reader who meets it goes looking
+	// for a scan that broke.
 	if strings.Contains(reason, "could not be completed") {
 		t.Errorf("the reason reads as a scan that failed: %q", reason)
 	}

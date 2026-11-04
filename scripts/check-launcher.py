@@ -60,6 +60,9 @@ func main() {
 \tfmt.Printf("argv:%q\\n", os.Args[1:])
 \tin, _ := io.ReadAll(os.Stdin)
 \tfmt.Printf("stdin:%q\\n", in)
+\tif os.Getenv("STUB_EXIT") == "2" {
+\t\tos.Exit(2)
+\t}
 }
 """
 
@@ -536,6 +539,122 @@ def resolves(findings, tmp, stub, route):
                         f"where the hook payload arrives -- {evidence(rc, out, err)}")
 
 
+def hook_commands():
+    """Every distinct command hooks.json runs."""
+    wiring = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    return {hook["command"] for entries in wiring["hooks"].values()
+            for entry in entries for hook in entry["hooks"]}
+
+
+def shells():
+    """(name, argv prefix, command rewrite) for each shell that runs this hook.
+
+    The harness picks the shell: bash where it finds one, PowerShell on a
+    Windows machine with no Git Bash. The prefix and the `${env:...}` rewrite
+    for PowerShell are what Claude Code 2.1.290 does before it spawns, read from
+    its binary and confirmed by scripts/check-hook-harness.py against the real
+    thing. A Windows bash is named by path, because the first `bash` on PATH
+    there can be the WSL launcher.
+
+    Off Windows the harness uses /bin/sh, and CLAUDE_CODE_SHELL_PREFIX can hand
+    the string to anything. zsh is the one that differs: it parses the whole
+    string before running any of it, so a line the others never reach can still
+    be a parse error. It is absent from a stock Linux runner, so this drives it
+    where it exists, and macOS always has it.
+    """
+    if not WINDOWS:
+        found = [("/bin/sh", ("/bin/sh", "-c"), lambda c: c)]
+        for exe in ("bash", "zsh"):
+            if shutil.which(exe):
+                found.append((exe, (exe, "-c"), lambda c: c))
+        return found
+    def rewrite(command):
+        return command.replace("${CLAUDE_PLUGIN_ROOT}", "${env:CLAUDE_PLUGIN_ROOT}")
+    found = []
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    if git_bash.exists():
+        found.append(("Git Bash", (str(git_bash), "-c"), lambda c: c))
+    for exe in ("powershell", "pwsh"):
+        if shutil.which(exe):
+            found.append((exe, (exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                                "Bypass", "-Command"), rewrite))
+    return found
+
+
+def hook_command_runs_under_every_shell(findings, tmp, stub):
+    """The string in hooks.json reaches the launcher, whichever shell reads it.
+
+    Driving the launcher by path, as everything above does, says nothing about
+    this. Measured 2026-11-04 on windows-latest with Git Bash out of reach: the
+    launcher was correct and never started, because `"<path>" hook` is a
+    PowerShell parse error, exit 1, and only exit 2 blocks. A planted key crossed
+    on Read, on a prompt, and with no binary installed.
+
+    Four arms per shell. Exit 2 is the one a passing spelling can still lose:
+    `& <cmd>` alone leaves PowerShell -Command reporting 1 for any failing
+    command, so spill-guard's own refusal would stop blocking. The last is a
+    launcher that never started, where `exit $LASTEXITCODE` alone is `exit $null`
+    under PowerShell: exit 0, so no scan and no hook error either.
+    """
+    commands = hook_commands()
+    if len(commands) != 1:
+        findings.append(f"hooks.json runs {len(commands)} different commands, and "
+                        f"this drives one: {sorted(commands)!r}")
+        return
+    command = commands.pop()
+    available = shells()
+    if WINDOWS and not any(name == "powershell" for name, _, _ in available):
+        findings.append("no powershell on this Windows machine, so the shell the "
+                        "harness falls back to went undriven")
+    if sys.platform == "darwin" and not any(name == "zsh" for name, _, _ in available):
+        findings.append("no zsh on this Mac, so the one shell that parses the whole "
+                        "string before running it went undriven")
+
+    def under(argv, spell, env):
+        p = subprocess.run(argv + (spell(command),), input=payload.encode("utf-8"),
+                           capture_output=True, check=False, cwd=ROOT, env=env)
+        return (p.returncode, p.stdout.decode("utf-8", "replace"),
+                p.stderr.decode("utf-8", "replace"))
+
+    # A non-ASCII path is the one a shell that re-encodes stdin would mangle, and
+    # a path that no longer names the file is an allow rather than an error.
+    payload = '{"prompt":"\u043a\u043b\u044e\u0447"}'
+    want_stdin = 'stdin:"{\\"prompt\\":\\"\u043a\u043b\u044e\u0447\\"}\\n"'
+    want_bare = 'stdin:"{\\"prompt\\":\\"\u043a\u043b\u044e\u0447\\"}"'
+    for name, argv, spell in available:
+        env = base_env(tmp)
+        env["CLAUDE_PLUGIN_ROOT"] = str(ROOT).replace("\\", "/") if name == "Git Bash" else str(ROOT)
+        env["SPILL_GUARD_BIN"] = str(stub)
+        rc, out, err = under(argv, spell, env)
+        if rc != 0 or 'argv:["hook"]' not in out:
+            findings.append(f"hooks.json's command does not reach the binary under "
+                            f"{name}, so nothing is scanned there -- "
+                            f"{evidence(rc, out, err)}")
+            continue
+        if want_stdin not in out and want_bare not in out:
+            findings.append(f"under {name} the payload did not reach the binary "
+                            f"byte for byte -- {evidence(rc, out, err)}")
+        env["STUB_EXIT"] = "2"
+        rc, out, err = under(argv, spell, env)
+        if rc != 2:
+            findings.append(f"under {name} the binary's exit 2 arrived as exit {rc}, "
+                            f"and only 2 blocks -- {evidence(rc, out, err)}")
+        env.pop("STUB_EXIT")
+        env.pop("SPILL_GUARD_BIN")
+        rc, out, err = under(argv, spell, env)
+        if not isinstance(deny_reason(out.strip()), str):
+            findings.append(f"under {name} with no binary installed, hooks.json's "
+                            f"command did not produce the launcher's deny -- "
+                            f"{evidence(rc, out, err)}")
+        env["CLAUDE_PLUGIN_ROOT"] = str(Path(tmp) / "no-such-plugin").replace("\\", "/")
+        rc, out, err = under(argv, spell, env)
+        if rc != 127:
+            findings.append(f"under {name} with no launcher at that path, hooks.json's "
+                            f"command exited {rc} where the POSIX half exits 127, and "
+                            f"0 is no scan with no hook error -- "
+                            f"{evidence(rc, out, err)}")
+
+
 def main():
     if shutil.which("go") is None:
         sys.exit("launcher: no go on PATH, and the stub this drives the "
@@ -557,6 +676,7 @@ def main():
                                             stub)
         for route in ("SPILL_GUARD_BIN", "PATH", "the default install location"):
             resolves(findings, work / f"case-{route.split()[0]}", stub, route)
+        hook_command_runs_under_every_shell(findings, work / "case-shells", stub)
 
     for entry in findings:
         print(f"launcher: {entry}", file=sys.stderr)
@@ -569,7 +689,8 @@ def main():
     print(f"launcher: executable in the index, split line endings intact, "
           f"4 block literals flat in both halves, denies with nothing "
           f"installed and on an unusable SPILL_GUARD_BIN, and resolves by all "
-          f"three routes -- driven through the {half} half on {sys.platform}")
+          f"three routes -- driven through the {half} half on {sys.platform}, "
+          f"and hooks.json's command under {', '.join(n for n, _, _ in shells())}")
     return 0
 
 

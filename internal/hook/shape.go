@@ -80,8 +80,8 @@ import (
 // One interface for two arguments that share only their verdict shape: this
 // one, where the bytes exist nowhere a scanner could look, and guarded.go's,
 // where they exist in a file whose contents no shipped rule would recognise.
-// Run reads it in place of failed(), whose sentence -- nothing scanned this
-// call -- is true of both and is the reason for neither.
+// Run reads it in place of failed(), whose sentence -- the scan could not be
+// completed -- is the reason for neither.
 type refusal interface {
 	error
 	// body is what the model is told, in verdict.go's voice.

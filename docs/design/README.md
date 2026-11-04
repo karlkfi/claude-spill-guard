@@ -18,8 +18,8 @@ scans what the call would have sent, and blocks — driven end to end against a
 live Claude Code on 2026-08-27, where a `Read` of a file carrying a Slack
 webhook came back denied with the rule, the path and the byte offset and no
 fragment of the value. `hooks/hooks.json` and the plugin manifests now point
-Claude Code at that binary, at `PreToolUse` on `Read`, `Bash` and `Grep` and at
-`UserPromptSubmit`; they were held back until there was a hook to fire, because
+Claude Code at that binary, at `PreToolUse` on `Read`, `Bash`, `Grep` and
+`PowerShell` and at `UserPromptSubmit`; they were held back until there was a hook to fire, because
 a repo installable as a security tool scanning nothing is the failure this
 document indicts the predecessor for. `Bash` is scanned as a command string
 **and** as the files its readers are pointed at, `internal/readers` being the
@@ -48,7 +48,7 @@ and the model's context.
   the accident, not a wall against intent.
 - **Not remote anything.** No telemetry, no update check, no shared rule
   source, no daemon.
-- **Not a recall play.** Ten precise rules beat seventy noisy ones. The
+- **Not a recall play.** Twelve precise rules beat seventy noisy ones. The
   inherited ruleset's defect was precision, not coverage — 27.6% of real files
   flagged, 5,679 matches, zero of them credentials
   ([`language-choice.md` §3](language-choice.md)).
@@ -280,10 +280,10 @@ the rest of the file is most of it. Driven 2026-09-04 on a binary built from
 | `cat .aws/credentials` — an AWS **secret** access key | exit 0, silent |
 | a `Read` of that same file | exit 0, silent |
 
-The shipped set is fourteen high-precision shapes, and not one of them matches
+The shipped set is fifteen high-precision shapes, and not one of them matches
 an AWS secret access key, a netrc password, a base64 registry auth or a
 kubeconfig's `client-key-data`. That is what this class holds. So a clean scan
-of one of these files is a report on the ten of those shapes enabled by default
+of one of these files is a report on the twelve of those shapes enabled by default
 and not a report on the file, and allowing the read on the strength of it is
 the shape of claim this whole document exists to refuse.
 
@@ -613,7 +613,7 @@ validated by reading that field and agreeing with it: the census is kept in
 `internal/hook/testdata/prompt-oracle.json` and a test compares against it on
 every run. What re-takes the census itself, against a pinned harness and
 without a credential, is
-[the job over that surface](#two-of-the-three-surfaces-cannot-be-driven-by-a-gate).
+[the job over that surface](#which-surfaces-a-gate-can-drive).
 
 **Take the census on `attachment.type == "file"`, never on a raw count of
 `"type":"attachment"`.** Skill listings, token reminders, deferred-tool deltas
@@ -939,7 +939,7 @@ nothing in the payload to tell one of its tools from the other.
 **Stoppable and scanned are two claims, and this member is the first to
 separate them.** The deny works — reading 2 — so a hook wired to these calls
 could stop one. Nothing here is wired to them: `hooks/hooks.json` matches
-`Read|Bash|Grep`, which no `mcp__…` name matches, so a file an MCP server reads is
+`Read|Bash|Grep|PowerShell`, which no `mcp__…` name matches, so a file an MCP server reads is
 not scanned and a session that installs one has a reader this scanner does not
 cover. The consequence is stated rather than fixed, and reading only the second
 half of it gets the posture backwards: the hook is not powerless on that
@@ -1039,8 +1039,8 @@ not need to do.
    Use word boundaries, not `strings.Contains`: naive matching finds `sk-`
    inside `disk-containerd-…`, and one broad keyword (`AC`) took the file hit
    rate from 1.2% to 18.9% on real files. The prefilter gates the credential
-   family only. Numeric PII rules have no literal to anchor on, which is one
-   reason they ship disabled.
+   family only. Numeric PII rules have no literal to anchor on, so `us-ssn`,
+   the one that ships enabled, pays a pass over every buffer.
 
 4. **Match, one rule at a time.** Never fold the patterns into a single
    alternation. Measured at 0.5x in Go and 0.7x in Rust: the DFA state space
@@ -1048,8 +1048,8 @@ not need to do.
    same result.
 
    **Where every match a rule can produce begins at one of its keywords, it
-   runs at the positions step 3 found rather than over the buffer.** Eight of
-   the ten enabled rules open on `\b`, which is an empty-width op at the head
+   runs at the positions step 3 found rather than over the buffer.** Nine of
+   the eleven credential rules open on `\b`, which is an empty-width op at the head
    of the compiled program: `regexp` derives no literal prefix from it, so it
    has nothing to skip towards and runs the NFA over every byte to arrive back
    at positions the prefilter had already found and thrown away. Deleting the
@@ -1221,19 +1221,19 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
   "id": "us-ssn",
   "family": "pii",
   "description": "US Social Security number",
-  "regex": "\\b(\\d{3}-?\\d{2}-?\\d{4})\\b",
+  "regex": "\\b([0-8]\\d{2}-\\d{2}-\\d{4})\\b",
   "group": 1,
   "keywords": [],
-  "labels": ["ssn", "social security"],
+  "labels": ["ssn", "social security", "social-security", "social_security", "socialsecurity", "socialsecuritynumber"],
   "validators": ["context-label"],
-  "enabled": false
+  "enabled": true
 }
 ```
 
 | Field | What it does |
 |---|---|
 | `id` | Stable identifier. Appears in findings and in the friction report. |
-| `family` | `credential` or `pii`. The `pii` family defaults to disabled. |
+| `family` | `credential` or `pii`. `us-ssn` is the only `pii` rule that ships enabled. |
 | `description` | What the rule matches, in a few words. It reaches a terminal, so it is escaped like a path. |
 | `regex` | RE2. Compiled at startup; a rule that does not compile is a startup failure, not a skipped rule. |
 | `group` | Which capture group holds the candidate. Lets a rule capture a wider window than it reports. |
@@ -1242,14 +1242,14 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `entropy` | Minimum Shannon bits per character over the captured group — over what the `extent` returned, where a rule names one. Omitted means no floor, and omitting it while naming the `entropy` check is a startup failure: Shannon is never negative, so a floor of zero gates nothing. A floor above what the group can reach is a startup failure too, not a quiet rule. |
 | `validators` | Names from the validator table above, all of which must pass. |
 | `extent` | Names a walk that says where the match really ends, run before the validators and widening the group they read. Omitted for every rule but `jwt`; see [Pipeline](#pipeline), step 4. |
-| `enabled` | Ships `false` for every `pii` rule. |
+| `enabled` | Ships `true` for every `credential` rule and for `us-ssn`, `false` for the other `pii` rules. |
 
 `labels` and `keywords` are both word-boundary literal lists and they are not
 interchangeable. `keywords` runs before the regex and gates the credential
 family; `labels` is read by the context-proximity check after a match, and
 gates nothing. Spending `keywords` on a numeric rule's labels would hand that
 rule the prefilter [the pipeline](#pipeline) says it does not have, and that
-absence is one of the reasons the family ships disabled. So the loader refuses
+absence is what an enabled `pii` rule pays for on every buffer. So the loader refuses
 them there, naming the family: an author who writes keywords onto a `pii` rule
 has asked for a literal gate and would otherwise be given the ungated
 full-corpus pass the prefilter exists to avoid, with nothing in the output to
@@ -1386,6 +1386,15 @@ defers. Until Q204 the first failure returned no buffers at all, so `echo <a
 key>; cat $X` and a key typed beside an `@` token with no working directory
 both exited 0 with no verdict.
 
+A buffer nothing decoded is the same case. Until Q244 a declared encoding this
+build cannot read deferred ahead of the findings, so `cat key.txt notes.utf32`,
+`echo <a key>; cat notes.utf32` and a prompt holding a key beside
+`@notes.utf32` all exited 0 with no verdict. They block now, and the notice names
+the unread buffer. They write no coverage record, as with Q204: the record exists
+because a deferred call is quiet to the person, and this one is not. A scan past
+its budget still discards what it found, which is Q227, and a `Grep` pattern
+beside a path that will not resolve is not read at all, which is Q245.
+
 **A payload that does not decode still blocks on exit 2.** Not JSON, no event,
 an event this binary cannot withhold at. That is the hook being invoked wrongly
 rather than a scanner failing to read something, and it is the signal that says
@@ -1457,8 +1466,9 @@ bytes can be in it. The skip is a decoder this build does not have rather than a
 trade it made — step 1 names the encoding because no measurement said the class
 was worth carrying. Recording costs close to nothing, because close to nothing
 is written in UTF-32, and the record names the file and the reason, so whoever
-sweeps the coverage log can convert it. The call itself proceeds and the
-override is not consulted, because there is no block left to downgrade.
+sweeps the coverage log can convert it. Where nothing else in the call matched,
+the call proceeds and the override is not consulted, because there is no block
+left to downgrade. A match beside it blocks and writes no record.
 
 **The binary skip is not recorded.** That one *is* the trade, and step 2 took it
 against a measurement — one PNG was 55% of the benchmark corpus. Denying every
@@ -2062,6 +2072,71 @@ in a workspace whose trust dialog has never been accepted. The untrusted
 workspace has its `permissions.allow` entries ignored with a warning on stderr,
 and its hooks run anyway.
 
+### The hook command has to parse under two shells
+
+The launcher turns every failure it can see into a deny, and none of that runs if
+the shell cannot parse the line that starts it. On Windows with no Git for Windows,
+Claude Code runs hook commands under PowerShell, where `"<path>" hook` is a parse
+error. It exits 1, and only 2 blocks. Driven 2026-11-04 on Claude Code 2.1.290 on
+`windows-latest` through [a fake of the API](#which-surfaces-a-gate-can-drive), with
+`C:\Program Files\Git` renamed: a `Read` of a planted key returned the key, a prompt
+carrying one reached the API, and a machine with no binary installed denied nothing.
+Run [41782955505](https://github.com/karlkfi/claude-spill-guard/actions/runs/41782955505).
+
+Five spellings were driven, on Linux, macOS and Windows with and without Git Bash:
+
+| Spelling | Bash | PowerShell | Why it is out |
+|---|---|---|---|
+| `"<path>" hook` | scans | **scans nothing** | The defect |
+| exec form, `args: ["hook"]` | **scans nothing** | **scans nothing** | `ENOEXEC` on the shebang-less launcher, `EINVAL` spawning a `.cmd` on Windows, and neither blocks |
+| `& "<path>" hook` | **blocks every call** | scans | A leading `&` is a bash syntax error, exit 2 |
+| a second entry with `shell: powershell` | scans | scans | A non-blocking hook error on every call and prompt on a machine with no PowerShell, and on Windows with Git Bash both entries would run, which was not separately measured |
+| one command that parses under both | scans | scans | Shipped |
+
+What ships is one string that each shell reads differently:
+
+```text
+echo --% >/dev/null;: ' | out-null
+<#'
+"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; exit $?; : '
+#>
+& "${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; if ($null -eq $LASTEXITCODE) { exit 127 }; exit $LASTEXITCODE #'
+```
+
+To a POSIX shell the quote on line 1 runs to line 2, so both are a no-op, and line 3
+runs and exits. To PowerShell, `--%` stops parsing at the pipe, `<# … #>` hides line
+3, and line 5 runs.
+
+Three pieces look removable and are not:
+
+- **The `: '` and `#'` quote lines 4 and 5 away from POSIX shells.** sh and bash
+  exit before reaching them, but zsh parses the whole string before running any of
+  it, and a bare `&` there is a parse error, exit 1. Driven 2026-11-04 on macOS on
+  2.1.290 under a `CLAUDE_CODE_SHELL_PREFIX` that runs zsh, without them: a planted
+  key crossed, in three spellings of that prefix.
+- **`exit $LASTEXITCODE`.** Without it `-Command` reports 1 for any failing native
+  command, so spill-guard's own refusal on exit 2 would stop blocking.
+- **The `if` before it.** A launcher that never started leaves that variable null,
+  and `exit $null` is exit 0, which would mean no scan and no hook error. It exits
+  127, as the POSIX half does. Under both that still lets the call through, with a
+  hook error on record, because the launcher's deny cannot run when the launcher is
+  what is missing.
+
+`make launcher` drives the string under each shell it finds on each platform, and
+`launcher-mutation-control` removes each of these and requires the gate to go red.
+`hook-harness.yml` drives it through the real harness, Windows PowerShell 5.1 and a
+non-ASCII path included.
+
+**The `PowerShell` tool is read as text and no further.** It is on when Git Bash is
+missing, its payload is `{"command", "description"}`, and `Get-Content planted.txt`
+returned the key to the model on that run. The command string is scanned, and a key
+in it blocks. Its operands need a reader table this repo does not have and the bash
+port cannot segment PowerShell, so every such call defers with a coverage record.
+That is a real gap on that machine, not a clean result, and a read of `.env` through
+it is not refused either. An interactive session was not driven, only `claude -p`,
+and whether the server flag that turns this tool on beside Git Bash is on for any
+account cannot be read from here.
+
 ### The third shape is a timeout, and it is the one this repo configures
 
 `hooks/hooks.json` sets `"timeout": 60` on both entries. Driven 2026-09-03
@@ -2071,7 +2146,7 @@ proceeds.** On both events.
 
 The hook logged its entry, slept, wrote a reason to stderr and exited a chosen
 code. `UserPromptSubmit` ran under a `HOME` of its own holding no credential,
-the route [the CI section](#two-of-the-three-surfaces-cannot-be-driven-by-a-gate)
+the route [the CI section](#which-surfaces-a-gate-can-drive)
 describes. `PreToolUse` needs one, a hook
 there firing only once the model has chosen a tool call, so it ran under
 `--settings` with `--setting-sources project` to keep this machine's own guards
@@ -3365,7 +3440,7 @@ because a zero over an empty corpus, a zero over a corpus nothing adversarial
 is left in, and a zero from a test that quietly stopped running are all the same
 zero from outside.
 
-### Two of the three surfaces cannot be driven by a gate
+### Which surfaces a gate can drive
 
 Every gate above runs the scanner. None of them runs Claude Code, and the
 defects this project exists to prevent are found on the far side of that
@@ -3400,9 +3475,15 @@ mechanism is 25 unauthenticated runs with the `PreToolUse` matcher wired the
 whole time, in which the recording hook fired `UserPromptSubmit` 25 times and
 `PreToolUse` **0** times. Neither alone would settle it; together they do.
 
-**So the prompt surface can be gated and the other two cannot**, and the
-reason is the credential boundary rather than a shortage of effort. The job
-over the one surface is `.github/workflows/prompt-oracle.yml`, which downloads
+**So without a model only the prompt surface can be driven, and the boundary
+turned out to be a model rather than a credential.** Driven 2026-11-04 on 2.1.290:
+with `ANTHROPIC_BASE_URL` at a loopback fake answering one `tool_use`, and a dummy
+key, the real binary fires `PreToolUse`, spawns the real hook and acts on its
+verdict, and the fake reads the result in the next request. That is
+[`hook-harness.yml`](../../.github/workflows/hook-harness.yml), and
+[the shell the harness picks](#the-hook-command-has-to-parse-under-two-shells) is
+what it found. A fake chooses the call the script asks for, so it says nothing
+about what a model would choose. The job over the prompt surface is `.github/workflows/prompt-oracle.yml`, which downloads
 a pinned `claude`, replays every case in the census over the fixture's own
 tree, and compares what the harness spliced against what the census says it
 splices. It is a workflow rather than a `make` gate: the gates run on a fresh

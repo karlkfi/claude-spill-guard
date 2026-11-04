@@ -1,7 +1,7 @@
 # Launcher fixtures
 
-One file, and it is a launcher that **fails**. Nothing here is ever copied back
-into `hooks/`.
+Three files that **fail**, each on purpose. Nothing here is ever copied back into
+`hooks/`.
 
 ## `lf-uniform-failing.cmd`
 
@@ -46,3 +46,18 @@ Regenerating it, should the measurement ever be re-taken: read the launcher
 through universal newlines, apply the `straight` → `block` substitution the
 step carries, and write the bytes. Anything that changes the hash needs a new
 measurement on a Windows runner, not a new hash.
+
+## `hooks-shell-form.json`
+
+`hooks/hooks.json` with the plain `"<path>" hook` command, which is a parse error
+under PowerShell. Under it on `windows-latest` with Git Bash out of reach, a planted
+key crossed (run 41782955505, 2026-11-04). `launcher-mutation-control` requires the
+gate to catch it, and `hook-harness.yml` requires the key to cross under it, so that
+job is known to be able to see the failure.
+
+## `hooks-zsh-parse-error.json`
+
+`hooks/hooks.json` as it stood at `22a9c05`, whose PowerShell line sits bare where
+zsh's whole-string parse can see it: `zsh:5: parse error near '&'`, exit 1. Under a
+zsh `CLAUDE_CODE_SHELL_PREFIX` on macOS on 2.1.290 a planted key crossed (2026-11-04).
+`launcher-mutation-control` requires the gate to catch it.

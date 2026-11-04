@@ -12,10 +12,8 @@ name: prompt-oracle
 # that reports `Not logged in` and bills nothing. A fork's pull request gets no
 # secrets and this needs none.
 #
-# The `Read` and `Bash` surfaces stay out for the same reason this one is in:
-# they reach a hook only once the model has chosen a tool call, which is an API
-# call. See docs/design/README.md, "Two of the three surfaces cannot be driven
-# by a gate".
+# The tool surfaces are not here because they reach a hook only once a model has
+# chosen a tool call. hook-harness.yml drives them, by faking that model.
 #
 # It is not a `make` gate. The gates run on a fresh clone against the tool tier
 # `make doctor` requires, and Claude Code is not in it -- so a gate over this
