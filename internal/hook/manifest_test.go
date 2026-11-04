@@ -130,7 +130,7 @@ func TestEveryEntryRunsTheLauncherWithTheHookSubcommand(t *testing.T) {
 					t.Errorf("%s entry %d names the subcommand %d times in %q, "+
 						"and one spelling per shell is 2", event, i, got, h.Command)
 				}
-				if !strings.Contains(h.Command, `& "${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; exit $LASTEXITCODE`) {
+				if !strings.Contains(h.Command, `& "${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; if ($null -eq $LASTEXITCODE) { exit 127 }; exit $LASTEXITCODE`) {
 					t.Errorf("%s entry %d has no PowerShell spelling that keeps the "+
 						"exit status, so a refusal on exit 2 would arrive as 1 and "+
 						"not block: %q", event, i, h.Command)

@@ -1,6 +1,6 @@
 # Launcher fixtures
 
-Two files that **fail**, each on purpose. Nothing here is ever copied back into
+Three files that **fail**, each on purpose. Nothing here is ever copied back into
 `hooks/`.
 
 ## `lf-uniform-failing.cmd`
@@ -54,3 +54,10 @@ under PowerShell. Under it on `windows-latest` with Git Bash out of reach, a pla
 key crossed (run 41782955505, 2026-11-04). `launcher-mutation-control` requires the
 gate to catch it, and `hook-harness.yml` requires the key to cross under it, so that
 job is known to be able to see the failure.
+
+## `hooks-zsh-parse-error.json`
+
+`hooks/hooks.json` as it stood at `22a9c05`, whose PowerShell line sits bare where
+zsh's whole-string parse can see it: `zsh:5: parse error near '&'`, exit 1. Under a
+zsh `CLAUDE_CODE_SHELL_PREFIX` on macOS on 2.1.290 a planted key crossed (2026-11-04).
+`launcher-mutation-control` requires the gate to catch it.

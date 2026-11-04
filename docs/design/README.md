@@ -2088,18 +2088,34 @@ What ships is one string that each shell reads differently:
 ```text
 echo --% >/dev/null;: ' | out-null
 <#'
-"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; exit $?
+"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; exit $?; : '
 #>
-& "${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; exit $LASTEXITCODE
+& "${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; if ($null -eq $LASTEXITCODE) { exit 127 }; exit $LASTEXITCODE #'
 ```
 
 To a POSIX shell the quote on line 1 runs to line 2, so both are a no-op, and line 3
-runs and exits before the shell reaches the `&`. To PowerShell, `--%` stops parsing
-at the pipe, `<# … #>` hides line 3, and line 5 runs. `exit $LASTEXITCODE` is
-load-bearing: without it `-Command` reports 1 for any failing native command, so
-spill-guard's own refusal on exit 2 would stop blocking. `make launcher` drives the
-string under each shell on each platform, and `hook-harness.yml` drives it through
-the real harness, Windows PowerShell 5.1 and a non-ASCII path included.
+runs and exits. To PowerShell, `--%` stops parsing at the pipe, `<# … #>` hides line
+3, and line 5 runs.
+
+Three pieces look removable and are not:
+
+- **The `: '` and `#'` quote lines 4 and 5 away from POSIX shells.** sh and bash
+  exit before reaching them, but zsh parses the whole string before running any of
+  it, and a bare `&` there is a parse error, exit 1. Driven 2026-11-04 on macOS on
+  2.1.290 under a `CLAUDE_CODE_SHELL_PREFIX` that runs zsh, without them: a planted
+  key crossed, in three spellings of that prefix.
+- **`exit $LASTEXITCODE`.** Without it `-Command` reports 1 for any failing native
+  command, so spill-guard's own refusal on exit 2 would stop blocking.
+- **The `if` before it.** A launcher that never started leaves that variable null,
+  and `exit $null` is exit 0, which would mean no scan and no hook error. It exits
+  127, as the POSIX half does. Under both that still lets the call through, with a
+  hook error on record, because the launcher's deny cannot run when the launcher is
+  what is missing.
+
+`make launcher` drives the string under each shell it finds on each platform, and
+`launcher-mutation-control` removes each of these and requires the gate to go red.
+`hook-harness.yml` drives it through the real harness, Windows PowerShell 5.1 and a
+non-ASCII path included.
 
 **The `PowerShell` tool is read as text and no further.** It is on when Git Bash is
 missing, its payload is `{"command", "description"}`, and `Get-Content planted.txt`

@@ -1380,7 +1380,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          sed -i 's/ hook; exit \$LASTEXITCODE/ hook/' hooks/hooks.json
+          sed -i "s/ hook; if .* #'/ hook #'/" hooks/hooks.json
           if git diff --quiet -- hooks/hooks.json; then
             echo "::error::the mutation changed nothing, so this step tested nothing" >&2
             exit 1
@@ -1395,6 +1395,63 @@ jobs:
           fi
           if ! grep -q "exit 2 arrived as exit 1" mutant.log; then
             echo "::error::the gate failed, but not on the exit status" >&2
+            exit 1
+          fi
+
+      # `exit $null` is exit 0, so with no guard a launcher PowerShell could not
+      # start would mean no scan and no hook error, where bash exits 127.
+      - name: A hook command that exits 0 with no launcher must fail the gate
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sed -i 's/if (\$null -eq \$LASTEXITCODE) { exit 127 }; //' hooks/hooks.json
+          if git diff --quiet -- hooks/hooks.json; then
+            echo "::error::the mutation changed nothing, so this step tested nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/hooks.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a hook command that exits 0 with no launcher" >&2
+            exit 1
+          fi
+          if ! grep -q 'under powershell with no launcher at that path, .* exited 0' mutant.log; then
+            echo "::error::the gate failed, but not because PowerShell exited 0" >&2
+            exit 1
+          fi
+
+      # zsh parses the whole string first, so `&` on a line sh never reaches is a
+      # parse error that runs nothing: exit 1, and a key crosses. The fixture is
+      # the wiring that was measured failing, 2026-11-04 on 2.1.290, under a zsh
+      # CLAUDE_CODE_SHELL_PREFIX.
+      - name: A hook command zsh cannot parse must fail the gate
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v zsh > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq zsh
+          fi
+          cp testdata/launcher/hooks-zsh-parse-error.json hooks/hooks.json
+          if git diff --quiet -- hooks/hooks.json; then
+            echo "::error::the fixture is identical to hooks.json, so this step tested nothing" >&2
+            exit 1
+          fi
+          make launcher > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- hooks/hooks.json
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the gate passed on a hook command zsh cannot parse" >&2
+            exit 1
+          fi
+          if ! grep -q 'does not reach the binary under zsh' mutant.log; then
+            echo "::error::the gate failed, but not on zsh" >&2
+            exit 1
+          fi
+          if ! grep -q 'parse error' mutant.log; then
+            echo "::error::zsh did not report a parse error, so this is not the failure that was measured" >&2
             exit 1
           fi
 

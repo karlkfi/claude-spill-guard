@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo --% >/dev/null;: ' | out-null\n<#'\n\"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd\" hook; exit $?\n#>\n& \"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd\" hook; exit $LASTEXITCODE",
+            "command": "echo --% >/dev/null;: ' | out-null\n<#'\n\"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd\" hook; exit $?; : '\n#>\n& \"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd\" hook; if ($null -eq $LASTEXITCODE) { exit 127 }; exit $LASTEXITCODE #'",
             "timeout": 60
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo --% >/dev/null;: ' | out-null\n<#'\n\"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd\" hook; exit $?\n#>\n& \"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd\" hook; exit $LASTEXITCODE",
+            "command": "echo --% >/dev/null;: ' | out-null\n<#'\n\"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd\" hook; exit $?; : '\n#>\n& \"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd\" hook; if ($null -eq $LASTEXITCODE) { exit 127 }; exit $LASTEXITCODE #'",
             "timeout": 60
           }
         ]

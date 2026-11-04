@@ -555,9 +555,19 @@ def shells():
     its binary and confirmed by scripts/check-hook-harness.py against the real
     thing. A Windows bash is named by path, because the first `bash` on PATH
     there can be the WSL launcher.
+
+    Off Windows the harness uses /bin/sh, and CLAUDE_CODE_SHELL_PREFIX can hand
+    the string to anything. zsh is the one that differs: it parses the whole
+    string before running any of it, so a line the others never reach can still
+    be a parse error. It is absent from a stock Linux runner, so this drives it
+    where it exists, and macOS always has it.
     """
     if not WINDOWS:
-        return [("/bin/sh", ("/bin/sh", "-c"), lambda c: c)]
+        found = [("/bin/sh", ("/bin/sh", "-c"), lambda c: c)]
+        for exe in ("bash", "zsh"):
+            if shutil.which(exe):
+                found.append((exe, (exe, "-c"), lambda c: c))
+        return found
     def rewrite(command):
         return command.replace("${CLAUDE_PLUGIN_ROOT}", "${env:CLAUDE_PLUGIN_ROOT}")
     found = []
@@ -580,9 +590,11 @@ def hook_command_runs_under_every_shell(findings, tmp, stub):
     PowerShell parse error, exit 1, and only exit 2 blocks. A planted key crossed
     on Read, on a prompt, and with no binary installed.
 
-    Three arms per shell. Exit 2 is the one a passing spelling can still lose:
+    Four arms per shell. Exit 2 is the one a passing spelling can still lose:
     `& <cmd>` alone leaves PowerShell -Command reporting 1 for any failing
-    command, so spill-guard's own refusal would stop blocking.
+    command, so spill-guard's own refusal would stop blocking. The last is a
+    launcher that never started, where `exit $LASTEXITCODE` alone is `exit $null`
+    under PowerShell: exit 0, so no scan and no hook error either.
     """
     commands = hook_commands()
     if len(commands) != 1:
@@ -594,6 +606,9 @@ def hook_command_runs_under_every_shell(findings, tmp, stub):
     if WINDOWS and not any(name == "powershell" for name, _, _ in available):
         findings.append("no powershell on this Windows machine, so the shell the "
                         "harness falls back to went undriven")
+    if sys.platform == "darwin" and not any(name == "zsh" for name, _, _ in available):
+        findings.append("no zsh on this Mac, so the one shell that parses the whole "
+                        "string before running it went undriven")
 
     def under(argv, spell, env):
         p = subprocess.run(argv + (spell(command),), input=payload.encode("utf-8"),
@@ -630,6 +645,13 @@ def hook_command_runs_under_every_shell(findings, tmp, stub):
         if not isinstance(deny_reason(out.strip()), str):
             findings.append(f"under {name} with no binary installed, hooks.json's "
                             f"command did not produce the launcher's deny -- "
+                            f"{evidence(rc, out, err)}")
+        env["CLAUDE_PLUGIN_ROOT"] = str(Path(tmp) / "no-such-plugin").replace("\\", "/")
+        rc, out, err = under(argv, spell, env)
+        if rc != 127:
+            findings.append(f"under {name} with no launcher at that path, hooks.json's "
+                            f"command exited {rc} where the POSIX half exits 127, and "
+                            f"0 is no scan with no hook error -- "
                             f"{evidence(rc, out, err)}")
 
 

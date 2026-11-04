@@ -159,7 +159,9 @@ is not simplifiable.** Claude Code runs a hook under PowerShell on Windows with 
 Git Bash, where the plain `"<path>" hook` is a parse error, exit 1, and scans
 nothing with nothing blocking: driven 2026-11-04, a planted key crossed. Exec form
 fails on every platform, a leading `&` blocks every call under bash, and a second
-entry with `shell: powershell` raises a hook error on every call on a Mac. The table
+entry with `shell: powershell` raises a hook error on every call on a Mac. zsh, which
+`CLAUDE_CODE_SHELL_PREFIX` can bring in, parses the whole string before running any
+of it, so the trailing `: '` and `#'` are load-bearing too. The table
 is in `docs/design/README.md` under *The hook command has to parse under two shells*,
 `make launcher` drives the string under each shell, and `hook-harness.yml` drives it
 through a real `claude` and a loopback fake of the API, which needs no credential.
