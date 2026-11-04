@@ -61,7 +61,7 @@ var errFileUnreadable = errors.New("a prompt names a file that could not be " +
 // which is what makes resolving it possible at all. docs/design/README.md,
 // "`@path` is an operand, not a hop", carries that measurement.
 func promptTargets(prompt, cwd string) ([]target, error) {
-	targets := []target{{promptLabel, []byte(prompt)}}
+	targets := []target{text(promptLabel, []byte(prompt))}
 	seen := make(map[string]bool)
 	// The first token that would not resolve, kept while the rest are read,
 	// for bashTargets' reason.
@@ -104,19 +104,16 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 			seen[path] = true
 			switch {
 			case info.Mode().IsRegular():
-				buf, err := os.ReadFile(path)
-				if err != nil {
-					note(unresolved{path, errFileUnreadable})
-					continue
-				}
-				targets = append(targets, target{path, buf})
+				targets = append(targets, file(path, info.Size(), func(error) error {
+					return unresolved{path, errFileUnreadable}
+				}))
 			case info.IsDir():
 				buf, err := listing(path)
 				if err != nil {
 					note(unresolved{path, err})
 					continue
 				}
-				targets = append(targets, target{path, buf})
+				targets = append(targets, text(path, buf))
 			default:
 				// A fifo or a device. os.ReadFile on one blocks for as long as
 				// nothing writes, which would hang the session rather than

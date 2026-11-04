@@ -304,10 +304,9 @@ func unread(skips []skipped) string {
 // This is the branch where deferring is least comfortable, and hook.go carries
 // that argument rather than this string.
 //
-// The reason claims nothing about what was read. A call carrying several
-// buffers may have been through some of them when the clock ran out, and which
-// ones is not a set this side of the deadline can name -- the scan is still
-// running. Under-claiming is the safe direction here for the reason
+// The reason claims nothing about what was read. Only a call where nothing
+// matched reaches it, and that may have been through some of its buffers when
+// the clock ran out. Under-claiming is the safe direction here for the reason
 // alsoUnread() gives: a buffer nothing opened produces no findings, exactly
 // like one that was read and held none.
 func overran(budget time.Duration) string {

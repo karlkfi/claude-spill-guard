@@ -68,7 +68,7 @@ const heredocLabel = "<heredoc>"
 // path we cannot settle -- there the scanner would report a clean result for a
 // file it never opened.
 func bashTargets(command, cwd string) ([]target, error) {
-	targets := []target{{commandLabel, []byte(command)}}
+	targets := []target{text(commandLabel, []byte(command))}
 	// The loop below names its reader `command`, so the string is kept here
 	// for the one reason that repeats it.
 	whole := command
@@ -455,13 +455,10 @@ func bashTargets(command, cwd string) ([]target, error) {
 				if class := guardedClass(path); class != "" && lastInPipeline(segments, i) {
 					return nil, &pathRefusal{path, class}
 				}
-				buf, err := os.ReadFile(path)
-				if err != nil {
-					note(unresolved{path, fmt.Errorf("reading a file this "+
-						"command would send: %w", osCause(err))})
-					continue
-				}
-				targets = append(targets, target{path, buf})
+				targets = append(targets, file(path, info.Size(), func(err error) error {
+					return unresolved{path, fmt.Errorf("reading a file this "+
+						"command would send: %w", osCause(err))}
+				}))
 			}
 		}
 

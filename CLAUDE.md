@@ -510,7 +510,7 @@ came back `No such tool available` — but `--tools Grep` exposes it, and driven
 that way on 2.1.290 its payload carries the field names the hook reads and
 its schema defaults `output_mode` to `files_with_matches`, so no mode passes.
 A `Grep` call's `pattern`, `path`, `glob` and `type`, and a `Read` call's
-`file_path`, are also matched as text, in every mode and before anything opens.
+`file_path`, are also matched as text, in every mode and whether or not it opens.
 A **skill** load stays out for a different reason — the
 payload is `{"skill": "<name>"}` and names no file, though a deny on it does
 stop the body crossing, so it is a member this cannot resolve rather than one
@@ -638,7 +638,9 @@ rules; this has no opinion to spend on them, because it could not read the
 call. **A gap does not hide a finding beside it**: the walk goes on past an
 operand it cannot settle, what it did read is scanned, and a match there
 blocks (Q204), naming a buffer nothing decoded beside it in the notice and
-writing no record (Q244). The exception is a scan past its budget (Q227).
+writing no record (Q244). A scan past its budget blocks on the buffers it got
+through, and it gets through the smallest first (Q227), which is an order rather
+than a size cap: `docs/design/README.md` under *The order the budget spends*.
 
 Why, measured over the week to 2026-09-05 across 100 sessions on one machine:
 

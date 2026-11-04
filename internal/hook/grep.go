@@ -440,16 +440,16 @@ func allFiltered(command string) bool {
 func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 	var targets []target
 	if in.Pattern != nil {
-		targets = append(targets, target{patternLabel, []byte(*in.Pattern)})
+		targets = append(targets, text(patternLabel, []byte(*in.Pattern)))
 	}
 	// The call's other strings are text it carries too, and a path is matched
-	// here ahead of being opened.
+	// whether or not it opens.
 	for _, f := range []struct {
 		label string
 		text  *string
 	}{{"<path>", in.Path}, {"<glob>", in.Glob}, {"<type>", in.Type}} {
 		if f.text != nil {
-			targets = append(targets, target{f.label, []byte(*f.text)})
+			targets = append(targets, text(f.label, []byte(*f.text)))
 		}
 	}
 	mode := "files_with_matches"
@@ -493,12 +493,10 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 	if class := guardedClass(path); class != "" {
 		return nil, &pathRefusal{path, class}
 	}
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		return targets, unresolved{path,
+	return append(targets, file(path, info.Size(), func(err error) error {
+		return unresolved{path,
 			fmt.Errorf("reading the file this Grep call searches: %w", osCause(err))}
-	}
-	return append(targets, target{path, buf}), nil
+	})), nil
 }
 
 // What a finding in a Grep call's pattern is reported against.

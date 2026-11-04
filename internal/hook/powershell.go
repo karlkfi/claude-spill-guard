@@ -22,5 +22,5 @@ var errPowerShellOperands = errors.New("which files this PowerShell command " +
 // powershellTargets is the command string, with the gap beside it. scanCall
 // scans what comes back and a match there blocks; otherwise the call defers.
 func powershellTargets(command string) ([]target, error) {
-	return []target{{commandLabel, []byte(command)}}, errPowerShellOperands
+	return []target{text(commandLabel, []byte(command))}, errPowerShellOperands
 }

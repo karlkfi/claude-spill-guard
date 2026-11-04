@@ -1405,7 +1405,7 @@ build cannot read deferred ahead of the findings, so `cat key.txt notes.utf32`,
 the unread buffer. They write no coverage record, as with Q204: the record exists
 because a deferred call is quiet to the person, and this one is not. Until Q245
 a `Grep` pattern beside a path that will not resolve was not read at all, the
-same case. A scan past its budget still discards what it found, which is Q227.
+same case. A scan past its budget [blocks too](#the-order-the-budget-spends).
 
 **A payload that does not decode still blocks on exit 2.** Not JSON, no event,
 an event this binary cannot withhold at. That is the hook being invoked wrongly
@@ -2214,10 +2214,11 @@ this repo ships can turn an expiry into a block.
 ### The scanner's own budget, and overrunning it is recorded
 
 `internal/hook` gives the scan **45 seconds** and keeps 15 of the 60 for
-itself. A scan still running at the end of the 45 stops and does what this
-design does with a buffer it could not read: it defers, on the same branch, and
-the record names the budget. The override is not consulted, because there is no
-block left to downgrade.
+itself. A scan still running at the end of the 45 stops. If nothing it got
+through matched, it does what this design does with a buffer it could not read:
+it defers, and the record names the budget. The override is not consulted there,
+because there is no block left to downgrade.
+[A match in what it got through blocks](#the-order-the-budget-spends).
 
 There is no third answer to weigh. Fifteen seconds later the process is killed
 and the call proceeds with no verdict and no record from this hook — the
@@ -2327,21 +2328,87 @@ file can be refused as well: 64 KiB of 80-column lines arrived whole and 128
 KiB of them arrived as nothing. The bytes that ran the scan past its budget
 were therefore bytes the harness was not going to send.
 
-**That does not make the record harmless, because an overrun reaches no verdict
-on any buffer in the call.** A small file named beside the big ones is attached
-with nothing said about it. Driven on the same version with a build of
-`162fcf9` at the shipped budget, at load 115, with the six fixtures followed by
-`@notes.txt`, a copy of the planted key file. The run took 49.702s and the
-prompt proceeded with `notes.txt` attached, key included. In that order the
-small file was never read. Under a budget cut to 1s it crosses in the other
-order too, after its finding was made and then discarded. The same binary
-blocks that file on its own. That is Q227, and it is a defect on `main` rather
-than in this measurement.
-
 None of this moves
 [the over-read](#a-buffer-whose-bytes-cross-anyway-measured): the limit is the
 harness's, measured on one version, and reading less than the harness sends is
 the only direction that can report a clean result for something that crossed.
+
+#### The order the budget spends
+
+An overrun used to reach no verdict on any buffer in the call, so a small file
+named beside big ones crossed with nothing said about it. Driven on 2.1.290 with
+a build of `162fcf9` at the shipped budget, at load 115, six 400 MiB fixtures
+followed by `@notes.txt`, a copy of the planted key file: the run took 49.702s
+and the prompt proceeded with `notes.txt` attached, key included.
+
+That was two defects, and each needed its own fix.
+
+**A finding already made was thrown away.** With the key file first and a budget
+cut to 1s, the scan matched it and the overrun then discarded the match. The scan
+now publishes what it has settled after each buffer, and the deadline answers
+from the last snapshot. A match there blocks, carrying
+[the notice](#a-blocking-verdict-carries-the-notice-too-on-a-channel-that-is-per-event) that the verdict stops
+short, and writes no record, as a walk's failure does. Each snapshot is built
+fresh and crosses on an atomic pointer, because the scan goes on running behind
+the verdict.
+
+**A buffer behind the overrun was never read.** The scan now takes buffers
+smallest first. The harness's limit is why that is the right order: it spliced
+none of the 400 MiB fixtures, so on a prompt the bytes that use up a budget are
+not the bytes that cross. Size order reaches everything under any such limit
+before anything over it, and it needs no number here that could go stale when the
+limit moves.
+
+**That is an order and not [the size cap refused above](#the-scanners-own-budget-and-overrunning-it-is-recorded).**
+Nothing is left out for being big. A big buffer is read if the budget reaches it,
+and a match in it blocks. Findings still come back in the call's order, so the
+sort never shows in a verdict's text.
+
+**The file reads moved too, because a read has no deadline.** Every file used to
+be read into memory before the first match, so a slow read could spend the budget
+with nothing looked at, the prompt's own text included. A target now carries its
+size and reads itself when its turn comes. That is unmeasured on a slow disk,
+since every run here is on a warm page cache. It did cut peak memory on the
+six-fixture call, below, from 2,410 MiB to 809 MiB.
+
+**A budget per buffer was the other proposal, and it was argued against rather
+than built.** The shares have to add up to 45 seconds, so with seven buffers the
+small file gets 6.4 seconds it does not need and each big one loses whatever the
+others left unused. And nothing can interrupt a buffer at the end of its share:
+the goroutine has to be abandoned, still using a core, for the rest of the scan.
+Scanning every buffer at once gives the same independence without the shares. It
+was not built either, because size order already reaches the small file first.
+
+Driven 2026-11-04 on built binaries, load 10–39, with six 400 MiB fixtures of
+keyword-bearing text and the planted key file as `notes.txt`. Base is `55218a3`.
+The fixtures repeat one line, so they say nothing about rate. All they have to do
+is run out the budget, and the deferring rows show they did.
+
+| Budget | Call | Base | This build |
+|---|---|---|---|
+| 1s | `@notes.txt` then one fixture | 1.025s, defers | 1.329s, blocks `aws-access-key-id` |
+| 1s | one fixture then `@notes.txt` | 1.016s, defers | 1.018s, blocks |
+| 1s | `cat` one fixture then `notes.txt` | 1.019s, defers | 1.018s, blocks |
+| 45s | six fixtures then `@notes.txt` | 45.072s, defers | 45.429s, blocks |
+| 45s | `cat` six fixtures then `notes.txt` | 45.056s, defers | 45.059s, blocks |
+
+Through `claude -p` on 2.1.290 under a clean `HOME`, at the 1s budget and load
+59–66, the base build attached `notes.txt` with the key in the transcript and wrote a coverage
+record in both prompt orders. This build wrote no record, and the prompt was
+blocked before anything was attached. The controls on this build: `@notes.txt`
+alone blocks in 0.012s, and one fixture alone still defers at 1.017s.
+
+Three things it does not close:
+
+- **A key inside the buffer the deadline stops on.** The scan publishes a buffer
+  only once it is finished, so a key at byte 0 of a 400 MiB file still defers at
+  the 1s budget. That is [Q249](../queue/Q249.md).
+- **A key in a buffer the budget never reaches.** Enough smaller buffers can
+  spend the budget first. On a prompt the harness's limit bounds what that can
+  cost. `cat big-1 big-2` has no such limit, so a key in the larger file defers
+  with a record.
+- **The wait.** The scan runs to the deadline to name every match, so these blocks
+  arrive at 45 seconds rather than at the first finding.
 
 Two numbers fall out of the first table's pair of builds. The deadline lands within **11ms** of the
 budget measured from process spawn, so the launcher, this binary's startup, the

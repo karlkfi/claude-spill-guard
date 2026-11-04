@@ -39,12 +39,15 @@
 package hook
 
 import (
+	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
@@ -81,13 +84,21 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 // run is Run with the clock and the budget handed in, so that a test can drive
 // the deadline in milliseconds rather than in the forty-five seconds the hook
 // ships with.
+func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr io.Writer) int {
+	return runPaced(context.Background(), func(string) {}, start, budget, stdin, stdout, stderr)
+}
+
+// runPaced is run with the scan's progress handed to the caller: pace is called
+// before each buffer is read, and ending ctx is the deadline arriving. A test
+// can then end the budget on a named buffer, where a timer would make it race
+// the match loop over a fixture.
 //
 // start is taken before anything is read, so the budget covers the whole
 // invocation and not just the scan. Everything ahead of the scan is bounded by
 // the payload -- reading stdin, decoding it, looking for an override -- and
 // charging it here costs nothing when it is fast and is the honest answer when
 // it is not.
-func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr io.Writer) int {
+func runPaced(ctx context.Context, pace func(label string), start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		return refuse(stderr, fmt.Errorf("%w: stdin could not be read: %v", errNoEvent, err))
@@ -106,11 +117,23 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		return deny(stdout, stderr, event, blockedLead+noReasonGiven, "")
 	}
 
-	got, finished := within(call, event, budget-time.Since(start))
+	got, finished := within(ctx, pace, call, event, budget-time.Since(start))
+	findings, skips, err := got.findings, got.skips, got.err
 	if !finished {
-		// A scan that ran out of budget read nothing this can name, so there is
-		// no notice to carry and no finding to report -- it is a coverage
-		// failure like any other and defers with one.
+		// A finding in a buffer the scan got through blocks, for the reason a
+		// walk's failure below lets one: the rest going unread is no reason to
+		// wave through what was read. No coverage record, for the same reason.
+		if len(findings) > 0 {
+			notice := partlyRead
+			if len(skips) > 0 {
+				notice += " " + alsoUnread(skips)
+			}
+			return decide(stdout, stderr, call, event, overridden, found(findings), notice)
+		}
+		// Nothing matched in what the scan reached. The skips it passed get no
+		// notice, because a list of them would read as the whole of what went
+		// unread and the buffers it never reached are not on it. A coverage
+		// failure like any other, and it defers with one.
 		//
 		// This is the branch where deferring is least comfortable, because a
 		// buffer big enough or keyword-dense enough to exhaust 45 seconds is
@@ -120,7 +143,6 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// context to judge. Its rates are in docs/design/README.md, "What 45 costs".
 		return abstain(stdout, stderr, call, event, overran(budget), nil)
 	}
-	findings, skips, err := got.findings, got.skips, got.err
 	if err != nil {
 		// A refusal is not a scan that failed, and failed() would say it was:
 		// its sentence is that the scan could not be completed, and that is not
@@ -281,8 +303,18 @@ const bypassPermissions = "bypassPermissions"
 // rules, and compiling the set is the fixed cost of every invocation.
 //
 // The loop runs to the end rather than returning at the first unread buffer. A
-// call naming several files should name every one of them that went unread, and
-// by here they are all in memory anyway.
+// call naming several files should name every one of them that went unread.
+//
+// Smallest first, and each file is read only when the scan reaches it, because
+// the budget can run out partway and what is left reaches no verdict. The
+// harness spliced nothing past 257 KiB in the design's drive, so size order gets
+// to what crosses before what only costs time, under any such limit and with no
+// number here to go stale. A big buffer is still read if the budget reaches it,
+// so this is not the size cap the design refuses. docs/design/README.md, "The
+// order the budget spends".
+//
+// publish gets what is settled after each buffer, and within answers from the
+// last of those when the deadline arrives first.
 //
 // A walk that failed on an operand still hands back what it collected first --
 // the prompt or command string, and any file resolved ahead of the failure --
@@ -291,7 +323,7 @@ const bypassPermissions = "bypassPermissions"
 // skip the part that can: before Q204 a key typed beside an `@` token that
 // would not resolve crossed with no verdict. A refusal is the exception, since
 // it blocks whatever the buffers hold.
-func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
+func scanCall(call payload, event Event, pace func(label string), publish func(scanned)) ([]scan.Finding, []skipped, error) {
 	buffers, gap := targets(call, event)
 	var refused refusal
 	if errors.As(gap, &refused) || len(buffers) == 0 {
@@ -319,28 +351,61 @@ func scanCall(call payload, event Event) ([]scan.Finding, []skipped, error) {
 	if event == UserPromptSubmit {
 		read = scan.BufferIncludingBinary
 	}
+	order := make([]int, len(buffers))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return cmp.Compare(buffers[a].size, buffers[b].size)
+	})
+	results := make([]*scan.Result, len(buffers))
 	var findings []scan.Finding
 	var skips []skipped
 	decoded := ""
-	for _, t := range buffers {
-		got, err := read(t.label, t.buf, set)
+	for _, i := range order {
+		t := buffers[i]
+		pace(t.label)
+		buf, err := t.load()
+		if err != nil {
+			if gap == nil {
+				gap = err
+			}
+			continue
+		}
+		got, err := read(t.label, buf, set)
 		if err != nil {
 			return nil, nil, err
 		}
-		// Both, not one or the other. A raw match reports findings and still
-		// reports that nothing decoded the buffer, because the two answer
-		// different questions and only the second is about coverage.
-		if got.Skipped != scan.Scanned {
-			skips = append(skips, skipped{t.label, got.Skipped})
-		} else if decoded == "" {
-			decoded = t.label
-		}
-		findings = append(findings, got.Findings...)
+		results[i] = &got
+		findings, skips, decoded = settled(buffers, results)
+		publish(scanned{findings: findings, skips: skips})
 	}
 	if gap != nil && decoded != "" {
 		gap = partlyDecoded{decoded, gap}
 	}
 	return findings, skips, gap
+}
+
+// settled gathers the results so far in the call's order rather than the scan's,
+// so a verdict reads the same however the sizes fall. Every slice is new, because
+// within can be reading the last one while the scan builds this one. decoded is
+// the first buffer whose text was read.
+func settled(buffers []target, results []*scan.Result) (findings []scan.Finding, skips []skipped, decoded string) {
+	for i, r := range results {
+		if r == nil {
+			continue
+		}
+		// Both, not one or the other. A raw match reports findings and still
+		// reports that nothing decoded the buffer, because the two answer
+		// different questions and only the second is about coverage.
+		if r.Skipped != scan.Scanned {
+			skips = append(skips, skipped{buffers[i].label, r.Skipped})
+		} else if decoded == "" {
+			decoded = buffers[i].label
+		}
+		findings = append(findings, r.Findings...)
+	}
+	return findings, skips, decoded
 }
 
 // A skipped is one buffer the pipeline could not read the text of, carried
@@ -430,9 +495,32 @@ func blocks(why scan.Skip) bool {
 }
 
 // A target is one buffer to scan and what a finding in it is reported against.
+//
+// A file arrives as its size and a way to read it rather than as its bytes, so
+// that what scanCall takes first is what it opens first: a read has no deadline
+// of its own, and one ahead of the scan would spend the budget before any buffer
+// was looked at.
 type target struct {
 	label string
-	buf   []byte
+	size  int64
+	load  func() ([]byte, error)
+}
+
+// text is a target already in memory.
+func text(label string, buf []byte) target {
+	return target{label, int64(len(buf)), func() ([]byte, error) { return buf, nil }}
+}
+
+// file is a target read when its turn comes. failed writes the error a read
+// failure becomes, because each surface has its own rule for what one may name.
+func file(path string, size int64, failed func(error) error) target {
+	return target{path, size, func() ([]byte, error) {
+		buf, err := os.ReadFile(path)
+		if err != nil {
+			return nil, failed(err)
+		}
+		return buf, nil
+	}}
 }
 
 // targets is everything of this call that can be scanned before it is sent.
@@ -480,7 +568,7 @@ func toolTargets(call payload) ([]target, error) {
 		}
 		// The path is text the call carries, as grepToolTargets scans a Grep
 		// path, so a key in it blocks whether or not it opens.
-		text := []target{{filePathLabel, []byte(*in.FilePath)}}
+		asText := []target{text(filePathLabel, []byte(*in.FilePath))}
 		// Claude Code sends an absolute path -- driven 2026-08-27 against
 		// 2.1.238, where it resolved one the model had only named. A relative
 		// one would resolve against this process's directory rather than the
@@ -492,7 +580,7 @@ func toolTargets(call payload) ([]target, error) {
 			// binary resolved and attempted to open, and a relative file_path
 			// is neither. That `file_path` is a path by contract where an
 			// operand is a command-string token does not change that.
-			return text, unresolved{*in.FilePath, errors.New("the Read call names " +
+			return asText, unresolved{*in.FilePath, errors.New("the Read call names " +
 				"a relative file_path, which this cannot resolve to the file the " +
 				"tool would open")}
 		}
@@ -503,9 +591,9 @@ func toolTargets(call payload) ([]target, error) {
 				// claims no safety that is missing -- the tool reports its own
 				// error, which is more use than this one's. Every other read
 				// failure is a file that exists and went unchecked.
-				return text, nil
+				return asText, nil
 			}
-			return text, unresolved{*in.FilePath,
+			return asText, unresolved{*in.FilePath,
 				fmt.Errorf("reading the file this call would send: %w", osCause(err))}
 		}
 		// Only a regular file, for bash.go's reason: os.ReadFile on a fifo
@@ -525,12 +613,12 @@ func toolTargets(call payload) ([]target, error) {
 		// actually meets, and one reason for every mode would say less than
 		// the OS error this replaced.
 		if info.IsDir() {
-			return text, unresolved{*in.FilePath, errors.New("the Read call names " +
+			return asText, unresolved{*in.FilePath, errors.New("the Read call names " +
 				"a directory, and this reads files rather than listing them, so " +
 				"what it would send was not read")}
 		}
 		if !info.Mode().IsRegular() {
-			return text, unresolved{*in.FilePath, errors.New("the Read call names " +
+			return asText, unresolved{*in.FilePath, errors.New("the Read call names " +
 				"something that is neither a file nor a directory, so what it " +
 				"would send cannot be read here")}
 		}
@@ -542,12 +630,10 @@ func toolTargets(call payload) ([]target, error) {
 		if class := guardedClass(*in.FilePath); class != "" {
 			return nil, &pathRefusal{*in.FilePath, class}
 		}
-		buf, err := os.ReadFile(*in.FilePath)
-		if err != nil {
-			return text, unresolved{*in.FilePath,
+		return append(asText, file(*in.FilePath, info.Size(), func(err error) error {
+			return unresolved{*in.FilePath,
 				fmt.Errorf("reading the file this call would send: %w", osCause(err))}
-		}
-		return append(text, target{*in.FilePath, buf}), nil
+		})), nil
 	case ToolBash:
 		var in bashInput
 		if err := unmarshalToolInput(ToolBash, call.ToolInput, &in); err != nil {
