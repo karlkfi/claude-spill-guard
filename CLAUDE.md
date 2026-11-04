@@ -711,6 +711,8 @@ a standing hazard. Carry a truncated hash instead. Emit rule ID, path, and
 offset — no fragment, not even a redacted one, because stderr reaches the API.
 A path the rules match is withheld too: a glob can open a file named for a key
 the model has never seen, so `named` in `internal/hook/coverage.go` stands in.
+It reads `_` as a boundary as well. A key with its own `_` glued to another `_`,
+and a key with a letter glued to it, still print, which is the stated limit.
 
 **No in-band bypass tag.** A magic string that disables the scanner is a
 prompt-injection surface: any content the model reads can contain it, including

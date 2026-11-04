@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -93,14 +94,26 @@ const withheldLabel = "a path a rule matches"
 // alone is not withheld here: %q escapes it, and a reader needs the name.
 func named(label string) string {
 	set, err := rules.Load(embedded.Shipped)
-	if err != nil {
-		return withheldLabel
-	}
-	got, err := scan.Buffer("", []byte(label), set)
-	if err != nil || len(got.Findings) > 0 || got.Skipped != scan.Scanned {
+	if err != nil || nameMatches(label, set) {
 		return withheldLabel
 	}
 	return label
+}
+
+// nameMatches reports whether a rule matches a file name or path. `_` is a word
+// character, so `creds_<key>.csv` defeats the `\b` a rule opens on. The second
+// pass reads `_` as a boundary, and the first keeps a key holding its own `_`.
+// Withholding a name wrongly costs a label, which is why this may over-match
+// where a rule over content may not. A key with its own `_` glued to another `_`
+// matches neither pass.
+func nameMatches(name string, set []rules.Rule) bool {
+	for _, text := range []string{name, strings.ReplaceAll(name, "_", " ")} {
+		got, err := scan.Buffer("", []byte(text), set)
+		if err != nil || len(got.Findings) > 0 || got.Skipped != scan.Scanned {
+			return true
+		}
+	}
+	return false
 }
 
 // partlyDecoded is a coverage failure on a call some of which was read: label
@@ -150,10 +163,12 @@ func record(stderr io.Writer, call payload, event Event, reason string, operands
 		Time:      time.Now().UTC(),
 		Event:     string(event),
 		SessionID: call.SessionID,
-		CWD:       call.CWD,
 		Version:   version.Version,
 		Reason:    reason,
 		Operands:  withheld(operands),
+	}
+	if kept := withheld([]string{call.CWD}); len(kept) == 1 {
+		c.CWD = kept[0]
 	}
 	// ToolName is absent on UserPromptSubmit and optional everywhere, so the
 	// field stays empty rather than inventing a name for the record.
@@ -198,11 +213,7 @@ func withheld(operands []string) []string {
 		// opening on a byte-order mark is decoded as UTF-16 and a key in it
 		// scans clean, and one carrying a NUL takes the binary skip. A path or
 		// an `@` token is plain text, so anything else is withheld unread.
-		if !plain(o) {
-			continue
-		}
-		got, err := scan.Buffer("", []byte(o), set)
-		if err != nil || len(got.Findings) > 0 || got.Skipped != scan.Scanned {
+		if !plain(o) || nameMatches(o, set) {
 			continue
 		}
 		out = append(out, o)

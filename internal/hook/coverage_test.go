@@ -266,6 +266,18 @@ func TestAVerdictWithholdsAFileNameARuleMatches(t *testing.T) {
 	hot := put("hot", []byte("AWS_ACCESS_KEY_ID="+secret+"\n"))
 	put("bin", []byte("\x00binary\n"))
 	put("u32", append([]byte{0xFF, 0xFE, 0, 0}, 't', 0, 0, 0))
+	glued := func(sub, name string) {
+		t.Helper()
+		if err := os.Mkdir(filepath.Join(dir, sub), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, sub, name),
+			[]byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	glued("after", secret+"_accessKeys.csv")
+	glued("before", "creds_"+secret+".csv")
 	if err := os.MkdirAll(filepath.Join(dir, "env", secret), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +286,8 @@ func TestAVerdictWithholdsAFileNameARuleMatches(t *testing.T) {
 	}
 	for _, tc := range []struct{ name, payload, want string }{
 		{"Bash, a finding", bashCall(t, "cat hot/*", dir), "aws-access-key-id"},
+		{"Bash, a key before a `_`", bashCall(t, "cat after/*", dir), "aws-access-key-id"},
+		{"Bash, a key after a `_`", bashCall(t, "cat before/*", dir), "aws-access-key-id"},
 		{"Bash, a binary", bashCall(t, "cat bin/*", dir), string(scan.SkippedBinary)},
 		{"Bash, a guarded path", bashCall(t, "cat env/*/.env", dir), "a dotenv file"},
 		{"Read, a finding", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":` +
@@ -298,6 +312,26 @@ func TestAVerdictWithholdsAFileNameARuleMatches(t *testing.T) {
 				t.Errorf("the log carries the key: %s", s)
 			}
 		})
+	}
+}
+
+// The working directory is a path the record carries too.
+func TestACoverageRecordWithholdsACWDARuleMatches(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), secret)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "cat $SOME_VAR", dir))
+	deferred(t, code, stdout, stderr)
+	got := readCoverage(t)
+	if len(got) != 1 {
+		t.Fatalf("wrote %d records, want 1", len(got))
+	}
+	if got[0].CWD != "" {
+		t.Errorf("the record keeps the cwd: %q", got[0].CWD)
+	}
+	if s := fmt.Sprintf("%+v", got[0]); strings.Contains(s, secret) {
+		t.Errorf("the record carries the key: %s", s)
 	}
 }
 
