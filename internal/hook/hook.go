@@ -58,9 +58,10 @@ import (
 // that runs and scans nothing is the failure this project indicts its
 // predecessor for.
 const (
-	ToolRead = "Read"
-	ToolBash = "Bash"
-	ToolGrep = "Grep"
+	ToolRead       = "Read"
+	ToolBash       = "Bash"
+	ToolGrep       = "Grep"
+	ToolPowerShell = "PowerShell"
 )
 
 // What a finding is reported against when there is no file. The design lets a
@@ -555,6 +556,15 @@ func toolTargets(call payload) ([]target, error) {
 			return nil, err
 		}
 		return grepToolTargets(in, call.CWD)
+	case ToolPowerShell:
+		var in powershellInput
+		if err := unmarshalToolInput(ToolPowerShell, call.ToolInput, &in); err != nil {
+			return nil, err
+		}
+		if in.Command == nil {
+			return nil, errors.New("the PowerShell call names no command")
+		}
+		return powershellTargets(*in.Command)
 	default:
 		// Not a tool this package scans. The set above is closed and named so
 		// that hooks.json's matcher can be held to it; a tool arriving here is

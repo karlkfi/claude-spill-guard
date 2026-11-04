@@ -18,8 +18,8 @@ scans what the call would have sent, and blocks — driven end to end against a
 live Claude Code on 2026-08-27, where a `Read` of a file carrying a Slack
 webhook came back denied with the rule, the path and the byte offset and no
 fragment of the value. `hooks/hooks.json` and the plugin manifests now point
-Claude Code at that binary, at `PreToolUse` on `Read`, `Bash` and `Grep` and at
-`UserPromptSubmit`; they were held back until there was a hook to fire, because
+Claude Code at that binary, at `PreToolUse` on `Read`, `Bash`, `Grep` and
+`PowerShell` and at `UserPromptSubmit`; they were held back until there was a hook to fire, because
 a repo installable as a security tool scanning nothing is the failure this
 document indicts the predecessor for. `Bash` is scanned as a command string
 **and** as the files its readers are pointed at, `internal/readers` being the
@@ -613,7 +613,7 @@ validated by reading that field and agreeing with it: the census is kept in
 `internal/hook/testdata/prompt-oracle.json` and a test compares against it on
 every run. What re-takes the census itself, against a pinned harness and
 without a credential, is
-[the job over that surface](#two-of-the-three-surfaces-cannot-be-driven-by-a-gate).
+[the job over that surface](#which-surfaces-a-gate-can-drive).
 
 **Take the census on `attachment.type == "file"`, never on a raw count of
 `"type":"attachment"`.** Skill listings, token reminders, deferred-tool deltas
@@ -939,7 +939,7 @@ nothing in the payload to tell one of its tools from the other.
 **Stoppable and scanned are two claims, and this member is the first to
 separate them.** The deny works — reading 2 — so a hook wired to these calls
 could stop one. Nothing here is wired to them: `hooks/hooks.json` matches
-`Read|Bash|Grep`, which no `mcp__…` name matches, so a file an MCP server reads is
+`Read|Bash|Grep|PowerShell`, which no `mcp__…` name matches, so a file an MCP server reads is
 not scanned and a session that installs one has a reader this scanner does not
 cover. The consequence is stated rather than fixed, and reading only the second
 half of it gets the posture backwards: the hook is not powerless on that
@@ -2062,6 +2062,55 @@ in a workspace whose trust dialog has never been accepted. The untrusted
 workspace has its `permissions.allow` entries ignored with a warning on stderr,
 and its hooks run anyway.
 
+### The hook command has to parse under two shells
+
+The launcher turns every failure it can see into a deny, and none of that runs if
+the shell cannot parse the line that starts it. On Windows with no Git for Windows,
+Claude Code runs hook commands under PowerShell, where `"<path>" hook` is a parse
+error. It exits 1, and only 2 blocks. Driven 2026-11-04 on Claude Code 2.1.290 on
+`windows-latest` through [a fake of the API](#which-surfaces-a-gate-can-drive), with
+`C:\Program Files\Git` renamed: a `Read` of a planted key returned the key, a prompt
+carrying one reached the API, and a machine with no binary installed denied nothing.
+Run [41782955505](https://github.com/karlkfi/claude-spill-guard/actions/runs/41782955505).
+
+Five spellings were driven, on Linux, macOS and Windows with and without Git Bash:
+
+| Spelling | Bash | PowerShell | Why it is out |
+|---|---|---|---|
+| `"<path>" hook` | scans | **scans nothing** | The defect |
+| exec form, `args: ["hook"]` | **scans nothing** | **scans nothing** | `ENOEXEC` on the shebang-less launcher, `EINVAL` spawning a `.cmd` on Windows, and neither blocks |
+| `& "<path>" hook` | **blocks every call** | scans | A leading `&` is a bash syntax error, exit 2 |
+| a second entry with `shell: powershell` | scans | scans | A non-blocking hook error on every call and prompt on a machine with no PowerShell, and two scans on Windows with Git Bash |
+| one command that parses under both | scans | scans | Shipped |
+
+What ships is one string that each shell reads differently:
+
+```text
+echo --% >/dev/null;: ' | out-null
+<#'
+"${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; exit $?
+#>
+& "${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; exit $LASTEXITCODE
+```
+
+To a POSIX shell the quote on line 1 runs to line 2, so both are a no-op, and line 3
+runs and exits before the shell reaches the `&`. To PowerShell, `--%` stops parsing
+at the pipe, `<# … #>` hides line 3, and line 5 runs. `exit $LASTEXITCODE` is
+load-bearing: without it `-Command` reports 1 for any failing native command, so
+spill-guard's own refusal on exit 2 would stop blocking. `make launcher` drives the
+string under each shell on each platform, and `hook-harness.yml` drives it through
+the real harness, Windows PowerShell 5.1 and a non-ASCII path included.
+
+**The `PowerShell` tool is read as text and no further.** It is on when Git Bash is
+missing, its payload is `{"command", "description"}`, and `Get-Content planted.txt`
+returned the key to the model on that run. The command string is scanned, and a key
+in it blocks. Its operands need a reader table this repo does not have and the bash
+port cannot segment PowerShell, so every such call defers with a coverage record.
+That is a real gap on that machine, not a clean result, and a read of `.env` through
+it is not refused either. An interactive session was not driven, only `claude -p`,
+and whether the server flag that turns this tool on beside Git Bash is on for any
+account cannot be read from here.
+
 ### The third shape is a timeout, and it is the one this repo configures
 
 `hooks/hooks.json` sets `"timeout": 60` on both entries. Driven 2026-09-03
@@ -2071,7 +2120,7 @@ proceeds.** On both events.
 
 The hook logged its entry, slept, wrote a reason to stderr and exited a chosen
 code. `UserPromptSubmit` ran under a `HOME` of its own holding no credential,
-the route [the CI section](#two-of-the-three-surfaces-cannot-be-driven-by-a-gate)
+the route [the CI section](#which-surfaces-a-gate-can-drive)
 describes. `PreToolUse` needs one, a hook
 there firing only once the model has chosen a tool call, so it ran under
 `--settings` with `--setting-sources project` to keep this machine's own guards
@@ -3365,7 +3414,7 @@ because a zero over an empty corpus, a zero over a corpus nothing adversarial
 is left in, and a zero from a test that quietly stopped running are all the same
 zero from outside.
 
-### Two of the three surfaces cannot be driven by a gate
+### Which surfaces a gate can drive
 
 Every gate above runs the scanner. None of them runs Claude Code, and the
 defects this project exists to prevent are found on the far side of that
@@ -3400,9 +3449,15 @@ mechanism is 25 unauthenticated runs with the `PreToolUse` matcher wired the
 whole time, in which the recording hook fired `UserPromptSubmit` 25 times and
 `PreToolUse` **0** times. Neither alone would settle it; together they do.
 
-**So the prompt surface can be gated and the other two cannot**, and the
-reason is the credential boundary rather than a shortage of effort. The job
-over the one surface is `.github/workflows/prompt-oracle.yml`, which downloads
+**So without a model only the prompt surface can be driven, and the boundary
+turned out to be a model rather than a credential.** Driven 2026-11-04 on 2.1.290:
+with `ANTHROPIC_BASE_URL` at a loopback fake answering one `tool_use`, and a dummy
+key, the real binary fires `PreToolUse`, spawns the real hook and acts on its
+verdict, and the fake reads the result in the next request. That is
+[`hook-harness.yml`](../../.github/workflows/hook-harness.yml), and
+[the shell the harness picks](#the-hook-command-has-to-parse-under-two-shells) is
+what it found. A fake chooses the call the script asks for, so it says nothing
+about what a model would choose. The job over the prompt surface is `.github/workflows/prompt-oracle.yml`, which downloads
 a pinned `claude`, replays every case in the census over the fixture's own
 tree, and compares what the harness spliced against what the census says it
 splices. It is a workflow rather than a `make` gate: the gates run on a fresh

@@ -71,7 +71,8 @@ func TestTheManifestNamesEveryEventThisPackageScans(t *testing.T) {
 }
 
 // The PreToolUse matcher is held to the constants rather than kept in step by
-// hand, which is what ToolRead, ToolBash and ToolGrep are exported for.
+// hand, which is what ToolRead, ToolBash, ToolGrep and ToolPowerShell are
+// exported for.
 func TestThePreToolUseMatcherNamesExactlyTheScannedTools(t *testing.T) {
 	wiring := loadWiring(t)
 
@@ -81,7 +82,7 @@ func TestThePreToolUseMatcherNamesExactlyTheScannedTools(t *testing.T) {
 			"so that this test reads all of it", manifestPath, len(entries))
 	}
 	named := strings.Split(entries[0].Matcher, "|")
-	if diff := setDiff(named, []string{ToolRead, ToolBash, ToolGrep}); diff != "" {
+	if diff := setDiff(named, []string{ToolRead, ToolBash, ToolGrep, ToolPowerShell}); diff != "" {
 		t.Errorf("the PreToolUse matcher %q does not name what toolTargets "+
 			"scans: %s", entries[0].Matcher, diff)
 	}
@@ -123,9 +124,16 @@ func TestEveryEntryRunsTheLauncherWithTheHookSubcommand(t *testing.T) {
 					t.Errorf("%s entry %d runs %q, which is not the launcher",
 						event, i, h.Command)
 				}
-				if !strings.HasSuffix(h.Command, " hook") {
-					t.Errorf("%s entry %d runs %q, which names no subcommand to "+
-						"scan with", event, i, h.Command)
+				// Twice: one spelling is the shell's and one is PowerShell's, and
+				// each runs only under its own.
+				if got := strings.Count(h.Command, `run-spill-guard.cmd" hook`); got != 2 {
+					t.Errorf("%s entry %d names the subcommand %d times in %q, "+
+						"and one spelling per shell is 2", event, i, got, h.Command)
+				}
+				if !strings.Contains(h.Command, `& "${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; exit $LASTEXITCODE`) {
+					t.Errorf("%s entry %d has no PowerShell spelling that keeps the "+
+						"exit status, so a refusal on exit 2 would arrive as 1 and "+
+						"not block: %q", event, i, h.Command)
 				}
 			}
 		}

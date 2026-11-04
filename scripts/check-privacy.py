@@ -83,6 +83,7 @@ SURFACES = {
     ("PreToolUse", "Read"): "the `file_path`, and the file it names",
     ("PreToolUse", "Grep"): "the `pattern`, and the file a `path` names when "
                             "it names one file",
+    ("PreToolUse", "PowerShell"): "the command string, and not the files it opens",
     ("UserPromptSubmit", None): "the prompt, and the files its `@` tokens name",
 }
 
@@ -344,6 +345,11 @@ def payloads(sb, line):
             ("the one file a path names",
              {**GREP, "tool_input": {"pattern": "x", "path": str(sb.planted),
                                      "output_mode": "content"}}),
+        ],
+        ("PreToolUse", "PowerShell"): [
+            ("the command string",
+             {"hook_event_name": "PreToolUse", "tool_name": "PowerShell",
+              "tool_input": {"command": "Write-Output " + shlex.quote(line)}}),
         ],
         ("UserPromptSubmit", None): [
             ("the prompt text", {**prompt, "prompt": "deploy with " + line}),

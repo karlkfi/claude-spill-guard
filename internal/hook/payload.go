@@ -127,6 +127,14 @@ type bashInput struct {
 	Command *string `json:"command"`
 }
 
+// powershellInput is the PowerShell tool's arguments, in the one field this
+// reads. The field name is the input schema Claude Code 2.1.290 sent on
+// windows-latest and the payload a hook received there, not an inference from
+// Bash.
+type powershellInput struct {
+	Command *string `json:"command"`
+}
+
 // grepToolInput is the Grep tool's arguments, as a hook received them from
 // Claude Code 2.1.290 and as that build's input schema names them. The tool's
 // other fields -- `glob`, `type`, `-A`, `head_limit` and the rest -- narrow or

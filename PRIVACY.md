@@ -23,6 +23,7 @@ sandboxed home directory — and fails until this file agrees with all four.
 | `PreToolUse` | `Bash` | the command string, and the files its readers are pointed at |
 | `PreToolUse` | `Read` | the `file_path`, and the file it names |
 | `PreToolUse` | `Grep` | the `pattern`, and the file a `path` names when it names one file |
+| `PreToolUse` | `PowerShell` | the command string, and not the files it opens |
 | `UserPromptSubmit` | every prompt | the prompt, and the files its `@` tokens name |
 
 The binary reads `BASHOPTS`, `CDPATH`, `CLAUDE_CODE_SHELL`,

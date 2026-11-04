@@ -1,0 +1,103 @@
+name: hook-harness
+
+# The one job here that runs the shipped plugin inside a real Claude Code making
+# real tool calls. scripts/check-hook-harness.py has the fake of the Messages API
+# and the argument; this has the three machine states it has to be driven on,
+# which only a runner can be put into. It holds no credential, so a fork's pull
+# request can run it.
+#
+# Not a `make` gate, for the reason prompt-oracle.yml is not: Claude Code is not
+# in the tier `make doctor` requires.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The subject is a third party's binary at a pinned version, so nothing in
+  # this repository moves it. The weekly run catches the download rotting.
+  schedule:
+    - cron: '43 4 * * 1'
+
+env:
+  PYTHON_VERSION: '3.13'
+  PYTHONUTF8: '1'
+  # Pinned for the reason prompt-oracle.yml's is, and read from
+  # https://downloads.claude.ai/claude-code-releases/<version>/manifest.json.
+  CLAUDE_VERSION: '2.1.290'
+  CLAUDE_SHA256_WINDOWS: '467d3dff9d6bbb26ab765284490a200dd713ee5778c55662007240e7e86386b2'
+  CLAUDE_SHA256_LINUX: 'ea38ee1a1f946eea9bc6e97fb912dbe71fc379b25cc605d91b308afa1ca08be7'
+
+jobs:
+  hook-harness:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Fetch the pinned harness and build the binary
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL "https://downloads.claude.ai/claude-code-releases/${CLAUDE_VERSION}/linux-x64/claude" -o "$RUNNER_TEMP/claude"
+          echo "${CLAUDE_SHA256_LINUX}  $RUNNER_TEMP/claude" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/claude"
+          go build -o "$RUNNER_TEMP/spill-guard" ./cmd/spill-guard
+
+      - name: The plugin scans through a real harness
+        if: runner.os != 'Windows'
+        run: python3 scripts/check-hook-harness.py --claude "$RUNNER_TEMP/claude" --binary "$RUNNER_TEMP/spill-guard"
+
+      - name: Fetch the pinned harness and build the binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          curl.exe -fsSL "https://downloads.claude.ai/claude-code-releases/$env:CLAUDE_VERSION/win32-x64/claude.exe" -o "$env:RUNNER_TEMP\claude.exe"
+          if ((Get-FileHash "$env:RUNNER_TEMP\claude.exe" -Algorithm SHA256).Hash -ne $env:CLAUDE_SHA256_WINDOWS) { throw 'the pinned harness did not match its checksum' }
+          go build -o "$env:RUNNER_TEMP\spill-guard.exe" ./cmd/spill-guard
+
+      - name: With Git Bash, the plugin scans through a real harness
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python scripts/check-hook-harness.py --claude "$env:RUNNER_TEMP\claude.exe" --binary "$env:RUNNER_TEMP\spill-guard.exe"
+
+      # Renamed rather than dropped from PATH, because the harness also looks
+      # under C:\Program Files\Git by name. The script asserts the effect, from
+      # which tools the harness offers.
+      - name: Take Git Bash out of reach
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Rename-Item 'C:\Program Files\Git' 'GitHidden'
+
+      - name: With no Git Bash, under PowerShell 7
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python scripts/check-hook-harness.py --no-git-bash --claude "$env:RUNNER_TEMP\claude.exe" --binary "$env:RUNNER_TEMP\spill-guard.exe"
+
+      # What every step above would still print on a script that could not see
+      # the failure. The wiring is the one measured to scan nothing, and the key
+      # has to cross under it.
+      - name: A wiring measured to scan nothing must let the key cross
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python scripts/check-hook-harness.py --no-git-bash --wiring testdata/launcher/hooks-shell-form.json --claude "$env:RUNNER_TEMP\claude.exe" --binary "$env:RUNNER_TEMP\spill-guard.exe"
+
+      # A machine with neither Git for Windows nor PowerShell 7 is where this
+      # started, and Windows PowerShell 5.1 re-encodes differently from 7.
+      - name: Take PowerShell 7 out of reach
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: Rename-Item 'C:\Program Files\PowerShell' 'PowerShellHidden'
+
+      - name: With no Git Bash, under Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: python scripts/check-hook-harness.py --no-git-bash --claude "$env:RUNNER_TEMP\claude.exe" --binary "$env:RUNNER_TEMP\spill-guard.exe"

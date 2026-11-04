@@ -31,7 +31,7 @@ measured.
 | `internal/testvec/` | The loader for `testdata/corpus/vectors/`. Test-only, linked into no binary, and it takes a `TB` rather than `*testing.T` so nothing outside a test imports `testing`. |
 | `rules/` | The shipped ruleset, and [`rules/README.md`](rules/README.md) for what each rule turns on. The JSON is data; `embed.go` beside it is the `go:embed` that compiles it in, which has to live here because the directive reaches only its own directory. |
 | `testdata/corpus/` | The precision corpus. `clean/` must produce nothing; `planted/` must produce exactly one finding each. `vectors/` is neither: it is the credential-shaped strings the unit tests read. `.github/secret_scanning.yml` is what keeps the whole corpus out of GitHub's push protection; spill-guard has no path arm and refuses these files like any other, which is what `self-scan` accounts for. |
-| `scripts/` | The gate scripts CI runs, the two only a workflow can run -- `check-install-scripts.py` in the release workflow, `check-prompt-oracle.py` which re-takes the harness census -- and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
+| `scripts/` | The gate scripts CI runs, the three only a workflow can run -- `check-install-scripts.py` in the release workflow, `check-prompt-oracle.py` which re-takes the harness census, `check-hook-harness.py` which drives the plugin through a real `claude` -- and the backlog tooling. `vendor/` is somebody else's code, grouped by source — [`scripts/README.md`](scripts/README.md) says what came from where, and `make vendor` holds it. |
 | `tools/` | A second Go module, pinning the linters. Never imported by anything that ships. |
 | `.githooks/` | Tracked git hooks. `make hooks` points `core.hooksPath` here. |
 | `hooks/` | Not those. `hooks.json`, the wiring Claude Code reads, and the launcher it names — which resolves the binary and denies when it cannot find one. |
@@ -141,7 +141,7 @@ fire.
 **The matcher is held to the Go constants, not kept in step by hand.**
 `internal/hook/manifest_test.go` reads `hooks/hooks.json` and asserts set
 equality both ways against `PreToolUse`/`UserPromptSubmit` and
-`ToolRead`/`ToolBash`/`ToolGrep`. Containment would only catch the loud direction. A
+`ToolRead`/`ToolBash`/`ToolGrep`/`ToolPowerShell`. Containment would only catch the loud direction. A
 matcher wider than the scanner delivers calls the hook returns clean on, and
 the hook still runs; an event the scanner handles and the manifest omits fires
 nothing at all — no payload, no verdict, no line in the transcript — so the
@@ -153,6 +153,18 @@ events it registered, and the first run of it reported `Hooks (0)` — the
 marketplace entry names a GitHub source, so the install cloned `main`, which
 had no manifests. That failing arm is what makes the `Hooks (2) PreToolUse,
 UserPromptSubmit` beside it worth anything.
+
+**The command in `hooks.json` is one string two shells read differently, and it
+is not simplifiable.** Claude Code runs a hook under PowerShell on Windows with no
+Git Bash, where the plain `"<path>" hook` is a parse error, exit 1, and scans
+nothing with nothing blocking: driven 2026-11-04, a planted key crossed. Exec form
+fails on every platform, a leading `&` blocks every call under bash, and a second
+entry with `shell: powershell` raises a hook error on every call on a Mac. The table
+is in `docs/design/README.md` under *The hook command has to parse under two shells*,
+`make launcher` drives the string under each shell, and `hook-harness.yml` drives it
+through a real `claude` and a loopback fake of the API, which needs no credential.
+The `PowerShell` tool's command string is scanned; its file operands are not, and
+every such call is a coverage record.
 
 The timeout is 60 seconds, matching branch-guard, and **expiry allows the
 call** — driven 2026-09-03 on 2.1.251, both events. The hook is killed, its
@@ -507,7 +519,7 @@ saying which shape arrived. The split is *inside* one server, so membership
 cannot be decided per server or per protocol either — a per-server rule would
 owe these two tools opposite answers — which is this repo's rejection of the
 payload-shape test arriving from a new direction. And stoppable is not scanned:
-`hooks.json` matches `Read|Bash|Grep`, which no `mcp__…` name matches, so the hook
+`hooks.json` matches `Read|Bash|Grep|PowerShell`, which no `mcp__…` name matches, so the hook
 is not powerless on that surface, it is not pointed at it. The design states
 that rather than fixing it.
 

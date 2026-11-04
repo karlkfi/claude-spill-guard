@@ -89,6 +89,14 @@ DECLARED = {
             "a workflow rather than a make gate because Claude Code is not in "
             "the tier `make doctor` requires",
     },
+    ".github/workflows/hook-harness.yml": {
+        "hook-harness":
+            "drives the shipped plugin through a pinned `claude` and a loopback "
+            "fake of the Messages API, with Git Bash present and out of reach, "
+            "which is the only thing here that reaches the shell the harness "
+            "picks; a workflow because Claude Code is not in the tier `make "
+            "doctor` requires",
+    },
     ".github/workflows/release-note.yml": {
         "release-note":
             "fails a pull request whose body has no `release-note` block, so a "
