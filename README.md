@@ -178,8 +178,10 @@ than findings, and after 505 of those 509 the session got a clean call through
 within four attempts by reading the same tree another way. The refusal was not
 withholding the bytes. It charged a turn.
 
-A broken install still blocks. A missing binary is refused by the launcher, and a
-payload the binary cannot decode exits 2.
+An install with no binary still blocks, because the launcher refuses the call. So
+does a payload the binary cannot decode, which exits 2. The launcher itself is the
+exception: if it is missing, the hook command exits 127 and the call goes through
+with a hook error on record.
 
 ## What it costs
 
