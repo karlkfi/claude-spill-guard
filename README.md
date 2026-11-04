@@ -1,7 +1,7 @@
 # spill-guard
 
-**A Claude Code hook that refuses a call when it would send a credential to the
-API.**
+**A Claude Code hook that blocks secrets and US Social Security numbers before a
+call sends them to the API.**
 
 [![tests](https://img.shields.io/github/actions/workflow/status/karlkfi/claude-spill-guard/tests.yml?branch=main&label=tests)](https://github.com/karlkfi/claude-spill-guard/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/github/license/karlkfi/claude-spill-guard.svg)](LICENSE) [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-7e57c2)](#install)
 
@@ -61,11 +61,13 @@ guarded.
 On a tool call Claude gets the refusal in place of the result, so the way
 forward lands where the command gets rewritten.
 
-**[PENDING, rules stream: the final rule list and the PII claim.]** The draft
-sentence, true of v0.6.1: it matches ten credential shapes (AWS key IDs, GitHub
-tokens of both kinds, Slack tokens and webhooks, Stripe live keys, OpenAI and
-Google API keys, PEM private keys and JWTs), and the four numeric PII rules ship
-disabled. [`rules/README.md`](rules/README.md) has what keeps each one quiet.
+It matches AWS key IDs, GitHub tokens of both kinds, Slack tokens and webhooks,
+Stripe live keys, OpenAI, Anthropic and Google API keys, PEM private keys and
+JWTs. It also matches US Social Security numbers, in one narrow form: written
+`###-##-####`, with `ssn` or `social security` within 64 bytes before. Nine bare
+digits do not match, and neither does a label after the number. Payment cards,
+Chinese resident IDs and public IPv4 addresses ship disabled.
+[`rules/README.md`](rules/README.md) has what keeps each one quiet.
 
 ## Install
 
@@ -215,8 +217,8 @@ pii-postal-code    169     pii-brn-kr          3
 the amdgpu DKMS version string `1:6.16.13.30300400-2341068`.
 
 Numeric PII patterns cannot be made precise by regex alone, so precision here
-comes from checksum validators, entropy floors and placeholder checks, with the
-numeric family shipping off. `make precision` holds that: the shipped rules must
+comes from checksum validators, context gating, entropy floors and placeholder
+checks, and a numeric rule that cannot clear that ships off. `make precision` holds that: the shipped rules must
 report zero findings on [`testdata/corpus/clean/`](testdata/corpus/) and exactly
 one on each planted fixture. The clean corpus is adversarial, since on 2026-11-03
 the old `pii-postal-code` pattern reported 31 matches on it and `pii-phone-cn`

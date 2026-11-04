@@ -1,12 +1,12 @@
 {
   "name": "spill-guard",
   "owner": { "name": "karlkfi", "url": "https://github.com/karlkfi" },
-  "description": "Keeps secrets and PII from reaching the API through a Claude Code session.",
+  "description": "Blocks secrets and US Social Security numbers before a Claude Code session sends them to the API.",
   "plugins": [
     {
       "name": "spill-guard",
       "version": "0.6.1",
-      "description": "Blocks secrets and PII before they reach the API: scans the prompt, a Read path, a Bash command, and the files each one would open, then denies the call rather than letting it cross.",
+      "description": "Blocks secrets and US Social Security numbers before they reach the API: scans the prompt, a Read path, a Bash command, and the files each one would open, then denies the call rather than letting it cross.",
       "author": { "name": "Karl Isenberg" },
       "source": {
         "source": "github",
