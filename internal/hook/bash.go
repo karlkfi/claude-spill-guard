@@ -359,7 +359,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 						continue
 					}
 					note(unresolved{path, fmt.Errorf("reading a file this "+
-						"command would send: %w", err)})
+						"command would send: %w", osCause(err))})
 					continue
 				}
 				// Only a regular file. os.ReadFile on a fifo blocks until
@@ -458,7 +458,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 				buf, err := os.ReadFile(path)
 				if err != nil {
 					note(unresolved{path, fmt.Errorf("reading a file this "+
-						"command would send: %w", err)})
+						"command would send: %w", osCause(err))})
 					continue
 				}
 				targets = append(targets, target{path, buf})

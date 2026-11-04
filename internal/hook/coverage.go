@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -72,6 +73,35 @@ type unresolved struct {
 
 func (u unresolved) Error() string { return u.err.Error() }
 func (u unresolved) Unwrap() error { return u.err }
+
+// osCause is why an os call failed, without the path a *fs.PathError's text
+// carries, so that wrapping one into a reason does not name the token.
+func osCause(err error) error {
+	var p *fs.PathError
+	if errors.As(err, &p) {
+		return p.Err
+	}
+	return err
+}
+
+// withheldLabel stands in for a buffer's label when the label itself matches.
+const withheldLabel = "a path a rule matches"
+
+// named is what a verdict calls a buffer. A glob can open a file whose name is a
+// key the model has never seen, so printing the label as it is would be how that
+// key reached the API. Fail closed, as withheld does, but a control character
+// alone is not withheld here: %q escapes it, and a reader needs the name.
+func named(label string) string {
+	set, err := rules.Load(embedded.Shipped)
+	if err != nil {
+		return withheldLabel
+	}
+	got, err := scan.Buffer("", []byte(label), set)
+	if err != nil || len(got.Findings) > 0 || got.Skipped != scan.Scanned {
+		return withheldLabel
+	}
+	return label
+}
 
 // partlyDecoded is a coverage failure on a call some of which was read: label
 // names the first buffer that was decoded and matched, and failed() says so
@@ -220,9 +250,9 @@ func appendCoverage(c coverage) {
 	if fi, err := os.Stat(path); err == nil && fi.Size() >= coverageCap {
 		_ = os.Rename(path, path+".1")
 	}
-	// 0600 because the reasons name paths on this machine. They carry no
-	// matched value -- a coverage failure is by definition a buffer nothing
-	// read -- but a path is still somebody's directory layout.
+	// 0600 because the operands and the cwd name paths on this machine. They
+	// carry no matched value -- withheld drops one -- but a path is still
+	// somebody's directory layout.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
