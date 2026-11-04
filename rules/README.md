@@ -688,6 +688,7 @@ files over 64 MiB skipped.
 | public applications, 3 | 85,729 | 0 | 11 |
 | **Those eight** | **395,516** | **13, 0.003%** | **332, 0.08%** |
 | public PII tooling, 4 | 5,724 | 17 | 16 |
+| public projects where an SSN field belongs, 17 | 60,637 | 81, 0.13% | 1 |
 
 The public projects were shallow clones picked to be adversarial, so their rates do
 not generalise. The last reading is the traffic: 5.00 GB of this machine's Claude
@@ -701,11 +702,23 @@ hold, and the label gate cannot help, because a fixture is labelled exactly as a
 card would be: `credit_card('…')` holds `card`. Each of those files would be a denied
 `Read`, and `Read` has no override. The clean corpus reads 0 on this rule throughout,
 which is why that zero carries no weight. [Q33](../docs/queue/Q33.md) has the rest.
-**`us-ssn` hits are fixtures too**, format tests and docs mostly. Its rate is what
-kept it on the table.
+
+**`us-ssn` fires where an SSN field lives, at a rate the 0.003% does not show.** No
+population behind that figure holds such a project, so the table's last row was
+swept after Karl's choice: HR, health records, tax, government identity and
+validators. `18F/identity-idp` reads 39 of 4,814 files, 0.81%,
+`codeforamerica/vita-min` 20 of 4,359, 0.46%, and 8 of the 17 read none. The mechanism
+is `payment-card`'s: a fixture is labelled as a real record is, and 72 of the 81 have
+a test-, example- or docs-shaped path. Each is a denied `Read`, with no override, for
+a session working there. The peak is 44x below `active_merchant`. By the harness's
+flags, not driven through a validator, 45 of the 81 hold nothing but placeholder
+values no check drops, and so do all 10 in `~/go/pkg/mod`;
+[Q242](../docs/queue/Q242.md) has that.
 
 What this leaves out: `~/Documents`, `~/Downloads` and mail, deliberately, so recall
-on real values is unmeasured; non-English text; and exports beyond those data sets.
+on real values is unmeasured; non-English text; exports beyond those data sets; and
+four more projects of that last kind, `vets-api`, `vets-website`, `mymove` and
+`moov-node`, whose clones returned `Repository not found`.
 
 **The other half of the decision is cost, because no prefilter gates this family.**
 One thread, 20,000 real text files, 312 MB, minimum of three, on `efac304`, on a

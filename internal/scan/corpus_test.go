@@ -204,11 +204,11 @@ var planted = map[string]string{
 	"slack-webhook-url.yaml":      "slack-webhook-url",
 	"stripe-live-secret-key.env":  "stripe-live-secret-key",
 	"openai-api-key.py":           "openai-api-key",
-	// Two, because the rule has two prefixes and either alone could be deleted
-	// with the corpus still reading green.
 	// The one numeric PII rule that ships on. Its value is in an area the
 	// Social Security Administration has never issued.
-	"us-ssn.txt":                 "us-ssn",
+	"us-ssn.txt": "us-ssn",
+	// Two, because the rule has two prefixes and either alone could be deleted
+	// with the corpus still reading green.
 	"anthropic-api-key.env":      "anthropic-api-key",
 	"anthropic-admin-api-key.sh": "anthropic-api-key",
 	"google-api-key.js":          "google-api-key",
