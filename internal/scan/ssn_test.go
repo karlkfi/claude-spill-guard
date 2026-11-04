@@ -27,6 +27,8 @@ func TestUSSSNShapes(t *testing.T) {
 		{"a snake_case key", "patient_ssn: " + ssn, 1},
 		{"the long label, two words ahead", "Social Security Number: " + ssn, 1},
 		{"YAML, on the line below its key", "ssn:\n  " + ssn, 1},
+		{"the long label in snake_case", "social_security_number = " + ssn, 1},
+		{"the long label in camelCase", `{"socialSecurityNumber": "` + ssn + `"}`, 1},
 		{"no label", "reference " + ssn, 0},
 		{"the label after the value", ssn + " is the ssn", 0},
 		{"the label further back than the window", "ssn " + far + " " + ssn, 0},

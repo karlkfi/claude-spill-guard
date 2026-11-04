@@ -657,12 +657,17 @@ be if anyone turned them on:
 | `ipv4-public` | `reserved-range` | off |
 
 **What `us-ssn` finds is narrow, and that is the sentence to repeat.** A value
-written `###-##-####`, area below 900, with `ssn`, `social security`,
-`social-security` or `socialsecurity` in the 64 bytes before it, in any case. A bare
-nine digits is not read, because `\b\d{3}-?\d{2}-?\d{4}\b` is an order number, a
+written `###-##-####`, area below 900, with `ssn` or `social security` in the 64
+bytes before it, in any case and spelled with a space, a hyphen, an underscore or
+nothing. A bare nine digits is not read, because `\b\d{3}-?\d{2}-?\d{4}\b` is an order number, a
 phone number and a serial. Neither is a label after the value, or a column header
 further back than the window, so most rows of a CSV go unreported.
 `TestUSSSNShapes` holds each of those.
+
+The snake_case and camelCase field names are in the list because a value under
+`social_security_number` or `socialSecurityNumber` went unreported, the second past
+the label's own word boundary. Over the populations below, each of the two labels
+newly fires on nothing but the control written to test it.
 
 **Karl chose `us-ssn` alone on 2026-11-03, on this reading.** Nothing re-runs it, and
 it is a reading of how often each rule fires on clean text rather than a precision

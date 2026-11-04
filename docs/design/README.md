@@ -1224,7 +1224,7 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
   "regex": "\\b([0-8]\\d{2}-\\d{2}-\\d{4})\\b",
   "group": 1,
   "keywords": [],
-  "labels": ["ssn", "social security", "social-security", "socialsecurity"],
+  "labels": ["ssn", "social security", "social-security", "social_security", "socialsecurity", "socialsecuritynumber"],
   "validators": ["context-label"],
   "enabled": true
 }
