@@ -6,7 +6,7 @@
     {
       "name": "spill-guard",
       "version": "0.6.1",
-      "description": "Blocks secrets and US Social Security numbers before they reach the API: scans the prompt, a Read path, a Bash command, and the files each one would open, then denies the call rather than letting it cross.",
+      "description": "Blocks secrets and US Social Security numbers before they reach the API: scans the prompt, a Read path, a Bash command, and the files each one would open, then denies a call that matches rather than letting it cross.",
       "author": { "name": "Karl Isenberg" },
       "source": {
         "source": "github",

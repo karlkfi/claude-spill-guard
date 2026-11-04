@@ -114,7 +114,8 @@ PowerShell command opens. Those calls are recorded.
 ### Check that the hook is live
 
 A scanner that enforces nothing and a session with no secrets in it produce the
-same silence, so check. This needs no secret:
+same silence, so check. This needs no secret. Make a new folder with an empty
+`.env` in it and start `claude` there. On macOS and Linux:
 
 ```bash
 mkdir spill-guard-check && cd spill-guard-check && touch .env && claude
@@ -133,7 +134,7 @@ the `Read` half blocks, for the reason under the plugin install.
 **A key you plant yourself will probably come back allowed**, with nothing said.
 AWS's documented example key and anything else ending in `EXAMPLE` are refused
 as placeholders, and `AKIA` plus sixteen `X`s falls below the entropy floor.
-`AKIA` plus sixteen random characters is blocked. The values you reach for when
+`AKIA` plus sixteen random uppercase letters and digits is blocked. The values you reach for when
 testing are the ones the precision work exists to ignore, so that silence is the
 scanner working rather than failing open. `spill-guard selftest` is the check to
 reach for.
@@ -207,16 +208,8 @@ Your machine will differ.
 
 This replaces `coo-quack/sensitive-canary`, a Node plugin that audits clean and
 is safe to install. Its ruleset, run over 257 real text files from an infrastructure repo,
-produced **5,679 matches across 9 rules, all of them PII noise and not one
-credential**. 71 of the 257 files flagged, which is 27.6%.
-
-```
-pii-phone-cn      2533     pii-postal-cn       8
-pii-ipv4-public   1522     pii-phone-de        4
-pii-phone-kr      1441     pii-steuer-id-de    3
-pii-postal-code    169     pii-brn-kr          3
-                           pii-phone-it        1
-```
+produced **more than 5,600 matches across 9 rules, all of them PII noise and not
+one credential**. 71 of the 257 files flagged, which is 27.6%.
 
 `0400-2341068` was flagged 268 times as a Chinese phone number. It is a slice of
 the amdgpu DKMS version string `1:6.16.13.30300400-2341068`.

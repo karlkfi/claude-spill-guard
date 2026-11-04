@@ -25,7 +25,7 @@ took a path nobody intended.
 
 Either script installs a single binary, to `~/.local/bin`, or to
 `%LOCALAPPDATA%\spill-guard\bin` on Windows, and writes nothing else. Pass `--dir`
-to put it somewhere else.
+(`-Dir` to `install.ps1`) to put it somewhere else.
 
 The install scripts are themselves listed in `checksums.txt`, so the script you
 fetched in order to read it can also be checked:
@@ -46,8 +46,9 @@ has the manual check that closes that, after a draft is published.
 
 ## Without the install script
 
-`go install` needs a Go toolchain and no verifier, and the module checksum
-database does the verifying:
+`go install` needs a Go toolchain and no verifier. The module checksum database
+checks what it downloads, which is a weaker guarantee than the signature the
+script checks:
 
 ```bash
 go install github.com/karlkfi/claude-spill-guard/cmd/spill-guard@latest
