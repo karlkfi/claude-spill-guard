@@ -212,6 +212,79 @@ func TestAFindingBlocksWhereAnOperandCouldNotBeResolved(t *testing.T) {
 	}
 }
 
+// A buffer nothing decoded does not hide a finding beside it either. Before Q244
+// every arm here exited 0 with a record about the other buffer and no verdict,
+// and a block over the same key with no such buffer beside it was the control.
+func TestAFindingBlocksBesideABufferNothingDecoded(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string][]byte{
+		"key.txt":     []byte("id=" + secret + "\n"),
+		"notes.utf32": {0xFF, 0xFE, 0x00, 0x00, 'h', 0, 0, 0},
+		"notes.utf16": {0xFF, 0xFE, 'h', 0, 0, 0, 'i', 0},
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prompt := func(text string) string {
+		return `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+			`,"prompt":` + quote(t, text) + `}`
+	}
+	keyfile := filepath.Join(dir, "key.txt")
+	for _, tc := range []struct {
+		name, payload, label, unread string
+	}{
+		{"a file ahead of it", bashCall(t, "cat key.txt notes.utf32", dir), keyfile, "notes.utf32"},
+		{"a file behind it", bashCall(t, "cat notes.utf32 key.txt", dir), keyfile, "notes.utf32"},
+		{"a file ahead of a UTF-16 mark that decodes to binary",
+			bashCall(t, "cat key.txt notes.utf16", dir), keyfile, "notes.utf16"},
+		{"the command string", bashCall(t, "echo "+secret+"; cat notes.utf32", dir), commandLabel, "notes.utf32"},
+		{"an @ file ahead of it", prompt("see @key.txt and @notes.utf32"), keyfile, "notes.utf32"},
+		{"an @ file behind it", prompt("see @notes.utf32 and @key.txt"), keyfile, "notes.utf32"},
+		{"the prompt text", prompt("here " + secret + " and @notes.utf32"), promptLabel, "notes.utf32"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := drive(t, tc.payload)
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 with a block (stderr: %q)", code, stderr)
+			}
+			if stdout == "" {
+				t.Fatal("no verdict: the buffer nothing decoded hid the finding")
+			}
+			reason := reasonOf(t, stdout)
+			if want := `"aws-access-key-id" at byte`; !strings.Contains(reason, want) ||
+				!strings.Contains(reason, fmt.Sprintf("%q", tc.label)) {
+				t.Errorf("reason = %q, want %s in %q", reason, want, tc.label)
+			}
+			notice := reason
+			if m, ok := decision(t, stdout)["systemMessage"].(string); ok {
+				notice = m
+			}
+			if !strings.Contains(notice, tc.unread) || !strings.Contains(notice, "nothing here decoded") {
+				t.Errorf("the verdict does not name the unread buffer %s: %q", tc.unread, stdout)
+			}
+			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+				t.Error("the verdict carries the value")
+			}
+			if got := readCoverage(t); len(got) != 0 {
+				t.Errorf("a block wrote %d coverage record(s): %+v", len(got), got)
+			}
+		})
+	}
+
+	// The hatch reaches this like any other block, and still names the buffer.
+	t.Run("the override asks", func(t *testing.T) {
+		_, stdout, _ := drive(t, bashCall(t, `SPILL_GUARD_OVERRIDE="a fixture" cat key.txt notes.utf32`, dir))
+		if got := verdictOf(t, stdout); got != "ask" {
+			t.Errorf("permissionDecision = %q, want ask", got)
+		}
+		if m, _ := decision(t, stdout)["systemMessage"].(string); !strings.Contains(m, "notes.utf32") {
+			t.Errorf("the confirmation does not name the unread buffer: %q", stdout)
+		}
+	})
+}
+
 // An operand the scanner skips is withheld as well. A NUL or a byte-order mark
 // sends the buffer down the binary skip, where it yields no findings, so
 // checking findings alone kept the key. argv cannot carry a NUL, so this is

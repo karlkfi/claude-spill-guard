@@ -158,9 +158,11 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// `cd`. It is 94.3% of what this hook used to block and it defers.
 		return abstain(stdout, stderr, call, event, failed(err), operandOf(err))
 	}
-	// Ahead of the findings, because found() says what the matches in this call
-	// are, and a buffer nothing opened makes that a claim about coverage rather
-	// than a report of one.
+	// Ahead of the skips, because a buffer nothing decoded is no reason to wave
+	// through one that matched. found() says what the matches in this call
+	// are, so every buffer it does not reach goes in the notice, whichever way
+	// that buffer would have gone alone. No coverage record, for the reason the
+	// walk's failure above writes none.
 	//
 	// Through decide, not deny: every other block this package writes can be
 	// downgraded to a confirmation, and one that cannot is a class of refusal
@@ -171,11 +173,14 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 	// carry picks for the event. A multi-buffer call is where that matters: a
 	// Bash segment naming a .env and a .png blocks on the first, and without
 	// this the person never learns nothing opened the second.
-	blocking, allowed := partition(skips)
-	notice := ""
-	if len(allowed) > 0 {
-		notice = alsoUnread(allowed)
+	if len(findings) > 0 {
+		notice := ""
+		if len(skips) > 0 {
+			notice = alsoUnread(skips)
+		}
+		return decide(stdout, stderr, call, event, overridden, found(findings), notice)
 	}
+	blocking, allowed := partition(skips)
 	if len(blocking) > 0 {
 		// A buffer that declared an encoding nothing here decodes. Coverage,
 		// not content, so it defers -- and the allowed skips beside it still
@@ -183,9 +188,6 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 		// act on.
 		return abstain(stdout, stderr, call, event, unread(blocking),
 			skippedOperands(blocking), allowed...)
-	}
-	if len(findings) > 0 {
-		return decide(stdout, stderr, call, event, overridden, found(findings), notice)
 	}
 	// An allowed skip, and nothing else to say. The design's step 6 has every
 	// path that declines to read name its reason and the caller carry that as

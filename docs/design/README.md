@@ -1386,6 +1386,14 @@ defers. Until Q204 the first failure returned no buffers at all, so `echo <a
 key>; cat $X` and a key typed beside an `@` token with no working directory
 both exited 0 with no verdict.
 
+A buffer nothing decoded is the same case. Until Q244 a declared encoding this
+build cannot read deferred ahead of the findings, so `cat key.txt notes.utf32`,
+`echo <a key>; cat notes.utf32` and a prompt holding a key beside
+`@notes.utf32` all exited 0 with no verdict. They block now, and the notice names
+the unread buffer. They write no coverage record, as with Q204: the record exists
+because a deferred call is quiet to the person, and this one is not. A scan past
+its budget still discards what it found, which is Q227.
+
 **A payload that does not decode still blocks on exit 2.** Not JSON, no event,
 an event this binary cannot withhold at. That is the hook being invoked wrongly
 rather than a scanner failing to read something, and it is the signal that says

@@ -145,7 +145,8 @@ func Summarize(args []string, stdout, stderr io.Writer) int {
 	}
 	// It covers every build whose records are in the log, so no arm's wording
 	// fits: an older record's reason can claim less was read than was. And it
-	// rules out no match, for Q227's overrun and Q244's undecodable buffer.
+	// rules out no match: Q227's overrun discards one, and until Q244 a buffer
+	// nothing decoded did too.
 	fmt.Fprint(stdout, "\nEach of these is a call that proceeded with no verdict, "+
 		"because some or all of what it might send went unread. A record names no "+
 		"finding and rules none out.\n")
