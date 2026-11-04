@@ -1,5 +1,5 @@
-// Command spill-guard scans local content for secrets and PII before a Claude
-// Code session can send it to the API.
+// Command spill-guard scans local content for secrets and US Social Security
+// numbers before a Claude Code session can send it to the API.
 //
 // The design is in docs/design/README.md. `hook`, `filter`, `selftest`,
 // `coverage` and `version` are implemented; the scan and rules subcommands land with the rows

@@ -1,7 +1,7 @@
 # Design
 
-spill-guard stops secrets and PII from reaching the Anthropic API through a
-Claude Code session. Detection is local heuristics only — a static Go binary,
+spill-guard stops secrets and US Social Security numbers from reaching the
+Anthropic API through a Claude Code session. Detection is local heuristics only — a static Go binary,
 stdlib `regexp`, no network calls for any reason.
 
 This directory holds the design and the reasoning behind it:

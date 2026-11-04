@@ -1,7 +1,7 @@
 # Working in this repo
 
-spill-guard is a Claude Code hook that stops secrets and PII from reaching the
-API through a session. It is a static Go binary with an empty supply chain.
+spill-guard is a Claude Code hook that stops secrets and US Social Security
+numbers from reaching the API through a session. It is a static Go binary with an empty supply chain.
 
 The design is in [`docs/design/`](docs/design/) and the scanner is not built
 yet. Read `docs/design/README.md` before writing code; read
