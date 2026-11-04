@@ -243,6 +243,9 @@ func TestAFindingBlocksBesideABufferNothingDecoded(t *testing.T) {
 		{"an @ file ahead of it", prompt("see @key.txt and @notes.utf32"), keyfile, "notes.utf32"},
 		{"an @ file behind it", prompt("see @notes.utf32 and @key.txt"), keyfile, "notes.utf32"},
 		{"the prompt text", prompt("here " + secret + " and @notes.utf32"), promptLabel, "notes.utf32"},
+		{"a Grep pattern", `{"hook_event_name":"PreToolUse","tool_name":"Grep","cwd":` + quote(t, dir) +
+			`,"tool_input":{"pattern":` + quote(t, secret) + `,"path":"notes.utf32","output_mode":"content"}}`,
+			patternLabel, "notes.utf32"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, tc.payload)

@@ -259,9 +259,9 @@ func found(findings []scan.Finding) string {
 //
 // It is not failed(), which reports a scan that stopped short: here the walk
 // finished and names each buffer, and a verdict that misreports its own coverage
-// is the shape this package exists to refuse. It is not found() either, whose sentence names
-// the matches in what this call would have sent -- true only of a call every
-// buffer of which was read, which is why hook.go writes this one ahead of it.
+// is the shape this package exists to refuse. It is not found() either, whose
+// sentence names the matches in what this call would have sent: this is the call
+// where nothing matched, and where one did, alsoUnread carries these buffers.
 //
 // The label comes out of the call, so %q escapes it; the reason is this
 // package's own fixed text and is not escaped.

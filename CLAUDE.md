@@ -636,8 +636,8 @@ rules; this has no opinion to spend on them, because it could not read the
 call. **A gap does not hide a finding beside it**: the walk goes on past an
 operand it cannot settle, what it did read is scanned, and a match there
 blocks (Q204), naming a buffer nothing decoded beside it in the notice and
-writing no record (Q244). A scan past its budget is the exception, which is
-Q227.
+writing no record (Q244). The exceptions are a scan past its budget (Q227) and
+a `Grep` pattern beside a path that will not resolve (Q245).
 
 Why, measured over the week to 2026-09-05 across 100 sessions on one machine:
 
