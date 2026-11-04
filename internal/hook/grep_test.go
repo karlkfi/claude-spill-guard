@@ -3,6 +3,7 @@ package hook
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -404,5 +405,95 @@ func TestTheGrepToolPatternIsScanned(t *testing.T) {
 		"pattern": key, "path": dir, "output_mode": "files_with_matches"}))
 	if !strings.Contains(reason, `"aws-access-key-id"`) || !strings.Contains(reason, patternLabel) {
 		t.Errorf("the reason does not name the rule in the pattern: %q", reason)
+	}
+}
+
+// A pattern is text the call carries whatever its path does, so one that will
+// not settle does not hide a key there. Before Q245 every arm here exited 0 with
+// no verdict and one record, since the failure returned no buffers.
+func TestTheGrepToolPatternIsScannedWhereItsPathCouldNotBeSettled(t *testing.T) {
+	dir := t.TempDir()
+	shut := filepath.Join(dir, "shut.txt")
+	if err := os.WriteFile(shut, []byte("x\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	// Root opens a 0o000 file and Windows ignores the mode, so the read succeeds
+	// and that arm is not the one this table means.
+	shutOpens := runtime.GOOS == "windows" || os.Geteuid() == 0
+	for _, tc := range []struct {
+		name, cwd, path string
+	}{
+		{"a relative path with no cwd", "", "notes.txt"},
+		{"no path and no cwd", "", ""},
+		{"a path that will not stat", dir, filepath.Join(dir, "a\x00b")},
+		{"something neither a file nor a directory", dir, os.DevNull},
+		{"a file that will not open", dir, shut},
+	} {
+		call := func(pattern string) string {
+			fields := map[string]string{"pattern": pattern, "output_mode": "content"}
+			if tc.path != "" {
+				fields["path"] = tc.path
+			}
+			return grepToolCall(t, tc.cwd, fields)
+		}
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.path == shut && shutOpens {
+				t.Skip("nothing stops this file being opened here")
+			}
+			code, stdout, stderr := drive(t, call(secret))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 with a block (stderr: %q)", code, stderr)
+			}
+			if stdout == "" {
+				t.Fatalf("no verdict: the path hid the pattern (stderr: %q)", stderr)
+			}
+			if got := verdictOf(t, stdout); got != "deny" {
+				t.Fatalf("permissionDecision = %q, want deny", got)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, `"aws-access-key-id"`) || !strings.Contains(reason, patternLabel) {
+				t.Errorf("the reason does not name the rule in the pattern: %q", reason)
+			}
+			if m, _ := decision(t, stdout)["systemMessage"].(string); !strings.Contains(m, partlyRead) {
+				t.Errorf("the verdict does not say the path went unread: %q", stdout)
+			}
+			if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+				t.Error("the verdict carries the value")
+			}
+			if got := readCoverage(t); len(got) != 0 {
+				t.Errorf("a block wrote %d coverage record(s): %+v", len(got), got)
+			}
+		})
+		t.Run(tc.name+", nothing in the pattern", func(t *testing.T) {
+			if tc.path == shut && shutOpens {
+				t.Skip("nothing stops this file being opened here")
+			}
+			code, stdout, stderr := drive(t, call("foo"))
+			reason := deferred(t, code, stdout, stderr)
+			if !strings.Contains(reason, "Part of this call was read and matched no rule") {
+				t.Errorf("coverage reason = %q, want it to say the pattern was read", reason)
+			}
+			if got := readCoverage(t); len(got) != 1 {
+				t.Errorf("wrote %d coverage record(s), want 1: %+v", len(got), got)
+			}
+		})
+	}
+}
+
+// A refusal stops the call for what it would do, so a key beside one needs no
+// match to stop it, and the reason stays the refusal's.
+func TestTheGrepToolRefusalsStandBesideAKeyInThePattern(t *testing.T) {
+	dir := grepTree(t)
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("A=b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{"a directory": dir, "a guarded path": ".env"} {
+		t.Run(name, func(t *testing.T) {
+			reason := denyReason(t, grepToolCall(t, dir, map[string]string{
+				"pattern": secret, "path": path, "output_mode": "content"}))
+			if strings.Contains(reason, "aws-access-key-id") || strings.Contains(reason, secret) {
+				t.Errorf("the reason is not the refusal's: %q", reason)
+			}
+		})
 	}
 }

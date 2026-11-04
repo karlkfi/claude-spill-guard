@@ -1391,9 +1391,9 @@ build cannot read deferred ahead of the findings, so `cat key.txt notes.utf32`,
 `echo <a key>; cat notes.utf32` and a prompt holding a key beside
 `@notes.utf32` all exited 0 with no verdict. They block now, and the notice names
 the unread buffer. They write no coverage record, as with Q204: the record exists
-because a deferred call is quiet to the person, and this one is not. A scan past
-its budget still discards what it found, which is Q227, and a `Grep` pattern
-beside a path that will not resolve is not read at all, which is Q245.
+because a deferred call is quiet to the person, and this one is not. Until Q245
+a `Grep` pattern beside a path that will not resolve was not read at all, the
+same case. A scan past its budget still discards what it found, which is Q227.
 
 **A payload that does not decode still blocks on exit 2.** Not JSON, no event,
 an event this binary cannot withhold at. That is the hook being invoked wrongly

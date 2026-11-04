@@ -434,7 +434,9 @@ func allFiltered(command string) bool {
 // returned a path list.
 //
 // The pattern is scanned, as a Bash command string is: it is text the call
-// carries, and a key typed into one is a key in the transcript.
+// carries, and a key typed into one is a key in the transcript. So it comes back
+// beside a path that will not settle, as a command string does beside an operand
+// that will not. A refusal returns nothing, since it blocks whatever is here.
 func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 	var targets []target
 	if in.Pattern != nil {
@@ -452,14 +454,14 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 		path = expandTilde(*in.Path)
 		if !filepath.IsAbs(path) {
 			if cwd == "" {
-				return nil, errors.New("the Grep call names a relative path and " +
+				return targets, errors.New("the Grep call names a relative path and " +
 					"the payload carries no working directory to resolve it against")
 			}
 			path = filepath.Join(cwd, path)
 		}
 	}
 	if path == "" {
-		return nil, errors.New("the Grep call names no path and the payload " +
+		return targets, errors.New("the Grep call names no path and the payload " +
 			"carries no working directory, so where it searches is unknown")
 	}
 	info, err := os.Stat(path)
@@ -468,13 +470,13 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 			// Nothing there sends nothing, as for a Read of an absent file.
 			return targets, nil
 		}
-		return nil, fmt.Errorf("reading the path this Grep call searches: %w", err)
+		return targets, fmt.Errorf("reading the path this Grep call searches: %w", err)
 	}
 	if info.IsDir() {
 		return nil, &grepToolRefusal{}
 	}
 	if !info.Mode().IsRegular() {
-		return nil, errors.New("the Grep call names something that is neither " +
+		return targets, errors.New("the Grep call names something that is neither " +
 			"a file nor a directory, so what it would send cannot be read here")
 	}
 	if class := guardedClass(path); class != "" {
@@ -482,7 +484,7 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 	}
 	buf, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading the file this Grep call searches: %w", err)
+		return targets, fmt.Errorf("reading the file this Grep call searches: %w", err)
 	}
 	return append(targets, target{path, buf}), nil
 }
