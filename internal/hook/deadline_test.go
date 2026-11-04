@@ -180,17 +180,19 @@ func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 // a short budget over a real scan is a race the match loop keeps winning as it
 // gets faster (Q232). The deadline arrives from inside the scan, so whatever was
 // settled ahead of that buffer is settled and nothing behind it can be.
+//
+// The scan's goroutine stays stalled until the test binary exits. Letting it go
+// would have it open a file while the test's temporary directory is removed,
+// which Windows refuses.
 func overrunAt(t *testing.T, label, payload string) (code int, stdout, stderr string) {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	ctx, expire := context.WithCancel(context.Background())
 	defer expire()
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
 	pace := func(at string) {
 		if filepath.Base(at) == label {
 			expire()
-			<-release
+			select {}
 		}
 	}
 	var out, errs bytes.Buffer
