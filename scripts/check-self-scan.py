@@ -87,9 +87,6 @@ REGIONS = {
 # here is a decision somebody took, not a note that the file was already like
 # this when the list was written.
 ALLOWED = {
-    "README.md":
-        "the published canary the install check tells a reader to paste. It "
-        "has to match: the whole check is that the prompt gets blocked",
     "testdata/corpus/README.md":
         "prose about the canary values, which quotes them to explain what "
         "makes each one inert",

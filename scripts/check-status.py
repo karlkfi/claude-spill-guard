@@ -198,15 +198,15 @@ def prose(f):
     A bare "no" invites the reading that nothing is written. What is true is
     narrower and more useful: the packages exist and the binary cannot reach
     them, which is a wiring statement rather than an effort one.
+
+    Packages are named only when one is unreached. Nobody installing this needs
+    a list of internal directories, and the check still reddens on the fact
+    that matters, because an unreached package changes this sentence.
     """
     commands = ", ".join(f"`{c}`" for c in f["commands"]) or "nothing"
-    if not f["packages"]:
-        return f"`spill-guard` builds and answers {commands}."
     unreached = [p for p in f["packages"] if p not in f["reachable"]]
     if not unreached:
-        written = ", ".join(f"`{p}`" for p in f["packages"])
-        return (f"`spill-guard` builds, answers {commands}, and reaches "
-                f"{written}.")
+        return f"`spill-guard` builds and answers {commands}."
     listed = ", ".join(f"`{p}`" for p in unreached)
     verb = "is" if len(unreached) == 1 else "are"
     reach = "it" if len(unreached) == 1 else "any of them"
@@ -223,8 +223,7 @@ def verdict(f):
     """
     done = [label for label, ok in rows(f) if ok]
     if len(done) == len(rows(f)):
-        return ("**Usable.** Every capability below is in place; see the "
-                "install instructions.")
+        return "Every capability below is in place."
     if not done:
         return "**Not yet usable — installing it would get you nothing.**"
     return ("**Partly wired — not yet usable.** Some of what it needs is in "

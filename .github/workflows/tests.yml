@@ -3538,25 +3538,25 @@ jobs:
         run: |
           python3 - <<'PY'
           import pathlib, re
-          p = pathlib.Path("README.md")
+          p = pathlib.Path("internal/selftest/selftest.go")
           t = p.read_text()
           found = re.findall(r"AKIA\w{16}", t)
-          assert len(found) == 1, f"expected one canary in README.md, found {len(found)}"
+          assert len(found) == 1, f"expected one canary in selftest.go, found {len(found)}"
           p.write_text(t.replace(found[0], "AKIA" + "0" * 16))
           PY
-          if git diff --quiet README.md; then
-            echo "::error::the mutation changed nothing -- the README canary is not where this expects it" >&2
+          if git diff --quiet internal/selftest/selftest.go; then
+            echo "::error::the mutation changed nothing -- the canary is not where this expects it" >&2
             exit 1
           fi
           make self-scan > mutant.log 2>&1 && rc=0 || rc=$?
           echo "check exit: $rc"
           cat mutant.log
-          git checkout -- README.md
+          git checkout -- internal/selftest/selftest.go
           if [ "$rc" -eq 0 ]; then
             echo "::error::self-scan passed with a dead allowlist entry" >&2
             exit 1
           fi
-          if ! grep -q 'README.md is on the allowlist and no longer' mutant.log; then
+          if ! grep -q 'internal/selftest/selftest.go is on the allowlist and no longer' mutant.log; then
             echo "::error::self-scan failed, but not on the dead entry" >&2
             exit 1
           fi

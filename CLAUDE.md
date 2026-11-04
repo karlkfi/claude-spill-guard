@@ -16,6 +16,7 @@ measured.
 | `docs/design/distribution.md` | The launcher, signed release assets, install channels. |
 | `docs/design/language-choice.md` | Why Go, with the measurements. Do not re-litigate. |
 | `docs/design/brief.md` | The origin brief, as written. |
+| `docs/installing.md` | What the install scripts verify, the `go install` route, and how to read `selftest`. The README keeps the commands and the live check. |
 | `docs/development/release-process.md` | Cutting a release: what a person does, and what the tag does. |
 | `docs/img/` | The social preview and the mark, as SVG masters and the one PNG rendered from them. [`rendering-images.md`](docs/development/rendering-images.md) says how. |
 | `cmd/spill-guard/` | The entry point. `hook`, `filter`, `selftest`, `coverage` and `version`; the rest land with the rows that specify them. |
@@ -710,9 +711,9 @@ tool. Every new rule needs a corpus case proving it stays quiet on clean input,
 and the `precision` job pins the false-positive count.
 
 **The scanner runs over this repository too, and the answer is not that no
-tracked file may match.** 23 of 251 do, and 15 of those are the corpus doing
-its job -- a gate whose first run had to be suppressed for fifteen files would
-teach everyone to suppress it. So `self-scan` allows two *regions* whose
+tracked file may match.** `make self-scan` prints how many do, and all but a
+named few are the corpus doing its job -- a gate whose first run had to be
+suppressed for the whole corpus would teach everyone to suppress it. So `self-scan` allows two *regions* whose
 contents are credential-shaped by specification, `planted/` and `vectors/`,
 where a new file is the ordinary way of working; everywhere else it takes a
 named path and the decision behind it. The list is asserted both ways, so an
