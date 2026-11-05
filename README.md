@@ -151,8 +151,8 @@ the binary unless it says otherwise:
   Over a file holding a key, `dd if=key.txt` and `cp key.txt /dev/stdout` pass because
   neither is a known reader. `exec 3<key.txt; cat <&3` ([Q230](docs/queue/Q230.md))
   and `while read l; do echo $l; done < key.txt` ([Q229](docs/queue/Q229.md)) pass
-  because the file arrives through a redirect the hook does not trace. Bash prints the
-  key in all four, and the hook leaves no verdict and no record. These are examples
+  because the file arrives through a redirect the hook does not trace. Under bash, all
+  four print the key and the hook leaves no verdict and no record. These are examples
   and not the whole class.
 - **What a command prints.** `gh auth token`, `kubectl get secret db -o yaml` and
   `aws configure get aws_secret_access_key` all pass. The hook decides before
@@ -190,8 +190,8 @@ A gap does not hide a match beside it, as long as the scanner can still tell whi
 words on the line are files. `cat "$X" key.txt` and `cat $(echo a) key.txt` are
 denied on what they could read, and so is `cat` of an undecodable file beside one
 holding a key. Where the whole operand list is unsettled, as in `echo a | xargs cat
-key.txt`, no file on that line is opened and the call gets only a record
-([Q254](docs/queue/Q254.md)).
+key.txt`, the scanner reads none of that command's files, so the key crosses with
+only a record ([Q254](docs/queue/Q254.md)).
 
 The budget is a limit on that. A scan takes the call's own text first and then its
 files smallest first, so a small file holding a key still blocks beside big ones.
