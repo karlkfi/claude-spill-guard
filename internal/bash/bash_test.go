@@ -132,6 +132,7 @@ func TestSegmentsResumeTheCommandASubstitutionInterrupted(t *testing.T) {
 		{"arithmetic's fallback", "cat $((a) ) f", [][]string{{"a"}, {"cat", "$(", "f"}}},
 		{"arithmetic holding a paren", "cat $(( (a) )) f", [][]string{{"a"}, {"cat", "$((", "f"}}},
 		{"arithmetic opening on one", "cat $(((a))) f", [][]string{{"a"}, {"cat", "$((", "f"}}},
+		{"a quoted paren is no close", "cat $((a ')' b)) f", [][]string{{"a", ")", "b"}, {"cat", "$((", "f"}}},
 		{"arithmetic unterminated", "cat $((a", [][]string{{"a"}, {"cat", "$("}}},
 		{"a word glued to arithmetic", "cat $((1))x f", [][]string{{"1"}, {"cat", "$((x", "f"}}},
 		{"in an assignment prefix", "P=$(a) cat f", [][]string{{"a"}, {"P=$(", "cat", "f"}}},
