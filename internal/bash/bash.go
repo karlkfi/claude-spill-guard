@@ -665,7 +665,11 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				// closes whatever subshell the command sits in, and the
 				// segments after it, still inside, read as outside.
 				if process {
-					cur, curQF = append(cur, ProcessSubstitution), append(curQF, NotQuoted)
+					// After an assignment it is read as that word's value, since
+					// the word ahead of it would otherwise take the command's place.
+					if n := len(cur); n == 0 || !isAssignment(cur[n-1], curQF[n-1]) {
+						cur, curQF = append(cur, ProcessSubstitution), append(curQF, NotQuoted)
+					}
 					openSubstitution(false)
 				}
 				i += 2

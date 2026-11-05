@@ -168,6 +168,21 @@ func TestAnOperandAfterASubstitutionIsScanned(t *testing.T) {
 		"cat $(echo a) 2>/dev/null " + name,
 		"cat <(echo a) " + name,
 		"diff <(echo a) " + name,
+		// In an assignment it is the value, and the command is what follows.
+		"X=<(echo a) cat " + name,
+		"X=>(cat) cat " + name,
+		"X+=<(echo a) cat " + name,
+		"X[0]=<(echo a) cat " + name,
+		"Y=1 X=<(echo a) cat " + name,
+		"X=$(echo a)<(echo b) cat " + name,
+		"a=b<(echo a) cat " + name,
+		"env X=<(echo a) cat " + name,
+		"time X=<(echo a) cat " + name,
+		"(X=<(echo a) cat " + name + ")",
+		"X=<(echo a); cat " + name,
+		"X=<(echo a) && cat " + name,
+		// A cost: bash runs the pipe here and opens no file.
+		"X=1 <(echo a) cat " + name,
 		"head -1 $(echo a) " + name,
 		"head -n $(echo 1) " + name,
 		"head -n $((1+1)) " + name,
@@ -238,6 +253,9 @@ func TestAWordAfterASubstitutionIsNotACommand(t *testing.T) {
 		"echo $(date) cat " + name,
 		"echo $(date) env",
 		"echo <(date) cat " + name,
+		// Bash runs the pipe here, and a quoted word assigns nothing.
+		"<(echo a) cat " + name,
+		"'X=1' <(echo a) cat " + name,
 		// A word the substitution is glued to is not the file it ends in: this
 		// opens whatever `a` plus the name spells.
 		"echo $(echo a)" + name,
@@ -305,7 +323,7 @@ func TestAGuardedPathAfterASubstitutionIsRefused(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("NAME=value\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"cat $(echo a) .env", "cat <(echo a) .env", "$(true) $(true) cat .env"} {
+	for _, command := range []string{"cat $(echo a) .env", "cat <(echo a) .env", "$(true) $(true) cat .env", "X=<(echo a) cat .env"} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
 			if code != 0 {
