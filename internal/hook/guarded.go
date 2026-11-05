@@ -92,7 +92,7 @@ import (
 type pathRefusal struct{ path, class string }
 
 func (r *pathRefusal) Error() string {
-	return fmt.Sprintf("%q is %s, which this refuses to read on its shape", r.path, r.class)
+	return fmt.Sprintf("%q is %s, which this refuses to read on its shape", named(r.path), r.class)
 }
 
 func (r *pathRefusal) body() string { return guarded(r.path, r.class) }

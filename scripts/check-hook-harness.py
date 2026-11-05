@@ -182,6 +182,21 @@ def install_plugin(into, wiring):
     return plugin
 
 
+def records_when_handed(binary, tool, command, cwd):
+    """The coverage log from this payload handed straight to the binary, so an
+    empty log from a real session means the hook never saw the call."""
+    state = Path(tempfile.mkdtemp(prefix="harness-state-"))
+    payload = {"hook_event_name": "PreToolUse", "tool_name": tool,
+               "tool_input": {"command": command}, "cwd": str(cwd)}
+    subprocess.run([binary, "hook"], input=json.dumps(payload).encode(),
+                   env={**os.environ, "XDG_STATE_HOME": str(state)},
+                   capture_output=True, timeout=TIMEOUT, check=False)
+    log = state / "spill-guard" / "coverage.jsonl"
+    text = log.read_text(encoding="utf-8") if log.exists() else ""
+    shutil.rmtree(state, ignore_errors=True)
+    return text
+
+
 def control(claude, plugin, cwd, binary):
     """A wiring measured to scan nothing must let the key cross, here."""
     planted = {"name": "Read", "input": {"file_path": str(cwd / "planted.txt")}}
@@ -219,6 +234,27 @@ def arms(claude, plugin, cwd, binary, no_git_bash):
         print(f"{what}: {got}")
         if got.requests:
             findings.append(f"{what}: the prompt reached the API -- {got}")
+
+    def must_refuse_nul(tool, command):
+        # The hook skips such a command string as binary, so a key in it would
+        # cross. docs/queue/Q246.md is parked on Claude Code refusing the call
+        # before the hook, and this is the arm that says when that stops.
+        what = f"a {tool} command holding a NUL"
+        if not records_when_handed(binary, tool, command, cwd):
+            findings.append(f"{what}: the binary left no record when handed it "
+                            f"directly, so an empty log below proves nothing")
+        got = drive(claude, plugin, cwd,
+                    {"name": tool, "input": {"command": command, "description": "print"}},
+                    env_extra=real)
+        print(f"{what}: {got}")
+        if not got.called:
+            findings.append(f"{what}: the fake never got the tool call -- {got}")
+        elif got.crossed or got.state or not any(
+                "InputValidationError" in result and "control characters" in result
+                for result in got.results):
+            findings.append(f"{what}: Claude Code did not refuse it ahead of the hook, "
+                            f"or reworded the refusal. If it did not refuse, the event "
+                            f"on docs/queue/Q246.md has fired -- {got}")
 
     clean = drive(claude, plugin, cwd, read("clean.txt"), env_extra=real)
     print(f"Read of a clean file: {clean}")
@@ -258,7 +294,9 @@ def arms(claude, plugin, cwd, binary, no_git_bash):
             claude, plugin, cwd,
             {"name": "Bash", "input": {"command": "cat planted.txt", "description": "read"}},
             env_extra=real))
+        must_refuse_nul("Bash", f'cat "$X" {key} \x00')
     if has_ps:
+        must_refuse_nul("PowerShell", f"Write-Output {key} \x00")
         must_block("a PowerShell command carrying the key", drive(
             claude, plugin, cwd,
             {"name": "PowerShell", "input": {"command": f"Write-Output {key}",

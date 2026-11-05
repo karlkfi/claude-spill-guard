@@ -243,7 +243,7 @@ func found(findings []scan.Finding) string {
 		// carrying a space. Neither the rule id nor the path is this binary's
 		// own text: one comes out of a JSON file and the other out of the
 		// call, and both reach a terminal.
-		items = append(items, fmt.Sprintf("%q at byte %d of %q", f.RuleID, f.Offset, f.Path))
+		items = append(items, fmt.Sprintf("%q at byte %d of %q", f.RuleID, f.Offset, named(f.Path)))
 	}
 	if extra > 0 {
 		items = append(items, fmt.Sprintf("and %d more", extra))
@@ -276,7 +276,7 @@ func listSkips(skips []skipped) string {
 	}
 	items := make([]string, 0, len(listed)+1)
 	for _, s := range listed {
-		items = append(items, fmt.Sprintf("%q (%s)", s.label, s.why))
+		items = append(items, fmt.Sprintf("%q (%s)", named(s.label), s.why))
 	}
 	if extra > 0 {
 		items = append(items, fmt.Sprintf("and %d more", extra))
@@ -304,10 +304,9 @@ func unread(skips []skipped) string {
 // This is the branch where deferring is least comfortable, and hook.go carries
 // that argument rather than this string.
 //
-// The reason claims nothing about what was read. A call carrying several
-// buffers may have been through some of them when the clock ran out, and which
-// ones is not a set this side of the deadline can name -- the scan is still
-// running. Under-claiming is the safe direction here for the reason
+// The reason claims nothing about what was read. Only a call where nothing
+// matched reaches it, and that may have been through some of its buffers when
+// the clock ran out. Under-claiming is the safe direction here for the reason
 // alsoUnread() gives: a buffer nothing opened produces no findings, exactly
 // like one that was read and held none.
 func overran(budget time.Duration) string {
@@ -425,7 +424,7 @@ func guarded(path, class string) string {
 		"reaches the readers it knows and no others: an interpreter told to open "+
 		"the same path goes straight past it, so read this as a net for the "+
 		"accident rather than as a claim that the path is guarded.",
-		path, class)
+		named(path), class)
 }
 
 // failed is the body for a scan that could not be completed.
@@ -451,6 +450,8 @@ func failed(err error) string {
 	var part partlyDecoded
 	if errors.As(err, &part) {
 		switch part.label {
+		case filePathLabel:
+			opening = "The file_path was read as text and matched no rule, but the scan"
 		case commandLabel:
 			opening = "The command string was read and matched no rule, but the scan"
 		case promptLabel:

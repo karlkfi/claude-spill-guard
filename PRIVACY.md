@@ -22,7 +22,7 @@ sandboxed home directory — and fails until this file agrees with all four.
 |---|---|---|
 | `PreToolUse` | `Bash` | the command string, and the files its readers are pointed at |
 | `PreToolUse` | `Read` | the `file_path`, and the file it names |
-| `PreToolUse` | `Grep` | the `pattern`, and the file a `path` names when it names one file |
+| `PreToolUse` | `Grep` | the `pattern`, `path`, `glob` and `type`, and the file a `path` names when it names one file |
 | `PreToolUse` | `PowerShell` | the command string, and not the files it opens |
 | `UserPromptSubmit` | every prompt | the prompt, and the files its `@` tokens name |
 
@@ -73,8 +73,8 @@ The coverage log is the one file. A call the scanner could not read — an
 operand it cannot resolve before the command runs, a file behind an encoding
 this build does not decode, a scan past its budget — is not blocked. The call
 proceeds, and the gap is recorded so it can be closed rather than prompted
-about. A rule match in what a finished scan did read still blocks, and that call
-writes no record. `spill-guard coverage` reads that log back, grouped by reason. It is
+about. A rule match in anything the scan finished reading still blocks, and that
+call writes no record. `spill-guard coverage` reads that log back, grouped by reason. It is
 state rather than configuration: deleting it changes nothing, and
 [`internal/hook/coverage.go`](internal/hook/coverage.go) has the cap it
 rotates at.

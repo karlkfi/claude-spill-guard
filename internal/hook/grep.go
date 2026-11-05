@@ -434,11 +434,23 @@ func allFiltered(command string) bool {
 // returned a path list.
 //
 // The pattern is scanned, as a Bash command string is: it is text the call
-// carries, and a key typed into one is a key in the transcript.
+// carries, and a key typed into one is a key in the transcript. So it comes back
+// beside a path that will not settle, as a command string does beside an operand
+// that will not. A refusal returns nothing, since it blocks whatever is here.
 func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 	var targets []target
 	if in.Pattern != nil {
-		targets = append(targets, target{patternLabel, []byte(*in.Pattern)})
+		targets = append(targets, text(patternLabel, []byte(*in.Pattern)))
+	}
+	// The call's other strings are text it carries too, and a path is matched
+	// here ahead of being opened.
+	for _, f := range []struct {
+		label string
+		text  *string
+	}{{"<path>", in.Path}, {"<glob>", in.Glob}, {"<type>", in.Type}} {
+		if f.text != nil {
+			targets = append(targets, text(f.label, []byte(*f.text)))
+		}
 	}
 	mode := "files_with_matches"
 	if in.OutputMode != nil && *in.OutputMode != "" {
@@ -452,14 +464,14 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 		path = expandTilde(*in.Path)
 		if !filepath.IsAbs(path) {
 			if cwd == "" {
-				return nil, errors.New("the Grep call names a relative path and " +
+				return targets, errors.New("the Grep call names a relative path and " +
 					"the payload carries no working directory to resolve it against")
 			}
 			path = filepath.Join(cwd, path)
 		}
 	}
 	if path == "" {
-		return nil, errors.New("the Grep call names no path and the payload " +
+		return targets, errors.New("the Grep call names no path and the payload " +
 			"carries no working directory, so where it searches is unknown")
 	}
 	info, err := os.Stat(path)
@@ -468,23 +480,23 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 			// Nothing there sends nothing, as for a Read of an absent file.
 			return targets, nil
 		}
-		return nil, fmt.Errorf("reading the path this Grep call searches: %w", err)
+		return targets, unresolved{path,
+			fmt.Errorf("reading the path this Grep call searches: %w", osCause(err))}
 	}
 	if info.IsDir() {
 		return nil, &grepToolRefusal{}
 	}
 	if !info.Mode().IsRegular() {
-		return nil, errors.New("the Grep call names something that is neither " +
+		return targets, errors.New("the Grep call names something that is neither " +
 			"a file nor a directory, so what it would send cannot be read here")
 	}
 	if class := guardedClass(path); class != "" {
 		return nil, &pathRefusal{path, class}
 	}
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading the file this Grep call searches: %w", err)
-	}
-	return append(targets, target{path, buf}), nil
+	return append(targets, file(path, info.Size(), func(err error) error {
+		return unresolved{path,
+			fmt.Errorf("reading the file this Grep call searches: %w", osCause(err))}
+	})), nil
 }
 
 // What a finding in a Grep call's pattern is reported against.

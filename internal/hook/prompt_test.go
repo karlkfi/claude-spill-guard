@@ -396,9 +396,13 @@ func TestABinaryTokenIsStillOpenedAndHandedOn(t *testing.T) {
 	}
 	for _, target := range got {
 		if target.label == path {
-			if !bytes.Equal(target.buf, body) {
+			buf, err := target.load()
+			if err != nil {
+				t.Fatalf("reading the target: %v", err)
+			}
+			if !bytes.Equal(buf, body) {
 				t.Errorf("the target carries %d bytes, want the whole %d-byte file",
-					len(target.buf), len(body))
+					len(buf), len(body))
 			}
 			return
 		}

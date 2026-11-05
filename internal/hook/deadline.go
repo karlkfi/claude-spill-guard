@@ -1,6 +1,8 @@
 package hook
 
 import (
+	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/karlkfi/claude-spill-guard/internal/scan"
@@ -65,15 +67,22 @@ const margin = 15 * time.Second
 const budget = hookTimeout - margin
 
 // A scanned is what scanCall made of a call, boxed so that the goroutine below
-// can hand back all three at once.
+// can hand back all three at once. err is unset on what is gathered partway.
 type scanned struct {
 	findings []scan.Finding
 	skips    []skipped
 	err      error
 }
 
-// within runs scanCall under a deadline and reports whether it reached one. A
-// budget already spent does not reach scanCall at all, for the reason below.
+// within runs scanCall under a deadline and reports whether the scan finished
+// ahead of it. A budget already spent does not reach scanCall at all, for the
+// reason below.
+//
+// A deadline that fires hands back what the scan had settled by then. That is
+// every buffer it got through, each stored whole as it finished, so what comes
+// back holds no partial read of the buffer still running and a finding in that
+// one is not in it. The scan's goroutine goes on writing while this one reads, so
+// each result sits in its own atomic slot and is never touched again once stored.
 //
 // Nothing here interrupts the work. os.ReadFile takes no context and neither
 // does the match loop, which is why the goroutine is left running rather than
@@ -88,7 +97,7 @@ type scanned struct {
 // the runtime collects everything on the way out. In a test, which is the one
 // caller that outlives a verdict, the goroutine finishes the buffer it was
 // given and exits on its own.
-func within(call payload, event Event, left time.Duration) (scanned, bool) {
+func within(ctx context.Context, pace func(label string), call payload, event Event, left time.Duration) (scanned, bool) {
 	// A budget already spent is answered here rather than below, because the
 	// select cannot answer it twice the same way. Both of its cases are ready
 	// at once in that case -- the timer from the first instant, the scan as
@@ -108,17 +117,21 @@ func within(call payload, event Event, left time.Duration) (scanned, bool) {
 	if left <= 0 {
 		return scanned{}, false
 	}
+	ctx, cancel := context.WithTimeout(ctx, left)
+	defer cancel()
+	var settle atomic.Pointer[func() scanned]
 	done := make(chan scanned, 1)
 	go func() {
-		findings, skips, err := scanCall(call, event)
+		findings, skips, err := scanCall(call, event, pace, func(s func() scanned) { settle.Store(&s) })
 		done <- scanned{findings, skips, err}
 	}()
-	timer := time.NewTimer(left)
-	defer timer.Stop()
 	select {
 	case got := <-done:
 		return got, true
-	case <-timer.C:
+	case <-ctx.Done():
+		if s := settle.Load(); s != nil {
+			return (*s)(), false
+		}
 		return scanned{}, false
 	}
 }

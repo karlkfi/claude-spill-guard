@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -73,6 +75,47 @@ type unresolved struct {
 func (u unresolved) Error() string { return u.err.Error() }
 func (u unresolved) Unwrap() error { return u.err }
 
+// osCause is why an os call failed, without the path a *fs.PathError's text
+// carries, so that wrapping one into a reason does not name the token.
+func osCause(err error) error {
+	var p *fs.PathError
+	if errors.As(err, &p) {
+		return p.Err
+	}
+	return err
+}
+
+// withheldLabel stands in for a buffer's label when the label itself matches.
+const withheldLabel = "a path a rule matches"
+
+// named is what a verdict calls a buffer. A glob can open a file whose name is a
+// key the model has never seen, so printing the label as it is would be how that
+// key reached the API. Fail closed, as withheld does, but a control character
+// alone is not withheld here: %q escapes it, and a reader needs the name.
+func named(label string) string {
+	set, err := rules.Load(embedded.Shipped)
+	if err != nil || nameMatches(label, set) {
+		return withheldLabel
+	}
+	return label
+}
+
+// nameMatches reports whether a rule matches a file name or path. `_` is a word
+// character, so `creds_<key>.csv` defeats the `\b` a rule opens on. The second
+// pass reads `_` as a boundary, and the first keeps a key holding its own `_`.
+// Withholding a name wrongly costs a label, which is why this may over-match
+// where a rule over content may not. A key with its own `_` glued to another `_`
+// matches neither pass.
+func nameMatches(name string, set []rules.Rule) bool {
+	for _, text := range []string{name, strings.ReplaceAll(name, "_", " ")} {
+		got, err := scan.Buffer("", []byte(text), set)
+		if err != nil || len(got.Findings) > 0 || got.Skipped != scan.Scanned {
+			return true
+		}
+	}
+	return false
+}
+
 // partlyDecoded is a coverage failure on a call some of which was read: label
 // names the first buffer that was decoded and matched, and failed() says so
 // rather than reporting the gap as the whole call.
@@ -120,10 +163,12 @@ func record(stderr io.Writer, call payload, event Event, reason string, operands
 		Time:      time.Now().UTC(),
 		Event:     string(event),
 		SessionID: call.SessionID,
-		CWD:       call.CWD,
 		Version:   version.Version,
 		Reason:    reason,
 		Operands:  withheld(operands),
+	}
+	if kept := withheld([]string{call.CWD}); len(kept) == 1 {
+		c.CWD = kept[0]
 	}
 	// ToolName is absent on UserPromptSubmit and optional everywhere, so the
 	// field stays empty rather than inventing a name for the record.
@@ -168,11 +213,7 @@ func withheld(operands []string) []string {
 		// opening on a byte-order mark is decoded as UTF-16 and a key in it
 		// scans clean, and one carrying a NUL takes the binary skip. A path or
 		// an `@` token is plain text, so anything else is withheld unread.
-		if !plain(o) {
-			continue
-		}
-		got, err := scan.Buffer("", []byte(o), set)
-		if err != nil || len(got.Findings) > 0 || got.Skipped != scan.Scanned {
+		if !plain(o) || nameMatches(o, set) {
 			continue
 		}
 		out = append(out, o)
@@ -220,9 +261,9 @@ func appendCoverage(c coverage) {
 	if fi, err := os.Stat(path); err == nil && fi.Size() >= coverageCap {
 		_ = os.Rename(path, path+".1")
 	}
-	// 0600 because the reasons name paths on this machine. They carry no
-	// matched value -- a coverage failure is by definition a buffer nothing
-	// read -- but a path is still somebody's directory layout.
+	// 0600 because the operands and the cwd name paths on this machine. They
+	// carry no matched value -- withheld drops one -- but a path is still
+	// somebody's directory layout.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return

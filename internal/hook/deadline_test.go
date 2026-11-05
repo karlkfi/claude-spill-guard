@@ -2,8 +2,11 @@ package hook
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -167,6 +170,298 @@ func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 	}
 	if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
 		t.Fatalf("the control reason = %q, want the planted key found", reason)
+	}
+}
+
+// overrunAt drives a call whose budget runs out at the moment the scan reaches
+// the named buffer, and which never gets through that buffer.
+//
+// No fixture and no timer, which is what makes this a statement about the code
+// rather than about a rate: no file here reaches the shipped budget (Q132), and
+// a short budget over a real scan is a race the match loop keeps winning as it
+// gets faster (Q232). The deadline arrives from inside the scan, so whatever was
+// settled ahead of that buffer is settled and nothing behind it can be.
+//
+// The scan's goroutine stays stalled until the test binary exits. Letting it go
+// would have it open a file while the test's temporary directory is removed,
+// which Windows refuses.
+func overrunAt(t *testing.T, label, payload string) (code int, stdout, stderr string) {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	ctx, expire := context.WithCancel(context.Background())
+	defer expire()
+	pace := func(at string) {
+		if filepath.Base(at) == label {
+			expire()
+			select {}
+		}
+	}
+	var out, errs bytes.Buffer
+	code = runPaced(ctx, pace, time.Now(), unhurried, strings.NewReader(payload), &out, &errs)
+	return code, out.String(), errs.String()
+}
+
+// The two ways an overrun let a key through, on every surface that carries more
+// than one buffer. Each case pairs a small buffer holding a key with a big one
+// the budget runs out on, and each has to block naming the rule.
+//
+// The arms differ in the order the call names them. With the key first, a scan
+// in call order finds it and an overrun threw the finding away. With the key
+// last, a scan in call order never reached it. So dropping the gather reddens
+// both and dropping the sort reddens only the second, which is why a test with
+// the key first would not have been enough.
+func TestAnOverrunStillBlocksOnTheBuffersItGotThrough(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("notes.txt", "AWS_ACCESS_KEY_ID="+secret+"\n")
+	write("big.log", strings.Repeat("the quick brown fox jumps over the lazy dog\n", 1024))
+	if err := os.Mkdir(filepath.Join(dir, secret), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(secret, "big.log"), strings.Repeat("hello\n", 1024))
+
+	prompt := func(text string) string {
+		return `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+			`,"prompt":` + quote(t, text) + `}`
+	}
+	bash := func(command string) string {
+		return `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+			`,"tool_input":{"command":` + quote(t, command) + `}}`
+	}
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"prompt, key first", prompt("@notes.txt and @big.log")},
+		{"prompt, key last", prompt("@big.log and @notes.txt")},
+		{"Bash, key first", bash("cat notes.txt big.log")},
+		{"Bash, key last", bash("cat big.log notes.txt")},
+		{"Grep, key in the pattern", `{"hook_event_name":"PreToolUse","tool_name":"Grep","tool_input":{` +
+			`"pattern":` + quote(t, secret) + `,"output_mode":"content",` +
+			`"path":` + quote(t, filepath.Join(dir, "big.log")) + `}}`},
+		{"Read, key in the file_path", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{` +
+			`"file_path":` + quote(t, filepath.Join(dir, secret, "big.log")) + `}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := overrunAt(t, "big.log", tc.payload)
+			if code != 0 {
+				t.Fatalf("exited %d (stderr %q)", code, stderr)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("reason = %q, want the planted key named", reason)
+			}
+			if stderr != "" {
+				t.Errorf("stderr = %q, want no coverage record beside a block", stderr)
+			}
+			if !strings.Contains(stdout, "no verdict on this call is a report on the rest") {
+				t.Errorf("stdout = %q, want it to say the verdict stops short", stdout)
+			}
+		})
+	}
+}
+
+// Nothing matched in what the scan reached, so there is nothing to block on and
+// the overrun defers as it always did. The control for the test above: without
+// it, a hook that blocked on every overrun would pass.
+func TestAnOverrunWithNothingFoundStillDefers(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"notes.txt": "nothing here\n", "big.log": strings.Repeat("hello\n", 1024)} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+		`,"prompt":"@big.log and @notes.txt"}`
+	code, stdout, stderr := overrunAt(t, "big.log", payload)
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "did not finish inside its") {
+		t.Errorf("coverage reason = %q, want the overrun recorded", reason)
+	}
+}
+
+// The verdict gathers what the scan stored while the scan goes on storing.
+// overrunAt cannot show that, because its scan stops at the deadline. This one
+// runs a real clock over enough buffers that the deadline lands among them, and
+// what it asserts is nothing the verdict says: it is here for -race, and swapping
+// an atomic slot for a plain pointer turns it red there.
+//
+// Cleaned up by hand because the scan can still have the last file open when the
+// test ends, which Windows refuses to delete under t.TempDir.
+func TestGatheringIsSafeWhileTheScanRuns(t *testing.T) {
+	dir, err := os.MkdirTemp("", "spill-guard-gather")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	var names []string
+	for i := range 200 {
+		name := fmt.Sprintf("f%d.txt", i)
+		names = append(names, name)
+		body := []byte("AWS_ACCESS_KEY_ID=" + secret + "\n")
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+		`,"tool_input":{"command":` + quote(t, "cat "+strings.Join(names, " ")) + `}}`
+	for budget := time.Millisecond; budget < 64*time.Millisecond; budget *= 2 {
+		if code, _, stderr := driveWithin(t, budget, payload); code != 0 {
+			t.Errorf("at %s exited %d (stderr %q)", budget, code, stderr)
+		}
+	}
+}
+
+// A string the call carries goes ahead of every file, however short the file, so
+// a read that never comes back cannot keep a key in the string from a verdict. A
+// path can be longer than the file it names, and that is the arm size order loses.
+func TestAStringTheCallCarriesIsMatchedAheadOfEveryFile(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{dir, filepath.Join(dir, secret)} {
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "tiny"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bash := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+		`,"tool_input":{"command":` + quote(t, "echo "+secret+"; cat tiny") + `}}`
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"prompt", `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+			`,"prompt":` + quote(t, secret+" and @tiny") + `}`},
+		{"Bash", bash},
+		{"Read", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{` +
+			`"file_path":` + quote(t, filepath.Join(dir, secret, "tiny")) + `}}`},
+		{"Grep", `{"hook_event_name":"PreToolUse","tool_name":"Grep","tool_input":{` +
+			`"pattern":` + quote(t, secret) + `,"output_mode":"content",` +
+			`"path":` + quote(t, filepath.Join(dir, "tiny")) + `}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := overrunAt(t, "tiny", tc.payload)
+			if code != 0 {
+				t.Fatalf("exited %d (stderr %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("reason = %q, want the key in the string named", reason)
+			}
+		})
+	}
+}
+
+// Gathering the results walks all of them, so it happens once rather than per
+// buffer. A call can name 150,000 files, and per buffer that spent the whole
+// budget where base reached a verdict in seconds. Bytes allocated rather than time,
+// because a clock is what Q232 says not to race: every file holds a finding, so a
+// per-buffer gather copies a growing list and the total goes with the square.
+func TestGatheringStaysLinearInTheBuffers(t *testing.T) {
+	allocated := func(files int) uint64 {
+		dir := t.TempDir()
+		names := make([]string, files)
+		for i := range names {
+			names[i] = fmt.Sprintf("f%d", i)
+			if err := os.WriteFile(filepath.Join(dir, names[i]), []byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+			`,"tool_input":{"command":` + quote(t, "cat "+strings.Join(names, " ")) + `}}`
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		code, stdout, stderr := driveWithin(t, unhurried, payload)
+		runtime.ReadMemStats(&after)
+		if code != 0 || !strings.Contains(stdout, "aws-access-key-id") {
+			t.Fatalf("exited %d, stdout %q (stderr %q), want a block", code, stdout, stderr)
+		}
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	small, large := allocated(500), allocated(4000)
+	if ratio := float64(large) / float64(small); ratio > 16 {
+		t.Errorf("8x the files allocated %.1fx the bytes (%d to %d), want about 8x", ratio, small, large)
+	}
+}
+
+// An override still downgrades the block an overrun now reaches. Every other
+// block here can be turned into a confirmation, and one that cannot is a class
+// of refusal with no way past it.
+func TestAnOverrideDowngradesABlockFromAnOverrun(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"notes.txt": "AWS_ACCESS_KEY_ID=" + secret + "\n", "big.log": strings.Repeat("hello\n", 1024)} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+		`,"tool_input":{"command":"SPILL_GUARD_OVERRIDE='a fixture' cat big.log notes.txt"}}`
+	code, stdout, stderr := overrunAt(t, "big.log", payload)
+	if code != 0 {
+		t.Fatalf("exited %d (stderr %q)", code, stderr)
+	}
+	if !strings.Contains(stdout, `"permissionDecision":"ask"`) {
+		t.Errorf("stdout = %q, want a confirmation", stdout)
+	}
+}
+
+// Smallest first holds for what reaches the disk as well as what reaches the
+// match loop. A read has no deadline, so a big file opened ahead of the scan
+// spends the budget before any buffer has been looked at.
+//
+// The file is rewritten as the scan passes the smaller buffer: read when its
+// turn comes, the key is there to find, and read during the walk, it is not.
+func TestABufferIsReadWhenItsTurnComes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.log")
+	key := "AWS_ACCESS_KEY_ID=" + secret + "\n"
+	if err := os.WriteFile(path, []byte(strings.Repeat(" ", 4096)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+		`,"prompt":"look at @big.log"}`
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	pace := func(label string) {
+		if label == promptLabel {
+			if err := os.WriteFile(path, []byte(key), 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	var out, errs bytes.Buffer
+	code := runPaced(context.Background(), pace, time.Now(), unhurried, strings.NewReader(payload), &out, &errs)
+	if code != 0 {
+		t.Fatalf("exited %d (stderr %q)", code, errs.String())
+	}
+	if reason := reasonOf(t, out.String()); !strings.Contains(reason, "aws-access-key-id") {
+		t.Errorf("reason = %q, want the key written after the walk found", reason)
+	}
+}
+
+// A verdict names what it found in the order the call named it, however the
+// sizes fall, so the sort stays out of the text.
+func TestFindingsAreReportedInTheCallsOrder(t *testing.T) {
+	dir := t.TempDir()
+	key := "AWS_ACCESS_KEY_ID=" + secret + "\n"
+	for name, body := range map[string]string{"a.txt": key + strings.Repeat("x ", 512), "b.txt": key} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+		`,"prompt":"@a.txt and @b.txt"}`
+	code, stdout, stderr := driveWithin(t, unhurried, payload)
+	if code != 0 {
+		t.Fatalf("exited %d (stderr %q)", code, stderr)
+	}
+	reason := reasonOf(t, stdout)
+	a, b := strings.Index(reason, "a.txt"), strings.Index(reason, "b.txt")
+	if a < 0 || b < 0 || a > b {
+		t.Errorf("reason = %q, want a.txt named ahead of b.txt", reason)
 	}
 }
 
