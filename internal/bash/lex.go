@@ -1048,8 +1048,7 @@ func markArithmetic(tokens []string, quotedFrom []int) ([]string, []int) {
 	out := make([]string, 0, len(tokens))
 	outQF := make([]int, 0, len(tokens))
 	for i, t := range tokens {
-		if i == 0 || t == "" || quotedFrom[i] != NotQuoted || !strings.HasPrefix(t, "((") ||
-			quotedFrom[i-1] != NotQuoted || !strings.HasSuffix(tokens[i-1], "$") ||
+		if quotedFrom[i] != NotQuoted || !strings.HasPrefix(t, "((") ||
 			!closesTogether(tokens[i:], quotedFrom[i:]) {
 			out, outQF = append(out, t), append(outQF, quotedFrom[i])
 			continue

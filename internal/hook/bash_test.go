@@ -197,6 +197,11 @@ func TestAnOperandAfterASubstitutionIsScanned(t *testing.T) {
 		"env FOO=1 $(echo) cat " + name,
 		"$(true) nice $(true) cat " + name,
 		"time -p $(true) cat " + name,
+		"$X$(true) cat " + name,
+		// `env` runs the cd, which moves nothing in the shell.
+		"env FOO=1 $(true) cd sub && cat " + name,
+		// A quoted word is no prefix, so the cd is an argument to it.
+		"'$(' cd sub; echo `cat " + name + "`",
 		// A substitution glued ahead of the name still runs that name.
 		"$(echo /bin)/cat " + name,
 		"$(echo /usr/bin)/grep AWS " + name,
@@ -340,6 +345,7 @@ func TestASubstitutionKeepsItsCoverageRecord(t *testing.T) {
 		// The note a wrapper's grammar leaves survives the arm that reads past it.
 		{"timeout $(echo 5) cat plain.txt", "command wrapper"},
 		{"timeout $((5)) cat plain.txt", "command wrapper"},
+		{"xargs $(echo) cat plain.txt", "command wrapper"},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
@@ -403,6 +409,21 @@ func TestAQuotedSubstitutionIsNotAPrefix(t *testing.T) {
 			deferred(t, code, stdout, stderr)
 		})
 	}
+}
+
+// `env -C` moves the command wherever the substitution sits, so the name here
+// opens the clean copy under sub and not the key beside the call.
+func TestAWrappersDirectoryHoldsPastASubstitution(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", name), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "env -C sub $(true) cat "+name, dir))
+	deferred(t, code, stdout, stderr)
 }
 
 // With no word from the substitution the file is grep's pattern and bash never

@@ -87,6 +87,29 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 // A substitution interrupts the command it sits in. Each row was run on bash
 // 5.3.15: with f holding text, the command after the `)` prints it or the words
 // after the `)` are that command's arguments.
+func TestTimeTakesItsOptionsAsPartOfTheKeyword(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    int
+	}{
+		{"time cat f", 1},
+		{"time -p cat f", 2},
+		{"time -- cat f", 2},
+		{"time -p -- cat f", 3},
+		{"time '-p' cat f", 1},
+		{"! -p cat f", 1},
+		{"if -p cat f", 1},
+	} {
+		tokens, quotedFrom, err := lex(tc.command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ShKeywordPeel(tokens, quotedFrom); got != tc.want {
+			t.Errorf("ShKeywordPeel(%q) = %d, want %d", tc.command, got, tc.want)
+		}
+	}
+}
+
 func TestSegmentsResumeTheCommandASubstitutionInterrupted(t *testing.T) {
 	for _, tc := range []struct {
 		name, in string
