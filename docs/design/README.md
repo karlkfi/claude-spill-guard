@@ -2378,7 +2378,7 @@ be read into memory before the first match, so a slow read could spend the budge
 with nothing looked at, the prompt's own text included. A target now carries its
 size and reads itself when its turn comes. That is unmeasured on a slow disk,
 since every run here is on a warm page cache. It did cut peak memory on the
-six-fixture call, below, from 2,410 MiB to 809 MiB.
+six-fixture call, below, from 2,411 MiB to 810 MiB.
 
 **A budget per buffer was the other proposal, and it was argued against rather
 than built.** The shares have to add up to 45 seconds, so with seven buffers the
@@ -2388,24 +2388,26 @@ the goroutine has to be abandoned, still using a core, for the rest of the scan.
 Scanning every buffer at once gives the same independence without the shares. It
 was not built either, because size order already reaches the small file first.
 
-Driven 2026-11-04 on built binaries, load 10–39, with six 400 MiB fixtures of
-keyword-bearing text and the planted key file as `notes.txt`. Base is `55218a3`.
+Driven 2026-11-04 on built binaries, load 4–6, with six 400 MiB fixtures of
+keyword-bearing text and the planted key file as `notes.txt`. Base is `1a4d9db`.
 The fixtures repeat one line, so they say nothing about rate. All they have to do
 is run out the budget, and the deferring rows show they did.
 
 | Budget | Call | Base | This build |
 |---|---|---|---|
-| 1s | `@notes.txt` then one fixture | 1.025s, defers | 1.329s, blocks `aws-access-key-id` |
-| 1s | one fixture then `@notes.txt` | 1.016s, defers | 1.018s, blocks |
-| 1s | `cat` one fixture then `notes.txt` | 1.019s, defers | 1.018s, blocks |
-| 45s | six fixtures then `@notes.txt` | 45.072s, defers | 45.429s, blocks |
-| 45s | `cat` six fixtures then `notes.txt` | 45.056s, defers | 45.059s, blocks |
+| 1s | `@notes.txt` then one fixture | 1.297s, defers | 1.284s, blocks `aws-access-key-id` |
+| 1s | one fixture then `@notes.txt` | 1.014s, defers | 1.013s, blocks |
+| 1s | `cat` one fixture then `notes.txt` | 1.013s, defers | 1.014s, blocks |
+| 1s | `Read` of one fixture, the key in its `file_path` | 1.014s, defers | 1.013s, blocks |
+| 1s | `Grep` of one fixture, the key in its `pattern` | 1.015s, defers | 1.014s, blocks |
+| 45s | six fixtures then `@notes.txt` | 45.306s, defers | 45.285s, blocks |
+| 45s | `cat` six fixtures then `notes.txt` | 45.028s, defers | 45.018s, blocks |
 
 Through `claude -p` on 2.1.290 under a clean `HOME`, at the 1s budget and load
-59–66, the base build attached `notes.txt` with the key in the transcript and wrote a coverage
+4–5, the base build attached `notes.txt` with the key in the transcript and wrote a coverage
 record in both prompt orders. This build wrote no record, and the prompt was
 blocked before anything was attached. The controls on this build: `@notes.txt`
-alone blocks in 0.012s, and one fixture alone still defers at 1.017s.
+alone blocks in 0.008s, and one fixture alone still defers at 1.018s.
 
 Three things it does not close:
 
