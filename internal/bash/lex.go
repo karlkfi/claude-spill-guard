@@ -1159,10 +1159,12 @@ func ShKeywordPeel(tokens []string, quotedFrom []int) int {
 	i := 0
 	for i < len(tokens) && isReservedWord(tokens[i], quotedFrom[i]) {
 		i++
-		// bash reads these after `time` as part of the keyword, as lex does.
+		// bash reads one of each after `time`, in this order, as part of the keyword.
 		if tokens[i-1] == "time" {
-			for i < len(tokens) && quotedFrom[i] == NotQuoted && (tokens[i] == "-p" || tokens[i] == "--") {
-				i++
+			for _, opt := range []string{"-p", "--"} {
+				if i < len(tokens) && quotedFrom[i] == NotQuoted && tokens[i] == opt {
+					i++
+				}
 			}
 		}
 	}

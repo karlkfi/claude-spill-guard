@@ -253,6 +253,12 @@ func TestAWordAfterASubstitutionIsNotACommand(t *testing.T) {
 		"echo $(date) cat " + name,
 		"echo $(date) env",
 		"echo <(date) cat " + name,
+		// Bash runs a program named by the second option here, and opens nothing.
+		"time -- -p cat " + name,
+		"time -p -p cat " + name,
+		"time -- -- cat " + name,
+		"time -p -- -p cat " + name,
+		"time -p -- -- cat " + name,
 		// Bash runs the pipe here, and a quoted word assigns nothing.
 		"<(echo a) cat " + name,
 		"'X=1' <(echo a) cat " + name,
