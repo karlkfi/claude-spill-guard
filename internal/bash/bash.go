@@ -365,6 +365,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	if err != nil {
 		return nil, err
 	}
+	tokens, quotedFrom = markArithmetic(tokens, quotedFrom)
 	tokens, quotedFrom = splitOperatorRuns(tokens, quotedFrom)
 	tokens, quotedFrom = glueDollarParen(tokens, quotedFrom)
 
@@ -441,7 +442,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	}
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
-		if quotedFrom[i] == gluedToClose {
+		if quotedFrom[i] == gluedToClose || quotedFrom[i] == arithmeticOpen {
 			i++
 			continue
 		}
@@ -467,7 +468,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			if t == "(" && !inPattern(clauses) && opensSubstitution(tokens, i) {
 				// `$((` is arithmetic, one word whatever it holds, and a caller
 				// asking how many words `$(` becomes needs the difference.
-				if n := len(cur); n > 0 && i+1 < len(tokens) && tokens[i+1] == "(" &&
+				if n := len(cur); n > 0 && i+2 < len(tokens) && quotedFrom[i+2] == arithmeticOpen &&
 					strings.HasSuffix(cur[n-1], "$(") {
 					cur[n-1] += "("
 				}

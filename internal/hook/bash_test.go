@@ -325,6 +325,8 @@ func TestASubstitutionKeepsItsCoverageRecord(t *testing.T) {
 		{"grep $(echo x key.env) plain.txt", "several words"},
 		{"head -n $(echo 1 key.env) plain.txt", "several words"},
 		{"awk $(echo 1 key.env) plain.txt", "several words"},
+		{"grep $( (echo x key.env) ) plain.txt", "several words"},
+		{"grep $((echo x key.env) ) plain.txt", "several words"},
 		// What runs is the substitution's to say, so no reading of the words
 		// after it settles what opens: these print key.env if it makes `cat`.
 		{"$(echo cat) key.env", "stands where"},

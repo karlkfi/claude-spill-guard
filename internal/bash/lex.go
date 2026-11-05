@@ -222,6 +222,10 @@ const NotQuoted = math.MaxInt
 // can spell one.
 const gluedToClose = math.MinInt
 
+// arithmeticOpen is the QuotedFrom of the empty token markArithmetic writes after
+// the `((` of a `$((…))`.
+const arithmeticOpen = math.MinInt + 1
+
 // Unquoted is the provenance list for a caller that holds none, reading every
 // word as though it were written without quotes -- which is what this repo did
 // before the provenance existed.
@@ -1034,6 +1038,50 @@ func splitOperatorRuns(tokens []string, quotedFrom []int) ([]string, []int) {
 		}
 	}
 	return out, outQF
+}
+
+// markArithmetic marks each `$((` that bash reads as arithmetic. Splitting a run
+// loses which parens touch, and `$( (x) )` is a substitution whose output can
+// become several words, as is `$((x) )`: bash tries arithmetic and falls back
+// when the two that close it do not touch.
+func markArithmetic(tokens []string, quotedFrom []int) ([]string, []int) {
+	out := make([]string, 0, len(tokens))
+	outQF := make([]int, 0, len(tokens))
+	for i, t := range tokens {
+		if i == 0 || t == "" || quotedFrom[i] != NotQuoted || !strings.HasPrefix(t, "((") ||
+			quotedFrom[i-1] != NotQuoted || !strings.HasSuffix(tokens[i-1], "$") ||
+			!closesTogether(tokens[i:], quotedFrom[i:]) {
+			out, outQF = append(out, t), append(outQF, quotedFrom[i])
+			continue
+		}
+		out, outQF = append(out, "((", ""), append(outQF, NotQuoted, arithmeticOpen)
+		if len(t) > 2 {
+			out, outQF = append(out, t[2:]), append(outQF, NotQuoted)
+		}
+	}
+	return out, outQF
+}
+
+// closesTogether reports whether the parens opened by tokens[0] close with their
+// last two touching.
+func closesTogether(tokens []string, quotedFrom []int) bool {
+	depth := 0
+	for i, t := range tokens {
+		if quotedFrom[i] != NotQuoted || !allPunct(t) {
+			continue
+		}
+		for j := range len(t) {
+			switch t[j] {
+			case '(':
+				depth++
+			case ')':
+				if depth--; depth == 0 {
+					return j > 0 && t[j-1] == ')'
+				}
+			}
+		}
+	}
+	return false
 }
 
 func allPunct(t string) bool {
