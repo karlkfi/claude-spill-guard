@@ -1444,8 +1444,10 @@ another route:
   substitution, which also blocks `env X=$(a) echo cat f`, where `f` is only echoed.
   Q254 prices that.
 - **A process substitution** holds its word, since dropping it moved the operands:
-  `grep -v <(x) f` took `f` for the pattern.
-- **`time`** takes `-p` and `--` as part of the keyword. `time -p cat f` crossed
+  `grep -v <(x) f` took `f` for the pattern. After an assignment it holds none, or
+  it would take the command's place in `X=<(x) cat f`, so `X=1 <(x) cat f` blocks
+  though bash runs the pipe and opens no `f`.
+- **`time`** takes one `-p` then one `--` as its keyword. `time -p cat f` crossed
   silently on `main`, and `time -p $(x) cat f` blocked only because of the split.
 
 A substitution anywhere in the command word writes a record, since its output can
@@ -1486,7 +1488,8 @@ These denies moved in the rows driven by hand, and the list is not exhaustive. `
 $(x) cat f` and `nice $(x)/cat f` now write a record: the first may be a `-C`, and
 the second is a word the wrapper cannot read. `$((5)) cat f`, `echo $(date) cat f`,
 `echo <(date) cat f` and `echo $(date) env` no longer deny, and bash opens no `f` and
-dumps nothing in any of them.
+dumps nothing in any of them. `$X $(a) cat f` no longer denies either and writes no
+record, though bash prints `f`: it is Q225's class, as `$X cat f` is silent on `main`.
 
 **A payload that does not decode still blocks on exit 2.** Not JSON, no event,
 an event this binary cannot withhold at. That is the hook being invoked wrongly
