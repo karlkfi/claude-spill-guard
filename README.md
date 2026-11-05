@@ -12,7 +12,7 @@ Claude Code sends what it reads to the API, and there is no undo. Git secret
 scanners do not help, because a file read into a session is never committed.
 spill-guard runs before the call and stops it there. It is a net for the
 accident rather than a wall, and [what it does not catch](#what-it-does-not-catch)
-is a short list worth reading before you rely on it.
+is worth reading before you rely on it.
 
 ## What it blocks
 
@@ -147,6 +147,12 @@ the binary unless it says otherwise:
 - **An interpreter.** `python3 -c 'print(open(".env").read())'` and the `node`
   equivalent pass, because the hook knows which argument of `cat` is a file and
   has no way to know what a script opens.
+- **A shell shape the parser does not follow, or a command with no reader row.**
+  Over a file holding a key, `dd if=key.txt` and `cp key.txt /dev/stdout` pass because
+  neither is a known reader. `time -p cat key.txt` ([Q223](docs/queue/Q223.md)),
+  `exec 3<key.txt; cat <&3` ([Q230](docs/queue/Q230.md)) and `while read l; do echo
+  $l; done < key.txt` ([Q229](docs/queue/Q229.md)) pass because the parser misses the
+  file. Bash prints the key in all five, and the hook leaves no verdict and no record.
 - **What a command prints.** `gh auth token`, `kubectl get secret db -o yaml` and
   `aws configure get aws_secret_access_key` all pass. The hook decides before
   the call runs, so it never sees the output.
@@ -181,11 +187,9 @@ withholding the bytes. It charged a turn.
 
 A gap does not normally hide a match beside it. `cat "$X" key.txt` is denied on
 what it could read, and so is `cat` of an undecodable file beside one holding a
-key. An unquoted `$(...)` is the exception: `cat $(pwd)/a.txt key.txt` gets no
-verdict and one record, while the quoted form is denied
-([Q252](docs/queue/Q252.md)).
+key.
 
-The budget is the other limit. A scan takes the call's own text first and then its
+The budget is a limit on that. A scan takes the call's own text first and then its
 files smallest first, so a small file holding a key still blocks beside big ones.
 A key in the file the budget stops on ([Q249](docs/queue/Q249.md)), or in one it
 never reaches, gets only a record, and a `cat` or `head` of that file crosses.
