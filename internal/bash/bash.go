@@ -240,7 +240,16 @@ type interrupted struct {
 	lastClose                bool
 	cmdPos, compoundPos      bool
 	shells                   int
+	// word is whether the last of cur is the word the substitution sits in. A
+	// redirect's target is not in cur, and a process substitution ends its word.
+	word bool
 }
+
+// ProcessSubstitution is the word a `<(…)` or `>(…)` holds in its command. Bash
+// hands the command one path for it, and without the word every operand after
+// it moves: `grep <(x) f` would take f for grep's pattern. No file to open, so a
+// caller drops it from what it reads, and a NUL so that no argument can spell it.
+const ProcessSubstitution = "\x00<("
 
 // opensSubstitution reports whether the `(` at tokens[i] is a substitution's
 // rather than a subshell's. A `>` or `<` ahead of it was taken as the target of
@@ -416,9 +425,9 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		stack []interrupted
 		pipes int
 	)
-	openSubstitution := func() {
+	openSubstitution := func(word bool) {
 		stack = append(stack, interrupted{cur, curRedir, curInputs, curQF, pipe, prevSep,
-			lead, fds, closed, closedParens, lastClose, cmdPos, compoundPos, len(shells)})
+			lead, fds, closed, closedParens, lastClose, cmdPos, compoundPos, len(shells), word})
 		cur, curQF, curRedir, curInputs = nil, nil, nil, nil
 		fds, closed, closedParens, lastClose = descriptors{}, nil, nil, false
 		pipes++
@@ -462,7 +471,9 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 					strings.HasSuffix(cur[n-1], "$(") {
 					cur[n-1] += "("
 				}
-				openSubstitution()
+				target := i >= 2 && (isOperator(tokens[i-2], quotedFrom[i-2], redir) ||
+					isOperator(tokens[i-2], quotedFrom[i-2], dup))
+				openSubstitution(strings.HasSuffix(tokens[i-1], "$(") && !target)
 				i++
 				continue
 			}
@@ -572,7 +583,8 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			// than down the pipe, so it numbers its own: `grep -r x d <(f)` is
 			// not filtered by f, and `grep -r x d 2> >(f)` sends the matches
 			// past it. What follows the `)` is in the command's pipeline again.
-			// The rest of a word glued to the `)` is that word's, and the word
+			// The rest of a word glued to the `)` is that word's, so `$(x)/cat`
+			// ends in `/cat` and a caller can tell it from `$(x) /cat`. The word
 			// holds a substitution, so nothing here can name what it opens.
 			if resume {
 				f := stack[len(stack)-1]
@@ -583,6 +595,9 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				cmdPos, compoundPos = f.cmdPos, f.compoundPos
 				i++
 				if i < len(tokens) && quotedFrom[i] == gluedToClose {
+					if n := len(cur); f.word && n > 0 && i+1 < len(tokens) {
+						cur[n-1] += tokens[i+1]
+					}
 					i += 2
 				}
 				continue
@@ -649,7 +664,8 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				// closes whatever subshell the command sits in, and the
 				// segments after it, still inside, read as outside.
 				if process {
-					openSubstitution()
+					cur, curQF = append(cur, ProcessSubstitution), append(curQF, NotQuoted)
+					openSubstitution(false)
 				}
 				i += 2
 				continue

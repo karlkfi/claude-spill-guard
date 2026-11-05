@@ -110,7 +110,8 @@ func envDumped(segments []bash.Segment) string {
 			continue
 		}
 		k := bash.ShKeywordPeel(segment.Tokens, segment.QuotedFrom)
-		tokens := bash.StripEnvPrefix(segment.Tokens[k:], segment.QuotedFrom[k:])
+		k += bash.EnvPrefixPeel(segment.Tokens[k:], segment.QuotedFrom[k:])
+		tokens := segment.Tokens[k+substitutionHeads(segment.Tokens[k:], segment.QuotedFrom[k:]):]
 		if len(tokens) == 0 {
 			continue
 		}
