@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -236,10 +237,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// (Q196). readers/wrappers.go is the port and carries the grammar.
 			// A cd run by a separate program, `env cd x`, moves nothing in the
 			// shell; `command cd x` and `builtin cd x` move it like a bare one.
+			tokens, prefixed := peelSubstitutionHead(tokens)
 			wrap := readers.PeelWrappers(tokens)
 			if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
 				moved = true
 				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment, v.cdpath)
+				dirUnknown = dirUnknown || prefixed
 				list.moved(segment, dirUnknown)
 				continue
 			}
@@ -257,8 +260,15 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// so the operands on the line are not the files the command reads.
 			// A grep that prints no matched text sends nothing a hidden operand
 			// would need read, for grep.go's reason.
+			//
+			// An unquoted substitution among the words is read past: `sudo -u
+			// $(whoami) cat f` and `env X=$(x) cat f` both print f, so the
+			// literal gets its verdict and the note still covers what the
+			// output adds. `timeout $T cat f` is the same shape and stays
+			// deferred, which Q254 holds open.
 			if wrap.Opaque {
-				if grepNames[filepath.Base(tokens[0])] {
+				past := slices.ContainsFunc(argv, isUnquotedSubstitution)
+				if grepNames[filepath.Base(tokens[0])] && !past {
 					if _, quiet := grepMode(tokens); quiet {
 						continue
 					}
@@ -266,7 +276,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 				note(fmt.Errorf("in the %q here, a command wrapper ahead of it "+
 					"supplies operands or options this cannot read, so which files "+
 					"it would read is not settled here", filepath.Base(tokens[0])))
-				continue
+				if !past {
+					continue
+				}
 			}
 			// `env -C` and `sudo -D` move the command they run and nothing
 			// else, so its operands resolve there and a `<` redirect, which the
@@ -308,6 +320,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 					"through %q, so which files this command would read is not "+
 					"settled here", strings.Join(flags, ", ")))
 				continue
+			}
+			// An unquoted substitution becomes however many words its output
+			// splits into, so one read here as a pattern or a flag's value can
+			// still hand the command a file: `grep $(echo x key.env) plain.txt`
+			// prints key.env. A grep that prints no matched text sends nothing
+			// that would need read, for grep.go's reason.
+			if !quiet && substitutionOffOperands(tokens, operands) {
+				note(fmt.Errorf("in the %q here, an unquoted command substitution may "+
+					"expand to several words, so which files this command would read "+
+					"is not settled here", filepath.Base(tokens[0])))
 			}
 			// Safe to name, and the argument has to be exact because this is
 			// the one caller-derived string the reason carries. Files matched
@@ -512,6 +534,36 @@ func bashTargets(command, cwd string) ([]target, error) {
 	return targets, gap
 }
 
+// peelSubstitutionHead drops an unquoted substitution standing where the command
+// name does, and reports whether it did. `$(prefix) cat f` prints f when the
+// substitution makes no words or a wrapper's, and that is how the shape is used:
+// 269 segments of the 34,996 real commands holding a substitution, measured
+// 2026-11-05, at least 121 of them a throttling prefix. One that makes a
+// command's name instead runs that with these words as arguments, so a `cd`
+// behind one may not move and the caller loses the directory.
+func peelSubstitutionHead(tokens []string) ([]string, bool) {
+	if len(tokens) > 1 && tokens[0] == "$(" {
+		return tokens[1:], true
+	}
+	return tokens, false
+}
+
+// isUnquotedSubstitution reports whether a word holds an unquoted `$(…)`.
+// Segments leaves such a word ending in the `$(` it opened, and a quoted one
+// whole.
+func isUnquotedSubstitution(word string) bool { return strings.HasSuffix(word, "$(") }
+
+// substitutionOffOperands reports whether tokens holds an unquoted substitution
+// the reader's grammar put somewhere other than its file operands.
+func substitutionOffOperands(tokens, operands []string) bool {
+	for _, t := range tokens[1:] {
+		if isUnquotedSubstitution(t) && !slices.Contains(operands, t) {
+			return true
+		}
+	}
+	return false
+}
+
 // substMark brackets the index of a substitution lifted out of a command
 // string, so the word left behind carries the substitution's position through
 // the lexer. Upstream's SUBST_MARK, and `\x1e` for upstream's reason, measured
@@ -666,9 +718,17 @@ func substStates(text string, subs []bash.Substitution, entry substState, lastpi
 		if len(tokens) == 0 {
 			continue
 		}
+		// peelSubstitutionHead's reading, of a head that was marked and then
+		// restored whole.
+		prefixed := len(tokens) > 1 && seg.QuotedFrom[head] == bash.NotQuoted &&
+			substMarkRE.FindString(segment.Tokens[head]) == segment.Tokens[head]
+		if prefixed {
+			tokens = tokens[1:]
+		}
 		wrap := readers.PeelWrappers(tokens)
 		if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
 			dir, unknown = follow(kind, arg, dir, unknown, seg, v.cdpath)
+			unknown = unknown || prefixed
 			list.moved(seg, unknown)
 			continue
 		}

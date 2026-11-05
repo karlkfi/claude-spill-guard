@@ -217,6 +217,11 @@ func skipQuoted(text string, i int) int {
 // nothing quoted is quoted later than any offset a match can end at.
 const NotQuoted = math.MaxInt
 
+// gluedToClose is the QuotedFrom of the empty token lexMarking writes between an
+// unquoted `)` and a word glued to it. No word has this provenance, so nothing
+// can spell one.
+const gluedToClose = math.MinInt
+
 // Unquoted is the provenance list for a caller that holds none, reading every
 // word as though it were written without quotes -- which is what this repo did
 // before the provenance existed.
@@ -434,7 +439,13 @@ const (
 // matches none of them, and both paths a non-ASCII byte can take append it to
 // the current token. Invalid UTF-8 therefore survives byte for byte, where a
 // []rune conversion would substitute U+FFFD and change the token.
-func lex(text string) ([]string, []int, error) {
+func lex(text string) ([]string, []int, error) { return lexMarking(text, false) }
+
+// lexMarking is lex, writing a gluedToClose token where a word starts straight
+// after an unquoted `)` when closes is set. shlex drops the adjacency, which
+// Segments needs: the `/x` of `$(pwd)/x` is part of the word the substitution
+// is in, and `$(pwd) /x` is a word of its own.
+func lexMarking(text string, closes bool) ([]string, []int, error) {
 	l := &lexer{src: requote(text), state: stateSpace, cmdPos: true}
 	var out []string
 	var quotedFrom []int
@@ -448,6 +459,13 @@ func lex(text string) ([]string, []int, error) {
 		}
 		out = append(out, token)
 		quotedFrom = append(quotedFrom, from)
+		// A run of punctuation pushes back only what is neither punctuation
+		// nor whitespace, which is the first byte of a word.
+		if closes && from == NotQuoted && len(l.pushback) > 0 && allPunct(token) &&
+			strings.HasSuffix(token, ")") {
+			out = append(out, "")
+			quotedFrom = append(quotedFrom, gluedToClose)
+		}
 	}
 }
 

@@ -47,7 +47,8 @@
 // provenance travels beside it rather than on it), and isDigits below. One
 // difference is this repo's rather than Go's: Segment.Inputs records which of
 // the redirects were `<`, and the field's comment carries why upstream has no
-// need of it.
+// need of it. So is the interrupted command below, which upstream has no need of
+// because an unresolvable operand there refuses the whole call.
 //
 // The layers, in the order a command passes through them:
 //
@@ -218,6 +219,39 @@ type compound struct {
 	depth       int
 }
 
+// interrupted is the command a substitution sits inside, kept while its body is
+// read. Bash expands a `$(…)`, `$((…))`, `<(…)` or `>(…)` to build the command's
+// words, so the words after one belong to that command: `cat $(x) f` reads f.
+// Upstream's loop flushes at the `(`, which leaves f a command name, and this
+// repo's walk goes on past the unresolved `$(`, so f crossed with only a record
+// for the substitution. It also ran `echo $(date) env` as `env`.
+//
+// So the body's segments come first, as bash runs them, and the command resumes
+// at the `)` with everything its own separators decide: its operator, its
+// pipeline, its subshells and its descriptors.
+type interrupted struct {
+	cur, curRedir, curInputs []string
+	curQF                    []int
+	pipe                     int
+	prevSep, lead            string
+	fds                      descriptors
+	closed                   []compound
+	closedParens             []int
+	lastClose                bool
+	cmdPos, compoundPos      bool
+	shells                   int
+}
+
+// opensSubstitution reports whether the `(` at tokens[i] is a substitution's
+// rather than a subshell's. A `>` or `<` ahead of it was taken as the target of
+// the redirect before it, in `> >(…)` and `< <(…)`.
+func opensSubstitution(tokens []string, i int) bool {
+	if i == 0 {
+		return false
+	}
+	return strings.HasSuffix(tokens[i-1], "$(") || tokens[i-1] == ">" || tokens[i-1] == "<"
+}
+
 // descriptors is where fd 1 and fd 2 point while one segment's redirects are
 // read: "pipe" and "err" for where they started, the next stage and the
 // shell's stderr, "file" for a file or a closed descriptor, and "other" for a
@@ -318,7 +352,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	if stripHeredocs {
 		cmd = StripHeredocBodies(cmd, nil, false)
 	}
-	tokens, quotedFrom, err := lex(StripComments(cmd))
+	tokens, quotedFrom, err := lexMarking(StripComments(cmd), true)
 	if err != nil {
 		return nil, err
 	}
@@ -376,9 +410,32 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		fds          = descriptors{}
 		parenFirst   []int
 		closedParens []int
+		// The commands substitutions have interrupted, innermost last, and the
+		// highest pipeline number handed out, since a resumed command takes
+		// back a number the body's successors must not reuse.
+		stack []interrupted
+		pipes int
 	)
+	openSubstitution := func() {
+		stack = append(stack, interrupted{cur, curRedir, curInputs, curQF, pipe, prevSep,
+			lead, fds, closed, closedParens, lastClose, cmdPos, compoundPos, len(shells)})
+		cur, curQF, curRedir, curInputs = nil, nil, nil, nil
+		fds, closed, closedParens, lastClose = descriptors{}, nil, nil, false
+		pipes++
+		pipe = pipes
+		parenFirst = append(parenFirst, -1)
+		paren++
+		opened++
+		shells = append(shells, opened)
+		prevSep, lead = "(", "("
+		cmdPos, compoundPos = true, true
+	}
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
+		if quotedFrom[i] == gluedToClose {
+			i++
+			continue
+		}
 		// A reserved word ahead of the name can leave it in command position,
 		// so `then f () { … }` is a definition; upstream's `len(cur) == 1` reads
 		// it as a call and the body as the current shell (Q212).
@@ -398,8 +455,19 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			continue
 		}
 		if isOperator(t, quotedFrom[i], separators) {
+			if t == "(" && !inPattern(clauses) && opensSubstitution(tokens, i) {
+				// `$((` is arithmetic, one word whatever it holds, and a caller
+				// asking how many words `$(` becomes needs the difference.
+				if n := len(cur); n > 0 && i+1 < len(tokens) && tokens[i+1] == "(" &&
+					strings.HasSuffix(cur[n-1], "$(") {
+					cur[n-1] += "("
+				}
+				openSubstitution()
+				i++
+				continue
+			}
 			empty := len(cur) == 0 && len(curRedir) == 0
-			substituted := false
+			resume := false
 			if !empty {
 				persists := paren == 0 && !isPipe(prevSep) &&
 					(t == ";" || t == "\n" || t == "&&" || t == "||")
@@ -463,17 +531,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				// is not itself marked.
 				clauses[n-1] = "body"
 			case t == "(":
-				// A `$(` body is a substitution, whose output is the command's
-				// words rather than its stdout, so it numbers its own pipe. So
-				// is the `(` of a `> >(…)` or `< <(…)`, which the redirect
-				// before it took as its target: `grep -r x d 2> >(f)` sends
-				// the matches past f.
-				if i > 0 && (tokens[i-1] == "$(" || tokens[i-1] == ">" || tokens[i-1] == "<") {
-					parenFirst = append(parenFirst, -1)
-					substituted = true
-				} else {
-					parenFirst = append(parenFirst, len(segs))
-				}
+				parenFirst = append(parenFirst, len(segs))
 				if fn != "" { // `f () ( … )`
 					opened++
 					shells = append(shells, opened)
@@ -492,7 +550,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 					if first := parenFirst[n-1]; first >= 0 {
 						closedParens = append(closedParens, first)
 					} else {
-						substituted = true
+						resume = true
 					}
 					parenFirst = parenFirst[:n-1]
 				}
@@ -510,13 +568,30 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				clauses[n-1] = "next"
 				patDepth, patStarted = 0, false
 			}
+			// A body's output reaches the command as a file or as words rather
+			// than down the pipe, so it numbers its own: `grep -r x d <(f)` is
+			// not filtered by f, and `grep -r x d 2> >(f)` sends the matches
+			// past it. What follows the `)` is in the command's pipeline again.
+			// The rest of a word glued to the `)` is that word's, and the word
+			// holds a substitution, so nothing here can name what it opens.
+			if resume {
+				f := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				cur, curRedir, curInputs, curQF = f.cur, f.curRedir, f.curInputs, f.curQF
+				pipe, prevSep, lead, fds = f.pipe, f.prevSep, f.lead, f.fds
+				closed, closedParens, lastClose = f.closed, f.closedParens, f.lastClose
+				cmdPos, compoundPos = f.cmdPos, f.compoundPos
+				i++
+				if i < len(tokens) && quotedFrom[i] == gluedToClose {
+					i += 2
+				}
+				continue
+			}
 			// A subshell's parens open and close no pipeline: `f | (g)` pipes
-			// f into g, and `(grep -r x d) | f` grep into f. A substitution's
-			// still do, because its body's output reaches the command as a
-			// file or as words rather than down the pipe: `grep -r x d <(f)`
-			// is not filtered by f.
-			if !isPipe(t) && (t != "(" && t != ")" || substituted) {
-				pipe++
+			// f into g, and `(grep -r x d) | f` grep into f.
+			if !isPipe(t) && t != "(" && t != ")" {
+				pipes++
+				pipe = pipes
 			}
 			prevSep, lead = t, t
 			cmdPos, compoundPos = true, true
@@ -565,18 +640,16 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				// paren as a target. It is a process substitution and not a
 				// file, and the loop that reads Inputs would try to open it,
 				// so it is kept out of Inputs and left in Redirects as it is.
-				if t == "<" && tokens[i+1] != "(" {
+				process := isOperator(tokens[i+1], quotedFrom[i+1], separators) && tokens[i+1] == "("
+				if t == "<" && !process {
 					curInputs = append(curInputs, tokens[i+1])
 				}
 				// Its body runs in a subshell, and its `)` still arrives
 				// as a separator. Upstream counts neither, so that `)`
 				// closes whatever subshell the command sits in, and the
 				// segments after it, still inside, read as outside.
-				if tokens[i+1] == "(" {
-					paren++
-					opened++
-					shells = append(shells, opened)
-					parenFirst = append(parenFirst, -1)
+				if process {
+					openSubstitution()
 				}
 				i += 2
 				continue
@@ -640,6 +713,16 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			conditional(prevSep), inCaseArm(clauses), pipe, curQF,
 			append([]int(nil), shells...), forked(lead, ""),
 			lastStage(lead, "", lastClose), "", "", fds.away()})
+	}
+	// An unterminated substitution: the commands it interrupted still ran.
+	for n := len(stack) - 1; n >= 0; n-- {
+		f := stack[n]
+		if len(f.cur) > 0 || len(f.curRedir) > 0 {
+			segs = append(segs, Segment{f.cur, f.curRedir, f.curInputs, false,
+				conditional(f.prevSep), inCaseArm(clauses), f.pipe, f.curQF,
+				append([]int(nil), shells[:min(f.shells, len(shells))]...), forked(f.lead, ""),
+				lastStage(f.lead, "", f.lastClose), "", "", f.fds.away()})
+		}
 	}
 	for k := range segs {
 		shells := segs[k].Shells
