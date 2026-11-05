@@ -207,7 +207,7 @@ func overrunAt(t *testing.T, label, payload string) (code int, stdout, stderr st
 //
 // The arms differ in the order the call names them. With the key first, a scan
 // in call order finds it and an overrun threw the finding away. With the key
-// last, a scan in call order never reached it. So dropping the publish reddens
+// last, a scan in call order never reached it. So dropping the gather reddens
 // both and dropping the sort reddens only the second, which is why a test with
 // the key first would not have been enough.
 func TestAnOverrunStillBlocksOnTheBuffersItGotThrough(t *testing.T) {
@@ -293,7 +293,7 @@ func TestAnOverrunWithNothingFoundStillDefers(t *testing.T) {
 // Cleaned up by hand because the scan can still have the last file open when the
 // test ends, which Windows refuses to delete under t.TempDir.
 func TestGatheringIsSafeWhileTheScanRuns(t *testing.T) {
-	dir, err := os.MkdirTemp("", "spill-guard-snapshot")
+	dir, err := os.MkdirTemp("", "spill-guard-gather")
 	if err != nil {
 		t.Fatal(err)
 	}

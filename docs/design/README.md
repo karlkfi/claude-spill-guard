@@ -2354,15 +2354,19 @@ That was two defects, and each needed its own fix.
 
 **A finding already made was thrown away.** With the key file first and a budget
 cut to 1s, the scan matched it and the overrun then discarded the match. The scan
-now publishes what it has settled after each buffer, and the deadline answers
-from the last snapshot. A match there blocks, carrying
+now stores each finished buffer's result in its own atomic slot, and the deadline
+gathers the slots once. A match there blocks, carrying
 [the notice](#a-blocking-verdict-carries-the-notice-too-on-a-channel-that-is-per-event) that the verdict stops
-short, and writes no record, as a walk's failure does. Each snapshot is built
-fresh and crosses on an atomic pointer, because the scan goes on running behind
-the verdict.
+short, and writes no record, as a walk's failure does.
 
-**A buffer behind the overrun was never read.** The scan now takes buffers
-smallest first. The harness's limit is why that is the right order: it spliced
+**Gathering once is not a tidy-up.** The first shape gathered after every buffer,
+which is quadratic in the buffers. `for f in *; do cat "$f"; done` over 150,000
+six-byte files and a larger key file denied in 9.09s on base and deferred at 45.03s
+on that shape, with the same result when the small files were binary. It now
+denies in 4.31s, and 3.71s for the binary files.
+
+**A buffer behind the overrun was never read.** The scan now takes what is in
+memory first, since that costs no read, and then files smallest first. The harness's limit is why that is the right order: it spliced
 none of the 400 MiB fixtures, so on a prompt the bytes that use up a budget are
 not the bytes that cross. Size order reaches everything under any such limit
 before anything over it, and it needs no number here that could go stale when the
@@ -2378,7 +2382,8 @@ be read into memory before the first match, so a slow read could spend the budge
 with nothing looked at, the prompt's own text included. A target now carries its
 size and reads itself when its turn comes. That is unmeasured on a slow disk,
 since every run here is on a warm page cache. It did cut peak memory on the
-six-fixture call, below, from 2,411 MiB to 810 MiB.
+six-fixture call, below, to about a third: 2,411 MiB to 810 MiB here, and 3,798 MiB
+to 1,246 MiB in a review of this change on another run.
 
 **A budget per buffer was the other proposal, and it was argued against rather
 than built.** The shares have to add up to 45 seconds, so with seven buffers the
@@ -2395,24 +2400,24 @@ is run out the budget, and the deferring rows show they did.
 
 | Budget | Call | Base | This build |
 |---|---|---|---|
-| 1s | `@notes.txt` then one fixture | 1.297s, defers | 1.284s, blocks `aws-access-key-id` |
-| 1s | one fixture then `@notes.txt` | 1.014s, defers | 1.013s, blocks |
+| 1s | `@notes.txt` then one fixture | 1.193s, defers | 1.360s, blocks `aws-access-key-id` |
+| 1s | one fixture then `@notes.txt` | 1.013s, defers | 1.012s, blocks |
 | 1s | `cat` one fixture then `notes.txt` | 1.013s, defers | 1.014s, blocks |
-| 1s | `Read` of one fixture, the key in its `file_path` | 1.014s, defers | 1.013s, blocks |
-| 1s | `Grep` of one fixture, the key in its `pattern` | 1.015s, defers | 1.014s, blocks |
-| 45s | six fixtures then `@notes.txt` | 45.306s, defers | 45.285s, blocks |
-| 45s | `cat` six fixtures then `notes.txt` | 45.028s, defers | 45.018s, blocks |
+| 1s | `Read` of one fixture, the key in its `file_path` | 1.015s, defers | 1.014s, blocks |
+| 1s | `Grep` of one fixture, the key in its `pattern` | 1.014s, defers | 1.012s, blocks |
+| 45s | six fixtures then `@notes.txt` | 45.032s, defers | 45.016s, blocks |
+| 45s | `cat` six fixtures then `notes.txt` | 45.029s, defers | 45.016s, blocks |
 
 Through `claude -p` on 2.1.290 under a clean `HOME`, at the 1s budget and load
 4–5, the base build attached `notes.txt` with the key in the transcript and wrote a coverage
 record in both prompt orders. This build wrote no record, and the prompt was
 blocked before anything was attached. The controls on this build: `@notes.txt`
-alone blocks in 0.008s, and one fixture alone still defers at 1.018s.
+alone blocks in 0.008s, and one fixture alone still defers at 1.020s.
 
 Three things it does not close:
 
-- **A key inside the buffer the deadline stops on.** The scan publishes a buffer
-  only once it is finished, so a key at byte 0 of a 400 MiB file still defers at
+- **A key inside the buffer the deadline stops on.** The scan stores a buffer's
+  result only once it is finished, so a key at byte 0 of a 400 MiB file still defers at
   the 1s budget. That is [Q249](../queue/Q249.md).
 - **A key in a buffer the budget never reaches.** Enough smaller buffers can
   spend the budget first. On a prompt the harness's limit bounds what that can
