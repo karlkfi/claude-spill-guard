@@ -537,7 +537,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 // peelSubstitutionHead drops an unquoted substitution standing where the command
 // name does, and reports whether it did. `$(prefix) cat f` prints f when the
 // substitution makes no words or a wrapper's, and that is how the shape is used:
-// 269 segments of the 34,996 real commands holding a substitution, measured
+// 269 segments across the 35,011 real commands holding a substitution, measured
 // 2026-11-05, at least 121 of them a throttling prefix. One that makes a
 // command's name instead runs that with these words as arguments, so a `cd`
 // behind one may not move and the caller loses the directory.

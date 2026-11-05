@@ -638,9 +638,13 @@ rules; this has no opinion to spend on them, because it could not read the
 call. **A gap does not hide a finding beside it**: the walk goes on past an
 operand it cannot settle, what it did read is scanned, and a match there
 blocks (Q204), naming a buffer nothing decoded beside it in the notice and
-writing no record (Q244). A scan past its budget blocks on the buffers it got
-through, and it gets through the smallest first (Q227), which is an order rather
-than a size cap: `docs/design/README.md` under *The order the budget spends*.
+writing no record (Q244). The exception is a call whose operand list is what
+is unsettled — `xargs`, a wrapper whose options this cannot read, a file-list
+flag, a `for` list holding a non-literal — where a literal on the line stays
+unread beside the record (Q254). A scan past its budget blocks on the buffers it
+got through, and it gets through the smallest first (Q227), which is an order
+rather than a size cap: `docs/design/README.md` under *The order the budget
+spends*.
 
 Why, measured over the week to 2026-09-05 across 100 sessions on one machine:
 
