@@ -1433,28 +1433,60 @@ over a clean file, because its output can add a file operand: `grep $(echo x k) 
 opens `k`.
 
 Some shapes denied only because of the split, and they had to keep working by
-another route. `sudo -u $(whoami) cat f` reads past the substitution even though
-the wrapper's grammar is lost. `$(prefix) cat f` reads the substitution as a
-prefix, which is how 269 real segments use it, and a `cd` behind one loses the
-directory. `env $(x) cat f` moved from a deny to a record, because that
-substitution may be a `-C` and the relative `f` is then unsettled.
+another route:
+
+- **A prefix.** A word with no literal text ahead of the command name is read past,
+  repeatedly and after a wrapper's own peel: `$(a) $(b) cat f`, `${X:-$(a)} cat f`,
+  `timeout 5 $(a) cat f`. A `cd` behind one loses the directory.
+- **A word glued to the `)`** stays on its word, so `$(x)/cat f` runs a cat and
+  `$(x)/nothing cat f` does not.
+- **A wrapper's lost grammar.** `sudo -u $(whoami) cat f` reads past the
+  substitution, which also blocks `env X=$(a) echo cat f`, where `f` is only echoed.
+  Q254 prices that.
+- **A process substitution** holds its word, since dropping it moved the operands:
+  `grep -v <(x) f` took `f` for the pattern.
+- **`time`** takes `-p` and `--` as part of the keyword. `time -p cat f` crossed
+  silently on `main`, and `time -p $(x) cat f` blocked only because of the split.
+
+A substitution still at command position writes a record, since its output can name
+any program and any file, so `$(echo cat) f` and `"$(echo cat)" f`, silent on `main`,
+now say so. That is the floor for what follows.
 
 Driven 2026-11-05 on binaries built from `main` and from this change, over the
-35,011 distinct real commands on this machine holding a `$(`, `<(` or `>(`:
+35,011 distinct real commands on this machine holding a `$(`, `<(` or `>(`, all from
+one scratch directory, so a relative operand named no file:
 
 | `main` | this change | commands |
 |---|---|---|
-| same verdict, same record | same | 34,912 |
+| same verdict, same record | same | 34,563 |
+| no verdict, none | no verdict, a record | 351 |
 | no verdict, a record | no verdict, none | 69 |
-| no verdict, none | no verdict, a record | 27 |
 | a notice | nothing | 2 |
 | no verdict, a record | deny on a rule | 1 |
 
-Nothing moved from a deny to no verdict. The 69 include `diff <(sed …)`, the shape
-Q216 named, and the 2 are a `diff` reading `/usr/bin/grep` as its operand. The one
-deny is a `grep` naming real files after a `$(find …)`. Every command ran from one
-scratch directory, so a relative operand named no file and this table says little
-about verdicts on them; the shapes above are held by tests instead.
+The 351 are the price of the record above, and the ones read are a throttling
+`$(script prefix) go test` that runs what it names. The 69 include `diff <(sed …)`,
+the shape Q216 named. To say something about file operands, the same commands went
+through both binaries patched so that every operand read as a file holding a key:
+
+| | commands |
+|---|---|
+| deny on `main` | 10,582 |
+| of those, no deny here | 46 |
+| no deny on `main`, deny here | 16 |
+
+Of the 46, 35 name only words a script finds inside a `<(…)` body, and reading the
+other 11 found the same class spelled another way: a body word behind `$K`, a
+followed `cd`, or an escape. `main` read a body's words as the outer reader's
+operands, as in `diff <(git show x:f)` naming `git`. Those denies were accidents, but
+not always empty ones: `diff <(fold f)` read `f` on `main`, and here `fold` is a
+command with no row, which is the design's stated limit.
+
+These denies moved in the rows driven by hand, and the list is not exhaustive. `env
+$(x) cat f` and `nice $(x)/cat f` now write a record: the first may be a `-C`, and
+the second is a word the wrapper cannot read. `$((5)) cat f`, `echo $(date) cat f`,
+`echo <(date) cat f` and `echo $(date) env` no longer deny, and bash opens no `f` and
+dumps nothing in any of them.
 
 **A payload that does not decode still blocks on exit 2.** Not JSON, no event,
 an event this binary cannot withhold at. That is the hook being invoked wrongly

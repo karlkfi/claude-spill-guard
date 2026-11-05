@@ -749,7 +749,8 @@ model can point at is the two-step bypass the project ruleset was retired for.
 
 **Do not hand-roll shell parsing.** The Bash operand resolution is a port of
 `claude-workspace-guard`'s segmentation layer, kept structurally identical so a
-fix there transfers by inspection. Writing quote-state tracking from scratch is
+fix there transfers by inspection, apart from the divergences named at each site,
+the largest that a substitution resumes the command it interrupted (Q252). Writing quote-state tracking from scratch is
 the documented failure mode for this class of tool, and it fails silently in
 both directions.
 
