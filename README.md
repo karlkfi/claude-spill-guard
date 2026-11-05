@@ -149,10 +149,11 @@ the binary unless it says otherwise:
   has no way to know what a script opens.
 - **A shell shape the parser does not follow, or a command with no reader row.**
   Over a file holding a key, `dd if=key.txt` and `cp key.txt /dev/stdout` pass because
-  neither is a known reader. `time -p cat key.txt` ([Q223](docs/queue/Q223.md)),
-  `exec 3<key.txt; cat <&3` ([Q230](docs/queue/Q230.md)) and `while read l; do echo
-  $l; done < key.txt` ([Q229](docs/queue/Q229.md)) pass because the parser misses the
-  file. Bash prints the key in all five, and the hook leaves no verdict and no record.
+  neither is a known reader. `exec 3<key.txt; cat <&3` ([Q230](docs/queue/Q230.md))
+  and `while read l; do echo $l; done < key.txt` ([Q229](docs/queue/Q229.md)) pass
+  because the file arrives through a redirect the hook does not trace. Bash prints the
+  key in all four, and the hook leaves no verdict and no record. These are examples
+  and not the whole class.
 - **What a command prints.** `gh auth token`, `kubectl get secret db -o yaml` and
   `aws configure get aws_secret_access_key` all pass. The hook decides before
   the call runs, so it never sees the output.
@@ -185,9 +186,12 @@ than findings, and after 505 of those 509 the session got a clean call through
 within four attempts by reading the same tree another way. The refusal was not
 withholding the bytes. It charged a turn.
 
-A gap does not normally hide a match beside it. `cat "$X" key.txt` is denied on
-what it could read, and so is `cat` of an undecodable file beside one holding a
-key.
+A gap does not hide a match beside it, as long as the scanner can still tell which
+words on the line are files. `cat "$X" key.txt` and `cat $(echo a) key.txt` are
+denied on what they could read, and so is `cat` of an undecodable file beside one
+holding a key. Where the whole operand list is unsettled, as in `echo a | xargs cat
+key.txt`, no file on that line is opened and the call gets only a record
+([Q254](docs/queue/Q254.md)).
 
 The budget is a limit on that. A scan takes the call's own text first and then its
 files smallest first, so a small file holding a key still blocks beside big ones.
@@ -206,13 +210,13 @@ with a hook error on record.
 
 ## What it costs
 
-About 10 ms per hook call. Medians ranged from 9.9 ms to 12.2 ms across four runs
+About 10 ms per hook call. Medians ranged from 9.8 ms to 10.8 ms across four runs
 of 40 calls each, for a `Bash` `ls`, a `Read` of a 1.2 KB file and a short prompt.
 That is a pre-release build of v0.7.0 through the command `hooks/hooks.json` runs,
-on one Apple M5 Max at a load of 5 to 6 on 2026-11-04, with small inputs. About
+on one Apple M5 Max at a load of about 6 on 2026-11-05, with small inputs. About
 2.5 ms of it is the cost of spawning any process from the measuring script. A
-larger file costs more: the binary alone took 4.8 to 6.6 ms on those inputs and 7.5
-to 7.9 ms on a 68 KB file. Your machine will differ.
+larger file costs more: the binary alone took 4.7 to 6.0 ms on those inputs and 7.4
+to 7.7 ms on a 68 KB file. Your machine will differ.
 
 ## How it is built
 
