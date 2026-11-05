@@ -1448,9 +1448,9 @@ another route:
 - **`time`** takes `-p` and `--` as part of the keyword. `time -p cat f` crossed
   silently on `main`, and `time -p $(x) cat f` blocked only because of the split.
 
-A substitution still at command position writes a record, since its output can name
-any program and any file, so `$(echo cat) f` and `"$(echo cat)" f`, silent on `main`,
-now say so. That is the floor for what follows.
+A substitution anywhere in the command word writes a record, since its output can
+name any program and any file, so `$(echo cat) f`, `"$(echo cat)" f` and `$(x)/python3
+f`, silent on `main`, now say so. That is the floor for what follows.
 
 Driven 2026-11-05 on binaries built from `main` and from this change, over the
 35,011 distinct real commands on this machine holding a `$(`, `<(` or `>(`, all from
@@ -1458,13 +1458,13 @@ one scratch directory, so a relative operand named no file:
 
 | `main` | this change | commands |
 |---|---|---|
-| same verdict, same record | same | 34,563 |
+| same verdict, same record | same | 34,588 |
 | no verdict, none | no verdict, a record | 351 |
 | no verdict, a record | no verdict, none | 69 |
 | a notice | nothing | 2 |
 | no verdict, a record | deny on a rule | 1 |
 
-The 351 are the price of the record above, and the ones read are a throttling
+The 351 are the price of the record above, and most of the ones read are a throttling
 `$(script prefix) go test` that runs what it names. The 69 include `diff <(sed …)`,
 the shape Q216 named. To say something about file operands, the same commands went
 through both binaries patched so that every operand read as a file holding a key:

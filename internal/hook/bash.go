@@ -595,11 +595,11 @@ func commandBehind(tokens []string) (readers.Peel, bool) {
 	return wrap, prefixed
 }
 
-// substitutionNamesCommand reports whether a substitution sits in the last path
-// element of the command, where the program it runs cannot be read: `$(x)t f`
-// but not `$(x)/cat f`, which runs a cat.
+// substitutionNamesCommand reports whether the command word holds a substitution,
+// so what it runs is the substitution's to say: `$(x)t f`, and `$(x)/cat f` too,
+// whose directory can hold anything by that name.
 func substitutionNamesCommand(argv []string) bool {
-	return len(argv) > 0 && strings.Contains(filepath.Base(argv[0]), "$(")
+	return len(argv) > 0 && strings.Contains(argv[0], "$(")
 }
 
 // holdsOpenExpansion reports whether a word holds an unquoted `$(…)` or `$((…))`.

@@ -238,9 +238,6 @@ func TestAWordAfterASubstitutionIsNotACommand(t *testing.T) {
 		"echo $(date) cat " + name,
 		"echo $(date) env",
 		"echo <(date) cat " + name,
-		// The name this runs is `nothing`, which has no row.
-		"$(pwd)/nothing cat " + name,
-		"$(pwd)/nothing head " + name,
 		// A word the substitution is glued to is not the file it ends in: this
 		// opens whatever `a` plus the name spells.
 		"echo $(echo a)" + name,
@@ -249,6 +246,16 @@ func TestAWordAfterASubstitutionIsNotACommand(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
 			if code != 0 || stdout != "" {
 				t.Errorf("exit %d, stdout %q, want a silent 0 (stderr: %q)", code, stdout, stderr)
+			}
+		})
+	}
+	// The program here is `nothing`, so the words after it open no file, and the
+	// directory it runs from is the substitution's to say.
+	for _, command := range []string{"$(pwd)/nothing cat " + name, "$(pwd)/nothing head " + name} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "stands where") {
+				t.Errorf("coverage reason = %q, want it to say the substitution stands where the name does", reason)
 			}
 		})
 	}
@@ -342,6 +349,9 @@ func TestASubstitutionKeepsItsCoverageRecord(t *testing.T) {
 		{"$(true) cat plain.txt", "stands where"},
 		{"timeout 5 $(echo) cat plain.txt", "stands where"},
 		{"nice $(echo /bin)/cat plain.txt", "stands where"},
+		{"timeout 5 $(echo /bin)/cat plain.txt", "stands where"},
+		{"$(echo /bin)/cat plain.txt", "stands where"},
+		{"$(echo /usr/bin)/python3 plain.txt", "stands where"},
 		// The note a wrapper's grammar leaves survives the arm that reads past it.
 		{"timeout $(echo 5) cat plain.txt", "command wrapper"},
 		{"timeout $((5)) cat plain.txt", "command wrapper"},
@@ -360,7 +370,6 @@ func TestASubstitutionKeepsItsCoverageRecord(t *testing.T) {
 		"head -n $((1+1)) plain.txt",
 		"cat <(echo a) plain.txt",
 		"grep -c $(echo x) plain.txt",
-		"$(echo /bin)/cat plain.txt",
 		"grep -r x <(echo a)",
 	} {
 		t.Run(command, func(t *testing.T) {
