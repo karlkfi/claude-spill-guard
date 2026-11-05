@@ -1394,7 +1394,8 @@ opinion to spend on them, because it could not read the call.
 cannot settle, everything it did collect is scanned — the prompt or command
 string, and every file that resolved — and a match there blocks, with a notice
 that part of the call went unread. Only a call where nothing readable matched
-defers. Until Q204 the first failure returned no buffers at all, so `echo <a
+defers. An unquoted `$(...)` is the open exception, hiding the operands after it
+([Q252](../queue/Q252.md)). Until Q204 the first failure returned no buffers at all, so `echo <a
 key>; cat $X` and a key typed beside an `@` token with no working directory
 both exited 0 with no verdict.
 

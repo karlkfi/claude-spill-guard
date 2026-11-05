@@ -173,24 +173,27 @@ recorded. `spill-guard coverage` counts those records, grouped by reason. A bina
 file with no byte-order mark is the exception: it leaves no record, and you get a
 message naming it instead.
 
-A gap does not hide a match beside it. `cat "$X" key.txt` is denied on what it
-could read, and so is `cat` of an undecodable file beside one holding a key.
+A gap was a block until 2026-09-05, and the measurement is what changed it. Over
+one week and 100 sessions on one machine, 509 of 540 blocks were gaps rather
+than findings, and after 505 of those 509 the session got a clean call through
+within four attempts by reading the same tree another way. The refusal was not
+withholding the bytes. It charged a turn.
 
-The budget is the limit on that. A scan takes the call's own text first and then
-its files smallest first, so a small file holding a key still blocks beside big
-ones. A key in the file the budget stops on ([Q249](docs/queue/Q249.md)), or in
-one it never reaches, crosses with only a record.
+A gap does not normally hide a match beside it. `cat "$X" key.txt` is denied on
+what it could read, and so is `cat` of an undecodable file beside one holding a
+key. An unquoted `$(...)` is the exception: `cat $(pwd)/a.txt key.txt` gets no
+verdict and one record, while the quoted form is denied
+([Q252](docs/queue/Q252.md)).
+
+The budget is the other limit. A scan takes the call's own text first and then its
+files smallest first, so a small file holding a key still blocks beside big ones.
+A key in the file the budget stops on ([Q249](docs/queue/Q249.md)), or in one it
+never reaches, gets only a record, and a `cat` or `head` of that file crosses.
 
 A command string holding a NUL would also be skipped as binary, but Claude Code
 refuses that call before any hook or shell runs. That was driven for `Bash` on
 2.1.282, 2.1.289, 2.1.290 and 2.1.309 and for `PowerShell` on 2.1.290, and CI
 re-checks the pinned version ([Q246](docs/queue/Q246.md)).
-
-That was a block until 2026-09-05, and the measurement is what changed it. Over
-one week and 100 sessions on one machine, 509 of 540 blocks were gaps rather
-than findings, and after 505 of those 509 the session got a clean call through
-within four attempts by reading the same tree another way. The refusal was not
-withholding the bytes. It charged a turn.
 
 An install with no binary still blocks, because the launcher refuses the call. So
 does a payload the binary cannot decode, which exits 2. The launcher itself is the
