@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -283,15 +284,15 @@ func TestAnOverrunWithNothingFoundStillDefers(t *testing.T) {
 	}
 }
 
-// The verdict reads what the scan published while the scan goes on publishing.
+// The verdict gathers what the scan stored while the scan goes on storing.
 // overrunAt cannot show that, because its scan stops at the deadline. This one
 // runs a real clock over enough buffers that the deadline lands among them, and
 // what it asserts is nothing the verdict says: it is here for -race, and swapping
-// the atomic for a plain pointer turns it red there.
+// an atomic slot for a plain pointer turns it red there.
 //
 // Cleaned up by hand because the scan can still have the last file open when the
 // test ends, which Windows refuses to delete under t.TempDir.
-func TestAPublishedSnapshotIsSafeToReadWhileTheScanRuns(t *testing.T) {
+func TestGatheringIsSafeWhileTheScanRuns(t *testing.T) {
 	dir, err := os.MkdirTemp("", "spill-guard-snapshot")
 	if err != nil {
 		t.Fatal(err)
@@ -312,6 +313,78 @@ func TestAPublishedSnapshotIsSafeToReadWhileTheScanRuns(t *testing.T) {
 		if code, _, stderr := driveWithin(t, budget, payload); code != 0 {
 			t.Errorf("at %s exited %d (stderr %q)", budget, code, stderr)
 		}
+	}
+}
+
+// A string the call carries goes ahead of every file, however short the file, so
+// a read that never comes back cannot keep a key in the string from a verdict. A
+// path can be longer than the file it names, and that is the arm size order loses.
+func TestAStringTheCallCarriesIsMatchedAheadOfEveryFile(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{dir, filepath.Join(dir, secret)} {
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "tiny"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bash := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+		`,"tool_input":{"command":` + quote(t, "echo "+secret+"; cat tiny") + `}}`
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"prompt", `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+			`,"prompt":` + quote(t, secret+" and @tiny") + `}`},
+		{"Bash", bash},
+		{"Read", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{` +
+			`"file_path":` + quote(t, filepath.Join(dir, secret, "tiny")) + `}}`},
+		{"Grep", `{"hook_event_name":"PreToolUse","tool_name":"Grep","tool_input":{` +
+			`"pattern":` + quote(t, secret) + `,"output_mode":"content",` +
+			`"path":` + quote(t, filepath.Join(dir, "tiny")) + `}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := overrunAt(t, "tiny", tc.payload)
+			if code != 0 {
+				t.Fatalf("exited %d (stderr %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("reason = %q, want the key in the string named", reason)
+			}
+		})
+	}
+}
+
+// Gathering the results walks all of them, so it happens once rather than per
+// buffer. A call can name 150,000 files, and per buffer that spent the whole
+// budget where base reached a verdict in seconds. Bytes allocated rather than time,
+// because a clock is what Q232 says not to race: every file holds a finding, so a
+// per-buffer gather copies a growing list and the total goes with the square.
+func TestGatheringStaysLinearInTheBuffers(t *testing.T) {
+	allocated := func(files int) uint64 {
+		dir := t.TempDir()
+		names := make([]string, files)
+		for i := range names {
+			names[i] = fmt.Sprintf("f%d", i)
+			if err := os.WriteFile(filepath.Join(dir, names[i]), []byte("AWS_ACCESS_KEY_ID="+secret+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+			`,"tool_input":{"command":` + quote(t, "cat "+strings.Join(names, " ")) + `}}`
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		code, stdout, stderr := driveWithin(t, unhurried, payload)
+		runtime.ReadMemStats(&after)
+		if code != 0 || !strings.Contains(stdout, "aws-access-key-id") {
+			t.Fatalf("exited %d, stdout %q (stderr %q), want a block", code, stdout, stderr)
+		}
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	small, large := allocated(500), allocated(4000)
+	if ratio := float64(large) / float64(small); ratio > 16 {
+		t.Errorf("8x the files allocated %.1fx the bytes (%d to %d), want about 8x", ratio, small, large)
 	}
 }
 

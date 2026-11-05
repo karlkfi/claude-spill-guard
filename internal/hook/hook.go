@@ -48,6 +48,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
@@ -313,8 +314,10 @@ const bypassPermissions = "bypassPermissions"
 // so this is not the size cap the design refuses. docs/design/README.md, "The
 // order the budget spends".
 //
-// publish gets what is settled after each buffer, and within answers from the
-// last of those when the deadline arrives first.
+// publish gets a way to gather what is finished, once, before the first buffer,
+// and within calls it when the deadline arrives first. Gathering walks every
+// result, so doing it after each buffer would be quadratic in the buffers: a `for`
+// over 150,000 files spent the whole budget on it.
 //
 // A walk that failed on an operand still hands back what it collected first --
 // the prompt or command string, and any file resolved ahead of the failure --
@@ -323,7 +326,7 @@ const bypassPermissions = "bypassPermissions"
 // skip the part that can: before Q204 a key typed beside an `@` token that
 // would not resolve crossed with no verdict. A refusal is the exception, since
 // it blocks whatever the buffers hold.
-func scanCall(call payload, event Event, pace func(label string), publish func(scanned)) ([]scan.Finding, []skipped, error) {
+func scanCall(call payload, event Event, pace func(label string), publish func(func() scanned)) ([]scan.Finding, []skipped, error) {
 	buffers, gap := targets(call, event)
 	var refused refusal
 	if errors.As(gap, &refused) || len(buffers) == 0 {
@@ -358,10 +361,11 @@ func scanCall(call payload, event Event, pace func(label string), publish func(s
 	slices.SortStableFunc(order, func(a, b int) int {
 		return cmp.Compare(buffers[a].size, buffers[b].size)
 	})
-	results := make([]*scan.Result, len(buffers))
-	var findings []scan.Finding
-	var skips []skipped
-	decoded := ""
+	results := make([]atomic.Pointer[scan.Result], len(buffers))
+	publish(func() scanned {
+		findings, skips, _ := settled(buffers, results)
+		return scanned{findings: findings, skips: skips}
+	})
 	for _, i := range order {
 		t := buffers[i]
 		pace(t.label)
@@ -376,10 +380,9 @@ func scanCall(call payload, event Event, pace func(label string), publish func(s
 		if err != nil {
 			return nil, nil, err
 		}
-		results[i] = &got
-		findings, skips, decoded = settled(buffers, results)
-		publish(scanned{findings: findings, skips: skips})
+		results[i].Store(&got)
 	}
+	findings, skips, decoded := settled(buffers, results)
 	if gap != nil && decoded != "" {
 		gap = partlyDecoded{decoded, gap}
 	}
@@ -387,11 +390,12 @@ func scanCall(call payload, event Event, pace func(label string), publish func(s
 }
 
 // settled gathers the results so far in the call's order rather than the scan's,
-// so a verdict reads the same however the sizes fall. Every slice is new, because
-// within can be reading the last one while the scan builds this one. decoded is
-// the first buffer whose text was read.
-func settled(buffers []target, results []*scan.Result) (findings []scan.Finding, skips []skipped, decoded string) {
-	for i, r := range results {
+// so a verdict reads the same however the sizes fall. within can call this while
+// the scan is still storing, which is why each slot is atomic. decoded is the
+// first buffer whose text was read.
+func settled(buffers []target, results []atomic.Pointer[scan.Result]) (findings []scan.Finding, skips []skipped, decoded string) {
+	for i := range results {
+		r := results[i].Load()
 		if r == nil {
 			continue
 		}
@@ -506,9 +510,10 @@ type target struct {
 	load  func() ([]byte, error)
 }
 
-// text is a target already in memory.
+// text is a target already in memory. It costs no read, so it sorts ahead of every
+// file, whose read has no deadline, however short the file is.
 func text(label string, buf []byte) target {
-	return target{label, int64(len(buf)), func() ([]byte, error) { return buf, nil }}
+	return target{label, -1, func() ([]byte, error) { return buf, nil }}
 }
 
 // file is a target read when its turn comes. failed writes the error a read

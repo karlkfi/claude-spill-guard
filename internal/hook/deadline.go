@@ -67,7 +67,7 @@ const margin = 15 * time.Second
 const budget = hookTimeout - margin
 
 // A scanned is what scanCall made of a call, boxed so that the goroutine below
-// can hand back all three at once. err is unset on a snapshot taken partway.
+// can hand back all three at once. err is unset on what is gathered partway.
 type scanned struct {
 	findings []scan.Finding
 	skips    []skipped
@@ -79,11 +79,10 @@ type scanned struct {
 // reason below.
 //
 // A deadline that fires hands back what the scan had settled by then. That is
-// every buffer it got through, each published whole as it finished, so what comes
+// every buffer it got through, each stored whole as it finished, so what comes
 // back holds no partial read of the buffer still running and a finding in that
 // one is not in it. The scan's goroutine goes on writing while this one reads, so
-// each snapshot is built fresh and never touched again, and an atomic pointer
-// carries it across.
+// each result sits in its own atomic slot and is never touched again once stored.
 //
 // Nothing here interrupts the work. os.ReadFile takes no context and neither
 // does the match loop, which is why the goroutine is left running rather than
@@ -120,18 +119,18 @@ func within(ctx context.Context, pace func(label string), call payload, event Ev
 	}
 	ctx, cancel := context.WithTimeout(ctx, left)
 	defer cancel()
-	var latest atomic.Pointer[scanned]
+	var settle atomic.Pointer[func() scanned]
 	done := make(chan scanned, 1)
 	go func() {
-		findings, skips, err := scanCall(call, event, pace, func(s scanned) { latest.Store(&s) })
+		findings, skips, err := scanCall(call, event, pace, func(s func() scanned) { settle.Store(&s) })
 		done <- scanned{findings, skips, err}
 	}()
 	select {
 	case got := <-done:
 		return got, true
 	case <-ctx.Done():
-		if got := latest.Load(); got != nil {
-			return *got, false
+		if s := settle.Load(); s != nil {
+			return (*s)(), false
 		}
 		return scanned{}, false
 	}

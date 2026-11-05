@@ -443,7 +443,7 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 		targets = append(targets, text(patternLabel, []byte(*in.Pattern)))
 	}
 	// The call's other strings are text it carries too, and a path is matched
-	// whether or not it opens.
+	// here ahead of being opened.
 	for _, f := range []struct {
 		label string
 		text  *string

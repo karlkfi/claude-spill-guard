@@ -510,7 +510,7 @@ came back `No such tool available` — but `--tools Grep` exposes it, and driven
 that way on 2.1.290 its payload carries the field names the hook reads and
 its schema defaults `output_mode` to `files_with_matches`, so no mode passes.
 A `Grep` call's `pattern`, `path`, `glob` and `type`, and a `Read` call's
-`file_path`, are also matched as text, in every mode, whether or not it opens.
+`file_path`, are also matched as text, in every mode and before anything opens.
 A **skill** load stays out for a different reason — the
 payload is `{"skill": "<name>"}` and names no file, though a deny on it does
 stop the body crossing, so it is a member this cannot resolve rather than one
