@@ -170,18 +170,18 @@ pii-postal-code    169     pii-brn-kr          3
 ```
 
 **That total and this table disagree by 5.** The nine counts sum to 5,684 against
-the stated 5,679. Both figures arrived together: the one revision of the source
-document carries both, and no commit here has changed either. [§6](#6-environment)
-says the three engines agreed on the total, and nothing says how the table was
-produced, so nothing here says which is wrong or whether the two count the same
-thing.
+the stated 5,679. Both figures arrived together: the one revision of the analysis
+this file began as carries both, and no commit here has changed either.
+[§6](#6-environment) says the three engines agreed on the total, and nothing says
+how the table was produced, so nothing here says which is wrong or whether the two
+count the same thing.
 
 It cannot be settled from this repository. The ruleset can be had, since v0.8.1 is
 tagged upstream, but the corpus is a private repo this document does not name, and
 the host in §6 is not the machine this repo is developed on. On 2026-11-04 a search
 for the amdgpu string below, over 61,046 local files and through GitHub code search
-with the maintainer's access, found no private repo holding it. That host could not
-be searched, so the corpus may still exist; it is out of reach from here.
+with the maintainer's access, found no private repo holding it. Neither search was
+exhaustive and that host was not searched, so the corpus may still exist.
 
 The gap moves no conclusion drawn from it: 27.6% counts files, and every rule in
 the table is a PII rule whichever total stands. Elsewhere this repo says "more than
