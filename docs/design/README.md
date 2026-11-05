@@ -1458,13 +1458,13 @@ one scratch directory, so a relative operand named no file:
 
 | `main` | this change | commands |
 |---|---|---|
-| same verdict, same record | same | 34,588 |
-| no verdict, none | no verdict, a record | 351 |
+| same verdict, same record | same | 34,569 |
+| no verdict, none | no verdict, a record | 370 |
 | no verdict, a record | no verdict, none | 69 |
 | a notice | nothing | 2 |
 | no verdict, a record | deny on a rule | 1 |
 
-The 351 are the price of the record above, and most of the ones read are a throttling
+The 370 are the price of the record above, and most of the ones read are a throttling
 `$(script prefix) go test` that runs what it names. The 69 include `diff <(sed …)`,
 the shape Q216 named. To say something about file operands, the same commands went
 through both binaries patched so that every operand read as a file holding a key:
