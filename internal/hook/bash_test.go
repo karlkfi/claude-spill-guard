@@ -345,7 +345,7 @@ func TestASubstitutionKeepsItsCoverageRecord(t *testing.T) {
 		// The note a wrapper's grammar leaves survives the arm that reads past it.
 		{"timeout $(echo 5) cat plain.txt", "command wrapper"},
 		{"timeout $((5)) cat plain.txt", "command wrapper"},
-		{"xargs $(echo) cat plain.txt", "command wrapper"},
+		{"xargs env FOO=1 $(echo) cat plain.txt", "command wrapper"},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
@@ -422,7 +422,7 @@ func TestAWrappersDirectoryHoldsPastASubstitution(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "sub", name), []byte("hello\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	code, stdout, stderr := drive(t, bashCall(t, "env -C sub $(true) cat "+name, dir))
+	code, stdout, stderr := drive(t, bashCall(t, "env -C sub FOO=1 $(true) cat "+name, dir))
 	deferred(t, code, stdout, stderr)
 }
 
