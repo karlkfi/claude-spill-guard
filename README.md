@@ -173,17 +173,18 @@ recorded. `spill-guard coverage` counts those records, grouped by reason. A bina
 file with no byte-order mark is the exception: it leaves no record, and you get a
 message naming it instead.
 
-A gap does not normally hide a match beside it. `cat "$X" key.txt` is denied on
-what it could read, and so is `cat` of an undecodable file beside one holding a
-key. Three open bugs let a match through anyway:
+A gap does not hide a match beside it. `cat "$X" key.txt` is denied on what it
+could read, and so is `cat` of an undecodable file beside one holding a key.
 
-- A scan past its budget reaches no verdict on anything in the call, including a
-  small file holding a key ([Q227](docs/queue/Q227.md)).
-- A `Grep` tool call in `content` mode loses a key in its pattern when its `path` is
-  a fifo, or is relative with no `cwd` ([Q245](docs/queue/Q245.md)).
-- A command string with a NUL in its first 8 KiB is skipped as binary, so a key in
-  it is never matched. Whether a NUL reaches a command string in real traffic is
-  unmeasured ([Q246](docs/queue/Q246.md)).
+The budget is the limit on that. A scan takes the call's own text first and then
+its files smallest first, so a small file holding a key still blocks beside big
+ones. A key in the file the budget stops on ([Q249](docs/queue/Q249.md)), or in
+one it never reaches, crosses with only a record.
+
+A command string holding a NUL would also be skipped as binary, but Claude Code
+refuses that call before any hook or shell runs. That was driven for `Bash` on
+2.1.282, 2.1.289, 2.1.290 and 2.1.309 and for `PowerShell` on 2.1.290, and CI
+re-checks the pinned version ([Q246](docs/queue/Q246.md)).
 
 That was a block until 2026-09-05, and the measurement is what changed it. Over
 one week and 100 sessions on one machine, 509 of 540 blocks were gaps rather
@@ -198,13 +199,13 @@ with a hook error on record.
 
 ## What it costs
 
-About 10 ms per hook call. Medians ranged from 8.9 ms to 10.1 ms across four runs
+About 10 ms per hook call. Medians ranged from 9.9 ms to 12.2 ms across four runs
 of 40 calls each, for a `Bash` `ls`, a `Read` of a 1.2 KB file and a short prompt.
 That is a pre-release build of v0.7.0 through the command `hooks/hooks.json` runs,
-on one Apple M5 Max on 2026-11-03, with small inputs. About 2 ms of it is the cost
-of spawning any process from the measuring script. A larger file costs more: the
-binary alone took 4.2 to 5.7 ms on those inputs and 6.6 to 7.2 ms on a 68 KB file.
-Your machine will differ.
+on one Apple M5 Max at a load of 5 to 6 on 2026-11-04, with small inputs. About
+2.5 ms of it is the cost of spawning any process from the measuring script. A
+larger file costs more: the binary alone took 4.8 to 6.6 ms on those inputs and 7.5
+to 7.9 ms on a 68 KB file. Your machine will differ.
 
 ## How it is built
 
