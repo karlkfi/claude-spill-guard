@@ -837,6 +837,36 @@ func TestAProcessSubstitutionIsNotAnInput(t *testing.T) {
 	}
 }
 
+// A process substitution's body is a command of its own, so its pattern is no
+// operand of the reader outside it. Read as one, a `$` or a glob in it deferred
+// the whole call (Q216). The same three with the key behind them still block.
+func TestAProcessSubstitutionsPatternIsNotTheReadersOperand(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	if err := os.WriteFile(filepath.Join(dir, "p.md"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, shape := range []string{
+		"diff <(cat %[1]s) %[1]s",
+		"diff <(sed -e '$a\\' %[1]s) %[1]s",
+		"diff <(grep -E '^[+-]' %[1]s) %[1]s",
+	} {
+		t.Run(shape, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, fmt.Sprintf(shape, "p.md"), dir))
+			if code != 0 || stdout != "" || stderr != "" {
+				t.Errorf("exit %d, stdout %q, stderr %q, want a silent 0", code, stdout, stderr)
+			}
+			code, stdout, stderr = drive(t, bashCall(t, fmt.Sprintf(shape, name), dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file", reason)
+			}
+		})
+	}
+}
+
 // A literal `cd` target is a path this process can compute, so the relative
 // operand after it gets a verdict instead of a coverage record. The key is
 // planted in a directory the payload's cwd is not, so each arm blocks only if
