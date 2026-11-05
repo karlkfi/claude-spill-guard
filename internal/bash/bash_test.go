@@ -41,9 +41,9 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 
 		// Not a case, and each ends a `)` at depth 0 or looks like the keyword.
 		{"a process substitution", "cat <(grep p f); P=1",
-			[]bool{false, false}},
-		{"two process substitutions", "diff <(a) <(b); P=1",
 			[]bool{false, false, false}},
+		{"two process substitutions", "diff <(a) <(b); P=1",
+			[]bool{false, false, false, false}},
 		{"a subshell", "(cd x); P=1", []bool{false, false}},
 		{"a function definition", "f() { echo hi; }; P=1",
 			[]bool{false, false, false}},
@@ -54,6 +54,15 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 		// there. Without the gate `P=1` comes back marked.
 		{"the word as an operand", "echo case in; (cd /tmp); P=1",
 			[]bool{false, false, false}},
+		// An empty body leaves the loop in command position, so these two need
+		// the command's own position back, and the second would read the `case`.
+		{"the word after a substitution is no keyword", "echo $(a) case in; (cd /tmp); P=1",
+			[]bool{false, false, false, false}},
+		{"nor after an empty one", "echo $() case in; (cd /tmp); P=1",
+			[]bool{false, false, false}},
+		// A pattern's parens are pattern syntax, a substitution's included.
+		{"a substitution in a pattern", "case x in $(a)) P=1;; esac",
+			[]bool{false, false, true, false}},
 		{"the word after a keyword is the keyword", "if x; then case q in r) P=1;; esac; fi",
 			[]bool{false, false, true, false, false}},
 	} {
@@ -73,6 +82,197 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A substitution interrupts the command it sits in. Each row was run on bash
+// 5.3.15: with f holding text, the command after the `)` prints it or the words
+// after the `)` are that command's arguments.
+func TestTimeTakesItsOptionsAsPartOfTheKeyword(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    int
+	}{
+		{"time cat f", 1},
+		{"time -p cat f", 2},
+		{"time -- cat f", 2},
+		{"time -p -- cat f", 3},
+		{"time -- -p cat f", 2},
+		{"time -p -p cat f", 2},
+		{"time -- -- cat f", 2},
+		{"time -p -- -p cat f", 3},
+		{"time -p -- -- cat f", 3},
+		{"time '-p' cat f", 1},
+		{"! -p cat f", 1},
+		{"if -p cat f", 1},
+	} {
+		tokens, quotedFrom, err := lex(tc.command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ShKeywordPeel(tokens, quotedFrom); got != tc.want {
+			t.Errorf("ShKeywordPeel(%q) = %d, want %d", tc.command, got, tc.want)
+		}
+	}
+}
+
+func TestSegmentsResumeTheCommandASubstitutionInterrupted(t *testing.T) {
+	for _, tc := range []struct {
+		name, in string
+		want     [][]string
+	}{
+		{"an operand after it", "cat $(a) f", [][]string{{"a"}, {"cat", "$(", "f"}}},
+		{"a word glued to the close", "cat $(a)/x f", [][]string{{"a"}, {"cat", "$(/x", "f"}}},
+		{"a quoted word glued to the close", "cat $(a)'x y' f", [][]string{{"a"}, {"cat", "$(x y", "f"}}},
+		{"a quoted word that is not glued", "cat $(a) 'x y'", [][]string{{"a"}, {"cat", "$(", "x y"}}},
+		{"both sides of the word", "cat p$(a)q f", [][]string{{"a"}, {"cat", "p$(q", "f"}}},
+		{"two in one word", "cat $(a)$(b) f", [][]string{{"a"}, {"b"}, {"cat", "$($(", "f"}}},
+		{"two glued by a word", "cat $(a)x$(b) f", [][]string{{"a"}, {"b"}, {"cat", "$(x$(", "f"}}},
+		{"nested", "cat $(a $(b) c) f", [][]string{{"b"}, {"a", "$(", "c"}, {"cat", "$(", "f"}}},
+		{"arithmetic", "head -n $((1+1)) f", [][]string{{"1+1"}, {"head", "-n", "$((", "f"}}},
+		{"a process substitution", "cat <(a) f", [][]string{{"a"}, {"cat", ProcessSubstitution, "f"}}},
+		{"an output one", "tee >(a) f", [][]string{{"a"}, {"tee", ProcessSubstitution, "f"}}},
+		{"a word glued to a process substitution stays out", "cat g <(a)/x f", [][]string{{"a"}, {"cat", "g", ProcessSubstitution, "f"}}},
+		{"a word glued to a redirect's target stays out", "cat g > $(a)/x f", [][]string{{"a"}, {"cat", "g", "f"}}},
+		{"one at the head", "<(a) cat f", [][]string{{"a"}, {ProcessSubstitution, "cat", "f"}}},
+		{"one in an assignment is its value", "X=<(a) cat f", [][]string{{"a"}, {"X=", "cat", "f"}}},
+		{"one glued to an assignment's value", "X=b<(a) cat f", [][]string{{"a"}, {"X=b", "cat", "f"}}},
+		{"two in an assignment", "X=<(a)<(b) cat f", [][]string{{"a"}, {"b"}, {"X=", "cat", "f"}}},
+		{"one standing after an assignment reads the same", "X=1 <(a) cat f", [][]string{{"a"}, {"X=1", "cat", "f"}}},
+		{"a quoted assignment is a word", "'X=1' <(a) cat f", [][]string{{"a"}, {"X=1", ProcessSubstitution, "cat", "f"}}},
+		{"a subshell opening a substitution", "cat $( (a) ) f", [][]string{{"a"}, {"cat", "$(", "f"}}},
+		{"arithmetic's fallback", "cat $((a) ) f", [][]string{{"a"}, {"cat", "$(", "f"}}},
+		{"arithmetic holding a paren", "cat $(( (a) )) f", [][]string{{"a"}, {"cat", "$((", "f"}}},
+		{"arithmetic opening on one", "cat $(((a))) f", [][]string{{"a"}, {"cat", "$((", "f"}}},
+		{"a quoted paren is no close", "cat $((a ')' b)) f", [][]string{{"a", ")", "b"}, {"cat", "$((", "f"}}},
+		{"arithmetic unterminated", "cat $((a", [][]string{{"a"}, {"cat", "$("}}},
+		{"a word glued to arithmetic", "cat $((1))x f", [][]string{{"1"}, {"cat", "$((x", "f"}}},
+		{"in an assignment prefix", "P=$(a) cat f", [][]string{{"a"}, {"P=$(", "cat", "f"}}},
+		{"a keyword after it is a word", "echo $(a) if", [][]string{{"a"}, {"echo", "$(", "if"}}},
+		{"a command name after it is a word", "echo $(a) env", [][]string{{"a"}, {"echo", "$(", "env"}}},
+		{"as a redirect's target", "cat < $(a) f", [][]string{{"a"}, {"cat", "f"}}},
+		{"a quoted paren as a redirect's target", "cat < '(' f", [][]string{{"cat", "f"}}},
+		{"inside a parameter expansion", "cat ${X:-$(a)} f", [][]string{{"a"}, {"cat", "${X:-$(}", "f"}}},
+		{"a word spelling a reader", "cat $(a) cat f", [][]string{{"a"}, {"cat", "$(", "cat", "f"}}},
+		{"an empty one", "cat $() f", [][]string{{"cat", "$(", "f"}}},
+		{"a case arm in the body", "cat $(case x in y) a;; esac) f",
+			[][]string{{"case", "x", "in", "y"}, {"a"}, {"esac"}, {"cat", "$(", "f"}}},
+		{"unterminated", "cat $(a f", [][]string{{"a", "f"}, {"cat", "$("}}},
+		// A subshell's close ends its command, and bash rejects a word after one.
+		{"a subshell", "(a) f", [][]string{{"a"}, {"f"}}},
+		{"a pattern's close", "case x in y)cat f;; esac",
+			[][]string{{"case", "x", "in", "y"}, {"cat", "f"}, {"esac"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			segs, err := Segments(tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([][]string, len(segs))
+			for i, s := range segs {
+				got[i] = s.Tokens
+				if len(s.QuotedFrom) != len(s.Tokens) {
+					t.Errorf("segment %d: %d tokens, %d provenance", i, len(s.Tokens), len(s.QuotedFrom))
+				}
+			}
+			if !slices.EqualFunc(got, tc.want, slices.Equal[[]string]) {
+				t.Errorf("Segments(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// What the command's own separators decide stays with the command. The numbers
+// are compared rather than pinned, since only which segments share one means
+// anything, and a resumed command must not share one with a later pipeline.
+func TestAResumedCommandKeepsItsOwnSeparators(t *testing.T) {
+	segsOf := func(t *testing.T, in string) []Segment {
+		t.Helper()
+		segs, err := Segments(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return segs
+	}
+	t.Run("the pipeline it writes to", func(t *testing.T) {
+		s := segsOf(t, "a | cat $(b) f | c")
+		if len(s) != 4 || s[0].Pipe != s[2].Pipe || s[2].Pipe != s[3].Pipe || s[1].Pipe == s[2].Pipe {
+			t.Errorf("Pipe = %d %d %d %d, want the body alone apart", s[0].Pipe, s[1].Pipe, s[2].Pipe, s[3].Pipe)
+		}
+		if !s[2].Forked || s[1].Forked {
+			t.Errorf("Forked = %v on the command and %v on the body", s[2].Forked, s[1].Forked)
+		}
+	})
+	// `}` after an empty body is an argument, so the function goes on past it.
+	t.Run("whether a closer is one", func(t *testing.T) {
+		s := segsOf(t, "f () { echo $() }; cd w; }")
+		if cd := s[len(s)-2]; cd.Tokens[0] != "cd" || cd.Function != "f" {
+			t.Errorf("segment %q: Function = %q, want f", cd.Tokens, cd.Function)
+		}
+	})
+	t.Run("the stage it is in the pipeline", func(t *testing.T) {
+		s := segsOf(t, "a | cat $(b) f")
+		if !s[2].Forked || !s[2].LastStage || s[1].Forked {
+			t.Errorf("command Forked = %v, LastStage = %v; body Forked = %v", s[2].Forked, s[2].LastStage, s[1].Forked)
+		}
+	})
+	t.Run("a pipeline number the body used is not reused", func(t *testing.T) {
+		s := segsOf(t, "cat $(b | c) f; d | e")
+		if len(s) != 5 || s[0].Pipe == s[3].Pipe || s[0].Pipe == s[2].Pipe {
+			t.Errorf("Pipe = %+v", s)
+		}
+	})
+	t.Run("the operator it is reached through", func(t *testing.T) {
+		s := segsOf(t, "a && cat $(b) f")
+		if s[2].Conditional != "&&" || s[1].Conditional != "" {
+			t.Errorf("Conditional = %q on the command and %q on the body", s[2].Conditional, s[1].Conditional)
+		}
+	})
+	t.Run("whether an assignment persists", func(t *testing.T) {
+		s := segsOf(t, "P=$(a); cat f")
+		if !s[1].Persists || s[0].Persists {
+			t.Errorf("Persists = %v on the assignment and %v on the body", s[1].Persists, s[0].Persists)
+		}
+	})
+	t.Run("the subshells it sits in", func(t *testing.T) {
+		s := segsOf(t, "(cat $(a) f); b")
+		if !slices.Equal(s[1].Shells, []int{1}) || !slices.Equal(s[0].Shells, []int{1, 2}) || len(s[2].Shells) != 0 {
+			t.Errorf("Shells = %v %v %v", s[0].Shells, s[1].Shells, s[2].Shells)
+		}
+	})
+	t.Run("where its stdout goes", func(t *testing.T) {
+		s := segsOf(t, "cat >&2 $(a) f | b")
+		if !s[1].StdoutAway || s[0].StdoutAway {
+			t.Errorf("StdoutAway = %v on the command and %v on the body", s[1].StdoutAway, s[0].StdoutAway)
+		}
+	})
+	// A compound or subshell closed ahead of the substitution is still the stage
+	// the pipe after it applies to.
+	t.Run("a group closed before it", func(t *testing.T) {
+		for _, in := range []string{"(x; a) > $(b) | c", "{ x; a; } > $(b) | c"} {
+			s := segsOf(t, in)
+			if s[0].Pipe != s[len(s)-1].Pipe {
+				t.Errorf("%s: Pipe = %d on the group and %d on the last stage", in, s[0].Pipe, s[len(s)-1].Pipe)
+			}
+		}
+	})
+	t.Run("a later stage closed before it", func(t *testing.T) {
+		s := segsOf(t, "a | { b; } > $(c)")
+		if last := s[len(s)-1]; !last.LastStage || !slices.Contains(last.Tokens, "}") {
+			t.Errorf("segment %q: LastStage = %v, want the closer's", last.Tokens, last.LastStage)
+		}
+	})
+	t.Run("the shell an unterminated one leaves behind", func(t *testing.T) {
+		s := segsOf(t, "(cat $(a")
+		if !slices.Equal(s[1].Shells, []int{1}) || !slices.Equal(s[0].Shells, []int{1, 2}) {
+			t.Errorf("Shells = %v on the body and %v on the command", s[0].Shells, s[1].Shells)
+		}
+	})
+	t.Run("the redirects written either side", func(t *testing.T) {
+		s := segsOf(t, "cat <a $(b) <c f")
+		if !slices.Equal(s[1].Inputs, []string{"a", "c"}) {
+			t.Errorf("Inputs = %q", s[1].Inputs)
+		}
+	})
 }
 
 func TestSegments(t *testing.T) {
@@ -221,8 +421,9 @@ func TestSegments(t *testing.T) {
 		{"a process substitution is a redirect target and not an input",
 			"diff <(sort a) <(sort b)",
 			[]Segment{
-				{[]string{"diff", "sort", "a"}, []string{"("}, nil, false, "", false, 0, nil, []int{1}, false, false, "", "", false},
-				{[]string{"sort", "b"}, []string{"("}, nil, false, "", false, 1, nil, []int{2}, false, false, "", "", false},
+				{[]string{"sort", "a"}, nil, nil, false, "", false, 1, nil, []int{1}, false, false, "", "", false},
+				{[]string{"sort", "b"}, nil, nil, false, "", false, 2, nil, []int{2}, false, false, "", "", false},
+				{[]string{"diff", ProcessSubstitution, ProcessSubstitution}, []string{"(", "("}, nil, true, "", false, 0, nil, nil, false, false, "", "", false},
 			}},
 
 		// The operator a segment is reached through, which Persists never
@@ -284,7 +485,7 @@ func TestSegmentsNumbersTheShellsASegmentRunsIn(t *testing.T) {
 			[]want{{[]int{1}, false}, {[]int{1, 2}, false}, {[]int{1, 2}, false},
 				{[]int{1}, false}, {nil, false}}},
 		{"a substitution", "echo $(cd w; cat x)",
-			[]want{{nil, false}, {[]int{1}, false}, {[]int{1}, false}}},
+			[]want{{[]int{1}, false}, {[]int{1}, false}, {nil, false}}},
 		{"a process substitution's ) closes its own shell",
 			"(cd a; diff <(cat x) y; cat z)",
 			[]want{{[]int{1}, false}, {[]int{1, 2}, false}, {[]int{1}, false},

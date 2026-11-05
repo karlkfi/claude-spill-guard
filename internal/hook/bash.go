@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 			gap = err
 		}
 	}
+	// Said only where nothing narrower was, which names what to change.
+	var unnamed error
 
 	// A body queued for a later pass runs in the state that was in force where
 	// it was WRITTEN -- the directory, the variables assigned by then, and the
@@ -236,10 +239,19 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// (Q196). readers/wrappers.go is the port and carries the grammar.
 			// A cd run by a separate program, `env cd x`, moves nothing in the
 			// shell; `command cd x` and `builtin cd x` move it like a bare one.
-			wrap := readers.PeelWrappers(tokens)
+			n := substitutionHeads(segment.Tokens[head:], segment.QuotedFrom[head:])
+			wrap, prefixed := commandBehind(tokens[n:])
+			prefixed = prefixed || n > 0
+			if prefixed || substitutionNamesCommand(wrap.Argv) ||
+				(wrap.Opaque && len(wrap.Argv) == 0 && slices.ContainsFunc(argv, holdsOpenExpansion)) {
+				unnamed = errors.New("a command substitution stands where the command name " +
+					"does, so which program runs and which files it would read is not " +
+					"settled here")
+			}
 			if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
 				moved = true
 				dir, dirUnknown = follow(kind, arg, dir, dirUnknown, segment, v.cdpath)
+				dirUnknown = dirUnknown || prefixed
 				list.moved(segment, dirUnknown)
 				continue
 			}
@@ -257,8 +269,15 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// so the operands on the line are not the files the command reads.
 			// A grep that prints no matched text sends nothing a hidden operand
 			// would need read, for grep.go's reason.
+			//
+			// An unquoted substitution among the words is read past: `sudo -u
+			// $(whoami) cat f` and `env X=$(x) cat f` both print f, so the
+			// literal gets its verdict and the note still covers what the
+			// output adds. `timeout $T cat f` is the same shape and stays
+			// deferred, which Q254 holds open.
 			if wrap.Opaque {
-				if grepNames[filepath.Base(tokens[0])] {
+				past := slices.ContainsFunc(argv, holdsOpenExpansion)
+				if grepNames[filepath.Base(tokens[0])] && !past {
 					if _, quiet := grepMode(tokens); quiet {
 						continue
 					}
@@ -266,7 +285,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 				note(fmt.Errorf("in the %q here, a command wrapper ahead of it "+
 					"supplies operands or options this cannot read, so which files "+
 					"it would read is not settled here", filepath.Base(tokens[0])))
-				continue
+				if !past {
+					continue
+				}
 			}
 			// `env -C` and `sudo -D` move the command they run and nothing
 			// else, so its operands resolve there and a `<` redirect, which the
@@ -280,6 +301,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 			if isGrep {
 				operands, noneRead = grepFiles(tokens)
 			}
+			operands = slices.DeleteFunc(slices.Clone(operands), func(o string) bool {
+				return o == bash.ProcessSubstitution
+			})
 			fileOperands := len(operands)
 			// grep.go carries the argument for both: a recursive grep with no
 			// operand reads `.`, and one whose output is filtered or carries no
@@ -308,6 +332,16 @@ func bashTargets(command, cwd string) ([]target, error) {
 					"through %q, so which files this command would read is not "+
 					"settled here", strings.Join(flags, ", ")))
 				continue
+			}
+			// An unquoted substitution becomes however many words its output
+			// splits into, so one read here as a pattern or a flag's value can
+			// still hand the command a file: `grep $(echo x key.env) plain.txt`
+			// prints key.env. A grep that prints no matched text sends nothing
+			// that would need read, for grep.go's reason.
+			if !quiet && substitutionOffOperands(tokens, operands) {
+				note(fmt.Errorf("in the %q here, an unquoted command substitution may "+
+					"expand to several words, so which files this command would read "+
+					"is not settled here", filepath.Base(tokens[0])))
 			}
 			// Safe to name, and the argument has to be exact because this is
 			// the one caller-derived string the reason carries. Files matched
@@ -509,7 +543,87 @@ func bashTargets(command, cwd string) ([]target, error) {
 			}
 		}
 	}
+	if gap == nil {
+		gap = unnamed
+	}
 	return targets, gap
+}
+
+// onlyExpansionsRE matches a word with no literal text in it, as Segments leaves
+// one: `$(`, `${X:-$(}`, `$X$(`. Arithmetic is not one, being a word whatever it
+// holds.
+var onlyExpansionsRE = regexp.MustCompile(`^(?:\$\(|\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)+$`)
+
+// mayExpandToNothing reports whether a word holds a substitution and can make no
+// word at all, which leaves the next word the command.
+func mayExpandToNothing(word string) bool {
+	return strings.Contains(word, "$(") && onlyExpansionsRE.MatchString(word)
+}
+
+// substitutionHeads counts the unquoted substitutions standing ahead of the
+// command name. `$(prefix) cat f` prints f when the substitution makes no words
+// or a wrapper's, and that is how the shape is used: 269 segments across the
+// 35,011 real commands holding a substitution, measured 2026-11-05. One that
+// makes a command's name instead runs that with these words as arguments, so a
+// `cd` behind one may not move and the caller loses the directory. A nil
+// quotedFrom reads every word as unquoted, for a caller past a wrapper's peel.
+func substitutionHeads(tokens []string, quotedFrom []int) int {
+	n := 0
+	for n < len(tokens) && mayExpandToNothing(tokens[n]) &&
+		(quotedFrom == nil || quotedFrom[n] == bash.NotQuoted) {
+		n++
+	}
+	return n
+}
+
+// commandBehind peels wrappers and the substitutions after them, as `timeout 5
+// $(x) cat f` has it, and reports whether there were any.
+func commandBehind(tokens []string) (readers.Peel, bool) {
+	wrap, prefixed := readers.PeelWrappers(tokens), false
+	for len(wrap.Argv) < len(tokens) {
+		n := substitutionHeads(wrap.Argv, nil)
+		if n == 0 {
+			break
+		}
+		tokens = wrap.Argv[n:]
+		next := readers.PeelWrappers(tokens)
+		next.Opaque = next.Opaque || wrap.Opaque
+		next.External = next.External || wrap.External
+		next.Chdirs = append(wrap.Chdirs, next.Chdirs...)
+		wrap, prefixed = next, true
+	}
+	return wrap, prefixed
+}
+
+// substitutionNamesCommand reports whether the command word holds a substitution,
+// so what it runs is the substitution's to say: `$(x)t f`, and `$(x)/cat f` too,
+// whose directory can hold anything by that name.
+func substitutionNamesCommand(argv []string) bool {
+	return len(argv) > 0 && strings.Contains(argv[0], "$(")
+}
+
+// holdsOpenExpansion reports whether a word holds an unquoted `$(…)` or `$((…))`.
+// Segments leaves such a word with the expansion unclosed, and a quoted one whole.
+func holdsOpenExpansion(word string) bool {
+	i := strings.LastIndex(word, "$(")
+	return i >= 0 && !strings.Contains(word[i:], ")")
+}
+
+// isUnquotedSubstitution is holdsOpenExpansion for `$(…)` alone, the one that can
+// become several words.
+func isUnquotedSubstitution(word string) bool {
+	return holdsOpenExpansion(strings.ReplaceAll(word, "$((", ""))
+}
+
+// substitutionOffOperands reports whether tokens holds an unquoted substitution
+// the reader's grammar put somewhere other than its file operands.
+func substitutionOffOperands(tokens, operands []string) bool {
+	for _, t := range tokens[1:] {
+		if isUnquotedSubstitution(t) && !slices.Contains(operands, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // substMark brackets the index of a substitution lifted out of a command
@@ -666,9 +780,18 @@ func substStates(text string, subs []bash.Substitution, entry substState, lastpi
 		if len(tokens) == 0 {
 			continue
 		}
-		wrap := readers.PeelWrappers(tokens)
+		// substitutionHeads' reading, of heads that were marked and then restored
+		// whole.
+		n := 0
+		for head+n < len(seg.Tokens) && seg.QuotedFrom[head+n] == bash.NotQuoted &&
+			mayExpandToNothing(substMarkRE.ReplaceAllString(segment.Tokens[head+n], "$$(")) {
+			n++
+		}
+		prefixed := n > 0
+		wrap := readers.PeelWrappers(tokens[n:])
 		if kind, arg := classifyCd(wrap.Argv); kind != "" && !wrap.External {
 			dir, unknown = follow(kind, arg, dir, unknown, seg, v.cdpath)
+			unknown = unknown || prefixed
 			list.moved(seg, unknown)
 			continue
 		}

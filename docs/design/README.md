@@ -1407,6 +1407,90 @@ because a deferred call is quiet to the person, and this one is not. Until Q245
 a `Grep` pattern beside a path that will not resolve was not read at all, the
 same case. A scan past its budget [blocks too](#the-order-the-budget-spends).
 
+The exception is a call whose operand list is what is unsettled, because the walk
+then reads nothing on the line: `xargs`, which appends its input; a wrapper whose
+options this cannot read, as in `timeout $T cat f`; a file-list flag, as in `wc
+--files0-from=l f`; and a `for` list holding a non-literal. Each defers with the
+literal beside it unread, and whether it should is Q254.
+`TestAnUnsettledOperandListStillHidesALiteral` pins all four.
+
+An unquoted substitution looked like a fifth, and it was a parser defect (Q252).
+The segmenter ended the command at the `(` of `$(`, `$((`, `<(` and `>(`, so `cat
+$(x) f` reached the walk as `cat $(`, then `x`, then `f`, and `f` was a command
+name no reader row matches. Upstream's group loop splits there too and needs
+nothing else: driven at `claude-bouncer` 87361d7, workspace-guard denies `cat $(x)
+README.md` on the `$(`. Here a gap has deferred since 2026-09-05, so the walk went
+on and found no file. Now the body's segments come first and the command resumes
+at the `)`, with the words after it among its own. That also ended two false
+denies, `echo $(date) cat f` and `echo $(date) env`, which read the words as a
+command.
+
+Two costs come with it, and both are pinned. `grep $(true) f` blocks though bash
+treats `f` as the pattern and never opens it, since nothing here can tell how many
+words a substitution makes, and `grep $(x) f` reading `f` is the common case. And
+an unquoted substitution at a pattern or a flag's value now writes a record even
+over a clean file, because its output can add a file operand: `grep $(echo x k) f`
+opens `k`.
+
+Some shapes denied only because of the split, and they had to keep working by
+another route:
+
+- **A prefix.** A word with no literal text ahead of the command name is read past,
+  repeatedly and after a wrapper's own peel: `$(a) $(b) cat f`, `${X:-$(a)} cat f`,
+  `timeout 5 $(a) cat f`. A `cd` behind one loses the directory.
+- **A word glued to the `)`** stays on its word, so `$(x)/cat f` runs a cat and
+  `$(x)/nothing cat f` does not.
+- **A wrapper's lost grammar.** `sudo -u $(whoami) cat f` reads past the
+  substitution, which also blocks `env X=$(a) echo cat f`, where `f` is only echoed.
+  Q254 prices that.
+- **A process substitution** holds its word, since dropping it moved the operands:
+  `grep -v <(x) f` took `f` for the pattern. After an assignment it holds none, or
+  it would take the command's place in `X=<(x) cat f`, so `X=1 <(x) cat f` blocks
+  though bash runs the pipe and opens no `f`.
+- **`time`** takes one `-p` then one `--` as its keyword. `time -p cat f` crossed
+  silently on `main`, and `time -p $(x) cat f` blocked only because of the split.
+
+A substitution anywhere in the command word writes a record, since its output can
+name any program and any file, so `$(echo cat) f`, `"$(echo cat)" f` and `$(x)/python3
+f`, silent on `main`, now say so. That is the floor for what follows.
+
+Driven 2026-11-05 on binaries built from `main` and from this change, over the
+35,011 distinct real commands on this machine holding a `$(`, `<(` or `>(`, all from
+one scratch directory, so a relative operand named no file:
+
+| `main` | this change | commands |
+|---|---|---|
+| same verdict, same record | same | 34,569 |
+| no verdict, none | no verdict, a record | 370 |
+| no verdict, a record | no verdict, none | 69 |
+| a notice | nothing | 2 |
+| no verdict, a record | deny on a rule | 1 |
+
+The 370 are the price of the record above, and most of the ones read are a throttling
+`$(script prefix) go test` that runs what it names. The 69 include `diff <(sed …)`,
+the shape Q216 named. To say something about file operands, the same commands went
+through both binaries patched so that every operand read as a file holding a key:
+
+| | commands |
+|---|---|
+| deny on `main` | 10,582 |
+| of those, no deny here | 46 |
+| no deny on `main`, deny here | 16 |
+
+Of the 46, 35 name only words a script finds inside a `<(…)` body, and reading the
+other 11 found the same class spelled another way: a body word behind `$K`, a
+followed `cd`, or an escape. `main` read a body's words as the outer reader's
+operands, as in `diff <(git show x:f)` naming `git`. Those denies were accidents, but
+not always empty ones: `diff <(fold f)` read `f` on `main`, and here `fold` is a
+command with no row, which is the design's stated limit.
+
+These denies moved in the rows driven by hand, and the list is not exhaustive. `env
+$(x) cat f` and `nice $(x)/cat f` now write a record: the first may be a `-C`, and
+the second is a word the wrapper cannot read. `$((5)) cat f`, `echo $(date) cat f`,
+`echo <(date) cat f` and `echo $(date) env` no longer deny, and bash opens no `f` and
+dumps nothing in any of them. `$X $(a) cat f` no longer denies either and writes no
+record, though bash prints `f`: it is Q225's class, as `$X cat f` is silent on `main`.
+
 **A payload that does not decode still blocks on exit 2.** Not JSON, no event,
 an event this binary cannot withhold at. That is the hook being invoked wrongly
 rather than a scanner failing to read something, and it is the signal that says

@@ -217,6 +217,15 @@ func skipQuoted(text string, i int) int {
 // nothing quoted is quoted later than any offset a match can end at.
 const NotQuoted = math.MaxInt
 
+// gluedToClose is the QuotedFrom of the empty token lexMarking writes between an
+// unquoted `)` and a word glued to it. No word has this provenance, so nothing
+// can spell one.
+const gluedToClose = math.MinInt
+
+// arithmeticOpen is the QuotedFrom of the empty token markArithmetic writes after
+// the `((` of a `$((…))`.
+const arithmeticOpen = math.MinInt + 1
+
 // Unquoted is the provenance list for a caller that holds none, reading every
 // word as though it were written without quotes -- which is what this repo did
 // before the provenance existed.
@@ -434,7 +443,13 @@ const (
 // matches none of them, and both paths a non-ASCII byte can take append it to
 // the current token. Invalid UTF-8 therefore survives byte for byte, where a
 // []rune conversion would substitute U+FFFD and change the token.
-func lex(text string) ([]string, []int, error) {
+func lex(text string) ([]string, []int, error) { return lexMarking(text, false) }
+
+// lexMarking is lex, writing a gluedToClose token where a word starts straight
+// after an unquoted `)` when closes is set. shlex drops the adjacency, which
+// Segments needs: the `/x` of `$(pwd)/x` is part of the word the substitution
+// is in, and `$(pwd) /x` is a word of its own.
+func lexMarking(text string, closes bool) ([]string, []int, error) {
 	l := &lexer{src: requote(text), state: stateSpace, cmdPos: true}
 	var out []string
 	var quotedFrom []int
@@ -448,6 +463,13 @@ func lex(text string) ([]string, []int, error) {
 		}
 		out = append(out, token)
 		quotedFrom = append(quotedFrom, from)
+		// A run of punctuation pushes back only what is neither punctuation
+		// nor whitespace, which is the first byte of a word.
+		if closes && from == NotQuoted && len(l.pushback) > 0 && allPunct(token) &&
+			strings.HasSuffix(token, ")") {
+			out = append(out, "")
+			quotedFrom = append(quotedFrom, gluedToClose)
+		}
 	}
 }
 
@@ -1018,6 +1040,49 @@ func splitOperatorRuns(tokens []string, quotedFrom []int) ([]string, []int) {
 	return out, outQF
 }
 
+// markArithmetic marks each `$((` that bash reads as arithmetic. Splitting a run
+// loses which parens touch, and `$( (x) )` is a substitution whose output can
+// become several words, as is `$((x) )`: bash tries arithmetic and falls back
+// when the two that close it do not touch.
+func markArithmetic(tokens []string, quotedFrom []int) ([]string, []int) {
+	out := make([]string, 0, len(tokens))
+	outQF := make([]int, 0, len(tokens))
+	for i, t := range tokens {
+		if quotedFrom[i] != NotQuoted || !strings.HasPrefix(t, "((") ||
+			!closesTogether(tokens[i:], quotedFrom[i:]) {
+			out, outQF = append(out, t), append(outQF, quotedFrom[i])
+			continue
+		}
+		out, outQF = append(out, "((", ""), append(outQF, NotQuoted, arithmeticOpen)
+		if len(t) > 2 {
+			out, outQF = append(out, t[2:]), append(outQF, NotQuoted)
+		}
+	}
+	return out, outQF
+}
+
+// closesTogether reports whether the parens opened by tokens[0] close with their
+// last two touching.
+func closesTogether(tokens []string, quotedFrom []int) bool {
+	depth := 0
+	for i, t := range tokens {
+		if quotedFrom[i] != NotQuoted || !allPunct(t) {
+			continue
+		}
+		for j := range len(t) {
+			switch t[j] {
+			case '(':
+				depth++
+			case ')':
+				if depth--; depth == 0 {
+					return j > 0 && t[j-1] == ')'
+				}
+			}
+		}
+	}
+	return false
+}
+
 func allPunct(t string) bool {
 	for i := 0; i < len(t); i++ {
 		if !isPunct(t[i]) {
@@ -1094,6 +1159,14 @@ func ShKeywordPeel(tokens []string, quotedFrom []int) int {
 	i := 0
 	for i < len(tokens) && isReservedWord(tokens[i], quotedFrom[i]) {
 		i++
+		// bash reads one of each after `time`, in this order, as part of the keyword.
+		if tokens[i-1] == "time" {
+			for _, opt := range []string{"-p", "--"} {
+				if i < len(tokens) && quotedFrom[i] == NotQuoted && tokens[i] == opt {
+					i++
+				}
+			}
+		}
 	}
 	return i
 }

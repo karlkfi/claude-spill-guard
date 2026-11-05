@@ -148,6 +148,332 @@ func TestAnOperandThatCannotBeResolvedDefers(t *testing.T) {
 	}
 }
 
+// The words after a substitution are the command's own, so the file among them
+// gets its verdict. Segments used to end the command at the `(`, which left the
+// file a command name with no reader row, and the call crossed with at most a
+// record for the substitution. Each opens the file under bash 5.3.15.
+func TestAnOperandAfterASubstitutionIsScanned(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		"cat $(echo a) " + name,
+		"cat $(pwd)/a " + name,
+		"cat p$(echo a)q " + name,
+		"cat $(echo a)$(echo b) " + name,
+		"cat $(cat $(echo a)) " + name,
+		"cat $((1+1)) " + name,
+		"cat ${X:-$(echo a)} " + name,
+		"cat $(echo a) cat " + name,
+		"cat `echo a` " + name,
+		"cat \"$(echo a)\" " + name,
+		"cat $(echo a) 2>/dev/null " + name,
+		"cat <(echo a) " + name,
+		"diff <(echo a) " + name,
+		// In an assignment it is the value, and the command is what follows.
+		"X=<(echo a) cat " + name,
+		"X=>(cat) cat " + name,
+		"X+=<(echo a) cat " + name,
+		"X[0]=<(echo a) cat " + name,
+		"Y=1 X=<(echo a) cat " + name,
+		"X=$(echo a)<(echo b) cat " + name,
+		"a=b<(echo a) cat " + name,
+		"env X=<(echo a) cat " + name,
+		"time X=<(echo a) cat " + name,
+		"(X=<(echo a) cat " + name + ")",
+		"X=<(echo a); cat " + name,
+		"X=<(echo a) && cat " + name,
+		// A cost: bash runs the pipe here and opens no file.
+		"X=1 <(echo a) cat " + name,
+		"head -1 $(echo a) " + name,
+		"head -n $(echo 1) " + name,
+		"head -n $((1+1)) " + name,
+		"grep AWS $(echo a) " + name,
+		"grep AWS <(echo a) " + name,
+		"grep -f $(echo a) " + name,
+		"grep -e $(echo AWS) " + name,
+		// Which word is the pattern: one word from the substitution leaves the
+		// file an operand, and that is the only reading in which it is read.
+		"grep $(echo AWS) " + name,
+		"sed -n $(echo 1p) " + name,
+		"awk $(echo 1) " + name,
+		"tail -n1 $(echo a) " + name + " | wc -c",
+		"cat $(echo a) < " + name,
+		// A wrapper whose grammar the substitution lost still runs the reader.
+		"timeout $(echo 5) cat " + name,
+		"nice -n $(echo 5) cat " + name,
+		"sudo -u $(whoami) cat " + name,
+		"env X=$(echo a) cat " + name,
+		"timeout $(echo 5) grep -c AWS " + name,
+		// A prefix: this runs cat when the substitution makes no words.
+		"$(true) cat " + name,
+		"$(true) nice cat " + name,
+		"$(true) $(true) cat " + name,
+		"${X:-$(true)} cat " + name,
+		"timeout 5 $(echo) cat " + name,
+		"env FOO=1 $(echo) cat " + name,
+		"$(true) nice $(true) cat " + name,
+		"time -p $(true) cat " + name,
+		"$X$(true) cat " + name,
+		// `env` runs the cd, which moves nothing in the shell.
+		"env FOO=1 $(true) cd sub && cat " + name,
+		// A quoted word is no prefix, so the cd is an argument to it.
+		"'$(' cd sub; echo `cat " + name + "`",
+		// A substitution glued ahead of the name still runs that name.
+		"$(echo /bin)/cat " + name,
+		"$(echo /usr/bin)/grep AWS " + name,
+		// Arithmetic among a wrapper's words is read past the same way.
+		"timeout $((5)) cat " + name,
+		"nice -n $((5)) cat " + name,
+		// `time` takes these as part of the keyword.
+		"time -p cat " + name,
+		"time -- cat " + name,
+		"time -p -- cat " + name,
+		// A process substitution holds its word, so the file is no pattern.
+		"grep -v <(echo a) " + name,
+		"grep <(echo a) " + name,
+		"awk <(echo 1) " + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file after the substitution", reason)
+			}
+		})
+	}
+}
+
+// The other direction of the same split: the words after a substitution are not
+// a command, so nothing here runs what they spell. Each read as one before, and
+// the first two blocked a call that opens no file and dumps no environment.
+func TestAWordAfterASubstitutionIsNotACommand(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		"echo $(date) cat " + name,
+		"echo $(date) env",
+		"echo <(date) cat " + name,
+		// Bash runs a program named by the second option here, and opens nothing.
+		"time -- -p cat " + name,
+		"time -p -p cat " + name,
+		"time -- -- cat " + name,
+		"time -p -- -p cat " + name,
+		"time -p -- -- cat " + name,
+		// Bash runs the pipe here, and a quoted word assigns nothing.
+		"<(echo a) cat " + name,
+		"'X=1' <(echo a) cat " + name,
+		// A word the substitution is glued to is not the file it ends in: this
+		// opens whatever `a` plus the name spells.
+		"echo $(echo a)" + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 || stdout != "" {
+				t.Errorf("exit %d, stdout %q, want a silent 0 (stderr: %q)", code, stdout, stderr)
+			}
+		})
+	}
+	// The program here is `nothing`, so the words after it open no file, and the
+	// directory it runs from is the substitution's to say.
+	for _, command := range []string{"$(pwd)/nothing cat " + name, "$(pwd)/nothing head " + name} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "stands where") {
+				t.Errorf("coverage reason = %q, want it to say the substitution stands where the name does", reason)
+			}
+		})
+	}
+}
+
+// A `cd` behind a prefix runs only if the prefix makes no command of its own, so
+// the file below it is a path this cannot settle. Key beside the call and a
+// clean file of the same name under sub: read as followed, this allows silently,
+// and read as not followed it blocks. Neither is what a record says.
+func TestACdBehindASubstitutionLosesTheDirectory(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", name), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{
+		"$(true) cd sub && cat " + name,
+		"$(true) cd sub; echo `cat " + name + "`",
+		"$(true) $(true) cd sub && cat " + name,
+		"$(true) $(true) cd sub; echo `cat " + name + "`",
+		"${X:-$(true)} cd sub; echo `cat " + name + "`",
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "cannot follow") {
+				t.Errorf("coverage reason = %q, want the move it cannot follow", reason)
+			}
+		})
+	}
+}
+
+func TestTheWordGluedToASubstitutionIsNotOpened(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	code, stdout, stderr := drive(t, bashCall(t, "cat $(echo a)"+name, dir))
+	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "expands at run time") {
+		t.Errorf("coverage reason = %q, want the word to be the unresolved operand", reason)
+	}
+}
+
+// The path refusal reads the same operands.
+func TestAGuardedPathAfterASubstitutionIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("NAME=value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"cat $(echo a) .env", "cat <(echo a) .env", "$(true) $(true) cat .env", "X=<(echo a) cat .env"} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, ".env") {
+				t.Errorf("reason = %q, want the path refused", reason)
+			}
+		})
+	}
+	// Still the careful form: a stage after it is what the refusal turns on.
+	code, stdout, _ := drive(t, bashCall(t, "cat $(echo a) .env | cut -d= -f1", dir))
+	if code != 0 || stdout != "" {
+		t.Errorf("exit %d, stdout %q, want no refusal of the piped form", code, stdout)
+	}
+}
+
+// What the substitution itself leaves unsettled stays on the record.
+func TestASubstitutionKeepsItsCoverageRecord(t *testing.T) {
+	bashShell(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plain.txt"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ command, says string }{
+		{"cat $(echo a) plain.txt", "expands at run time"},
+		// Each of these opens key.env under bash 5.3.15 once the substitution's
+		// output splits, though no operand here holds it.
+		{"grep $(echo x key.env) plain.txt", "several words"},
+		{"head -n $(echo 1 key.env) plain.txt", "several words"},
+		{"awk $(echo 1 key.env) plain.txt", "several words"},
+		{"grep $( (echo x key.env) ) plain.txt", "several words"},
+		{"grep $((echo x key.env) ) plain.txt", "several words"},
+		// What runs is the substitution's to say, so no reading of the words
+		// after it settles what opens: these print key.env if it makes `cat`.
+		{"$(echo cat) key.env", "stands where"},
+		{"$(echo ca)t key.env", "stands where"},
+		{"\"$(echo cat)\" key.env", "stands where"},
+		{"$((5)) plain.txt", "stands where"},
+		{"$(true)", "stands where"},
+		{"$(true) cat plain.txt", "stands where"},
+		{"timeout 5 $(echo) cat plain.txt", "stands where"},
+		{"nice $(echo /bin)/cat plain.txt", "stands where"},
+		{"timeout 5 $(echo /bin)/cat plain.txt", "stands where"},
+		{"$(echo /bin)/cat plain.txt", "stands where"},
+		{"$(echo /usr/bin)/python3 plain.txt", "stands where"},
+		// The note a wrapper's grammar leaves survives the arm that reads past it.
+		{"timeout $(echo 5) cat plain.txt", "command wrapper"},
+		{"timeout $((5)) cat plain.txt", "command wrapper"},
+		{"xargs env FOO=1 $(echo) cat plain.txt", "command wrapper"},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, tc.says) {
+				t.Errorf("coverage reason = %q, want it to say %q", reason, tc.says)
+			}
+		})
+	}
+	// Nothing is left unsettled here: arithmetic is one word, a process
+	// substitution is the file its body writes, and a grep -c prints no line.
+	for _, command := range []string{
+		"head -n $((1+1)) plain.txt",
+		"cat <(echo a) plain.txt",
+		"grep -c $(echo x) plain.txt",
+		"grep -r x <(echo a)",
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 || stdout != "" || stderr != "" {
+				t.Errorf("exit %d, stdout %q, stderr %q, want a silent 0", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+// The arms where the operand list itself is what is unsettled. A literal on the
+// line goes unread beside the record, which is the exception the design names
+// to "a gap does not hide a finding": these are deliberate, and pinned so a
+// change to them is one somebody chooses.
+func TestAnUnsettledOperandListStillHidesALiteral(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	for _, command := range []string{
+		"echo a | xargs cat " + name,
+		"timeout $T cat " + name,
+		"timeout \"$(echo 5)\" cat " + name,
+		"wc --files0-from=list " + name,
+		"for f in $(echo a) " + name + "; do cat \"$f\"; done",
+		// Which could be `-C dir`, so the relative name is unsettled.
+		"env $(echo) cat " + name,
+		// The word a wrapper could not read took the command with it.
+		"nice $(echo /bin)/cat " + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			deferred(t, code, stdout, stderr)
+		})
+	}
+}
+
+// A quoted word is one word, so what follows it is its argument: these look for
+// a program called `$(` or named by the output, and reading them as a prefix
+// would block a file nothing opens.
+func TestAQuotedSubstitutionIsNotAPrefix(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	for _, command := range []string{"'$(' cat " + name, "\"$(true)\" cat " + name} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			deferred(t, code, stdout, stderr)
+		})
+	}
+}
+
+// `env -C` moves the command wherever the substitution sits, so the name here
+// opens the clean copy under sub and not the key beside the call.
+func TestAWrappersDirectoryHoldsPastASubstitution(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", name), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "env -C sub FOO=1 $(true) cat "+name, dir))
+	deferred(t, code, stdout, stderr)
+}
+
+// With no word from the substitution the file is grep's pattern and bash never
+// opens it, so this blocks a read that does not happen. Pinned because it is the
+// price of the arm above and not an oversight: nothing here can tell how many
+// words a substitution makes, and reading it as none is the fail-open.
+func TestAnEmptySubstitutionAtThePatternOverBlocks(t *testing.T) {
+	dir, name := planted(t)
+	code, stdout, stderr := drive(t, bashCall(t, "grep $(true) "+name, dir))
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+		t.Errorf("reason = %q, want the operand", reason)
+	}
+}
+
 // A relative operand with no cwd to resolve against is the same class, and it
 // is the one a payload rather than a command produces.
 func TestARelativeOperandWithNoCwdDefers(t *testing.T) {
@@ -623,6 +949,36 @@ func TestAProcessSubstitutionIsNotAnInput(t *testing.T) {
 	code, stdout, stderr := drive(t, bashCall(t, "cat <(echo hi)", dir))
 	if code != 0 || stdout != "" {
 		t.Errorf("exit %d, stdout %q, want a silent 0 (stderr: %q)", code, stdout, stderr)
+	}
+}
+
+// A process substitution's body is a command of its own, so its pattern is no
+// operand of the reader outside it. Read as one, a `$` or a glob in it deferred
+// the whole call (Q216). The same three with the key behind them still block.
+func TestAProcessSubstitutionsPatternIsNotTheReadersOperand(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	if err := os.WriteFile(filepath.Join(dir, "p.md"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, shape := range []string{
+		"diff <(cat %[1]s) %[1]s",
+		"diff <(sed -e '$a\\' %[1]s) %[1]s",
+		"diff <(grep -E '^[+-]' %[1]s) %[1]s",
+	} {
+		t.Run(shape, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, fmt.Sprintf(shape, "p.md"), dir))
+			if code != 0 || stdout != "" || stderr != "" {
+				t.Errorf("exit %d, stdout %q, stderr %q, want a silent 0", code, stdout, stderr)
+			}
+			code, stdout, stderr = drive(t, bashCall(t, fmt.Sprintf(shape, name), dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the file", reason)
+			}
+		})
 	}
 }
 

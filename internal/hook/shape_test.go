@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -55,7 +56,7 @@ var (
 )
 
 func TestAnEnvironmentDumpIsRefusedOnItsShape(t *testing.T) {
-	for _, command := range dumps {
+	for _, command := range append(slices.Clone(dumps), "$(true) env", "$(true) $(true) env", "X=<(echo a) env") {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, t.TempDir()))
 			if code != 0 {
