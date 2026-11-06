@@ -41,6 +41,15 @@ branch and a pull request like any other — nothing about a two-line version
 bump needs a direct-to-`main` exception, which is why this document still
 describes none.
 
+**Merging the bump opens a window that only publishing closes.** Once `main`
+carries the new number, `claude plugin update` delivers the new hook command
+while `releases/latest` still serves the previous binary. For v0.7.0 that pair
+allowed every `PowerShell` call with no record. So merge the bump last, and only
+when whoever publishes can see the tag through to the published release. On
+v0.7.0 the window ran 7m16s, from merge to publish, and it stayed that short
+only because the person publishing was at the keyboard. Nothing here enforces
+it.
+
 ## Before the tag
 
 1. **The plugin manifests say the version you are about to tag**, merged. The
