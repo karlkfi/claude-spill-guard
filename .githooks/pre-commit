@@ -17,11 +17,15 @@
 # commit that cannot be recorded is worse than a branch that is briefly red.
 # They still print as notes, so the human sees them.
 set -euo pipefail
-shopt -s inherit_errexit
+shopt -s inherit_errexit 2>/dev/null || true
 
 # `set -e` does not reach inside a command substitution: `out="$(f)"` runs f
 # past its own failure and takes the status of f's last command. inherit_errexit
-# is what makes that exit instead of continuing with a truncated value.
+# is what makes that exit instead of continuing with a truncated value, and it
+# is bash 4.4+: a git hook runs on whatever the contributor has, and stock macOS
+# is 3.2.57, where the bare form exits 1 and blocks every commit. Safe to skip
+# here because the one substitution below is a plain assignment, whose status
+# is the substitution's own.
 
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
