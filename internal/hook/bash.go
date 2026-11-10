@@ -833,9 +833,9 @@ func substStates(text string, subs []bash.Substitution, entry substState, lastpi
 // functions a call to which moves the caller's directory. A body runs in the
 // shell that calls it, so a `cd` written at the body's own level moves the
 // caller at every call and moves nothing at the definition. A body calling one
-// of these moves its caller too, and so does a last stage `lastpipe` may run
-// in the body's shell. known names the ones an enclosing string defined, which
-// a substitution inherits.
+// of these moves its caller too, as does a body that runs code in this shell,
+// and so does a last stage `lastpipe` may run in the body's shell. known names
+// the ones an enclosing string defined, which a substitution inherits.
 func cdFunctions(segments []bash.Segment, known map[string]bool, lastpipe bool) map[string]bool {
 	funcs := maps.Clone(known)
 	if funcs == nil {
@@ -861,7 +861,7 @@ func cdFunctions(segments []bash.Segment, known map[string]bool, lastpipe bool) 
 				if wrap.External || len(wrap.Argv) == 0 {
 					continue
 				}
-				if kind, _ := classifyCd(wrap.Argv); kind == "" && !funcs[wrap.Argv[0]] {
+				if kind, _ := classifyCd(wrap.Argv); kind == "" && !funcs[wrap.Argv[0]] && !runsInShell(wrap, funcs) {
 					continue
 				}
 			}
@@ -908,6 +908,9 @@ func runsInShell(wrap readers.Peel, funcs map[string]bool) bool {
 // the command string bash re-parses, so `eval true` keeps the directory and
 // `eval cd w` does not; a word the shell expands first could be anything.
 func evalMoves(args []string, funcs map[string]bool) bool {
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
 	if slices.ContainsFunc(args, func(a string) bool { return strings.ContainsAny(a, "$`") }) {
 		return true
 	}
@@ -949,11 +952,13 @@ func trapRunsBeforeExit(args []string) bool {
 // opensFunsub reports whether a token opens one of bash 5.3's substitutions
 // that run in this shell, `${ list; }` and `${| list; }`. internal/bash does
 // not lex them: it splits the body at its own `;` or `|` and leaves `${` at
-// the end of a word, or whole inside double quotes. A `\${` is literal, and a
-// single-quoted one is too but reads the same here, which only adds a record.
+// the end of a word, or whole inside double quotes. Tokens arrive with their
+// quoting removed, so the escape in `\${` is gone and the backslash `\\${`
+// leaves is a literal: no backslash here escapes, so every opener counts, and
+// a literal one costs a record.
 func opensFunsub(tok string) bool { return funsubRE.MatchString(tok) }
 
-var funsubRE = regexp.MustCompile(`(?:^|[^\\])\$\{(?:[ \t\n|]|$)`)
+var funsubRE = regexp.MustCompile(`\$\{(?:[ \t\n|]|$)`)
 
 // pastDefinition adds the definitions arms says are reached at this segment,
 // and reports whether one other than body's own had been reached. Past such a

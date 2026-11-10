@@ -1651,6 +1651,9 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"mapfile -t a < l.txt; cat x", "x"},
 		{"cd w; ${g:-true}; cat x", "w/x"},
 		{"f() { :; }; cd w; eval f; cat x", "w/x"},
+		{"cd w; eval -- true; cat x", "w/x"},
+		{"cd w; f() { eval true; }; f; cat x", "w/x"},
+		{"f() { trap 'rm -f t' EXIT; }; cd w; f; cat x", "w/x"},
 		// A loop that ends before the definition is not reached by it.
 		{"for i in 1; do cat x; done; f() { cd w; }", "x"},
 		// A definition that does not move arms nothing.
@@ -1681,6 +1684,7 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"command eval cd w; cat x", "cannot follow"},
 		{"eval eval cd w; cat x", "cannot follow"},
 		{"eval $X; cat x", "cannot follow"},
+		{"eval -- cd w; cat x", "cannot follow"},
 		{"source ./s.sh; cat x", "cannot follow"},
 		{". ./s.sh; cat x", "cannot follow"},
 		{"cd w; . ./s.sh 2>/dev/null; cat x", "cannot follow"},
@@ -1688,6 +1692,9 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"trap -- 'cd w' RETURN INT; cat x", "cannot follow"},
 		{"mapfile -C 'cd w;:' -c 1 a < l.txt; cat x", "cannot follow"},
 		{"readarray -tC 'cd w;:' -c 1 a < l.txt; cat x", "cannot follow"},
+		{"f() { eval cd w; }; f; cat x", "cannot follow"},
+		{"f() { source ./s.sh; }; f; cat x", "cannot follow"},
+		{"f() { trap 'cd w' DEBUG; }; f; cat x", "cannot follow"},
 		// A substitution body is placed where it was written, past the move.
 		{`eval cd w; echo "$(cat x)"`, "cannot follow"},
 		{"echo ${ cd w; }; cat x", "${ …; }"},
@@ -1695,6 +1702,9 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"x=${ cd w; }; cat x", "${ …; }"},
 		{"cat ${ cd w; } x", "${ …; }"},
 		{`echo "${ cd w; }"; cat x`, "${ …; }"},
+		// Tokens arrive dequoted, so the backslash left of `\\${` is a literal.
+		{`echo \\${ cd w; }; cat x`, "${ …; }"},
+		{"f() { echo ${ cd w; }; }; f; cat x", "${ …; }"},
 		{"f() { cd w; }; echo ${ f; }; cat x", "${ …; }"},
 		{"f() { cd w; }; echo ${| f; }; cat x", "${ …; }"},
 	} {
