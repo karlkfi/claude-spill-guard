@@ -188,10 +188,9 @@ withholding the bytes. It charged a turn.
 
 A gap does not normally hide a match beside it. `cat "$X" key.txt` and `cat $(echo
 a) key.txt` are denied on what they could read, and so is `cat` of an undecodable
-file beside one holding a key. Where the whole operand list is unsettled, as in
-`echo a | xargs cat key.txt`, the scanner reads none of that command's files, so the
-key crosses with only a record ([Q254](docs/queue/Q254.md)). Other shapes cross with
-no record at all, as [what it does not catch](#what-it-does-not-catch) says.
+file beside one holding a key, and so are `echo a | xargs cat key.txt` and `timeout
+$T cat key.txt`, where the rest of the operand list is unknown. Other shapes cross
+with no record at all, as [what it does not catch](#what-it-does-not-catch) says.
 
 The budget is a limit on that. A scan takes the call's own text first and then its
 files smallest first, so a small file holding a key still blocks beside big ones.

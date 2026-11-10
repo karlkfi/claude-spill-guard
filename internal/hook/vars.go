@@ -54,6 +54,11 @@ const impureValueChars = " \t\n$`*?[:"
 // what makes a pattern safe to keep here.
 const impureItemChars = " \t\n$`:"
 
+// unsettledItem is the candidate a `for` list item stands as when this cannot
+// say what it expands to. resolve refuses it for its `$`, and varUseRE never
+// matches it, so no later substitution turns it into a path.
+const unsettledItem = "$(unsettled for-list item)"
+
 // maxLoopCandidates bounds what a loop variable expands to: the values one
 // variable may be bound to, and the cross product a token naming several of
 // them stands for. Upstream's MAX_LOOP_CANDIDATES, at its number.
@@ -509,8 +514,9 @@ func (v *vars) splitWords(raw []string, quotedFrom []int, sub []string) []string
 // -- same tilde handling, same rejection of `$`, a backtick and whitespace --
 // and then rejects a brace item: unlike an assignment value, a for-list item IS
 // brace-expanded, so `{a,b}` kept as the literal string would miss the real `a`
-// and `b`. A rejected item poisons the loop variable, which is the coverage
-// record the operand had before any of this.
+// and `b`. A rejected item binds as unsettledItem, which is the coverage
+// record the operand had before any of this, and the literals beside it are
+// still read.
 //
 // A glob item is kept, as the pattern itself (upstream's issue 99), and what
 // makes that sound here is not what makes it sound there. Upstream only asks
@@ -536,12 +542,13 @@ func literalLoopItem(raw string) (string, bool) {
 //	"", nil, false     not a `for NAME in` header: the caller's poison path
 //	                   runs unchanged, which is where `for ((…))` goes, since
 //	                   the arithmetic form lexes a `(` where the name would be
-//	name, nil, true    a list this cannot expand -- a non-literal or brace
-//	                   item, a `for NAME` over "$@", an empty list, or more
-//	                   values than the cap. The caller drops NAME from both
-//	                   maps, which is the poison it had before loops existed
+//	name, nil, true    a list this cannot expand -- a `for NAME` over "$@", an
+//	                   empty list, or more values than the cap. The caller
+//	                   drops NAME from both maps, which is the poison it had
+//	                   before loops existed
 //	name, values, true the candidate set, so a `$NAME` in a later operand is
-//	                   one path per value bash iterates
+//	                   one path per value bash iterates. A non-literal or brace
+//	                   item is unsettledItem among them, which records
 //
 // Called on the post-substitution tokens with the reserved words already off:
 // `SP=/x; for f in $SP/a` binds what bash iterates, and a nested loop's header
@@ -579,7 +586,11 @@ func forLoopBinding(tokens []string, loops map[string][]string) (string, []strin
 		for _, cand := range cands {
 			val, ok := literalLoopItem(cand)
 			if !ok {
-				return name, nil, true // non-literal item
+				// The literals beside it are still values bash iterates, so
+				// they are kept and this one stands in for what is not (Q254).
+				// Upstream poisons the name here, where that only adds a
+				// prompt; here it left a literal unread.
+				val = unsettledItem
 			}
 			values = append(values, val)
 			if len(values) > maxLoopCandidates {

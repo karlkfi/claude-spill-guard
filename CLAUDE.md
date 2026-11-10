@@ -274,9 +274,9 @@ that shape) and `mkdir -p x && SP=/x; tail "$SP/f"` records; `andOr` in
 `for NAME in <list>` binds NAME to its items rather than poisoning it, so `for
 f in a.env b.env; do cat "$f"; done` scans both — the body reads every value
 bash iterates, which is the file set the command sends rather than a walk, and
-a glob item is kept as the pattern for `glob.go` to expand. What poisons the
-name instead is an item that is not a literal, a brace item, more than 256
-values, and a header the shell may not have reached or whose loop runs where
+a glob item is kept as the pattern for `glob.go` to expand. A non-literal or a
+brace item binds as a stand-in that records, beside literals still read (Q254);
+what poisons the name is more than 256 values, and a header the shell may not have reached or whose loop runs where
 the segments after it are not; upstream binds through the last of those,
 because a candidate bash never took only adds a prompt there. A queued
 substitution body starts from the map, the directory and the glob options in
@@ -639,10 +639,10 @@ rules; this has no opinion to spend on them, because it could not read the
 call. **A gap does not hide a finding beside it**: the walk goes on past an
 operand it cannot settle, what it did read is scanned, and a match there
 blocks (Q204), naming a buffer nothing decoded beside it in the notice and
-writing no record (Q244). The exception is a call whose operand list is what
-is unsettled — `xargs`, a wrapper whose options this cannot read, a file-list
-flag, a `for` list holding a non-literal — where a literal on the line stays
-unread beside the record (Q254). A scan past its budget blocks on the buffers it
+writing no record (Q244). So does an unsettled operand list — `xargs`, a
+wrapper whose options this cannot read, a `for` list holding a non-literal —
+whose literals are still opened (Q254); a file-list flag's line is left unread,
+since nothing on it crosses. A scan past its budget blocks on the buffers it
 got through, and it gets through the smallest first (Q227), which is an order
 rather than a size cap: `docs/design/README.md` under *The order the budget
 spends*.

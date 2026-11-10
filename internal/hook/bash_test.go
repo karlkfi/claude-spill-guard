@@ -466,21 +466,56 @@ func TestASubstitutionKeepsItsCoverageRecord(t *testing.T) {
 	}
 }
 
-// The arms where the operand list itself is what is unsettled. A literal on the
-// line goes unread beside the record, which is the exception the design names
-// to "a gap does not hide a finding": these are deliberate, and pinned so a
-// change to them is one somebody chooses.
-func TestAnUnsettledOperandListStillHidesALiteral(t *testing.T) {
+// The arms where the operand list itself is what is unsettled. The literals on
+// the line are still files the command opens -- bash 5.3.15 prints the key for
+// each of these -- so they get their verdict, with the record beside it (Q254).
+func TestAnUnsettledOperandListStillReadsALiteral(t *testing.T) {
 	bashShell(t)
 	dir, name := planted(t)
 	for _, command := range []string{
 		"echo a | xargs cat " + name,
 		"timeout $T cat " + name,
 		"timeout \"$(echo 5)\" cat " + name,
-		"wc --files0-from=list " + name,
+		"nice -n $N cat " + name,
 		"for f in $(echo a) " + name + "; do cat \"$f\"; done",
-		// Which could be `-C dir`, so the relative name is unsettled.
+		"for f in {a,b} " + name + "; do cat \"$f\"; done",
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 || !strings.Contains(reasonOf(t, stdout), name) {
+				t.Errorf("exit %d, stdout %q, want a block naming %s (stderr: %q)", code, stdout, name, stderr)
+			}
+		})
+	}
+	// A clean literal beside the same gap is no reason to block.
+	if err := os.WriteFile(filepath.Join(dir, "plain.txt"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{
+		"echo a | xargs cat plain.txt",
+		"timeout $T cat plain.txt",
+		"for f in $(echo a) plain.txt; do cat \"$f\"; done",
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); strings.Contains(reason, unsettledItem) {
+				t.Errorf("coverage reason = %q, want it to name the operand", reason)
+			}
+		})
+	}
+}
+
+// What stays unread beside the record, because nothing on the line is what
+// crosses. GNU wc and sort refuse an operand beside --files0-from and BSD sort
+// ignores one; the two substitutions took the directory and the command name.
+func TestAnUnsettledOperandListLeavesTheseUnread(t *testing.T) {
+	bashShell(t)
+	dir, name := planted(t)
+	for _, command := range []string{
+		"wc --files0-from=list " + name,
+		// Either could be `-C dir`, so the relative name is unsettled.
 		"env $(echo) cat " + name,
+		"env -X cat " + name,
 		// The word a wrapper could not read took the command with it.
 		"nice $(echo /bin)/cat " + name,
 	} {
@@ -639,14 +674,17 @@ func TestAWrapperThatRunsNoReaderOpensNothing(t *testing.T) {
 
 // `xargs` takes the reader's operands from its input, and a wrapper option
 // off its row may have been anything, so the files the reader opens are not
-// the ones on the line: recorded, never resolved. A finding elsewhere in the
-// call still blocks, and a grep that prints no matched text needs nothing.
+// all on the line: what is missing is recorded, never resolved. A finding
+// elsewhere in the call still blocks, and a grep that prints no matched text
+// needs nothing. A recursive grep behind xargs searches what its input names,
+// not `.`, so it is recorded rather than refused as a directory.
 func TestAWrapperThatHidesOperandsDefers(t *testing.T) {
 	dir, name := planted(t)
 	for _, command := range []string{
 		"echo " + name + " | xargs cat",
-		"env -X cat " + name,
-		"nice -n $N cat " + name,
+		"env -X cat",
+		"nice -n $N cat",
+		"echo . | xargs grep -r AWS",
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
@@ -1907,8 +1945,8 @@ func TestALoopVariableResolvesToTheFilesBashIterates(t *testing.T) {
 
 // The lists the port declines, each because bash would iterate something this
 // cannot compute, or because the header sits where the segments reading it are
-// not. Every one poisons the name, which is the coverage record the operand had
-// before loop binding existed -- so nothing here is a new refusal.
+// not. Every one records the operand, as it was recorded before loop binding
+// existed -- so nothing here is a new refusal.
 //
 // The last four are the divergence from upstream, which binds regardless: there
 // a candidate bash never took only adds a prompt, here it decides which file

@@ -275,15 +275,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 			}
 			// `xargs` hands the reader operands from its input, and a wrapper
 			// whose options could not be read may have been handed any of them,
-			// so the operands on the line are not the files the command reads.
-			// A grep that prints no matched text sends nothing a hidden operand
+			// so the operands on the line are not all the files the command
+			// reads. They are still files it reads -- `echo a | xargs cat f`,
+			// `timeout $T cat f` and `sudo -u $(whoami) cat f` all print f -- so
+			// they get their verdict and the note covers the rest (Q254). A
+			// grep that prints no matched text sends nothing a hidden operand
 			// would need read, for grep.go's reason.
-			//
-			// An unquoted substitution among the words is read past: `sudo -u
-			// $(whoami) cat f` and `env X=$(x) cat f` both print f, so the
-			// literal gets its verdict and the note still covers what the
-			// output adds. `timeout $T cat f` is the same shape and stays
-			// deferred, which Q254 holds open.
 			if wrap.Opaque {
 				past := slices.ContainsFunc(argv, holdsOpenExpansion)
 				if grepNames[filepath.Base(tokens[0])] && !past {
@@ -294,9 +291,6 @@ func bashTargets(command, cwd string) ([]target, error) {
 				note(fmt.Errorf("in the %q here, a command wrapper ahead of it "+
 					"supplies operands or options this cannot read, so which files "+
 					"it would read is not settled here", filepath.Base(tokens[0])))
-				if !past {
-					continue
-				}
 			}
 			// `env -C` and `sudo -D` move the command they run and nothing
 			// else, so its operands resolve there and a `<` redirect, which the
@@ -320,7 +314,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 			recursive, quiet := false, false
 			if isGrep {
 				recursive, quiet = grepMode(tokens)
-				if recursive && noneRead {
+				if recursive && noneRead && !wrap.Appends {
 					operands = append(operands, ".")
 				}
 			}
@@ -332,10 +326,11 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// readers only, every reader in the table, never a `<(…)`, and
 			// docs/design/README.md, "An input redirect", has the week behind each.
 			operands = append(operands, inputs...)
-			// A flag whose value is a file naming other files. The list itself
-			// is an operand and is scanned; what it names cannot be known
-			// without opening it, and scanning the list alone would report a
-			// clean result for every file in it.
+			// A flag whose value is a file naming other files, which cannot be
+			// known without opening it. Nothing on the line is read, because
+			// nothing on it crosses: GNU `wc` and `sort` refuse an operand beside
+			// the flag, BSD `sort` ignores one, and `file` prints a type. The
+			// list's own bytes do not cross either, past the names `wc` prints.
 			if flags := readers.Indirect(tokens); len(flags) > 0 {
 				note(fmt.Errorf("a file operand is named indirectly "+
 					"through %q, so which files this command would read is not "+
@@ -382,6 +377,9 @@ func bashTargets(command, cwd string) ([]target, error) {
 				for _, cand := range cands {
 					expanded, err := expand(cand, at, atUnknown, globsAltered, qualified)
 					if err != nil {
+						if strings.Contains(cand, unsettledItem) {
+							cand = operand
+						}
 						note(unresolved{cand, fmt.Errorf("in the %q here, %w", command, err)})
 						continue
 					}
@@ -605,6 +603,7 @@ func commandBehind(tokens []string) (readers.Peel, bool) {
 		tokens = wrap.Argv[n:]
 		next := readers.PeelWrappers(tokens)
 		next.Opaque = next.Opaque || wrap.Opaque
+		next.Appends = next.Appends || wrap.Appends
 		next.External = next.External || wrap.External
 		next.Chdirs = append(wrap.Chdirs, next.Chdirs...)
 		wrap, prefixed = next, true

@@ -165,6 +165,10 @@ type Peel struct {
 	// guessed past: Argv starts at the first later word naming a reader or a
 	// wrapper, and a caller treats the operands as unsettled.
 	Opaque bool
+	// Appends is true when the operands missing from the string are ones
+	// `xargs` adds after the last word, so the ones in it are still the
+	// command's own.
+	Appends bool
 	// External is true when a wrapper on the way is a separate program, so a
 	// `cd` it runs moves nothing in the shell.
 	External bool
@@ -268,6 +272,7 @@ func PeelWrappers(tokens []string) Peel {
 	}
 	p.Argv = argv
 	p.Opaque = lost || appends
+	p.Appends = appends
 	return p
 }
 

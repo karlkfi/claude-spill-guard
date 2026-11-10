@@ -1421,12 +1421,25 @@ because a deferred call is quiet to the person, and this one is not. Until Q245
 a `Grep` pattern beside a path that will not resolve was not read at all, the
 same case. A scan past its budget [blocks too](#the-order-the-budget-spends).
 
-The exception is a call whose operand list is what is unsettled, because the walk
-then reads nothing on the line: `xargs`, which appends its input; a wrapper whose
-options this cannot read, as in `timeout $T cat f`; a file-list flag, as in `wc
---files0-from=l f`; and a `for` list holding a non-literal. Each defers with the
-literal beside it unread, and whether it should is Q254.
-`TestAnUnsettledOperandListStillHidesALiteral` pins all four.
+A call whose operand list is what is unsettled was the exception until Q254, and
+three of its four arms read the literals on the line now, with the record beside
+them. `xargs` appends its input after them; a wrapper whose options this cannot
+read, as in `timeout $T cat f`, still hands them to the command behind it; and a
+`for` list keeps its literal items beside a stand-in for the one it cannot expand,
+where upstream poisons the name. bash 5.3.15 prints the key for each. The price is
+a block where the command reads nothing: macOS `xargs` runs nothing on empty
+input, `timeout $T` with `T` unset takes `cat` for its duration, and `timeout $T
+foo cat f` blocks over a file `foo` was handed. Over the 240,454 distinct `Bash`
+commands in this machine's transcripts on 2026-11-09, the wrapper arm took 244
+segments and 5 had a literal operand, 4 of them an `xargs -I{}` placeholder that
+names no file; 258 commands had a `for` list mixing a literal with a non-literal.
+
+The file-list flag, as in `wc --files0-from=l f`, still leaves the line unread,
+because nothing on it crosses. GNU `wc` and `sort` refuse an operand beside the
+flag, BSD `sort` ignores one, BSD `wc` has no such flag, and `file -f` prints a
+type; the list's own bytes reach the output only as file names. 0 of
+the same commands carried it. `TestAnUnsettledOperandListStillReadsALiteral` and
+`TestAnUnsettledOperandListLeavesTheseUnread` pin both.
 
 An unquoted substitution looked like a fifth, and it was a parser defect (Q252).
 The segmenter ended the command at the `(` of `$(`, `$((`, `<(` and `>(`, so `cat
@@ -1456,7 +1469,8 @@ another route:
   `$(x)/nothing cat f` does not.
 - **A wrapper's lost grammar.** `sudo -u $(whoami) cat f` reads past the
   substitution, which also blocks `env X=$(a) echo cat f`, where `f` is only echoed.
-  Q254 prices that.
+  Q254 extended the reading to every lost grammar and counted the shape at 0 of
+  244 such segments.
 - **A process substitution** holds its word, since dropping it moved the operands:
   `grep -v <(x) f` took `f` for the pattern. After an assignment it holds none, or
   it would take the command's place in `X=<(x) cat f`, so `X=1 <(x) cat f` blocks
@@ -3133,12 +3147,13 @@ flag alters it.
 
 The binding is a port of `bash-workspace-guard.py`'s `for_loop_binding`,
 `literal_for_item` and `expand_loop_candidates` (its issues 70 and 99), in
-`internal/hook/vars.go`. A list of literals and globs is recorded; anything
-else poisons the name, which is the coverage record the operand had before any
-of this, so nothing here is a new refusal. Poisoned by an item carrying a `$`
-or a backtick, a brace item — bash brace-expands a for-list item where it does
-not an assignment value — a `for NAME` over `"$@"`, an empty list, and the
-`for ((…))` arithmetic form, which lexes a `(` where the name would be.
+`internal/hook/vars.go`. A list of literals and globs is recorded. An item
+carrying a `$` or a backtick, or a brace item — bash brace-expands a for-list
+item where it does not an assignment value — binds as a stand-in that records
+the operand, beside the literals, which are still read (Q254); upstream poisons
+the name there. A `for NAME` over `"$@"`, an empty list, and the `for ((…))`
+arithmetic form, which lexes a `(` where the name would be, poison it, which is
+the coverage record the operand had before any of this.
 
 **Measured 2026-09-07** over a week of this machine's transcripts, in one
 pass: 28,763 Bash calls, of which 3,351 carry a `for NAME in`, 746 of those
