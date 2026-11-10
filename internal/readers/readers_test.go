@@ -184,6 +184,26 @@ func TestIndirect(t *testing.T) {
 	}
 }
 
+func TestIndirectLists(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		tokens []string
+		want   []string
+	}{
+		{"an inline value", []string{"wc", "--files0-from=list", "x"}, []string{"list"}},
+		{"a detached value", []string{"sort", "--files0-from", "list", "x"}, []string{"list"}},
+		{"both of file's spellings", []string{"file", "-f", "a", "--files-from", "b", "x"}, []string{"a", "b"}},
+		{"no such flag", []string{"wc", "x"}, nil},
+		{"a command with no indirect flags at all", []string{"cat", "a"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IndirectLists(tc.tokens); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("IndirectLists(%q) = %q, want %q", tc.tokens, got, tc.want)
+			}
+		})
+	}
+}
+
 // Every command named in `indirect` must have a row, or the flags are named
 // against nothing and Indirect silently returns empty for them.
 func TestEveryIndirectCommandHasARow(t *testing.T) {

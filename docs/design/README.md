@@ -1434,12 +1434,15 @@ commands in this machine's transcripts on 2026-11-09, the wrapper arm took 244
 segments and 5 had a literal operand, 4 of them an `xargs -I{}` placeholder that
 names no file; 258 commands had a `for` list mixing a literal with a non-literal.
 
-The file-list flag, as in `wc --files0-from=l f`, still leaves the line unread,
-because nothing on it crosses. GNU `wc` and `sort` refuse an operand beside the
-flag, BSD `sort` ignores one, BSD `wc` has no such flag, and `file -f` prints a
-type; the list's own bytes reach the output only as file names. 0 of
-the same commands carried it. `TestAnUnsettledOperandListStillReadsALiteral` and
-`TestAnUnsettledOperandListLeavesTheseUnread` pin both.
+The file-list flag, as in `wc --files0-from=l f`, reads the list and leaves the
+rest of the line unread. The list crosses: GNU `wc` and `sort` and `file -f` print
+each name in it they cannot open, so a key there reaches the output, and on BSD,
+where `sort` ignores it and `wc` has no such flag, the block costs a call that
+sends nothing. The other operands do not cross, since GNU `wc` and `sort` refuse
+one beside the flag and BSD `sort` ignores it. 0 of the same commands carried the
+flag. `TestAnUnsettledOperandListStillReadsALiteral`,
+`TestAFileListIsReadAndWhatItNamesIsNot` and
+`TestAnUnsettledOperandListLeavesTheseUnread` pin the three.
 
 An unquoted substitution looked like a fifth, and it was a parser defect (Q252).
 The segmenter ended the command at the `(` of `$(`, `$((`, `<(` and `>(`, so `cat

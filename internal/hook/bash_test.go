@@ -505,9 +505,29 @@ func TestAnUnsettledOperandListStillReadsALiteral(t *testing.T) {
 	}
 }
 
-// What stays unread beside the record, because nothing on the line is what
-// crosses. GNU wc and sort refuse an operand beside --files0-from and BSD sort
-// ignores one; the two substitutions took the directory and the command name.
+// The list itself is read, because GNU wc and sort and `file -f` print each name
+// in it they cannot open, so a key there crosses (review of #261, driven on
+// coreutils 9.11). The record stays, since what the list names is not read.
+func TestAFileListIsReadAndWhatItNamesIsNot(t *testing.T) {
+	dir, name := planted(t)
+	for _, command := range []string{
+		"wc --files0-from=" + name,
+		"sort --files0-from " + name,
+		"file -f " + name,
+		"wc --files0-from=- < " + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 || !strings.Contains(reasonOf(t, stdout), name) {
+				t.Errorf("exit %d, stdout %q, want a block naming %s (stderr: %q)", code, stdout, name, stderr)
+			}
+		})
+	}
+}
+
+// What stays unread beside the record. GNU wc and sort refuse an operand beside
+// --files0-from and BSD sort ignores one; the two substitutions took the
+// directory and the command name.
 func TestAnUnsettledOperandListLeavesTheseUnread(t *testing.T) {
 	bashShell(t)
 	dir, name := planted(t)

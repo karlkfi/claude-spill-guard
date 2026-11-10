@@ -327,15 +327,18 @@ func bashTargets(command, cwd string) ([]target, error) {
 			// docs/design/README.md, "An input redirect", has the week behind each.
 			operands = append(operands, inputs...)
 			// A flag whose value is a file naming other files, which cannot be
-			// known without opening it. Nothing on the line is read, because
-			// nothing on it crosses: GNU `wc` and `sort` refuse an operand beside
-			// the flag, BSD `sort` ignores one, and `file` prints a type. The
-			// list's own bytes do not cross either, past the names `wc` prints.
+			// known without opening it. The list is read: GNU `wc` and `sort`
+			// and `file -f` print each name it holds back when it does not open,
+			// so its contents cross. The other operands are not, because GNU
+			// `wc` and `sort` refuse one beside the flag and BSD `sort` ignores
+			// it.
 			if flags := readers.Indirect(tokens); len(flags) > 0 {
 				note(fmt.Errorf("a file operand is named indirectly "+
 					"through %q, so which files this command would read is not "+
 					"settled here", strings.Join(flags, ", ")))
-				continue
+				lists := readers.IndirectLists(tokens)
+				operands = append(lists, inputs...)
+				fileOperands = len(lists)
 			}
 			// An unquoted substitution becomes however many words its output
 			// splits into, so one read here as a pattern or a flag's value can

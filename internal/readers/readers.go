@@ -103,6 +103,20 @@ func Indirect(tokens []string) []string {
 	return found
 }
 
+// IndirectLists returns the files the flags Indirect reports are given. Every
+// flag-named file of these commands is such a list, so it is splitArgs' files.
+func IndirectLists(tokens []string) []string {
+	if len(Indirect(tokens)) == 0 {
+		return nil
+	}
+	name := path.Base(tokens[0])
+	if target, ok := aliases[name]; ok {
+		name = target
+	}
+	files, _, _ := splitArgs(tokens, specs[name])
+	return files
+}
+
 // splitArgs walks one simple command's arguments against its spec, returning
 // the files named by flags, the flags it saw, and the positionals.
 //

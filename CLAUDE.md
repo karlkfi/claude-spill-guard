@@ -641,8 +641,8 @@ operand it cannot settle, what it did read is scanned, and a match there
 blocks (Q204), naming a buffer nothing decoded beside it in the notice and
 writing no record (Q244). So does an unsettled operand list — `xargs`, a
 wrapper whose options this cannot read, a `for` list holding a non-literal —
-whose literals are still opened (Q254); a file-list flag's line is left unread,
-since nothing on it crosses. A scan past its budget blocks on the buffers it
+whose literals are still opened (Q254); a file-list flag reads the list and
+no other operand. A scan past its budget blocks on the buffers it
 got through, and it gets through the smallest first (Q227), which is an order
 rather than a size cap: `docs/design/README.md` under *The order the budget
 spends*.
