@@ -41,9 +41,17 @@ ITEM_ID = re.compile(r"\bQ\d+\b")
 
 # Half the store, with a floor. The ratio is what keeps this from needing a
 # constant per store size: an index names every item and prose names a handful,
-# so the two populations do not overlap at any size worth gating. Measured
-# 2026-08-21 over 58 tracked files and a 25-item store, the most any real page
-# named was 6 distinct ids, in docs/queue/README.md, against a limit of 13.
+# so the two populations do not overlap at any size worth gating. Only ids with
+# a file in the store count. Prose cites completed items as history, and those
+# ids are not in the store, so counting them measured how much a page remembers
+# rather than how much of the store it enumerates: docs/design/README.md cites
+# 37 distinct ids and 9 of them are open, and a merged set of three open PRs
+# took it to 42 against a limit of 41.
+#
+# Re-taken 2026-11-10 over an 84-item store: the most any tracked file named
+# among the store's items was 9, in docs/design/README.md, against a limit of
+# 42 (37 distinct ids there before the filter). First measured 2026-08-21 over
+# 58 tracked files and a 25-item store: 6, in docs/queue/README.md, against 13.
 #
 # The floor governs only below 20 items, where it trades a missed hand-rolled
 # index for keeping the margin off prose. Nothing is given up on the shape that
@@ -59,8 +67,9 @@ def tracked():
     return [p for p in out.split("\0") if p]
 
 
-def store_size():
-    return len([p for p in STORE.glob("Q*.md") if re.fullmatch(r"Q\d+", p.stem)])
+def store_ids():
+    """The id of every item with a file in the store."""
+    return {p.stem for p in STORE.glob("Q*.md") if re.fullmatch(r"Q\d+", p.stem)}
 
 
 def looks_rendered(text):
@@ -77,7 +86,8 @@ def looks_rendered(text):
 
 
 def main():
-    limit = max(ID_FLOOR, (store_size() + 1) // 2)
+    items = store_ids()
+    limit = max(ID_FLOOR, (len(items) + 1) // 2)
     findings = []
     for rel in tracked():
         path = ROOT / rel
@@ -87,7 +97,7 @@ def main():
             continue
         reason = looks_rendered(text)
         if reason is None:
-            named = set(ITEM_LINK.findall(text)) | set(ITEM_ID.findall(text))
+            named = (set(ITEM_LINK.findall(text)) | set(ITEM_ID.findall(text))) & items
             if len(named) >= limit:
                 reason = (f"names {len(named)} of the store's items, at or over "
                           f"the {limit} that reads as an enumeration")
