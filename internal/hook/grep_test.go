@@ -339,6 +339,8 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		"cd / && grep -rn foo " + dir + " | tee dev/stderr | spill-guard filter",
 		"grep -rn foo . | gtee /dev/stderr | spill-guard filter",
 		"grep -rn foo . | dd of=/dev/stderr status=none | spill-guard filter",
+		"grep -rn foo . | env -C / tee dev/stderr | spill-guard filter",
+		"grep -rn foo . | nice -n \"$N\" tee /dev/stderr | spill-guard filter",
 	}
 	// Under Git Bash /dev is not under the drive root, so neither of these
 	// reaches a device there.
@@ -383,6 +385,7 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		"grep -rn foo . | tee //dev/null | spill-guard filter",
 		"grep -rn foo . | tee sub/out.log | spill-guard filter",
 		"grep -rn foo . | dd of=out.log status=none | spill-guard filter",
+		"grep -rn foo . | env -C sub tee out.log | spill-guard filter",
 	} {
 		t.Run(command+" is allowed", func(t *testing.T) {
 			allowed(t, bashCall(t, command, dir))

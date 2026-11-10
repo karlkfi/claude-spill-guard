@@ -320,14 +320,29 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 		if k > i && s.StdoutAway {
 			return true
 		}
-		var written []string
+		type write struct {
+			name, dir  string
+			dirUnknown bool
+		}
+		var written []write
 		for _, r := range s.Redirects {
 			if !slices.Contains(s.Inputs, r) {
-				written = append(written, r)
+				written = append(written, write{r, dir, dirUnknown})
 			}
 		}
 		p := bash.ShKeywordPeel(s.Tokens, s.QuotedFrom)
-		argv := readers.PeelWrappers(bash.StripEnvPrefix(s.Tokens[p:], s.QuotedFrom[p:])).Argv
+		wrap := readers.PeelWrappers(bash.StripEnvPrefix(s.Tokens[p:], s.QuotedFrom[p:]))
+		// A wrapper whose grammar was lost may hide the writer behind it.
+		if k > i && wrap.Opaque {
+			return true
+		}
+		// `env -C` and `sudo -D` move the command, so its operands land there;
+		// the shell opened the redirects before the wrapper ran.
+		cmdDir, cmdDirUnknown := dir, dirUnknown
+		for _, d := range wrap.Chdirs {
+			cmdDir, cmdDirUnknown = chdirTo(d, cmdDir, cmdDirUnknown)
+		}
+		argv := wrap.Argv
 		name := ""
 		if len(argv) > 0 {
 			name = filepath.Base(argv[0])
@@ -339,27 +354,28 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 				if flags && a == "--" {
 					flags = false
 				} else if !flags || !strings.HasPrefix(a, "-") || a == "-" {
-					written = append(written, a)
+					written = append(written, write{a, cmdDir, cmdDirUnknown})
 				}
 			}
 		case "dd", "gdd":
 			for _, a := range argv[1:] {
 				if out, ok := strings.CutPrefix(a, "of="); ok {
-					written = append(written, out)
+					written = append(written, write{out, cmdDir, cmdDirUnknown})
 				}
 			}
 		}
-		for _, w := range written {
+		for _, wr := range written {
+			w := wr.name
 			if strings.ContainsAny(w, "$`()<>*?[{~") {
 				return true
 			}
 			// A leading slash is absolute to the shell on every platform,
 			// Git Bash included, where filepath.IsAbs would say otherwise.
 			if !strings.HasPrefix(w, "/") && !filepath.IsAbs(w) {
-				if dirUnknown || dir == "" {
+				if wr.dirUnknown || wr.dir == "" {
 					return true
 				}
-				w = filepath.Join(dir, w)
+				w = filepath.Join(wr.dir, w)
 			}
 			w = path.Clean(filepath.ToSlash(w))
 			switch {

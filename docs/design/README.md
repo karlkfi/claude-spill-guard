@@ -2738,8 +2738,10 @@ names it reads are redirect targets, `tee` and `gtee` operands, and `dd`'s
 resolved against the directory the `cd` tracker holds and cleaned, so
 `//dev/stderr`, `../../dev/stderr` and `cd / && … | tee dev/stderr` count as
 the device, and a name that exists and is not a regular file is refused too,
-which takes in a symlink to `/dev/stderr`. Each of those four put the key on
-stderr before this, driven in review of #254. A
+which takes in a symlink to `/dev/stderr`. An `env -C` or `sudo -D` ahead of
+the writer moves where its operands land, and a wrapper whose options this
+cannot read is refused, since the writer may be behind it. Each of those put
+the key on stderr before this, driven in review of #254. A
 copy to a regular file is allowed when nothing else in the string can read it.
 `grep -rn pat dir | tee out.log | spill-guard filter` is allowed, because a
 later call that reads `out.log` is scanned when it runs. Adding `; cat out.log`
