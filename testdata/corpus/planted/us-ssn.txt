@@ -1,4 +1,4 @@
 Onboarding notes, pasted from the HR ticket.
 start date: next Monday
-ssn: 666-41-7302
+ssn: 000-41-7302
 laptop: shipped

@@ -592,6 +592,8 @@ func passes(rule rules.Rule, buf []byte, lo, hi int) (bool, error) {
 			ok = validate.NotPlaceholderCard(candidate)
 		case rules.AWSPlaceholder:
 			ok = validate.NotPlaceholderAWSKeyID(candidate)
+		case rules.SSNPlaceholder:
+			ok = validate.NotPlaceholderSSN(candidate)
 		case rules.JWTSampleKey:
 			ok = validate.NotSampleJWT(candidate)
 		case rules.Mod11:

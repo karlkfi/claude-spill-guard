@@ -42,6 +42,7 @@ const (
 	Luhn            Validator = "luhn"
 	CardPlaceholder Validator = "card-placeholder"
 	AWSPlaceholder  Validator = "aws-placeholder"
+	SSNPlaceholder  Validator = "ssn-placeholder"
 	JWTSampleKey    Validator = "jwt-sample-key"
 	Mod11           Validator = "mod-11"
 	Entropy         Validator = "entropy"
@@ -86,6 +87,7 @@ var validators = map[Validator]bool{
 	Luhn:            true,
 	CardPlaceholder: true,
 	AWSPlaceholder:  true,
+	SSNPlaceholder:  true,
 	JWTSampleKey:    true,
 	Mod11:           true,
 	Entropy:         true,

@@ -1215,6 +1215,7 @@ not need to do.
    |---|---|---|
    | `luhn` | Luhn checksum | Payment cards |
    | `card-placeholder` | Denylist of the published test numbers and repeated-digit runs Luhn accepts | Payment cards, beside `luhn` |
+   | `ssn-placeholder` | Rejects area 666, group 00, serial 0000, a run of one digit and three published examples | `us-ssn`, beside `context-label` |
    | `aws-placeholder` | Rejects a key ID ending in `EXAMPLE`, the mark AWS puts on the credentials in its own documentation | `aws-access-key-id`, beside `entropy` |
    | `jwt-sample-key` | Recomputes the HMAC and rejects a token that verifies under a published sample signing key | `jwt`, beside `entropy` |
    | `mod-11` | ISO 7064 MOD 11-2 | National ID numbers |
@@ -1260,7 +1261,7 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
   "group": 1,
   "keywords": [],
   "labels": ["ssn", "social security", "social-security", "social_security", "socialsecurity", "socialsecuritynumber"],
-  "validators": ["context-label"],
+  "validators": ["ssn-placeholder", "context-label"],
   "enabled": true
 }
 ```

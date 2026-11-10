@@ -685,7 +685,7 @@ be if anyone turned them on:
 
 | Rule | Validators | Ships |
 |---|---|---|
-| `us-ssn` | `context-label` | **on** |
+| `us-ssn` | `ssn-placeholder`, `context-label` | **on** |
 | `payment-card` | `luhn`, `card-placeholder`, `context-label` | off, measured below |
 | `cn-resident-id` | `mod-11`, `context-label` | off |
 | `ipv4-public` | `reserved-range` | off |
@@ -696,6 +696,7 @@ bytes before it, in any case and spelled with a space, a hyphen, an underscore o
 nothing. A bare nine digits is not read, because `\b\d{3}-?\d{2}-?\d{4}\b` is an order number, a
 phone number and a serial. Neither is a label after the value, or a column header
 further back than the window, so most rows of a CSV go unreported.
+Nor is a published example or a shape SSA never assigns, below.
 `TestUSSSNShapes` holds each of those.
 
 The snake_case and camelCase field names are in the list because a value under
@@ -746,14 +747,47 @@ is `payment-card`'s: a fixture is labelled as a real record is, and 72 of the 81
 a test-, example- or docs-shaped path. Each is a denied `Read`, with no override, for
 a session working there. The peak is 44x below `active_merchant`. By the harness's
 flags, not driven through a validator, 45 of the 81 hold nothing but placeholder
-values no check drops, and so do all 10 in `~/go/pkg/mod`;
-[Q242](../docs/queue/Q242.md) has that. Shown this row, Karl kept the rule as it is and
-left Q242 for later.
+values no check dropped then, and so did all 10 in `~/go/pkg/mod`. Shown this row,
+Karl kept the rule as it is and left the placeholders for later, which is
+`ssn-placeholder` below.
 
 What this leaves out: `~/Documents`, `~/Downloads` and mail, deliberately, so recall
 on real values is unmeasured; non-English text; exports beyond those data sets; and
 four more projects of that last kind, `vets-api`, `vets-website`, `mymove` and
 `moov-node`, whose clones returned `Repository not found`.
+
+**`ssn-placeholder` drops what SSA never assigns and three published examples.**
+SSA's own manual, [POMS RM 10201.035](https://secure.ssa.gov/poms.nsf/lnx/0110201035),
+read 2026-11-09, calls an SSN invalid when its area is `000`, `666` or in the 900s,
+its group `00` or its serial `0000`. Those cost no recall, because no one holds
+one. The regex already refuses the 900s, and the check drops `666`, group `00` and
+serial `0000`. It also drops a run of one repeated digit and three examples: the
+number on the sample card sold in Woolworth wallets, the one in a 1940 Board
+pamphlet, and the ascending one form documentation uses. Their digits are in
+`internal/validate/ssn.go` rather than here, because written beside the words
+that name them they would make this file a finding for every installed binary
+older than the check. Those three come from secondary sources, because ssa.gov's
+own pages return 403 here, and since 2011 SSA assigns any valid area at random,
+so whether anyone now holds one of them is a recall cost nothing here can price.
+
+Area `000` is the one never-assigned shape left matching, so that the planted
+fixture can be a value the rule finds and no one can hold. The choice between the
+four was measured rather than taken: driven 2026-11-09 through a binary built
+from this tree, over fresh shallow clones and this machine, every file counted
+and none deduplicated.
+
+| Population | Files hit before | After |
+|---|---|---|
+| `18F/identity-idp` at `1df24c9` | 39 | 3 |
+| `codeforamerica/vita-min` at `fa7789b` | 20 | 9 |
+| `~/go/pkg/mod` | 23 | 0 |
+
+Leaving `666` matching instead would have kept 20 of those 82 files blocked
+rather than 12, and leaving group `00` 14; leaving serial `0000` matching would
+also have kept 12. The 12 left hold values that are none of these shapes, in
+`spec/` trees, by the mechanism the paragraph above describes, and a list cannot
+reach them. The other 15 projects in that row were not re-cloned, so the 81 is
+not re-taken.
 
 **The other half of the decision is cost, because no prefilter gates this family.**
 One thread, 20,000 real text files, 312 MB, minimum of three, on `efac304`, on a

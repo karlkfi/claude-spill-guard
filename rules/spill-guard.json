@@ -151,7 +151,7 @@
       "group": 1,
       "keywords": [],
       "labels": ["ssn", "social security", "social-security", "social_security", "socialsecurity", "socialsecuritynumber"],
-      "validators": ["context-label"],
+      "validators": ["ssn-placeholder", "context-label"],
       "enabled": true
     },
     {

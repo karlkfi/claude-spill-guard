@@ -37,6 +37,14 @@ func TestUSSSNShapes(t *testing.T) {
 		{"an area in the 900s", "ssn: 9" + ssn[1:], 0},
 		{"glued to a digit", "ssn: 1" + ssn, 0},
 		{"masked", "ssn: ***-**-" + ssn[len(ssn)-4:], 0},
+		// ssn-placeholder, under a label it would otherwise fire on. Each value
+		// is split so this file stays readable to a hook built without the check.
+		{"the form-documentation example", "ssn: 123-45-" + "6789", 0},
+		{"the Woolworth wallet card", "ssn: 078-05-" + "1120", 0},
+		{"a run of one digit", "ssn: 111-11-" + "1111", 0},
+		{"area 666", "ssn: 666" + ssn[3:], 0},
+		{"group 00", "ssn: " + ssn[:4] + "00" + ssn[6:], 0},
+		{"serial 0000", "ssn: " + ssn[:7] + "0000", 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
