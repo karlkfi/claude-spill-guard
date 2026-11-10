@@ -94,8 +94,9 @@ blind to a long one. A floor of 20 therefore costs nothing on what sessions here
 write, and a padded placeholder in
 [`testdata/corpus/clean/env.example`](../testdata/corpus/clean/env.example)
 falls to the entropy floor. A placeholder written in words does not: the
-prefix followed by `your-oauth-token-goes-here` clears 3.0 and blocks, as does
-any spelled-out stand-in at least 20 bytes long. The census found no body that
+prefix followed by `your-oauth-token-goes-here` clears 3.0 and blocks, as do
+most stand-ins spelled in words; one padded out with a repeated letter can
+still fall under the floor. The census found no body that
 long behind these prefixes, placeholder or otherwise, so that is a stated
 limit rather than a measured cost. Nor does the census say how long a real token
 is, so a real one shorter than 20 bytes would go unreported.
