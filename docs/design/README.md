@@ -259,7 +259,11 @@ Before Q250, `SPILL_GUARD_OVERRIDE=why cat key.txt .env` asked about the `.env`
 alone and approving sent the key. Driven 2026-11-09 on built binaries over a
 `.env`, an `env`, a recursive `grep` and a file named after the `.env`: all
 four named no rule on `main` and all four name it now, while the same calls
-without the hatch deny on the refusal and scan nothing, as before.
+without the hatch deny on the refusal and scan nothing, as before. Where that
+scan falls short, an operand that does not resolve or a budget that runs out,
+the prompt says part of the call went unread, whether or not it names a match:
+with no match named, that sentence is the only thing in it saying an approval
+sends more than the refusal names.
 
 **What this does not do is guard a path.** The row that filed it carried a
 second half — refusing a read of `~/.claude/settings.json`, `.env`,
