@@ -1558,6 +1558,9 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"{ f() { cd w; }; }; cat x", "x"},
 		{"! f() { cd w; }; cat x", "x"},
 		{"time f() { cd w; }; cat x", "x"},
+		{"time -p f() { cd w; }; cat x", "x"},
+		{"time -- f() { cd w; }; cat x", "x"},
+		{"time -p -- f() { cd w; }; cat x", "x"},
 		{"! f() { cd w; }; eval f; cat x", "w/x"},
 		{"! ! f() { cd w; }; eval f; cat x", "w/x"},
 		{"if f() { cd w; }; then :; fi; cat x", "x"},
@@ -2002,6 +2005,8 @@ func TestACaseArmDoesNotSettleWhatComesAfterIt(t *testing.T) {
 		{"a case after a bang", "! case x in y) SP=" + dir + ";; esac; cat $SP/" + name},
 		{"a case after time", "time case x in y) SP=" + dir + ";; esac; cat $SP/" + name},
 		{"a case after then behind a closer", "if { :; } then case x in y) SP=" + dir + ";; esac; fi; cat $SP/" + name},
+		{"a case after time's options", "time -p -- case x in y) SP=" + dir + ";; esac; cat $SP/" + name},
+		{"a case after time -p", "time -p case x in y) SP=" + dir + ";; esac; cat $SP/" + name},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, t.TempDir()))

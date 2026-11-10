@@ -77,6 +77,15 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 			[]bool{false, false, true, false, false, false}},
 		{"a quoted brace is no keyword", "echo '{' case in; (cd /tmp); P=1",
 			[]bool{false, false, false}},
+		// bash reads one `-p` then one `--` as part of `time` (Q223).
+		{"after time's options", "time -p -- case q in r) P=1;; esac; cat f",
+			[]bool{false, true, false, false}},
+		{"after time's --", "time -- case q in r) P=1;; esac; cat f",
+			[]bool{false, true, false, false}},
+		{"a quoted option ends them", "time '-p' case in; (cd /tmp); P=1",
+			[]bool{false, false, false}},
+		{"so does one out of order", "time -- -p case in; (cd /tmp); P=1",
+			[]bool{false, false, false}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			segs, err := Segments(tc.in)

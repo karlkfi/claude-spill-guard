@@ -1159,13 +1159,21 @@ func ShKeywordPeel(tokens []string, quotedFrom []int) int {
 	i := 0
 	for i < len(tokens) && isReservedWord(tokens[i], quotedFrom[i]) {
 		i++
-		// bash reads one of each after `time`, in this order, as part of the keyword.
 		if tokens[i-1] == "time" {
-			for _, opt := range []string{"-p", "--"} {
-				if i < len(tokens) && quotedFrom[i] == NotQuoted && tokens[i] == opt {
-					i++
-				}
-			}
+			i += timeOptionPeel(tokens[i:], quotedFrom[i:])
+		}
+	}
+	return i
+}
+
+// timeOptionPeel reports how many of tokens are options of the `time` before
+// them: bash reads one `-p` then one `--`, in that order and unquoted, as part
+// of the keyword.
+func timeOptionPeel(tokens []string, quotedFrom []int) int {
+	i := 0
+	for _, opt := range []string{"-p", "--"} {
+		if i < len(tokens) && quotedFrom[i] == NotQuoted && tokens[i] == opt {
+			i++
 		}
 	}
 	return i

@@ -185,7 +185,7 @@ type Segment struct {
 // definitionPrefix is whether a function definition can stand behind word:
 // any of leadingWords but a closer, which ends a command rather than leading
 // one. `if f () { cd w; }; then` and `! f () { cd w; }` both define f, driven
-// on bash 5.3.15. `time -p` is Q223's, and stops the run at `-p`.
+// on bash 5.3.15, and so does `time -p -- f () { cd w; }` (Q223).
 func definitionPrefix(word string) bool {
 	for _, closer := range compoundClosers {
 		if word == closer {
@@ -448,6 +448,9 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		k := 0
 		for k < len(cur) && definitionPrefix(cur[k]) && curQF[k] == NotQuoted {
 			k++
+			if cur[k-1] == "time" {
+				k += timeOptionPeel(cur[k:], curQF[k:])
+			}
 		}
 		if t == "(" && i+1 < len(tokens) && tokens[i+1] == ")" &&
 			isOperator(t, quotedFrom[i], separators) &&
@@ -716,7 +719,8 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			fn = ""
 			compoundPos = leadingWords[t]
 		} else {
-			fn, compoundPos = "", false
+			fn = ""
+			compoundPos = compoundPos && continuesTime(cur, curQF, t, quotedFrom[i])
 		}
 		cur = append(cur, t)
 		curQF = append(curQF, quotedFrom[i])
@@ -777,6 +781,19 @@ func inPattern(clauses []string) bool {
 // test for `|` alone, and `P=/x; true |& P=/y; cat $P/f` read /y/f where
 // bash reads /x/f, silently.
 func isPipe(sep string) bool { return sep == "|" || sep == "|&" }
+
+// continuesTime is whether word is one more option of a `time` ending cur, so
+// the word after it is still in command position: `time -p case` and `time --
+// f () { … }` are the keyword and a definition (Q223).
+func continuesTime(cur []string, curQF []int, word string, wordQF int) bool {
+	for j := len(cur) - 1; j >= 0 && j >= len(cur)-2; j-- {
+		if cur[j] == "time" && curQF[j] == NotQuoted {
+			words := append(slices.Clone(cur[j+1:]), word)
+			return timeOptionPeel(words, append(slices.Clone(curQF[j+1:]), wordQF)) == len(words)
+		}
+	}
+	return false
+}
 
 // trackCase advances the `case` clause states for one word token. The three
 // arms and their order are scanDollarParen's: a clause waiting for its `in`
