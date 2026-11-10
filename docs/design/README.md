@@ -448,6 +448,15 @@ on `main` and denies on this change, while `cat < notes.txt`, `python3 - <
 planted.env`, `cat < .env | cut -d= -f1` and `diff <(sort a) <(sort b)` allow
 on both.
 
+**An `@` token is a read too, and is refused the same way.** It splices the
+file with no tool call ([`@path` is an operand](#path-is-an-operand-not-a-hop)),
+so until Q236 `see @.env` got the content scan alone and exited 0 silent. The
+reason is written for the person who typed the token. Swept first, since the
+class was measured on tool calls: over 2,999 transcript files here on
+2026-11-09, 185 path-like `@` tokens in 7,668 typed prompts and 1,403 `file`
+attachments named no member of the class, while a planted control came back 2
+of 3 tokens and 1 of 2 attachments, missing only `src/main.go` and `.env.example`.
+
 **Reads only.** A *write* to one of these changes what some other tool then
 does — an environment variable injected, a registry credential replaced — which
 is not a spill and is not this tool's goal. `echo … > .env` is not refused, and

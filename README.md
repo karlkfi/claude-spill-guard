@@ -20,7 +20,7 @@ is worth reading before you rely on it.
 |---|---|
 | `cat deploy.log`, a `Read` of it, or `@deploy.log` in a prompt, with a key in the file | Blocked, naming the rule and byte offset and never the value |
 | A prompt with a key pasted into it | Blocked the same way |
-| `cat .env`, or a `Read` of `.env` | Blocked on the path alone, whatever the file holds |
+| `cat .env`, a `Read` of `.env`, or `@.env` in a prompt | Blocked on the path alone, whatever the file holds |
 | `cat ~/.aws/credentials`, or four other credential files | Blocked on the path alone |
 | `env`, `printenv` | Blocked, offering `env \| cut -d= -f1` for the names |
 | `grep -r password .` | Blocked, offering the same command with the output scanned |
@@ -121,15 +121,14 @@ same silence, so check. This needs no secret. Make a new folder with an empty
 mkdir spill-guard-check && cd spill-guard-check && touch .env && claude
 ```
 
-Ask Claude to run `cat .env` and then to read `.env` with its `Read` tool. Both
-should come back blocked by spill-guard. If either one does not, the hook is not
-live, and nothing leaked, because the file is empty.
+Ask Claude to run `cat .env` and then to read `.env` with its `Read` tool, then
+send a prompt with `@.env` in it. All three should come back blocked by
+spill-guard. If any one does not, the hook is not live, and nothing leaked,
+because the file is empty.
 
-The file has to exist, since a missing `.env` is allowed. This check also says
-nothing about prompts: `@.env` is allowed, because the path refusal does not
-reach that surface. `spill-guard selftest` drives a prompt through the scanner,
-in-process rather than through Claude Code. On Windows without Git for Windows only
-the `Read` half blocks, for the reason under the plugin install.
+The file has to exist, since a missing `.env` is allowed. On Windows without Git
+for Windows the `cat` half does not block, for the reason under the plugin
+install.
 
 **A key you plant yourself will probably come back allowed**, with nothing said.
 AWS's documented example key and anything else ending in `EXAMPLE` are refused
@@ -162,8 +161,7 @@ the binary unless it says otherwise:
   the hook.
 - **A value no rule knows.** A password in `deploy.env` passes `cat`, because the
   path refusal covers `.env` and the credential files above rather than every
-  name with `env` in it. A `@.env` in a prompt gets the content scan and not the
-  path refusal, so a password in it passes too.
+  name with `env` in it.
 - **`!` bash mode and skill loads**, by the measurements in
   [`docs/design/`](docs/design/README.md) rather than by this drive. `!cat` is not
   a tool call, and a skill load names no file.
