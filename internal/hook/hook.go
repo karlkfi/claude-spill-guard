@@ -119,8 +119,32 @@ func runPaced(ctx context.Context, pace func(label string), start time.Time, bud
 		return deny(stdout, stderr, event, blockedLead+noReasonGiven, "")
 	}
 
-	got, finished := within(ctx, pace, call, event, budget-time.Since(start))
+	got, finished := within(ctx, pace, call, event, overridden, budget-time.Since(start))
 	findings, skips, err := got.findings, got.skips, got.err
+	// A refusal blocks whatever the buffers hold, so they are scanned only
+	// under an override, where the confirmation has to name what approving
+	// sends: without it a key in a file beside a `.env` crossed on a prompt
+	// that mentioned only the `.env`. Ahead of the deadline, because a scan
+	// that ran out is still a call stopped for its shape. Not failed(), whose
+	// sentence is that the scan stopped short, which is not the reason.
+	var refused refusal
+	if errors.As(err, &refused) {
+		body, notice := refused.body(), ""
+		if len(findings) > 0 {
+			body += " " + found(findings)
+			// Anything joined to the refusal is a gap beside it.
+			if !finished || err != error(refused) {
+				notice = partlyRead
+			}
+		}
+		if len(skips) > 0 {
+			if notice != "" {
+				notice += " "
+			}
+			notice += alsoUnread(skips)
+		}
+		return decide(stdout, stderr, call, event, overridden, body, notice)
+	}
 	if !finished {
 		// A finding in a buffer the scan got through blocks, for the reason a
 		// walk's failure below lets one: the rest going unread is no reason to
@@ -146,16 +170,6 @@ func runPaced(ctx context.Context, pace func(label string), start time.Time, bud
 		return abstain(stdout, stderr, call, event, overran(budget), nil)
 	}
 	if err != nil {
-		// A refusal is not a scan that failed, and failed() would say it was:
-		// its sentence is that the scan could not be completed, and that is not
-		// the reason. The call was stopped for what it would do, so
-		// the body has to say so and name what the caller can do instead --
-		// shape.go and guarded.go carry the two arguments.
-		var refused refusal
-		if errors.As(err, &refused) {
-			return decide(stdout, stderr, call, event, overridden,
-				refused.body(), "")
-		}
 		// What the walk collected before it failed was scanned, and a finding
 		// in it blocks: the gap is in what could not be read, and deferring on
 		// it is no reason to wave through what could. The notice says the
@@ -326,11 +340,12 @@ const bypassPermissions = "bypassPermissions"
 // failure is a reason the rest of the call cannot be decided, not a reason to
 // skip the part that can: before Q204 a key typed beside an `@` token that
 // would not resolve crossed with no verdict. A refusal is the exception, since
-// it blocks whatever the buffers hold.
-func scanCall(call payload, event Event, pace func(label string), publish func(func() scanned)) ([]scan.Finding, []skipped, error) {
+// it blocks whatever the buffers hold, and is scanned past only when overridden.
+func scanCall(call payload, event Event, overridden bool, pace func(label string), publish func(func() scanned)) ([]scan.Finding, []skipped, error) {
 	buffers, gap := targets(call, event)
 	var refused refusal
-	if errors.As(gap, &refused) || len(buffers) == 0 {
+	isRefused := errors.As(gap, &refused)
+	if isRefused && !overridden || len(buffers) == 0 {
 		return nil, nil, gap
 	}
 	set, err := rules.Load(embedded.Shipped)
@@ -363,17 +378,26 @@ func scanCall(call payload, event Event, pace func(label string), publish func(f
 		return cmp.Compare(buffers[a].size, buffers[b].size)
 	})
 	results := make([]atomic.Pointer[scan.Result], len(buffers))
+	// A refusal travels with what a deadline hands back, or an overridden one
+	// that ran out would defer and wave the call through.
+	var stands error
+	if isRefused {
+		stands = gap
+	}
 	publish(func() scanned {
 		findings, skips, _ := settled(buffers, results)
-		return scanned{findings: findings, skips: skips}
+		return scanned{findings: findings, skips: skips, err: stands}
 	})
 	for _, i := range order {
 		t := buffers[i]
 		pace(t.label)
 		buf, err := t.load()
 		if err != nil {
-			if gap == nil {
+			switch {
+			case gap == nil:
 				gap = err
+			case isRefused:
+				gap = errors.Join(gap, err)
 			}
 			continue
 		}
@@ -390,7 +414,7 @@ func scanCall(call payload, event Event, pace func(label string), publish func(f
 		results[i].Store(&got)
 	}
 	findings, skips, decoded := settled(buffers, results)
-	if gap != nil && decoded != "" {
+	if gap != nil && decoded != "" && !isRefused {
 		gap = partlyDecoded{decoded, gap}
 	}
 	return findings, skips, gap
@@ -640,7 +664,7 @@ func toolTargets(call payload) ([]target, error) {
 		// stands between the two -- so every member of the class is refused
 		// here.
 		if class := guardedClass(*in.FilePath); class != "" {
-			return nil, &pathRefusal{*in.FilePath, class}
+			return asText, &pathRefusal{*in.FilePath, class}
 		}
 		return append(asText, file(*in.FilePath, info.Size(), func(err error) error {
 			return unresolved{*in.FilePath,

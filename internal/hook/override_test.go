@@ -533,3 +533,95 @@ func TestASubscriptedOverrideDoesNotArmTheHatch(t *testing.T) {
 		})
 	}
 }
+
+// Q250's table. A refusal stops the call whatever its buffers hold, so they
+// went unscanned, and an override turned that into a prompt naming only the
+// refusal: approving it sent the key in key.txt too. The last row is the one
+// the walk used to return before reaching, a file named after the refusal.
+//
+// The arms without the hatch are the control and are unchanged: a deny on the
+// refusal that names no rule, since nothing is sent and a retry without the
+// refused part meets the finding.
+func TestAnOverriddenRefusalNamesAFindingBesideIt(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "key.txt", "AWS_ACCESS_KEY_ID="+secret+"\n")
+	writeFile(t, dir, ".env", "A=1\n")
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const hatch = "SPILL_GUARD_OVERRIDE=why "
+	for _, tc := range []struct{ command, refusal string }{
+		{"cat key.txt", ""},
+		{"cat key.txt .env", "dotenv"},
+		{"cat key.txt; env", "environment"},
+		{"cat key.txt; grep -r x sub", "recursive"},
+		{"cat .env key.txt", "dotenv"},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			_, stdout, _ := drive(t, bashCall(t, hatch+tc.command, dir))
+			if got := verdictOf(t, stdout); got != "ask" {
+				t.Fatalf("permissionDecision = %q, want ask", got)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, "aws-access-key-id") || !strings.Contains(reason, "key.txt") {
+				t.Errorf("the confirmation does not name the finding: %q", reason)
+			}
+			if !strings.Contains(reason, tc.refusal) {
+				t.Errorf("the confirmation does not name the refusal %q: %q", tc.refusal, reason)
+			}
+			if strings.Contains(stdout, secret) {
+				t.Errorf("the confirmation carries the value: %q", stdout)
+			}
+			// Every operand here resolved, so nothing says part went unread.
+			if strings.Contains(stdout, partlyRead) {
+				t.Errorf("the confirmation says part of the call went unread: %q", stdout)
+			}
+			if tc.refusal == "" {
+				return
+			}
+			_, stdout, _ = drive(t, bashCall(t, tc.command, dir))
+			if got := verdictOf(t, stdout); got != "deny" {
+				t.Fatalf("without the hatch, permissionDecision = %q, want deny", got)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, tc.refusal) ||
+				strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("without the hatch, the deny is not the refusal alone: %q", reason)
+			}
+		})
+	}
+}
+
+// Scanning past a refusal gives an overridden one a deadline to miss, and a
+// missed deadline with nothing found defers. The refusal has to survive it, or
+// the hatch would turn a block into no verdict at all.
+func TestAnOverriddenRefusalPastItsBudgetStillAsks(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "key.txt", "AWS_ACCESS_KEY_ID="+secret+"\n")
+	writeFile(t, dir, ".env", "A=1\n")
+	_, stdout, stderr := overrunAt(t, "key.txt",
+		bashCall(t, "SPILL_GUARD_OVERRIDE=why cat .env key.txt", dir))
+	if got := verdictOf(t, stdout); got != "ask" {
+		t.Fatalf("permissionDecision = %q, want ask (stderr: %q)", got, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "dotenv") {
+		t.Errorf("the confirmation does not name the refusal: %q", reason)
+	}
+}
+
+// An operand the walk could not settle sits beside the refusal here, so the
+// confirmation names the finding and says the rest went unread.
+func TestAnOverriddenRefusalBesideAGapSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "key.txt", "AWS_ACCESS_KEY_ID="+secret+"\n")
+	writeFile(t, dir, ".env", "A=1\n")
+	_, stdout, _ := drive(t, bashCall(t, `SPILL_GUARD_OVERRIDE=why cat key.txt "$X" .env`, dir))
+	if got := verdictOf(t, stdout); got != "ask" {
+		t.Fatalf("permissionDecision = %q, want ask", got)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+		t.Errorf("the confirmation does not name the finding: %q", reason)
+	}
+	if !strings.Contains(stdout, partlyRead) {
+		t.Errorf("the confirmation does not say part went unread: %q", stdout)
+	}
+}

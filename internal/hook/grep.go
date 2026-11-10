@@ -436,7 +436,7 @@ func allFiltered(command string) bool {
 // The pattern is scanned, as a Bash command string is: it is text the call
 // carries, and a key typed into one is a key in the transcript. So it comes back
 // beside a path that will not settle, as a command string does beside an operand
-// that will not. A refusal returns nothing, since it blocks whatever is here.
+// that will not. A refusal comes back beside them too, for an override's prompt.
 func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 	var targets []target
 	if in.Pattern != nil {
@@ -484,14 +484,14 @@ func grepToolTargets(in grepToolInput, cwd string) ([]target, error) {
 			fmt.Errorf("reading the path this Grep call searches: %w", osCause(err))}
 	}
 	if info.IsDir() {
-		return nil, &grepToolRefusal{}
+		return targets, &grepToolRefusal{}
 	}
 	if !info.Mode().IsRegular() {
 		return targets, errors.New("the Grep call names something that is neither " +
 			"a file nor a directory, so what it would send cannot be read here")
 	}
 	if class := guardedClass(path); class != "" {
-		return nil, &pathRefusal{path, class}
+		return targets, &pathRefusal{path, class}
 	}
 	return append(targets, file(path, info.Size(), func(err error) error {
 		return unresolved{path,

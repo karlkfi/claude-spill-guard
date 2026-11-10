@@ -251,6 +251,16 @@ env` is a confirmation rather than an allow, which is the right shape for a
 control whose threat model is accident: the session that means it says why, and
 a person is told before the environment leaves the machine.
 
+**And the confirmation names what else the call would send.** A refusal stops
+the call whatever its buffers hold, so without the hatch nothing beside it is
+scanned. With it, the walk goes on past the refusal and its buffers are scanned
+before the prompt is written, so a finding beside the refusal is named in it.
+Before Q250, `SPILL_GUARD_OVERRIDE=why cat key.txt .env` asked about the `.env`
+alone and approving sent the key. Driven 2026-11-09 on built binaries over a
+`.env`, an `env`, a recursive `grep` and a file named after the `.env`: all
+four named no rule on `main` and all four name it now, while the same calls
+without the hatch deny on the refusal and scan nothing, as before.
+
 **What this does not do is guard a path.** The row that filed it carried a
 second half — refusing a read of `~/.claude/settings.json`, `.env`,
 `~/.aws/credentials` and the rest of that class — and that half is

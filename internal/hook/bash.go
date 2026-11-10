@@ -86,6 +86,15 @@ func bashTargets(command, cwd string) ([]target, error) {
 	}
 	// Said only where nothing narrower was, which names what to change.
 	var unnamed error
+	// The first refusal, kept while the walk goes on for the gap's reason: an
+	// override turns it into a confirmation, and that has to name a key in a
+	// file the walk would otherwise have stopped short of.
+	var refused error
+	stop := func(err error) {
+		if refused == nil {
+			refused = err
+		}
+	}
 
 	// A body queued for a later pass runs in the state that was in force where
 	// it was WRITTEN -- the directory, the variables assigned by then, and the
@@ -135,7 +144,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 		// gap. It runs on substitution bodies too, which is what this being
 		// inside the queue loop buys: `echo $(env)` dumps as surely as `env`.
 		if name := envDumped(segments); name != "" {
-			return nil, &shapeRefusal{name}
+			stop(&shapeRefusal{name})
 		}
 
 		// The directory a relative operand resolves against, advanced through
@@ -459,7 +468,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 					if cur.depth == 0 {
 						rewrite = filteredRewrite(whole, segments, i)
 					}
-					return nil, &grepRefusal{filepath.Base(tokens[0]), rewrite}
+					stop(&grepRefusal{filepath.Base(tokens[0]), rewrite})
+					continue
 				}
 				if info.IsDir() {
 					note(unresolved{path, fmt.Errorf("in the %q here, a file "+
@@ -487,7 +497,8 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// below and still matched against every rule. The careful form
 				// keeps its content coverage rather than trading it away.
 				if class := guardedClass(path); class != "" && lastInPipeline(segments, i) {
-					return nil, &pathRefusal{path, class}
+					stop(&pathRefusal{path, class})
+					continue
 				}
 				targets = append(targets, file(path, info.Size(), func(err error) error {
 					return unresolved{path, fmt.Errorf("reading a file this "+
@@ -542,6 +553,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 					substState{cur.state.dir, cur.state.unknown || moved, unplaced, globsAltered, funcs, maps.Clone(reached), ""}})
 			}
 		}
+	}
+	if refused != nil && gap != nil {
+		return targets, errors.Join(refused, gap)
+	}
+	if refused != nil {
+		return targets, refused
 	}
 	if gap == nil {
 		gap = unnamed
