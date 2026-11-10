@@ -232,7 +232,8 @@ func PeelWrappers(tokens []string) Peel {
 	// zsh's `noglob` and `-` modify a command the shell runs itself, so they
 	// are words only until a wrapper other than `exec` or `builtin` is read:
 	// `command noglob cat` and `sudo noglob cat` look up a program by that
-	// name. Driven on zsh 5.9.
+	// name. Driven on zsh 5.9. `noglob cat *.env` hands cat the pattern
+	// itself, and the hook still expands it: a superset, as for a quoted glob.
 	modifiers := MaybeZsh()
 	for range maxPeel {
 		if len(argv) == 0 {
