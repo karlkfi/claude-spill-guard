@@ -195,8 +195,10 @@ no record at all, as [what it does not catch](#what-it-does-not-catch) says.
 
 The budget is a limit on that. A scan takes the call's own text first and then its
 files smallest first, so a small file holding a key still blocks beside big ones.
-A key in the file the budget stops on ([Q249](docs/queue/Q249.md)), or in one it
-never reaches, gets only a record, and a `cat` or `head` of that file crosses.
+In the file the budget stops on, a key still blocks once its rule has been
+through that file. A key only the rule still running would find, or one in a
+file the budget never reaches, gets only a record, and a `cat` or `head` of that
+file crosses.
 
 A command string holding a NUL would also be skipped as binary, but Claude Code
 refuses that call before any hook or shell runs. That was driven for `Bash` on

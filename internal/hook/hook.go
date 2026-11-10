@@ -90,7 +90,8 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 }
 
 // runPaced is run with the scan's progress handed to the caller: pace is called
-// before each buffer is read, and ending ctx is the deadline arriving. A test
+// before each buffer is read and again each time a rule settles a finding in
+// one, and ending ctx is the deadline arriving. A test
 // can then end the budget on a named buffer, where a timer would make it race
 // the match loop over a fixture.
 //
@@ -350,9 +351,9 @@ func scanCall(call payload, event Event, pace func(label string), publish func(f
 	// of match loop against a 60-second timeout, where no organic binary `@`
 	// target has been observed in 881 tokens. scan.BufferIncludingBinary
 	// carries that argument and why it is not a second verdict axis.
-	read := scan.Buffer
+	read := scan.BufferEach
 	if event == UserPromptSubmit {
-		read = scan.BufferIncludingBinary
+		read = scan.BufferIncludingBinaryEach
 	}
 	order := make([]int, len(buffers))
 	for i := range order {
@@ -376,7 +377,13 @@ func scanCall(call payload, event Event, pace func(label string), publish func(f
 			}
 			continue
 		}
-		got, err := read(t.label, buf, set)
+		// A finding is stored as soon as its rule has been through the buffer,
+		// because a deadline arriving while a later rule runs would otherwise
+		// lose it with the rest of the buffer (Q249).
+		got, err := read(t.label, buf, set, func(part scan.Result) {
+			results[i].Store(&part)
+			pace(t.label)
+		})
 		if err != nil {
 			return nil, nil, err
 		}

@@ -2500,9 +2500,15 @@ alone blocks in 0.008s, and one fixture alone still defers at 1.020s.
 
 Three things it does not close:
 
-- **A key inside the buffer the deadline stops on.** The scan stores a buffer's
-  result only once it is finished, so a key at byte 0 of a 400 MiB file still defers at
-  the 1s budget. That is [Q249](../queue/Q249.md).
+- **A key whose rule is still running when the deadline arrives.** A finding in
+  the buffer the deadline stops on is now kept as soon as its rule is through
+  that buffer, rather than once every rule is. Driven 2026-11-09 at the 1s
+  budget, load about 29, over a 400 MiB file with the planted key at byte 0:
+  `head -5 big.log` deferred at 1.069s on `16ce3b6` and denies at 1.639s on this
+  build. The same file without its key line still defers, at 1.030s. What is
+  left is a key that only the rule still running recognises: that rule has
+  handed back nothing, because `FindAllSubmatchIndex` returns no match until it
+  has walked the whole buffer.
 - **A key in a buffer the budget never reaches.** Enough smaller buffers can
   spend the budget first. On a prompt the harness's limit bounds what that can
   cost. `cat big-1 big-2` has no such limit, so a key in the larger file defers

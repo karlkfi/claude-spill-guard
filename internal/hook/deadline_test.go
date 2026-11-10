@@ -145,9 +145,12 @@ func TestAScanThatOverrunsItsBudgetDefers(t *testing.T) {
 // that is not yielding. Go preempts one asynchronously and this is what says so
 // on the code that ships, rather than on a claim about the runtime.
 //
-// The pair is the whole test. Over one file, a spent budget blocks on the
-// clock and an unhurried one blocks on the key planted at its end, so the
-// buffer is demonstrably scannable and demonstrably not scanned in time.
+// The pair is the whole test. Over one file, a short budget stops on the clock
+// and an unhurried one blocks on the key planted at its end, so the buffer is
+// demonstrably scannable and demonstrably not scanned in time. Stopping on the
+// clock has two answers since a finding is kept as soon as its rule is through
+// (Q249): a defer when the deadline beat the key's rule, and a block that says
+// it stops short when it did not. A scan that finished gives neither.
 func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 	// Four mebibytes is about 0.6s of match loop at the worst rate measured
 	// for this ruleset, which is thirty times the budget below. The ratio is
@@ -158,8 +161,12 @@ func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 		`"tool_input":{"file_path":` + quote(t, path) + `}}`
 
 	code, stdout, stderr := driveWithin(t, 20*time.Millisecond, payload)
-	if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "did not finish inside its") {
-		t.Fatalf("coverage reason = %q, want the deadline to have fired mid-scan", reason)
+	if stdout == "" {
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "did not finish inside its") {
+			t.Fatalf("coverage reason = %q, want the deadline to have fired mid-scan", reason)
+		}
+	} else if !strings.Contains(stdout, partlyRead) {
+		t.Fatalf("stdout = %q, want the deadline to have fired mid-scan", stdout)
 	}
 
 	// The positive control. The same file scans to a real finding, so the
@@ -170,6 +177,9 @@ func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 	}
 	if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
 		t.Fatalf("the control reason = %q, want the planted key found", reason)
+	}
+	if strings.Contains(stdout, partlyRead) {
+		t.Fatalf("the control stdout = %q, want a scan that finished", stdout)
 	}
 }
 
@@ -187,11 +197,23 @@ func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 // which Windows refuses.
 func overrunAt(t *testing.T, label, payload string) (code int, stdout, stderr string) {
 	t.Helper()
+	return overrunOn(t, label, 1, payload)
+}
+
+// overrunOn is overrunAt with the deadline arriving on the nth time the scan
+// reports progress on the named buffer rather than the first. The first is
+// before the buffer is read; each after it is a rule settling a finding in it.
+func overrunOn(t *testing.T, label string, nth int, payload string) (code int, stdout, stderr string) {
+	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	ctx, expire := context.WithCancel(context.Background())
 	defer expire()
+	seen := 0
 	pace := func(at string) {
-		if filepath.Base(at) == label {
+		if filepath.Base(at) != label {
+			return
+		}
+		if seen++; seen == nth {
 			expire()
 			select {}
 		}
@@ -258,6 +280,44 @@ func TestAnOverrunStillBlocksOnTheBuffersItGotThrough(t *testing.T) {
 			}
 			if stderr != "" {
 				t.Errorf("stderr = %q, want no coverage record beside a block", stderr)
+			}
+			if !strings.Contains(stdout, "no verdict on this call is a report on the rest") {
+				t.Errorf("stdout = %q, want it to say the verdict stops short", stdout)
+			}
+		})
+	}
+}
+
+// The buffer the deadline stops on, rather than one before it (Q249). The key
+// opens big.log and the deadline arrives once its rule is through the buffer,
+// with every later rule still to run, so the scan never finishes big.log and
+// only a finding stored partway can block. `head -5` is the row's case: it
+// prints the key and nothing bounds how big the file behind it can be.
+func TestAnOverrunStillBlocksOnTheBufferItStoppedIn(t *testing.T) {
+	dir := t.TempDir()
+	body := "AWS_ACCESS_KEY_ID=" + secret + "\n" +
+		strings.Repeat("the quick brown fox jumps over the lazy dog\n", 1024)
+	if err := os.WriteFile(filepath.Join(dir, "big.log"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"Bash", `{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":` + quote(t, dir) +
+			`,"tool_input":{"command":"head -5 big.log"}}`},
+		{"Read", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{` +
+			`"file_path":` + quote(t, filepath.Join(dir, "big.log")) + `}}`},
+		{"prompt", `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+			`,"prompt":"look at @big.log"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := overrunOn(t, "big.log", 2, tc.payload)
+			if code != 0 {
+				t.Fatalf("exited %d (stderr %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+				t.Errorf("reason = %q, want the planted key named", reason)
 			}
 			if !strings.Contains(stdout, "no verdict on this call is a report on the rest") {
 				t.Errorf("stdout = %q, want it to say the verdict stops short", stdout)

@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 
 	"github.com/karlkfi/claude-spill-guard/internal/rules"
 	"github.com/karlkfi/claude-spill-guard/internal/validate"
@@ -154,11 +155,23 @@ type Result struct {
 // providing. Disabled rules are skipped here rather than by the caller, so one
 // place decides it.
 func Buffer(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
+	return BufferEach(path, buf, ruleset, nil)
+}
+
+// BufferEach is Buffer for a caller that may stop waiting before it returns.
+// each is handed what the buffer has settled so far every time a rule finds
+// something, so a finding is the caller's as soon as its rule is through the
+// buffer rather than once every rule is. A nil each is Buffer.
+//
+// A rule is the grain, and the rule still running when the caller stops
+// waiting has given it nothing: FindAllSubmatchIndex returns no match until it
+// has walked the whole buffer.
+func BufferEach(path string, buf []byte, ruleset []rules.Rule, each func(Result)) (Result, error) {
 	text, source, skip := decode(buf)
 	if skip != Scanned {
 		return Result{Skipped: skip}, nil
 	}
-	findings, err := match(path, text, source, ruleset)
+	findings, err := match(path, text, source, ruleset, skip, each)
 	if err != nil {
 		return Result{}, err
 	}
@@ -240,6 +253,12 @@ const rawLimit = 32 << 20
 // And only up to rawLimit, which is what keeps this from being worse than the
 // skip it replaces. See there.
 func BufferIncludingBinary(path string, buf []byte, ruleset []rules.Rule) (Result, error) {
+	return BufferIncludingBinaryEach(path, buf, ruleset, nil)
+}
+
+// BufferIncludingBinaryEach is BufferIncludingBinary with each, as BufferEach
+// is Buffer with it.
+func BufferIncludingBinaryEach(path string, buf []byte, ruleset []rules.Rule, each func(Result)) (Result, error) {
 	text, source, skip := decode(buf)
 	switch {
 	case skip == Scanned:
@@ -252,7 +271,7 @@ func BufferIncludingBinary(path string, buf []byte, ruleset []rules.Rule) (Resul
 	default:
 		return Result{Skipped: skip}, nil
 	}
-	findings, err := match(path, text, source, ruleset)
+	findings, err := match(path, text, source, ruleset, skip, each)
 	if err != nil {
 		return Result{}, err
 	}
@@ -262,7 +281,11 @@ func BufferIncludingBinary(path string, buf []byte, ruleset []rules.Rule) (Resul
 // match runs every enabled rule over text and returns what survived, in the
 // order the rules were given and by offset within each rule. source maps an
 // offset in text back to the offset in the file a finding has to report.
-func match(path string, text []byte, source func(int) int, ruleset []rules.Rule) ([]Finding, error) {
+//
+// each, where it is set, gets a copy of the findings so far after every rule
+// that adds one, beside skip: the caller may be reading it from another
+// goroutine while this one goes on appending.
+func match(path string, text []byte, source func(int) int, ruleset []rules.Rule, skip Skip, each func(Result)) ([]Finding, error) {
 	var findings []Finding
 	for _, rule := range ruleset {
 		if !rule.Enabled {
@@ -286,6 +309,9 @@ func match(path string, text []byte, source func(int) int, ruleset []rules.Rule)
 			return nil, err
 		}
 		findings = append(findings, found...)
+		if each != nil && len(found) > 0 {
+			each(Result{Findings: slices.Clone(findings), Skipped: skip})
+		}
 	}
 	return findings, nil
 }

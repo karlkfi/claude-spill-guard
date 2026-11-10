@@ -79,10 +79,12 @@ type scanned struct {
 // reason below.
 //
 // A deadline that fires hands back what the scan had settled by then. That is
-// every buffer it got through, each stored whole as it finished, so what comes
-// back holds no partial read of the buffer still running and a finding in that
-// one is not in it. The scan's goroutine goes on writing while this one reads, so
-// each result sits in its own atomic slot and is never touched again once stored.
+// every buffer it got through, and in the buffer still running, every finding
+// whose rule had finished with it: a finding in that buffer is stored when its
+// rule is through, not when the last rule is. What a rule still running would
+// have found is not in it. The scan's goroutine goes on writing while this one
+// reads, so each result sits in its own atomic slot, and a stored result is
+// replaced rather than changed.
 //
 // Nothing here interrupts the work. os.ReadFile takes no context and neither
 // does the match loop, which is why the goroutine is left running rather than

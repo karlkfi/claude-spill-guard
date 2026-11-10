@@ -461,6 +461,43 @@ func TestBufferIncludingBinaryMatchesRawBytesAndKeepsTheReason(t *testing.T) {
 	}
 }
 
+// each is what a caller that stops waiting gets to keep, so it has to carry the
+// finding and the skip a finished Result would, and say nothing for a rule that
+// found nothing.
+func TestEachIsHandedWhatARuleFound(t *testing.T) {
+	ruleset := load(t, awsRule)
+	for _, tc := range []struct {
+		name string
+		buf  string
+		scan func(string, []byte, []rules.Rule, func(Result)) (Result, error)
+		want int
+		skip Skip
+	}{
+		{"text", "x " + key, BufferEach, 1, Scanned},
+		{"raw", "\x00" + key, BufferIncludingBinaryEach, 1, ScannedRaw},
+		{"nothing found", "nothing here", BufferEach, 0, Scanned},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var parts []Result
+			got, err := tc.scan("a", []byte(tc.buf), ruleset, func(r Result) { parts = append(parts, r) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(parts) != tc.want {
+				t.Fatalf("each was called %d time(s), want %d", len(parts), tc.want)
+			}
+			for _, p := range parts {
+				if !reflect.DeepEqual(p, got) {
+					t.Errorf("each got %+v, want what the buffer finished with, %+v", p, got)
+				}
+				if p.Skipped != tc.skip {
+					t.Errorf("each got Skipped %q, want %q", p.Skipped, tc.skip)
+				}
+			}
+		})
+	}
+}
+
 // A raw match is not a decode, and the reason is what says so. UTF-16 written
 // with no byte-order mark is the population that makes the difference legible:
 // every ASCII character in it carries a NUL, so the raw pass finds nothing
