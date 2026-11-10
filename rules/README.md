@@ -1,6 +1,6 @@
 # The shipped ruleset
 
-`spill-guard.json` is the v1 ruleset: eleven credential rules, `us-ssn`, and three
+`spill-guard.json` is the v1 ruleset: twelve credential rules, `us-ssn`, and three
 more numeric PII rules that ship off. It is the only ruleset. `rules/embed.go` compiles it
 into the binary and `internal/rules` loads nothing else — there is no project
 file layered over it, and a rule that is too noisy is turned off here, in a
@@ -17,7 +17,7 @@ reviewed diff rather than a flag.
 
 JSON has no comments, so the reasoning is here.
 
-## Eleven credential rules, not seventy
+## Twelve credential rules, not seventy
 
 The predecessor's ruleset flagged 27.6% of 257 real files and produced more
 than 5,600 matches with zero credentials in them. That is a precision failure, not a
@@ -36,6 +36,7 @@ carried by a planted fixture in
 | `stripe-live-secret-key` | `sk_live_` `rk_live_` | live keys only — see below |
 | `openai-api-key` | `sk-` | the embedded `T3BlbkFJ`, floor 3.0 |
 | `anthropic-api-key` | `sk-ant-api03-` `sk-ant-admin01-` | 108 or 110 fixed characters closing `AA`, floor 3.0 — see below |
+| `anthropic-token` | `sk-ant-oat` `sk-ant-ort` `sk-ant-sid` `sk-ant-ccsr-` | 20 to 1000 body bytes, floor 3.0 — see below |
 | `google-api-key` | `AIza` | 39 fixed characters, floor 3.0 |
 | `private-key-block` | `PRIVATE KEY` | a base64 body line has to follow the header, across RFC 1421's headers if the key has them, indented or not, behind a unified diff's `+` or `-`, and behind grep's `path:N:` or `path-N-` |
 | `jwt` | `eyJ` | three segments, the first two both opening `eyJ`, measured by an extent rather than capped, floor 3.5, and no published sample signature |
@@ -46,9 +47,9 @@ same shape to a regex; the padded one carries 1.0219 bits per byte against a
 floor of 3.0, so it goes. What a floor cannot reach is a published example
 written to look like a key. AWS's own measures 3.6842 and clears the floor by
 design, and the jwt.io sample token measures 5.4441 against 3.5 — the two
-rules below carry a second check for exactly that. Five of the eleven rules match
+rules below carry a second check for exactly that. Six of the twelve rules match
 [`testdata/corpus/clean/env.example`](../testdata/corpus/clean/env.example) and
-none of the five survives its own validator.
+none of the six survives its own validator.
 
 **`sk_test_` is not a credential and is not matched.** A Stripe test key is
 published by the integrator in their own README, works against nothing, and
@@ -68,8 +69,36 @@ name the same prefixes and tail with no length.
 [keyhog](https://github.com/santhreal/keyhog/pull/7) moved from a different fixed
 layout, with a hyphen before its last six bytes, to 80–120 bytes, which contains
 this one, so it is no evidence against it. A key of another length goes unreported
-here, and so does every other `sk-ant-` prefix, which is the rule's stated limit
-rather than a judgement that they are harmless.
+here, which is the rule's stated limit rather than a judgement that it is
+harmless. The other `sk-ant-` prefixes are `anthropic-token`'s, below.
+
+**`anthropic-token` has a floor rather than a length, and the floor is Claude
+Code's.** Claude Code 2.1.290 reads four more `sk-ant-` prefixes: an OAuth access
+token (`sk-ant-oat01-`), its refresh token (`sk-ant-ort01-`), a claude.ai session
+key sent as a cookie (`sk-ant-sid01-`), and a git password for a remote session
+(`sk-ant-ccsr-`). This repo has found no published length for any of them, and
+none near key length exists on this machine to measure. The one bound on record
+is the secret scanner bundled in that binary, whose `anthropic-oauth-token` rule
+is `sk-ant-(?:oat|ort)\d{2}-[\w-]{20,}`. This rule takes that floor and caps the
+run at RE2's 1000, so it keeps the anchored path. It has no closing `\b`, unlike
+the rules above it: past the cap a run of word bytes has no boundary to stop at,
+so with one a hyphen-free token longer than 1000 bytes went unreported, and
+without it that token is reported on its first 1000.
+
+A bare prefix would be the precision risk, because sessions quote these
+prefixes. Read 2026-11-09 over 2,997 transcripts under `~/.claude/projects`,
+5.47 GB: 118 `sk-ant-oat01-`, 74 `sk-ant-ort01-`, 62 `sk-ant-sid01-` and 35
+`sk-ant-ccsr-`, and the longest body behind any of them was 3 bytes. The same
+read finds the planted `sk-ant-api03-` fixture at its 95 bytes, so it is not
+blind to a long one. A floor of 20 therefore costs nothing on what sessions here
+write, and a padded placeholder in
+[`testdata/corpus/clean/env.example`](../testdata/corpus/clean/env.example)
+falls to the entropy floor. That census says nothing about how long a real token
+is, so a real one shorter than 20 bytes would go unreported.
+
+`sk-ant-si-` and `sk-ant-cc-` are not here because they are already caught:
+Claude Code strips either one to reach a JWT, and `jwt` reports the token
+behind the prefix.
 
 **`slack-webhook-url` reports the last path segment rather than the URL.** The
 entropy check reads the captured group, and a webhook URL is mostly a literal
@@ -77,7 +106,7 @@ host, so capturing the whole thing would put a floor over text that is the same
 in every match. Capturing the secret tail lets the floor drop
 `.../B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` without dropping a real one.
 
-**Ten of the eleven carry an entropy floor. The eleventh is structural instead.**
+**Eleven of the twelve carry an entropy floor. The twelfth is structural instead.**
 `private-key-block` matches a PEM header, which is a fixed string, and a floor
 over a constant is not a check — so the rule requires one base64 body line
 after the header, stepping over `Proc-Type:` and `DEK-Info:` if the key is an

@@ -89,6 +89,17 @@
       "enabled": true
     },
     {
+      "id": "anthropic-token",
+      "family": "credential",
+      "description": "Anthropic OAuth token, claude.ai session key or Claude Code session git credential",
+      "regex": "\\b(sk-ant-(?:(?:oat|ort|sid)\\d{2}|ccsr)-[A-Za-z0-9_-]{20,1000})",
+      "group": 1,
+      "keywords": ["sk-ant-oat", "sk-ant-ort", "sk-ant-sid", "sk-ant-ccsr-"],
+      "entropy": 3.0,
+      "validators": ["entropy"],
+      "enabled": true
+    },
+    {
       "id": "google-api-key",
       "family": "credential",
       "description": "Google API key",

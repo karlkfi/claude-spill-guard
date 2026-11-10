@@ -157,7 +157,7 @@ func BenchmarkRule(b *testing.B) {
 	ruleset := loadShipped(b)
 	corpus, _ := benchCorpus(b)
 	planted := append(append([]byte(nil), corpus...),
-		"\nAKIA ghp_ github_pat_ xoxb- sk_live_ sk- sk-ant-api03- sk-ant-admin01- AIza eyJ\n"...)
+		"\nAKIA ghp_ github_pat_ xoxb- sk_live_ sk- sk-ant-api03- sk-ant-admin01- sk-ant-oat AIza eyJ\n"...)
 
 	var arms []struct {
 		name string
@@ -166,7 +166,7 @@ func BenchmarkRule(b *testing.B) {
 	for _, id := range []string{
 		"aws-access-key-id", "github-token", "github-fine-grained-pat",
 		"slack-token", "stripe-live-secret-key", "openai-api-key", "anthropic-api-key",
-		"google-api-key",
+		"anthropic-token", "google-api-key",
 		// jwt joined the anchored arm when its repeats were bounded. It is the
 		// rule with the most to gain, because `eyJ` heads any base64-encoded
 		// JSON object and so turns up in ordinary content.
@@ -249,7 +249,7 @@ func BenchmarkRuleset(b *testing.B) {
 
 	corpus, _ := benchCorpus(b)
 	planted := append(append([]byte(nil), corpus...),
-		"\nAKIA ghp_ github_pat_ xoxb- sk_live_ sk- sk-ant-api03- sk-ant-admin01- AIza eyJ\n"...)
+		"\nAKIA ghp_ github_pat_ xoxb- sk_live_ sk- sk-ant-api03- sk-ant-admin01- sk-ant-oat AIza eyJ\n"...)
 
 	for _, c := range []struct {
 		name string

@@ -376,11 +376,11 @@ func matchRule(path string, text []byte, source func(int) int, rule rules.Rule) 
 	// Where the loader settled that every match this rule can produce starts at
 	// one of its keywords, the hits are the whole list of places to look, and
 	// the pass that would find them again is work already done. What makes that
-	// pass expensive is the \b nine of the eleven credential rules open on: an
+	// pass expensive is the \b ten of the twelve credential rules open on: an
 	// empty-width op at the head of the compiled program, so regexp derives no
 	// literal prefix, has nothing to skip towards, and runs the NFA over every
 	// byte of the buffer to arrive back at the positions this already holds.
-	// All nine get here; anchor.go says what a rule has to satisfy to.
+	// All ten get here; anchor.go says what a rule has to satisfy to.
 	if rule.Anchor != nil && boundedKeywords(rule.Keywords) {
 		if at, ok := keywordPositions(text, rule.Keywords, budget(len(text), rule.Reach)); ok {
 			return matchAt(path, text, source, rule, at)

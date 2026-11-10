@@ -58,6 +58,11 @@ Two files carry `anthropic-api-key`, one per prefix, and both hold a value marke
 `0SPILLGUARD`. `clean/env.example` holds the padded placeholder the rule has to
 drop.
 
+Two more carry `anthropic-token`, an OAuth access token and a session key,
+also marked `0SPILLGUARD`. Its other two prefixes and its 20-byte floor are
+driven in `internal/scan/anthropic_test.go`, and `clean/env.example` holds its
+padded placeholder and the bare prefix quoted in a comment.
+
 Six files carry `private-key-block`, because the rule has six layouts to
 reach. `private-key-block.pem` is a body on the line after the header;
 `private-key-block-rfc1421.pem` is the encrypted PKCS#1 form, with `Proc-Type:`

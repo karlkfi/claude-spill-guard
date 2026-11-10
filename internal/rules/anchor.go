@@ -14,7 +14,8 @@ import (
 // same number, which is what the caller refuses on. A rule that did reach it
 // would be refused the anchored path rather than mismatched.
 //
-// No shipped rule comes near it now. The longest is openai-api-key at 171, and
+// No shipped rule comes near it now. The longest is anthropic-token at 1,013,
+// one repeat at RE2's cap of 1000 behind a 13-byte prefix, and
 // jwt -- which used to be 3,008, from three repeats at RE2's own cap of 1000 --
 // is the shortest at 11, having moved everything past its first eleven bytes
 // into an extent. Three such repeats in one pattern still nearly reach this

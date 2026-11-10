@@ -211,8 +211,12 @@ var planted = map[string]string{
 	// with the corpus still reading green.
 	"anthropic-api-key.env":      "anthropic-api-key",
 	"anthropic-admin-api-key.sh": "anthropic-api-key",
-	"google-api-key.js":          "google-api-key",
-	"private-key-block.pem":      "private-key-block",
+	// Two of anthropic-token's four prefixes. The other two, and the floor,
+	// are driven in anthropic_test.go.
+	"anthropic-oauth-token.sh": "anthropic-token",
+	"anthropic-session-key.sh": "anthropic-token",
+	"google-api-key.js":        "google-api-key",
+	"private-key-block.pem":    "private-key-block",
 	// And again, for the same reason one file down: this one is an RFC 1421
 	// encrypted key, which puts Proc-Type and DEK-Info between the header and
 	// the body -- the shape the body-line clause missed until it learned to
