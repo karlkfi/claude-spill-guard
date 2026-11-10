@@ -111,7 +111,10 @@ shasum -a 256 scripts/vendor/claude-skills/queue.py
 The `log` line prints the value for the "Taken from" column, from the same
 revision the bytes came from, so neither half is typed by hand. It names the
 last commit that touched that file, which is why `queue.py` and
-`alloc-queue-id.sh` can carry different commits. The `>` truncates the existing
+`alloc-queue-id.sh` can carry different commits. The two rows above were
+written before this block existed and name the upstream tip each file was read
+at (`f1fae51`, which touched neither), so the column changes meaning at the next
+re-vendor. The `>` truncates the existing
 file rather than recreating it, so the `100755` mode in the index survives.
 
 ### The table above is what `make vendor` reads
