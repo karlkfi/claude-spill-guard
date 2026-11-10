@@ -1,6 +1,7 @@
 package readers
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -155,5 +156,77 @@ func TestTheWrapperTableIsUpstreams(t *testing.T) {
 		if _, ok := wrappers[name]; !ok {
 			t.Errorf("no row for %s", name)
 		}
+	}
+}
+
+// Q220: the words a shell runs the next word behind without a wrapper's
+// program. Each row is what zsh 5.9 (`zsh -f -c`) and bash 5.3.15 printed
+// for a file holding a marker, driven 2026-11-09, so a bash column of ""
+// is a command not found. The zsh column is what the peel answers when the
+// tool shell may be zsh, the bash column what it answers when it is bash.
+//
+// bash's coproc arm is driven: `coproc cat k.env; read -r l <&"${COPROC[0]}";
+// echo "$l"` printed the marker. The row's failed drive slept first, by which
+// time the coprocess had exited and bash had closed its descriptors.
+func TestTheShellsOwnModifiersArePeeledByShell(t *testing.T) {
+	f := strings.Fields
+	for _, tc := range []struct {
+		in        string
+		bash, zsh string
+		zshOpaque bool
+	}{
+		{"noglob cat f", "noglob cat f", "cat f", false},
+		{"nocorrect cat f", "nocorrect cat f", "cat f", false},
+		{"repeat 1 cat f", "repeat 1 cat f", "cat f", false},
+		{"repeat 2 cat f", "repeat 2 cat f", "cat f", false},
+		{"repeat 01 cat f", "repeat 01 cat f", "cat f", false},
+		{"repeat 0 cat f", "repeat 0 cat f", "", false},
+		{"repeat x cat f", "repeat x cat f", "cat f", true}, // x may be 0
+		{"coproc cat f", "cat f", "cat f", false},
+		{"coproc repeat 1 cat f", "repeat 1 cat f", "cat f", false},
+		{"coproc nocorrect cat f", "nocorrect cat f", "cat f", false},
+		{"coproc noglob cat f", "noglob cat f", "cat f", false},
+		{"repeat 1 nocorrect cat f", "repeat 1 nocorrect cat f", "cat f", false},
+		{"repeat 1 noglob cat f", "repeat 1 noglob cat f", "cat f", false},
+		{"nocorrect noglob cat f", "nocorrect noglob cat f", "cat f", false},
+		{"nocorrect exec cat f", "nocorrect exec cat f", "cat f", false},
+		{"noglob command cat f", "noglob command cat f", "cat f", false},
+		{"noglob exec cat f", "noglob exec cat f", "cat f", false},
+		{"exec noglob cat f", "noglob cat f", "cat f", false},
+		{"builtin noglob cat f", "noglob cat f", "cat f", false},
+		{"noglob - cat f", "noglob - cat f", "cat f", false},
+		{"exec - cat f", "- cat f", "cat f", false},
+		{"noglob nice cat f", "noglob nice cat f", "cat f", false},
+		// After these the next word is a command name zsh looks up, so it
+		// reads nothing and the peel stops where zsh did.
+		{"noglob nocorrect cat f", "noglob nocorrect cat f", "nocorrect cat f", false},
+		{"noglob repeat 1 cat f", "noglob repeat 1 cat f", "repeat 1 cat f", false},
+		{"nocorrect repeat 1 cat f", "nocorrect repeat 1 cat f", "repeat 1 cat f", false},
+		{"noglob coproc cat f", "noglob coproc cat f", "coproc cat f", false},
+		{"command noglob cat f", "noglob cat f", "noglob cat f", false},
+		{"nice noglob cat f", "noglob cat f", "noglob cat f", false},
+		{"sudo -n noglob cat f", "noglob cat f", "noglob cat f", false},
+	} {
+		for _, zsh := range []bool{false, true} {
+			want := tc.bash
+			if zsh {
+				want = tc.zsh
+			}
+			t.Run(fmt.Sprintf("%s/zsh=%v", tc.in, zsh), func(t *testing.T) {
+				MaybeZsh = func() bool { return zsh }
+				t.Cleanup(func() { MaybeZsh = func() bool { return false } })
+				p := PeelWrappers(f(tc.in))
+				if got := strings.Join(p.Argv, " "); got != want {
+					t.Errorf("Argv = %q, want %q", got, want)
+				}
+				if p.Opaque != (zsh && tc.zshOpaque) {
+					t.Errorf("Opaque = %v", p.Opaque)
+				}
+			})
+		}
+	}
+	// A coprocess is a subshell in both, so a cd behind one moves nothing.
+	if !PeelWrappers(f("coproc cd sub")).External {
+		t.Error("coproc cd sub: External = false, want true")
 	}
 }

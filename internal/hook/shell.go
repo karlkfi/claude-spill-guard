@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/karlkfi/claude-spill-guard/internal/readers"
 )
 
 // The Bash tool's shell is not bash unless something on the machine names
@@ -90,3 +92,7 @@ func toolShellIsZsh() bool {
 	path := toolShell()
 	return path != "" && strings.Contains(filepath.Base(path), "zsh")
 }
+
+// The peel in internal/readers needs the same bit for zsh's precommand
+// modifiers, and reads it as glob.go does: not bash is read as zsh.
+func init() { readers.MaybeZsh = func() bool { return !toolShellIsBash() } }

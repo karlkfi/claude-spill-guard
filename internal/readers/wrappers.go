@@ -181,21 +181,74 @@ type Peel struct {
 	Chdirs []string
 }
 
+// MaybeZsh reports whether the Bash tool's shell may be zsh. internal/hook,
+// which reads the shell, sets it; the default is bash's reading.
+var MaybeZsh = func() bool { return false }
+
+// countRE is a `repeat` count zsh evaluates to the same number nothing here
+// has to: digits, with the blanks arithmetic ignores.
+var countRE = regexp.MustCompile(`^\s*\d+\s*$`)
+
+// peelLead takes the words a shell reads only as a command's first: `coproc`
+// in both shells, and zsh's `repeat N` and `nocorrect`. In bash the zsh three
+// are a command not found, and peeling one there would block over a file
+// bash never opens. The order is zsh 5.9's, driven: `coproc` and `repeat`
+// take each other and either may come first, `nocorrect` takes neither after
+// it, and none is a word once a precommand modifier has been read. A repeat
+// count that is not a literal may be zero, so the command is read as one
+// whose grammar was lost rather than as one that runs. Upstream peels none of
+// these at c1e1f81, so this half is written here rather than ported.
+func peelLead(argv []string, p *Peel) (rest []string, lost bool) {
+	zsh := MaybeZsh()
+	for len(argv) > 0 {
+		switch {
+		case argv[0] == "coproc":
+			p.External = true // it runs in a subshell, so its cd moves nothing
+		case zsh && argv[0] == "repeat" && len(argv) > 1:
+			if !countRE.MatchString(argv[1]) {
+				return scanForCommand(argv[2:]), true
+			}
+			if strings.Trim(argv[1], " \t0") == "" {
+				return nil, false // zero times
+			}
+			argv = argv[1:]
+		default:
+			for zsh && len(argv) > 0 && argv[0] == "nocorrect" {
+				argv = argv[1:]
+			}
+			return argv, false
+		}
+		argv = argv[1:]
+	}
+	return argv, false
+}
+
 // PeelWrappers reads the wrappers off the head of tokens, which a caller has
 // already stripped of reserved words and inline assignments.
 func PeelWrappers(tokens []string) Peel {
-	argv := tokens
 	var p Peel
-	lost, appends := false, false
+	argv, lost := peelLead(tokens, &p)
+	appends := false
+	// zsh's `noglob` and `-` modify a command the shell runs itself, so they
+	// are words only until a wrapper other than `exec` or `builtin` is read:
+	// `command noglob cat` and `sudo noglob cat` look up a program by that
+	// name. Driven on zsh 5.9.
+	modifiers := MaybeZsh()
 	for range maxPeel {
 		if len(argv) == 0 {
 			break
+		}
+		if modifiers && (argv[0] == "noglob" || argv[0] == "-") {
+			argv = argv[1:]
+			p.Builtin = false // `builtin noglob cat f` prints f
+			continue
 		}
 		name := path.Base(argv[0])
 		w, ok := wrappers[name]
 		if !ok {
 			break
 		}
+		modifiers = modifiers && (name == "exec" || name == "builtin")
 		p.External = p.External || w.external
 		appends = appends || name == "xargs"
 		// Only the last wrapper peeled decides: `builtin command cat f` runs
