@@ -76,6 +76,8 @@ func TestAnthropicTokenShapes(t *testing.T) {
 		{"at the floor", "sk-ant-oat01-" + floor, 1},
 		// No hyphen, so no word boundary anywhere past the 1000-byte cap.
 		{"a body past the cap", "sk-ant-oat01-" + strings.Repeat("q7Zk3Wb9", 160), 1},
+		// Words clear the entropy floor; only a padded placeholder falls to it.
+		{"a placeholder written in words", vec.Get(t, "anthropic-token-word-placeholder"), 1},
 		{"one byte under the floor", "sk-ant-oat01-" + floor[1:], 0},
 		{"the prefix quoted in prose", "tokens begin `sk-ant-oat01-` and expire", 0},
 		{"the prefix with an ellipsis", "sk-ant-oat01-...", 0},

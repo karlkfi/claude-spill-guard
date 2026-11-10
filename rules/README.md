@@ -93,7 +93,11 @@ read finds the planted `sk-ant-api03-` fixture at its 95 bytes, so it is not
 blind to a long one. A floor of 20 therefore costs nothing on what sessions here
 write, and a padded placeholder in
 [`testdata/corpus/clean/env.example`](../testdata/corpus/clean/env.example)
-falls to the entropy floor. That census says nothing about how long a real token
+falls to the entropy floor. A placeholder written in words does not: the
+prefix followed by `your-oauth-token-goes-here` clears 3.0 and blocks, as does
+any spelled-out stand-in at least 20 bytes long. The census found no body that
+long behind these prefixes, placeholder or otherwise, so that is a stated
+limit rather than a measured cost. Nor does the census say how long a real token
 is, so a real one shorter than 20 bytes would go unreported.
 
 `sk-ant-si-` and `sk-ant-cc-` are not here because they are already caught:
