@@ -461,12 +461,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 				// A recursive grep is the exception, refused toward a filter on
 				// its output rather than deferred; grep.go has why.
 				if info.IsDir() && isGrep && recursive {
-					if quiet || filteredLater(segments, i) {
+					if quiet || filteredLater(segments, i, dir, dirUnknown) {
 						continue
 					}
 					rewrite := ""
 					if cur.depth == 0 {
-						rewrite = filteredRewrite(whole, segments, i)
+						rewrite = filteredRewrite(whole, segments, i, dir, dirUnknown)
 					}
 					stop(&grepRefusal{filepath.Base(tokens[0]), rewrite})
 					continue

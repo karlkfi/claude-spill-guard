@@ -333,7 +333,25 @@ func TestAFilterCountsWhereGrepsStdoutReachesIt(t *testing.T) {
 // and a later call that does is scanned then.
 func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 	dir := grepTree(t)
-	for _, command := range []string{
+	refused := []string{
+		// A device judged where the name lands, not how it is spelled.
+		"grep -rn foo . | tee //dev/stderr | spill-guard filter",
+		"cd / && grep -rn foo " + dir + " | tee dev/stderr | spill-guard filter",
+		"grep -rn foo . | gtee /dev/stderr | spill-guard filter",
+		"grep -rn foo . | dd of=/dev/stderr status=none | spill-guard filter",
+	}
+	// Under Git Bash /dev is not under the drive root, so neither of these
+	// reaches a device there.
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink("/dev/stderr", filepath.Join(dir, "errlink")); err != nil {
+			t.Fatal(err)
+		}
+		refused = append(refused,
+			"grep -rn foo . | tee "+strings.Repeat("../", 40)+"dev/stderr | spill-guard filter",
+			"grep -rn foo . | tee errlink | spill-guard filter",
+		)
+	}
+	for _, command := range append(refused,
 		"grep -rn foo . | tee /dev/stderr | spill-guard filter",
 		"grep -rn foo . | tee /dev/fd/2 | spill-guard filter",
 		"grep -rn foo . | tee -a /dev/stderr | spill-guard filter",
@@ -347,7 +365,7 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		"grep -rn foo . | cat > out.log | spill-guard filter; cat out.log",
 		"grep -rn foo . 2>err.log | spill-guard filter && cat err.log",
 		"cat out.log & grep -rn foo . | tee out.log | spill-guard filter",
-	} {
+	) {
 		t.Run(command+" is refused", func(t *testing.T) {
 			reason := denyReason(t, bashCall(t, command, dir))
 			if rewrite := rewriteIn(reason); rewrite != "" {
@@ -362,6 +380,9 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		"grep -rn foo . | head -5 | spill-guard filter",
 		"grep -rn foo . | sort 2>/dev/null | spill-guard filter",
 		"grep -rn foo . | spill-guard filter | tee out.log",
+		"grep -rn foo . | tee //dev/null | spill-guard filter",
+		"grep -rn foo . | tee sub/out.log | spill-guard filter",
+		"grep -rn foo . | dd of=out.log status=none | spill-guard filter",
 	} {
 		t.Run(command+" is allowed", func(t *testing.T) {
 			allowed(t, bashCall(t, command, dir))

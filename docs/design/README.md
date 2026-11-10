@@ -2732,12 +2732,20 @@ filter does not count.** Driven on bash 5.3.15 with the built filter and a
 planted key, `| tee /dev/stderr |`, `| tee >(cat >&2) |` and `| cat >&2 |` each
 put the key in the tool result while the filter withheld its own copy (Q233).
 So `copiedAround` refuses a stage that sends its stdout away, and one that
-writes to a device other than `/dev/null` or to a name it cannot settle. A
+writes to a device other than `/dev/null` or to a name it cannot settle. The
+names it reads are redirect targets, `tee` and `gtee` operands, and `dd`'s
+`of=`. A name is judged where it lands rather than how it is spelled: it is
+resolved against the directory the `cd` tracker holds and cleaned, so
+`//dev/stderr`, `../../dev/stderr` and `cd / && … | tee dev/stderr` count as
+the device, and a name that exists and is not a regular file is refused too,
+which takes in a symlink to `/dev/stderr`. Each of those four put the key on
+stderr before this, driven in review of #254. A
 copy to a regular file is allowed when nothing else in the string can read it.
 `grep -rn pat dir | tee out.log | spill-guard filter` is allowed, because a
 later call that reads `out.log` is scanned when it runs. Adding `; cat out.log`
 gets it refused, because the hook resolves that operand before the file is
-written. The program of an awk or sed stage is not read: Q257.
+written. The program of an awk or sed stage is not read, and neither is any
+other command that takes an output path: Q257.
 
 The recursion flags
 are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`,

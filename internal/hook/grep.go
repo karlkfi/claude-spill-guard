@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -265,8 +266,9 @@ func grepFiles(tokens []string) (files []string, none bool) {
 // Any later stage rather than the last one: `grep -rn x . | spill-guard filter
 // | head` sends only what the filter passed. The name is matched on its base so
 // the absolute path a reason writes is recognised, and the tokens are peeled
-// the way envDumped peels them.
-func filteredLater(segments []bash.Segment, i int) bool {
+// the way envDumped peels them. dir is where the grep runs, which is where a
+// relative name a later stage writes is resolved.
+func filteredLater(segments []bash.Segment, i int, dir string, dirUnknown bool) bool {
 	// `grep -r x d >&2 | filter` sends the matches to stderr, which the tool
 	// result carries, and the filter reads nothing.
 	if segments[i].StdoutAway {
@@ -285,7 +287,7 @@ func filteredLater(segments []bash.Segment, i int) bool {
 		name := filepath.Base(tokens[0])
 		if name == "spill-guard" || name == "spill-guard.exe" ||
 			filepath.ToSlash(tokens[0]) == self() {
-			return !copiedAround(segments, i, j)
+			return !copiedAround(segments, i, j, dir, dirUnknown)
 		}
 	}
 	return false
@@ -298,13 +300,17 @@ func filteredLater(segments []bash.Segment, i int) bool {
 //
 // A copy to a regular file is allowed only where nothing else in the string
 // can read it: a later call that reads it is scanned then, but a `cat out.log`
-// later in this string is resolved before the file is written. A device other
-// than /dev/null, and a name this cannot settle -- a `$`, a glob, a `>(` --
-// are refused outright.
+// later in this string is resolved before the file is written. A name is
+// judged where it lands rather than how it is spelled, so `//dev/stderr`,
+// `../../dev/stderr` and a symlink to a device count as the device: anything
+// under /dev or /proc other than stdout and /dev/null, anything that exists and
+// is not a regular file, and a name this cannot settle -- a `$`, a glob, a `>(`,
+// a relative name where the directory is lost -- are refused outright.
 //
 // Stages that write a file from their own program -- awk's `print >`, sed's
-// `w` -- are not read; Q257 holds them.
-func copiedAround(segments []bash.Segment, i, j int) bool {
+// `w` -- are not read, and neither is any writer but tee and dd; Q257 holds
+// them.
+func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool) bool {
 	toFile := false
 	for k := i; k < j; k++ {
 		s := segments[k]
@@ -322,7 +328,12 @@ func copiedAround(segments []bash.Segment, i, j int) bool {
 		}
 		p := bash.ShKeywordPeel(s.Tokens, s.QuotedFrom)
 		argv := readers.PeelWrappers(bash.StripEnvPrefix(s.Tokens[p:], s.QuotedFrom[p:])).Argv
-		if len(argv) > 0 && filepath.Base(argv[0]) == "tee" {
+		name := ""
+		if len(argv) > 0 {
+			name = filepath.Base(argv[0])
+		}
+		switch name {
+		case "tee", "gtee":
 			flags := true
 			for _, a := range argv[1:] {
 				if flags && a == "--" {
@@ -331,16 +342,37 @@ func copiedAround(segments []bash.Segment, i, j int) bool {
 					written = append(written, a)
 				}
 			}
+		case "dd", "gdd":
+			for _, a := range argv[1:] {
+				if out, ok := strings.CutPrefix(a, "of="); ok {
+					written = append(written, out)
+				}
+			}
 		}
 		for _, w := range written {
+			if strings.ContainsAny(w, "$`()<>*?[{~") {
+				return true
+			}
+			// A leading slash is absolute to the shell on every platform,
+			// Git Bash included, where filepath.IsAbs would say otherwise.
+			if !strings.HasPrefix(w, "/") && !filepath.IsAbs(w) {
+				if dirUnknown || dir == "" {
+					return true
+				}
+				w = filepath.Join(dir, w)
+			}
+			w = path.Clean(filepath.ToSlash(w))
 			switch {
 			case w == "/dev/null" || w == "/dev/stdout" || w == "/dev/fd/1":
-			case strings.HasPrefix(w, "/dev/") || strings.HasPrefix(w, "/proc/") ||
-				strings.ContainsAny(w, "$`()<>*?[{~"):
+				continue
+			case strings.HasPrefix(w, "/dev/") || strings.HasPrefix(w, "/proc/"):
 				return true
-			default:
-				toFile = true
 			}
+			// Stat follows a symlink, as the writer's open does.
+			if info, err := os.Stat(filepath.FromSlash(w)); err == nil && !info.Mode().IsRegular() {
+				return true
+			}
+			toFile = true
 		}
 	}
 	if !toFile {
@@ -427,7 +459,7 @@ func shellQuote(s string) string {
 // gets no rewrite. And the string matches no rule: the refusal is reached before
 // scanCall scans the command, so a key written into the pattern would otherwise
 // go back out in the reason.
-func filteredRewrite(command string, segments []bash.Segment, i int) string {
+func filteredRewrite(command string, segments []bash.Segment, i int, dir string, dirUnknown bool) string {
 	if segments[i].Pipe != segments[len(segments)-1].Pipe {
 		return ""
 	}
@@ -451,7 +483,7 @@ func filteredRewrite(command string, segments []bash.Segment, i int) string {
 		return ""
 	}
 	rewrite := "set -o pipefail; " + trimmed + " | " + filterCommand()
-	if !allFiltered(rewrite) {
+	if !allFiltered(rewrite, dir, dirUnknown) {
 		return ""
 	}
 	return rewrite
@@ -465,10 +497,21 @@ func filteredRewrite(command string, segments []bash.Segment, i int) string {
 // `echo $(grep -r x .)` segments the grep into the string's own list, and the
 // rewrite of it was refused in turn -- driven, before this check existed -- so
 // the model would have been handed a fix that loops.
-func allFiltered(command string) bool {
+//
+// dir is where the refused grep ran. It stands for every grep in the string
+// only while nothing in it changes directory; past a cd it is dropped, which
+// can cost a rewrite and cannot offer one the hook then refuses.
+func allFiltered(command, dir string, dirUnknown bool) bool {
 	segments, err := bash.Segments(command)
 	if err != nil {
 		return false
+	}
+	for _, segment := range segments {
+		for _, t := range segment.Tokens {
+			if n := filepath.Base(t); n == "cd" || n == "pushd" || n == "popd" {
+				dirUnknown = true
+			}
+		}
 	}
 	for i, segment := range segments {
 		k := bash.ShKeywordPeel(segment.Tokens, segment.QuotedFrom)
@@ -477,7 +520,7 @@ func allFiltered(command string) bool {
 			continue
 		}
 		if recursive, quiet := grepMode(tokens); recursive && !quiet &&
-			!filteredLater(segments, i) {
+			!filteredLater(segments, i, dir, dirUnknown) {
 			return false
 		}
 	}
