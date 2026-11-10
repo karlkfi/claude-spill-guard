@@ -415,10 +415,7 @@ func searched() string {
 // of guarded.go's own literals.
 func guarded(path, class string) string {
 	return fmt.Sprintf("%q is %s, and this refused to read it on that alone. "+
-		"Nothing here opened the file, so nothing here has an opinion about "+
-		"what is in it -- the class is refused because most of what these files "+
-		"hold matches no rule in this set, and a clean scan of one would report "+
-		"a safety it is not providing. Nothing was sent. If you want the shape "+
+		unopened+" If you want the shape "+
 		"of the file rather than its values, a filter with a stage after it -- "+
 		"`cat FILE | cut -d= -f1` -- is not refused and is still scanned. This "+
 		"reaches the readers it knows and no others: an interpreter told to open "+
@@ -426,6 +423,24 @@ func guarded(path, class string) string {
 		"accident rather than as a claim that the path is guarded.",
 		named(path), class)
 }
+
+// spliced is guarded's body for an `@` token in a prompt.
+func spliced(path, class string) string {
+	return fmt.Sprintf("%q is %s, and this refused to splice it into the "+
+		"prompt on that alone. "+unopened+" To show the model the shape of the "+
+		"file rather than its values, ask it to run `cat FILE | cut -d= -f1`, "+
+		"which is not refused and is still scanned. This reaches the `@` token "+
+		"and nothing else: the same contents pasted into a prompt get the "+
+		"content scan alone, which most of what these files hold passes.",
+		named(path), class)
+}
+
+// unopened is the argument both path refusals make for refusing a file whose
+// contents nothing here read.
+const unopened = "Nothing here opened the file, so nothing here has an opinion " +
+	"about what is in it -- the class is refused because most of what these " +
+	"files hold matches no rule in this set, and a clean scan of one would " +
+	"report a safety it is not providing. Nothing was sent."
 
 // failed is the body for a scan that could not be completed.
 //

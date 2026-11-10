@@ -97,6 +97,12 @@ func (r *pathRefusal) Error() string {
 
 func (r *pathRefusal) body() string { return guarded(r.path, r.class) }
 
+// A splicedRefusal is a pathRefusal on an `@` token, whose reason is read by
+// the person who typed it rather than by a model with a command to rewrite.
+type splicedRefusal struct{ pathRefusal }
+
+func (r *splicedRefusal) body() string { return spliced(r.path, r.class) }
+
 // The spellings of a dotenv file that exist to be committed. A closed set of
 // four, because every entry is a claim that a file named this way holds
 // placeholders, and that is a convention rather than a rule anything enforces.

@@ -251,3 +251,101 @@ func TestAGuardedPathReachedThroughAVariableIsRefused(t *testing.T) {
 		t.Errorf("the reason does not name the class: %q", reason)
 	}
 }
+
+// plant is writeFile for a name with directories in it.
+func plant(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, rel, content)
+}
+
+// promptAt drives a prompt from dir, and returns the block reason or "" when
+// the prompt was allowed.
+func promptAt(t *testing.T, dir, prompt string) string {
+	t.Helper()
+	code, stdout, stderr := drive(t, `{"hook_event_name":"UserPromptSubmit","cwd":`+
+		quote(t, dir)+`,"prompt":`+quote(t, prompt)+`}`)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if stdout == "" {
+		return ""
+	}
+	if got := decision(t, stdout); got["decision"] != "block" {
+		t.Fatalf("decision = %v, want block: %q", got["decision"], stdout)
+	}
+	return reasonOf(t, stdout)
+}
+
+// An `@` token splices the file it names, so it is a read of that file and the
+// class is refused on it. The fixtures match no rule, so a block is the path.
+// Before this, `see @.env` exited 0 with empty stdout and stderr.
+func TestAnAtTokenNamingAGuardedPathIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	for _, rel := range []string{".env", ".env.local", ".aws/credentials",
+		".netrc", ".git-credentials", ".docker/config.json", ".kube/config",
+		"staging.kubeconfig", ".env.example", "deploy.env", ".aws/config"} {
+		plant(t, dir, rel, "PORT=3000\n")
+	}
+	for _, rel := range []string{".env", ".env.local", ".aws/credentials",
+		".netrc", ".git-credentials", ".docker/config.json", ".kube/config",
+		"staging.kubeconfig"} {
+		t.Run(rel, func(t *testing.T) {
+			reason := promptAt(t, dir, "see @"+rel)
+			class := guardedClass(filepath.Join(dir, rel))
+			if !strings.Contains(reason, class) || !strings.Contains(reason, "splice it into the prompt") {
+				t.Errorf("the reason does not refuse the splice on its class %q: %q", class, reason)
+			}
+		})
+	}
+	for _, rel := range []string{".env.example", "deploy.env", ".aws/config"} {
+		t.Run(rel, func(t *testing.T) {
+			if reason := promptAt(t, dir, "see @"+rel); reason != "" {
+				t.Errorf("a token outside the class was refused: %q", reason)
+			}
+		})
+	}
+}
+
+// The README's live check: an empty `.env` holds nothing to match, so only the
+// path can block it.
+func TestAnAtTokenNamingAnEmptyDotenvIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".env", "")
+	if reason := promptAt(t, dir, "see @.env"); !strings.Contains(reason, "a dotenv file") {
+		t.Errorf("an empty .env was not refused: %q", reason)
+	}
+}
+
+// A token that will not resolve defers on its own, and beside a refused one it
+// must not turn the block into no verdict, in either order.
+func TestARefusedAtTokenBesideAGapStillBlocks(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".env", "PORT=3000\n")
+	writeFile(t, dir, "notes.txt", "hello\n")
+	code, stdout, stderr := drive(t, `{"hook_event_name":"UserPromptSubmit","cwd":`+
+		quote(t, dir)+`,"prompt":"see @notes.txt/x"}`)
+	deferred(t, code, stdout, stderr)
+	for _, prompt := range []string{"see @notes.txt/x @.env", "see @.env @notes.txt/x"} {
+		if reason := promptAt(t, dir, prompt); !strings.Contains(reason, "a dotenv file") {
+			t.Errorf("%q: the refusal did not survive the gap: %q", prompt, reason)
+		}
+	}
+}
+
+// The reason names the path through named(), so a directory called after a
+// key is withheld rather than sent.
+func TestAnAtTokenRefusalDoesNotCarryAKeyShapedPath(t *testing.T) {
+	dir := t.TempDir()
+	plant(t, dir, secret+"/.env", "PORT=3000\n")
+	code, stdout, stderr := drive(t, `{"hook_event_name":"UserPromptSubmit","cwd":`+
+		quote(t, dir)+`,"prompt":"see @`+secret+`/.env"}`)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if strings.Contains(stdout+stderr, secret) {
+		t.Errorf("the key-shaped path reached the output: %q %q", stdout, stderr)
+	}
+}

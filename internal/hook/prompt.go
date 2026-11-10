@@ -65,7 +65,7 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 	seen := make(map[string]bool)
 	// The first token that would not resolve, kept while the rest are read,
 	// for bashTargets' reason.
-	var gap error
+	var gap, refused error
 	note := func(err error) {
 		if gap == nil {
 			gap = err
@@ -104,6 +104,15 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 			seen[path] = true
 			switch {
 			case info.Mode().IsRegular():
+				// The splice is the read, so the refusal `cat .env` gets is
+				// taken here, ahead of a content scan most of the file would
+				// pass. The walk goes on for bashTargets' reason.
+				if class := guardedClass(path); class != "" {
+					if refused == nil {
+						refused = &splicedRefusal{pathRefusal{path, class}}
+					}
+					continue
+				}
 				targets = append(targets, file(path, info.Size(), func(error) error {
 					return unresolved{path, errFileUnreadable}
 				}))
@@ -124,6 +133,12 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 				continue
 			}
 		}
+	}
+	if refused != nil && gap != nil {
+		return targets, errors.Join(refused, gap)
+	}
+	if refused != nil {
+		return targets, refused
 	}
 	return targets, gap
 }
