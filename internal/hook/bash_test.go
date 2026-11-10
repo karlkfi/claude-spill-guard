@@ -1591,8 +1591,6 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 		{"pushd() { :; }; pushd w >/dev/null; cat x", "x"},
 		{`cd() { :; }; echo "$(cd w; cat x)"`, "x"},
 		{`cd() { :; }; cd w; echo "$(cat x)"`, "x"},
-		{"f() { cd w; }; echo ${ f; }; cat x", "w/x"},
-		{"f() { cd w; }; echo ${| f; }; cat x", "w/x"},
 		{"f() { cd w; }; compgen -F f x >/dev/null 2>&1; cat x", "w/x"},
 		{"cd () ( : ); cd w; cat x", "x"},
 		{"function cd ( : ); cd w; cat x", "x"},
@@ -1642,10 +1640,16 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 	}
 	for _, tc := range []struct{ command, key string }{
 		// The cd goes first: one after an eval or a source is lost anyway,
-		// since either may have assigned CDPATH.
+		// since either may have assigned CDPATH. An eval of literal words that
+		// move nothing keeps the directory.
 		{"cd w; eval true; cat x", "w/x"},
+		{"cd w; eval echo hi; cat x", "w/x"},
+		{"trap 'rm -f t' EXIT; cat x", "x"},
+		{"trap - DEBUG; cat x", "x"},
+		{"trap -p; cat x", "x"},
+		{"eval cd w | cat; cat x", "x"},
+		{"mapfile -t a < l.txt; cat x", "x"},
 		{"cd w; ${g:-true}; cat x", "w/x"},
-		{"cd w; . ./s.sh 2>/dev/null; cat x", "w/x"},
 		{"f() { :; }; cd w; eval f; cat x", "w/x"},
 		// A loop that ends before the definition is not reached by it.
 		{"for i in 1; do cat x; done; f() { cd w; }", "x"},
@@ -1667,6 +1671,57 @@ func TestAMoveThroughAWordTheHookCannotNameIsNotFollowed(t *testing.T) {
 			}
 		})
 	}
+	// With no function defined at all, a word that runs code in this shell can
+	// still move it, and a bash 5.3 `${ …; }` body is code in this shell that
+	// the segmenter does not lex (Q226, Q228). Each reads w/x on bash 5.3.15.
+	for _, tc := range []struct{ command, says string }{
+		{"eval cd w; cat x", "cannot follow"},
+		{"eval 'cd w'; cat x", "cannot follow"},
+		{"builtin eval cd w; cat x", "cannot follow"},
+		{"command eval cd w; cat x", "cannot follow"},
+		{"eval eval cd w; cat x", "cannot follow"},
+		{"eval $X; cat x", "cannot follow"},
+		{"source ./s.sh; cat x", "cannot follow"},
+		{". ./s.sh; cat x", "cannot follow"},
+		{"cd w; . ./s.sh 2>/dev/null; cat x", "cannot follow"},
+		{"trap 'cd w' DEBUG; cat x", "cannot follow"},
+		{"trap -- 'cd w' RETURN INT; cat x", "cannot follow"},
+		{"mapfile -C 'cd w;:' -c 1 a < l.txt; cat x", "cannot follow"},
+		{"readarray -tC 'cd w;:' -c 1 a < l.txt; cat x", "cannot follow"},
+		// A substitution body is placed where it was written, past the move.
+		{`eval cd w; echo "$(cat x)"`, "cannot follow"},
+		{"echo ${ cd w; }; cat x", "${ …; }"},
+		{"echo ${| cd w; }; cat x", "${ …; }"},
+		{"x=${ cd w; }; cat x", "${ …; }"},
+		{"cat ${ cd w; } x", "${ …; }"},
+		{`echo "${ cd w; }"; cat x`, "${ …; }"},
+		{"f() { cd w; }; echo ${ f; }; cat x", "${ …; }"},
+		{"f() { cd w; }; echo ${| f; }; cat x", "${ …; }"},
+	} {
+		t.Run(tc.command+" defers", func(t *testing.T) {
+			root := tree(t, "w/x")
+			code, stdout, stderr := drive(t, bashCall(t, tc.command, root))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, tc.says) {
+				t.Errorf("coverage reason = %q, want it to say %q", reason, tc.says)
+			}
+		})
+	}
+	// The body of one is not read either, so a reader there is recorded rather
+	// than crossing with nothing said.
+	// bash reads w/x here, so the key in x is one it never opens: a body
+	// resolved where the string started would block on it.
+	t.Run("a body after a funsub is not placed where the string started", func(t *testing.T) {
+		root := tree(t, "x")
+		code, stdout, stderr := drive(t, bashCall(t, `echo ${ cd w; }; echo "$(cat x)"`, root))
+		deferred(t, code, stdout, stderr)
+	})
+	t.Run("a reader inside a funsub body defers", func(t *testing.T) {
+		root := tree(t, "x")
+		code, stdout, stderr := drive(t, bashCall(t, "echo ${ cat x; }", root))
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "${ …; }") {
+			t.Errorf("coverage reason = %q, want it to name the funsub", reason)
+		}
+	})
 }
 
 // The moves whose destination is not the literal, or not a literal at all.

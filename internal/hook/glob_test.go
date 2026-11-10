@@ -149,7 +149,8 @@ func TestAGlobBashWouldExpandDifferentlyIsRecorded(t *testing.T) {
 		{"GLOBIGNORE assigned at an index", "GLOBIGNORE[0]=x; cat *.env", "changes how the shell expands"},
 		{"GLOBIGNORE assigned at another index", "GLOBIGNORE[1]=x; cat *.env", "changes how the shell expands"},
 		{"after an eval", "eval x=1; cat *.env", "changes how the shell expands"},
-		{"after a source", "source rc; cat *.env", "changes how the shell expands"},
+		// Absolute, since a source also loses the directory (Q226).
+		{"after a source", "source rc; cat " + dir + "/*.env", "changes how the shell expands"},
 		{"in a backtick body after a shopt", "shopt -s dotglob; echo `cat *.env`", "changes how the shell expands"},
 		{"in a quoted body after a shopt", "shopt -s dotglob; echo \"$(cat *.env)\"", "changes how the shell expands"},
 		{"a class Go cannot compile", "cat *.[env", "cannot expand"},

@@ -187,6 +187,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 			moved = moved || leftUnknown
 			list.enter(segment, v, &dirUnknown)
 			dir, dirUnknown = enterShell(&saved, segment.Shells, dir, dirUnknown)
+			if slices.ContainsFunc(segment.Tokens, opensFunsub) {
+				moved, dirUnknown = true, true
+				note(errors.New("a `${ …; }` substitution runs its body in this shell, " +
+					"and nothing here reads that body, so what it reads and where it " +
+					"leaves the directory are not settled here"))
+			}
 			body := segment.Body
 			if body == "" {
 				body = cur.state.within
@@ -264,7 +270,7 @@ func bashTargets(command, cwd string) ([]target, error) {
 				list.moved(segment, dirUnknown)
 				continue
 			}
-			if !segment.Forked && callsCdFunction(wrap, funcs) {
+			if !segment.Forked && (callsCdFunction(wrap, funcs) || runsInShell(wrap, funcs)) {
 				moved, dirUnknown = true, true
 			}
 			list.ran()
@@ -754,6 +760,7 @@ func substStates(text string, subs []bash.Substitution, entry substState, lastpi
 		seg.Redirects = restoreAll(segment.Redirects, text, subs)
 		list.enter(seg, v, &unknown)
 		dir, unknown = enterShell(&saved, seg.Shells, dir, unknown)
+		unknown = unknown || slices.ContainsFunc(seg.Tokens, opensFunsub)
 		// Kept for the bodies written here, which lose their own directory
 		// in their own walk; a marker's directory is never read past one.
 		body := seg.Body
@@ -814,7 +821,7 @@ func substStates(text string, subs []bash.Substitution, entry substState, lastpi
 			list.moved(seg, unknown)
 			continue
 		}
-		if !seg.Forked && callsCdFunction(wrap, funcs) {
+		if !seg.Forked && (callsCdFunction(wrap, funcs) || runsInShell(wrap, funcs)) {
 			unknown = true
 		}
 		list.ran()
@@ -871,6 +878,82 @@ func cdFunctions(segments []bash.Segment, known map[string]bool, lastpipe bool) 
 func callsCdFunction(wrap readers.Peel, funcs map[string]bool) bool {
 	return !wrap.External && len(wrap.Argv) > 0 && funcs[wrap.Argv[0]]
 }
+
+// runsInShell reports whether a peeled segment runs words as code in this
+// shell, so a `cd` among them moves the caller: `eval cd w`, `source`, `.`, a
+// trap's action and a mapfile callback each read w/x after them on bash 5.3.15
+// (Q226). A file's text is not read, so the directory is lost, which upstream
+// does not do: it poisons the variables there and keeps the directory.
+func runsInShell(wrap readers.Peel, funcs map[string]bool) bool {
+	if wrap.External || len(wrap.Argv) == 0 {
+		return false
+	}
+	args := wrap.Argv[1:]
+	switch wrap.Argv[0] {
+	case "eval":
+		return evalMoves(args, funcs)
+	case "source", ".":
+		return true
+	case "trap":
+		return trapRunsBeforeExit(args)
+	case "mapfile", "readarray":
+		return slices.ContainsFunc(args, func(a string) bool {
+			return strings.HasPrefix(a, "-") && strings.Contains(a, "C")
+		})
+	}
+	return false
+}
+
+// evalMoves reports whether eval's words may move the shell. Literal words are
+// the command string bash re-parses, so `eval true` keeps the directory and
+// `eval cd w` does not; a word the shell expands first could be anything.
+func evalMoves(args []string, funcs map[string]bool) bool {
+	if slices.ContainsFunc(args, func(a string) bool { return strings.ContainsAny(a, "$`") }) {
+		return true
+	}
+	segments, err := bash.Segments(strings.Join(args, " "))
+	if err != nil {
+		return true
+	}
+	for _, seg := range segments {
+		if slices.ContainsFunc(seg.Tokens, opensFunsub) {
+			return true
+		}
+		k := bash.ShKeywordPeel(seg.Tokens, seg.QuotedFrom)
+		wrap := readers.PeelWrappers(seg.Tokens[k+bash.EnvPrefixPeel(seg.Tokens[k:], seg.QuotedFrom[k:]):])
+		if kind, _ := classifyCd(wrap.Argv); kind != "" && !wrap.External {
+			return true
+		}
+		if callsCdFunction(wrap, funcs) || runsInShell(wrap, funcs) {
+			return true
+		}
+	}
+	return false
+}
+
+// trapRunsBeforeExit reports whether a trap sets an action that can fire while
+// later commands are still to run. `-p`, `-l`, a reset and an ignore set none,
+// and an EXIT trap fires once nothing is left to read.
+func trapRunsBeforeExit(args []string) bool {
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	if len(args) < 2 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		return false
+	}
+	return slices.ContainsFunc(args[1:], func(sig string) bool {
+		return sig != "EXIT" && sig != "0"
+	})
+}
+
+// opensFunsub reports whether a token opens one of bash 5.3's substitutions
+// that run in this shell, `${ list; }` and `${| list; }`. internal/bash does
+// not lex them: it splits the body at its own `;` or `|` and leaves `${` at
+// the end of a word, or whole inside double quotes. A `\${` is literal, and a
+// single-quoted one is too but reads the same here, which only adds a record.
+func opensFunsub(tok string) bool { return funsubRE.MatchString(tok) }
+
+var funsubRE = regexp.MustCompile(`(?:^|[^\\])\$\{(?:[ \t\n|]|$)`)
 
 // pastDefinition adds the definitions arms says are reached at this segment,
 // and reports whether one other than body's own had been reached. Past such a
