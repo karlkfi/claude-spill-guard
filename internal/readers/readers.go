@@ -2,6 +2,7 @@ package readers
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -153,6 +154,10 @@ func splitArgs(tokens []string, s spec) (files []string, seen map[string]bool, p
 				} else {
 					i += 1 + n
 				}
+				continue
+			}
+			if slices.Contains(s.emptyValue, tok) && i+1 < len(tokens) && tokens[i+1] == "" {
+				i += 2
 				continue
 			}
 			// An unknown flag is assumed to take no argument. Guessing the

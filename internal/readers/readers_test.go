@@ -52,6 +52,16 @@ func TestFiles(t *testing.T) {
 			[]string{"sed", "--in-place", "s/a/b/", "f"}, []string{"f"}, false},
 		{"sed -i with no script has no operand to keep",
 			[]string{"sed", "-i", "f"}, nil, false},
+		{"sed -i takes an empty suffix, as BSD reads it",
+			[]string{"sed", "-i", "", "s/a/b/", "f"}, []string{"f"}, false},
+		{"sed -I likewise",
+			[]string{"sed", "-I", "", "s/a/b/", "f"}, []string{"f"}, false},
+		{"sed -i '' before -e leaves no script positional",
+			[]string{"sed", "-i", "", "-e", "s/a/b/", "f"}, []string{"f"}, false},
+		{"a non-empty token after -i may be GNU's script, so both stay",
+			[]string{"sed", "-i", ".bak", "s/a/b/", "f"}, []string{"s/a/b/", "f"}, false},
+		{"an empty token is consumed after -i and nowhere else",
+			[]string{"cat", "-i", "", "f"}, []string{"", "f"}, false},
 
 		// The divergence.
 		{"uniq's second positional is written, not read",

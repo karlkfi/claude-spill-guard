@@ -99,6 +99,9 @@ type spec struct {
 	// one the command writes rather than reads; -1 when every one is a read.
 	// `uniq IN OUT` is 1.
 	firstOutput int
+	// emptyValue names the flags that consume the next token only when it is
+	// empty. See the sed row.
+	emptyValue []string
 }
 
 // specs is the table. Only readers are here -- see the package comment for
@@ -164,12 +167,21 @@ var specs = map[string]spec{
 		suppressProg: []string{"-e", "--regexp", "-f", "--file"},
 		firstOutput:  -1,
 	},
+	// BSD sed takes the token after -i or -I as the backup suffix; GNU takes
+	// only an attached one, so to GNU `sed -i '' X f` has the empty script and
+	// reads X and f. Neither reading can be chosen without running sed, but an
+	// empty script prints nothing and an in-place edit sends its input to the
+	// file, so X carries nothing out under GNU either. Consuming the empty
+	// token gives BSD's reading, which loses nothing GNU's would have sent.
+	// A non-empty token is left alone: as GNU's script it can be
+	// `w /dev/stdout`.
 	"sed": {
 		consume:      map[string]int{"--expression": 1, "--line-length": 1, "-e": 1, "-l": 1},
 		fileFlags:    map[string]flagFiles{"--file": {1, []int{0}}, "-f": {1, []int{0}}},
 		prog:         1,
 		suppressProg: []string{"-e", "--expression", "-f", "--file"},
 		firstOutput:  -1,
+		emptyValue:   []string{"-i", "-I"},
 	},
 	"sort": {
 		consume:     map[string]int{"--batch-size": 1, "--buffer-size": 1, "--compress-program": 1, "--field-separator": 1, "--key": 1, "--output": 1, "--parallel": 1, "--random-source": 1, "--temporary-directory": 1, "-S": 1, "-T": 1, "-k": 1, "-o": 1, "-t": 1},

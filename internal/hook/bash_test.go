@@ -58,6 +58,46 @@ func TestAReaderSOperandIsOpenedAndScanned(t *testing.T) {
 	}
 }
 
+// Q215's four rows. BSD sed takes the empty token after -i as the backup
+// suffix, and reading it as the script made `'s/a/${X}/'` an operand that
+// expands at run time, so the call was deferred and recorded. Each row must
+// block over a planted file and stay silent over a clean one: the first half
+// is what proves the file is still read once the script stops being one.
+//
+// Both readings were driven on 2026-11-09. BSD sed (macOS 26) edits f with the
+// script after the suffix. GNU sed 4.9 (debian:stable-slim) reads the empty
+// token as the script: `sed -i "" X f` exits 0 having edited X and f and
+// printed nothing, and `sed -i 'w /dev/stdout' X` prints X, which is why only
+// an empty token is consumed.
+func TestAnInPlaceSedReadsItsFileAndNotItsScript(t *testing.T) {
+	for _, form := range []string{
+		"sed -i '' 's/a/b/' %s",
+		"sed -i '' 's/a/${X}/' %s",
+		"sed -i.bak 's/a/${X}/' %s",
+		"sed 's/a/${X}/' %s",
+	} {
+		t.Run(form, func(t *testing.T) {
+			dir, name := planted(t)
+			code, stdout, stderr := drive(t, bashCall(t, fmt.Sprintf(form, name), dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the planted file blocked", reason)
+			}
+
+			clean := t.TempDir()
+			if err := os.WriteFile(filepath.Join(clean, "f.txt"), []byte("a\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, stdout, stderr = drive(t, bashCall(t, fmt.Sprintf(form, "f.txt"), clean))
+			if code != 0 || stdout != "" || stderr != "" {
+				t.Errorf("clean file: code %d, stdout %q, stderr %q; want silent", code, stdout, stderr)
+			}
+		})
+	}
+}
+
 // The pattern is not a path. Opening it would be the wrong-argument-position
 // failure pointed the other way -- and if `pat` happened to exist, the scanner
 // would read a file the command never touches.
