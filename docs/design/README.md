@@ -2339,8 +2339,11 @@ is written by the one waiting on it, and the process exit collects whatever was
 still running. Go preempts a goroutine in a tight match loop asynchronously, so
 the timer is scheduled without the scan yielding. That is the load-bearing
 mechanism claim and it is driven rather than read —
-`TestTheDeadlineFiresWhileTheMatchLoopIsRunning` blocks on the clock over a
-buffer whose next arm, given time, blocks on a key planted in it.
+`TestTheDeadlineFiresWhileTheMatchLoopIsRunning` stops on the clock over a
+buffer that its control arm, given time, blocks on for a key planted in it.
+The control is timed and has to take at least 30 times the short arm's
+budget, so a faster match loop fails the test outright rather than making it
+flaky.
 
 #### Driven end to end, on built binaries
 

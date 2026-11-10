@@ -145,33 +145,30 @@ func TestAScanThatOverrunsItsBudgetDefers(t *testing.T) {
 // that is not yielding. Go preempts one asynchronously and this is what says so
 // on the code that ships, rather than on a claim about the runtime.
 //
-// The pair is the whole test. Over one file, a short budget stops on the clock
-// and an unhurried one blocks on the key planted at its end, so the buffer is
+// The pair is the whole test. Over one file, an unhurried budget blocks on the
+// key planted at its end and a short one stops on the clock, so the buffer is
 // demonstrably scannable and demonstrably not scanned in time. Stopping on the
 // clock has two answers since a finding is kept as soon as its rule is through
 // (Q249): a defer when the deadline beat the key's rule, and a block that says
 // it stops short when it did not. A scan that finished gives neither.
+//
+// What makes the second arm mean anything is the distance between the scan and
+// the budget, and that distance is a rate this repo keeps improving: the 30x
+// the fixture once had shrank to about 2x and the arm flaked (Q232). So the
+// control is timed and the ratio asserted, and a faster match loop fails here by
+// name instead of turning the short arm into a coin.
 func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
-	// Four mebibytes is about 0.6s of match loop at the worst rate measured
-	// for this ruleset, which is thirty times the budget below. The ratio is
-	// what makes this robust on a slower machine: every one of them moves the
-	// scan away from the deadline rather than towards it.
-	path := slowToScan(t, 4<<20, secret)
+	const budget = 10 * time.Millisecond
+	const ratio = 30
+	path := slowToScan(t, 32<<20, secret)
 	payload := `{"hook_event_name":"PreToolUse","tool_name":"Read",` +
 		`"tool_input":{"file_path":` + quote(t, path) + `}}`
 
-	code, stdout, stderr := driveWithin(t, 20*time.Millisecond, payload)
-	if stdout == "" {
-		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "did not finish inside its") {
-			t.Fatalf("coverage reason = %q, want the deadline to have fired mid-scan", reason)
-		}
-	} else if !strings.Contains(stdout, partlyRead) {
-		t.Fatalf("stdout = %q, want the deadline to have fired mid-scan", stdout)
-	}
-
-	// The positive control. The same file scans to a real finding, so the
-	// block above is the clock and not the buffer.
-	code, stdout, stderr = driveWithin(t, unhurried, payload)
+	// The positive control. The same file scans to a real finding, so a stop
+	// below is the clock and not the buffer.
+	began := time.Now()
+	code, stdout, stderr := driveWithin(t, unhurried, payload)
+	took := time.Since(began)
 	if code != 0 {
 		t.Fatalf("the control exited %d (stderr %q)", code, stderr)
 	}
@@ -180,6 +177,19 @@ func TestTheDeadlineFiresWhileTheMatchLoopIsRunning(t *testing.T) {
 	}
 	if strings.Contains(stdout, partlyRead) {
 		t.Fatalf("the control stdout = %q, want a scan that finished", stdout)
+	}
+	if took < ratio*budget {
+		t.Fatalf("the control scanned in %v, under %d times the %v budget, so the arm "+
+			"below would race the scan: grow the fixture or shrink the budget", took, ratio, budget)
+	}
+
+	code, stdout, stderr = driveWithin(t, budget, payload)
+	if stdout == "" {
+		if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, "did not finish inside its") {
+			t.Fatalf("coverage reason = %q, want the deadline to have fired mid-scan", reason)
+		}
+	} else if !strings.Contains(stdout, partlyRead) {
+		t.Fatalf("stdout = %q, want the deadline to have fired mid-scan", stdout)
 	}
 }
 
