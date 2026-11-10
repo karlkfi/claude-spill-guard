@@ -156,6 +156,11 @@ func TestARecursiveGrepIsRefusedAndItsRewriteIsAllowed(t *testing.T) {
 		"grep -r --file a.go",
 		"grep -rf a.go",
 		"grep -r -f a.go sub",
+		// The lexer splits `--file=<(…)` at the `<(`, and the grep's own
+		// `<(` is no copy around the filter its rewrite adds.
+		"grep -r -f <(echo foo)",
+		"grep -r --file=<(echo foo)",
+		"grep -r -f <(echo foo) sub",
 	} {
 		t.Run(command, func(t *testing.T) {
 			reason := denyReason(t, bashCall(t, command, dir))
@@ -194,14 +199,6 @@ func TestAPatternFileIsReadAndIsNotAnOperand(t *testing.T) {
 			if strings.Join(files, " ") != strings.Join(tc.files, " ") || none != tc.none {
 				t.Errorf("grepFiles = %q, %v; want %q, %v", files, none, tc.files, tc.none)
 			}
-		})
-	}
-	// The lexer splits `--file=<(…)` at the `<(`. Both are refused with no
-	// rewrite, because copiedAround cannot tell a `<(` from a `>(`.
-	dir := grepTree(t)
-	for _, command := range []string{"grep -r -f <(echo foo)", "grep -r --file=<(echo foo)"} {
-		t.Run(command, func(t *testing.T) {
-			denyReason(t, bashCall(t, command, dir))
 		})
 	}
 }
@@ -402,6 +399,7 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		"grep -rn foo . | tee \"$LOG\" | spill-guard filter",
 		"grep -rn foo . | cat >&2 | spill-guard filter",
 		"grep -rn foo . | head 1>&2 | spill-guard filter",
+		"grep -rn foo . > >(cat >&2) | spill-guard filter",
 		"grep -rn foo . | tee out.log | spill-guard filter; cat out.log",
 		"grep -rn foo . | tee out.log | spill-guard filter | cat out.log",
 		"grep -rn foo . | cat > out.log | spill-guard filter; cat out.log",
@@ -426,6 +424,7 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		"grep -rn foo . | tee sub/out.log | spill-guard filter",
 		"grep -rn foo . | dd of=out.log status=none | spill-guard filter",
 		"grep -rn foo . | env -C sub tee out.log | spill-guard filter",
+		"grep -rn -f <(echo foo) . | spill-guard filter",
 	} {
 		t.Run(command+" is allowed", func(t *testing.T) {
 			allowed(t, bashCall(t, command, dir))

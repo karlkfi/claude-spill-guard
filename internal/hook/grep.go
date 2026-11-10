@@ -355,6 +355,12 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 		}
 		var written []write
 		for _, r := range s.Redirects {
+			// On the grep itself a `(` is a `<(` or a `>(` operand, since
+			// `>>(` does not parse and `> >(` records `>`: neither is a way
+			// out for the matches, which leave only by stdout.
+			if k == i && r == "(" {
+				continue
+			}
 			if !slices.Contains(s.Inputs, r) {
 				written = append(written, write{r, dir, dirUnknown})
 			}

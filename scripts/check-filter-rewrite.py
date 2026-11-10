@@ -155,7 +155,8 @@ def main():
         # left the grep with a "file" to read, so the walk of `.` went
         # unrefused and printed the key.
         (tree / "pats").write_bytes(b"AKIA\n")
-        for command in ("grep -rn -f pats", "grep -rn --file=pats"):
+        for command in ("grep -rn -f pats", "grep -rn --file=pats",
+                        "grep -rn -f <(echo AKIA)"):
             decision, reason = hook(binary, command, tree)
             rewrite = rewrite_of(reason)
             if decision != "deny" or not rewrite:
