@@ -132,8 +132,12 @@ func runPaced(ctx context.Context, pace func(label string), start time.Time, bud
 		body, notice := refused.body(), ""
 		if len(findings) > 0 {
 			body += " " + found(findings)
-			// Anything joined to the refusal is a gap beside it.
-			if !finished || err != error(refused) {
+		}
+		// Anything joined to the refusal is a gap beside it. Only an override
+		// scans past a refusal, so without one nothing was read to fall short.
+		if overridden && (!finished || err != error(refused)) {
+			notice = restUnread
+			if len(findings) > 0 {
 				notice = partlyRead
 			}
 		}

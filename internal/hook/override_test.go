@@ -606,6 +606,9 @@ func TestAnOverriddenRefusalPastItsBudgetStillAsks(t *testing.T) {
 	if reason := reasonOf(t, stdout); !strings.Contains(reason, "dotenv") {
 		t.Errorf("the confirmation does not name the refusal: %q", reason)
 	}
+	if !strings.Contains(stdout, restUnread) {
+		t.Errorf("the confirmation does not say key.txt went unread: %q", stdout)
+	}
 }
 
 // An operand the walk could not settle sits beside the refusal here, so the
@@ -623,5 +626,27 @@ func TestAnOverriddenRefusalBesideAGapSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(stdout, partlyRead) {
 		t.Errorf("the confirmation does not say part went unread: %q", stdout)
+	}
+}
+
+// With nothing found, the notice is the only thing in the confirmation saying
+// an approval sends more than the refusal names. Without the hatch nothing was
+// scanned, so the deny carries none.
+func TestAnOverriddenRefusalBesideAGapWithNoFindingSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".env", "A=1\n")
+	_, stdout, _ := drive(t, bashCall(t, `SPILL_GUARD_OVERRIDE=why cat "$X" .env`, dir))
+	if got := verdictOf(t, stdout); got != "ask" {
+		t.Fatalf("permissionDecision = %q, want ask", got)
+	}
+	if !strings.Contains(stdout, restUnread) {
+		t.Errorf("the confirmation does not say part went unread: %q", stdout)
+	}
+	_, stdout, _ = drive(t, bashCall(t, `cat "$X" .env`, dir))
+	if got := verdictOf(t, stdout); got != "deny" {
+		t.Fatalf("without the override, permissionDecision = %q, want deny", got)
+	}
+	if strings.Contains(stdout, restUnread) || strings.Contains(stdout, partlyRead) {
+		t.Errorf("a deny that scanned nothing says part went unread: %q", stdout)
 	}
 }

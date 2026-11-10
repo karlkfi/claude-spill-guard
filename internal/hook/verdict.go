@@ -548,6 +548,11 @@ const partlyRead = "Part of what this call would have sent could not be " +
 	"read here: the matches named are in what could be, and no verdict on " +
 	"this call is a report on the rest."
 
+// restUnread is partlyRead for a confirmation that names no match, where "the
+// matches named" would point at nothing.
+const restUnread = "Part of what this call would have sent could not be " +
+	"read here, and no verdict on this call is a report on it."
+
 // alsoUnread is unscanned's counterpart for a call that is being blocked or
 // confirmed rather than allowed.
 //
