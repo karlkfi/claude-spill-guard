@@ -125,6 +125,32 @@ def main():
                 failures.append(f"{rewrite!r}: stderr does not name the rule: "
                                 f"{stderr.strip()}")
 
+        # A stage between the grep and its filter (Q233). A tee to a file the
+        # string never reads keeps a rewrite, and running it must withhold the
+        # key from both streams; a tee to stderr gets none, since appending a
+        # filter after it would leave the copy in the tool result.
+        command = "grep -rn AKIA . | tee out.log"
+        decision, reason = hook(binary, command, tree)
+        rewrite = rewrite_of(reason)
+        if decision != "deny" or not rewrite:
+            failures.append(f"{command!r}: decision {decision!r}, rewrite {rewrite!r}; "
+                            f"want deny with a rewrite")
+        else:
+            again, _ = hook(binary, rewrite, tree)
+            if again is not None:
+                failures.append(f"{rewrite!r}: the hook answered {again!r} to its "
+                                f"own rewrite, want no verdict")
+            r = subprocess.run([bash, "-c", rewrite], cwd=tree, capture_output=True)
+            print(f"tee to a file: exit {r.returncode}, {len(r.stdout)} bytes out")
+            if r.returncode != 3 or r.stdout or b"AKIA" in r.stderr:
+                failures.append(f"{rewrite!r}: exit {r.returncode}, {len(r.stdout)} "
+                                f"bytes out, want 3 and the key in neither stream")
+        command = "grep -rn AKIA . | tee /dev/stderr"
+        decision, reason = hook(binary, command, tree)
+        if decision != "deny" or rewrite_of(reason):
+            failures.append(f"{command!r}: decision {decision!r}, rewrite "
+                            f"{rewrite_of(reason)!r}; want deny with no rewrite")
+
     if failures:
         for f in failures:
             print("check-filter-rewrite: " + f, file=sys.stderr)

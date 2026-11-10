@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -271,7 +272,8 @@ func filteredLater(segments []bash.Segment, i int) bool {
 	if segments[i].StdoutAway {
 		return false
 	}
-	for _, later := range segments[i+1:] {
+	for j := i + 1; j < len(segments); j++ {
+		later := segments[j]
 		if later.Pipe != segments[i].Pipe {
 			continue
 		}
@@ -283,6 +285,70 @@ func filteredLater(segments []bash.Segment, i int) bool {
 		name := filepath.Base(tokens[0])
 		if name == "spill-guard" || name == "spill-guard.exe" ||
 			filepath.ToSlash(tokens[0]) == self() {
+			return !copiedAround(segments, i, j)
+		}
+	}
+	return false
+}
+
+// copiedAround reports whether a stage between the grep at i and the filter at
+// j writes what it reads somewhere the filter does not see (Q233). `grep -rn x
+// d | tee /dev/stderr | spill-guard filter` puts every matched line in the
+// tool result before the filter reads it, and `| cat >&2 |` gives it nothing.
+//
+// A copy to a regular file is allowed only where nothing else in the string
+// can read it: a later call that reads it is scanned then, but a `cat out.log`
+// later in this string is resolved before the file is written. A device other
+// than /dev/null, and a name this cannot settle -- a `$`, a glob, a `>(` --
+// are refused outright.
+//
+// Stages that write a file from their own program -- awk's `print >`, sed's
+// `w` -- are not read; Q257 holds them.
+func copiedAround(segments []bash.Segment, i, j int) bool {
+	toFile := false
+	for k := i; k < j; k++ {
+		s := segments[k]
+		if s.Pipe != segments[i].Pipe {
+			continue
+		}
+		if k > i && s.StdoutAway {
+			return true
+		}
+		var written []string
+		for _, r := range s.Redirects {
+			if !slices.Contains(s.Inputs, r) {
+				written = append(written, r)
+			}
+		}
+		p := bash.ShKeywordPeel(s.Tokens, s.QuotedFrom)
+		argv := readers.PeelWrappers(bash.StripEnvPrefix(s.Tokens[p:], s.QuotedFrom[p:])).Argv
+		if len(argv) > 0 && filepath.Base(argv[0]) == "tee" {
+			flags := true
+			for _, a := range argv[1:] {
+				if flags && a == "--" {
+					flags = false
+				} else if !flags || !strings.HasPrefix(a, "-") || a == "-" {
+					written = append(written, a)
+				}
+			}
+		}
+		for _, w := range written {
+			switch {
+			case w == "/dev/null" || w == "/dev/stdout" || w == "/dev/fd/1":
+			case strings.HasPrefix(w, "/dev/") || strings.HasPrefix(w, "/proc/") ||
+				strings.ContainsAny(w, "$`()<>*?[{~"):
+				return true
+			default:
+				toFile = true
+			}
+		}
+	}
+	if !toFile {
+		return false
+	}
+	for k, s := range segments {
+		inSpan := k >= i && k <= j && s.Pipe == segments[i].Pipe
+		if !inSpan && (k > i || s.Forked) {
 			return true
 		}
 	}
