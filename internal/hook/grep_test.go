@@ -150,6 +150,12 @@ func TestARecursiveGrepIsRefusedAndItsRewriteIsAllowed(t *testing.T) {
 		"grep -r --after-context 2 foo",
 		"grep -r --context 3 foo",
 		"grep -2 foo",
+		// A pattern file is not an operand, however it is spelled (Q255).
+		"grep -r -f a.go",
+		"grep -r --file=a.go",
+		"grep -r --file a.go",
+		"grep -rf a.go",
+		"grep -r -f a.go sub",
 	} {
 		t.Run(command, func(t *testing.T) {
 			reason := denyReason(t, bashCall(t, command, dir))
@@ -162,6 +168,40 @@ func TestARecursiveGrepIsRefusedAndItsRewriteIsAllowed(t *testing.T) {
 				t.Errorf("rewrite = %q, want pipefail ahead and the filter last", rewrite)
 			}
 			allowed(t, bashCall(t, rewrite, dir))
+		})
+	}
+}
+
+// A pattern file is read, because grep opens it, and is not what the walk is
+// over: with no other operand the grep searches `.` (Q255).
+func TestAPatternFileIsReadAndIsNotAnOperand(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		files   []string
+		none    bool
+	}{
+		{"grep -r -f pats", []string{"pats"}, true},
+		{"grep -r --file=pats", []string{"pats"}, true},
+		{"grep -r --file pats", []string{"pats"}, true},
+		{"grep -r -e x -f pats", []string{"pats"}, true},
+		{"grep -r -f pats d", []string{"pats", "d"}, false},
+		{"grep -r --file=pats d", []string{"pats", "d"}, false},
+		{"grep -r -e -f d", []string{"d"}, false},
+		{"grep -r -- x -f", []string{"-f"}, false},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			files, none := grepFiles(strings.Fields(tc.command))
+			if strings.Join(files, " ") != strings.Join(tc.files, " ") || none != tc.none {
+				t.Errorf("grepFiles = %q, %v; want %q, %v", files, none, tc.files, tc.none)
+			}
+		})
+	}
+	// The lexer splits `--file=<(…)` at the `<(`. Both are refused with no
+	// rewrite, because copiedAround cannot tell a `<(` from a `>(`.
+	dir := grepTree(t)
+	for _, command := range []string{"grep -r -f <(echo foo)", "grep -r --file=<(echo foo)"} {
+		t.Run(command, func(t *testing.T) {
+			denyReason(t, bashCall(t, command, dir))
 		})
 	}
 }

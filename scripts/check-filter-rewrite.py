@@ -151,6 +151,27 @@ def main():
             failures.append(f"{command!r}: decision {decision!r}, rewrite "
                             f"{rewrite_of(reason)!r}; want deny with no rewrite")
 
+        # A pattern file is not an operand (Q255). Spelled apart from -r, it
+        # left the grep with a "file" to read, so the walk of `.` went
+        # unrefused and printed the key.
+        (tree / "pats").write_bytes(b"AKIA\n")
+        for command in ("grep -rn -f pats", "grep -rn --file=pats"):
+            decision, reason = hook(binary, command, tree)
+            rewrite = rewrite_of(reason)
+            if decision != "deny" or not rewrite:
+                failures.append(f"{command!r}: decision {decision!r}, rewrite "
+                                f"{rewrite!r}; want deny with a rewrite")
+                continue
+            again, _ = hook(binary, rewrite, tree)
+            if again is not None:
+                failures.append(f"{rewrite!r}: the hook answered {again!r} to its "
+                                f"own rewrite, want no verdict")
+            r = subprocess.run([bash, "-c", rewrite], cwd=tree, capture_output=True)
+            print(f"{command!r}: exit {r.returncode}, {len(r.stdout)} bytes out")
+            if r.returncode != 3 or r.stdout or b"AKIA" in r.stderr:
+                failures.append(f"{rewrite!r}: exit {r.returncode}, {len(r.stdout)} "
+                                f"bytes out, want 3 and the key in neither stream")
+
     if failures:
         for f in failures:
             print("check-filter-rewrite: " + f, file=sys.stderr)

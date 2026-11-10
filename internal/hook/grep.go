@@ -214,8 +214,11 @@ func recurses(value string) bool {
 // node_modules as the pattern and x as the file, and a disputed option's next
 // token is read both ways. The files are the union of the readings, and none
 // is true when either reading has none, which is the case a recursive grep
-// searches `.` in. Driven 2026-11-01: `grep --context id key.env` prints the
-// key on BSD grep 2.6.0, and `grep -r --context 3 x` walks `.` on ugrep 7.8.4.
+// searches `.` in. A pattern file is among the files, since grep opens it, and
+// is not an operand, so none is judged with it read as a pattern: `grep -r -f
+// pats` walks `.` as surely as `grep -r -e x` does (Q255). Driven 2026-11-01:
+// `grep --context id key.env` prints the key on BSD grep 2.6.0, and `grep -r
+// --context 3 x` walks `.` on ugrep 7.8.4.
 func grepFiles(tokens []string) (files []string, none bool) {
 	spelled := make([]string, len(tokens))
 	copy(spelled, tokens)
@@ -232,6 +235,11 @@ func grepFiles(tokens []string) (files []string, none bool) {
 		name := resolveLong(key)
 		switch {
 		case name == "":
+		case inline && value == "" && i+1 < len(spelled) &&
+			spelled[i+1] == bash.ProcessSubstitution:
+			// `--file=<(…)` is one word to bash, and the lexer splits it
+			// at the `<(`, so the option takes the next token as its value.
+			spelled[i] = name
 		case inline:
 			spelled[i] = name + "=" + value
 		default:
@@ -249,7 +257,8 @@ func grepFiles(tokens []string) (files []string, none bool) {
 	seen := map[string]bool{}
 	for _, r := range readings {
 		got, _ := readers.Files(r)
-		none = none || len(got) == 0
+		operands, _ := readers.Files(patternsInline(r))
+		none = none || len(operands) == 0
 		for _, f := range got {
 			if !seen[f] {
 				seen[f] = true
@@ -258,6 +267,26 @@ func grepFiles(tokens []string) (files []string, none bool) {
 		}
 	}
 	return files, none
+}
+
+// patternsInline is tokens with each pattern file spelled as a pattern, `-f`
+// as `-e` and `--file` as `--regexp`, which take their value the same way.
+// The tokens are spelled out already, so an abbreviation reaches here whole.
+func patternsInline(tokens []string) []string {
+	out := slices.Clone(tokens)
+	for i := 1; i < len(out); i++ {
+		switch tok := out[i]; {
+		case tok == "--":
+			return out
+		case tok == "-f":
+			out[i] = "-e"
+		case tok == "--file":
+			out[i] = "--regexp"
+		case strings.HasPrefix(tok, "--file="):
+			out[i] = "--regexp=" + strings.TrimPrefix(tok, "--file=")
+		}
+	}
+	return out
 }
 
 // filteredLater reports whether a stage after segment i in its own pipeline is
