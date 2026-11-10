@@ -238,7 +238,7 @@ type interrupted struct {
 	closed                   []compound
 	closedParens             []int
 	lastClose                bool
-	cmdPos, compoundPos      bool
+	compoundPos              bool
 	shells                   int
 	// word is whether the last of cur is the word the substitution sits in. A
 	// redirect's target is not in cur, and a process substitution ends its word.
@@ -396,10 +396,6 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		// handling at all. Segment.CaseArm has what this costs and why the
 		// port takes it.
 		clauses []string
-		// Whether the next word is where bash reads a command name, so `case`
-		// in `echo case` stays an operand. cmdPosKeywords is the same set
-		// scanDollarParen keys on.
-		cmdPos = true
 		// Upstream's compound tracking (its Q265 and Q272): the compounds
 		// still open, the function whose header has been read and whose body
 		// has not opened, the separator Forked judges a segment by -- which a
@@ -428,7 +424,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 	)
 	openSubstitution := func(word bool) {
 		stack = append(stack, interrupted{cur, curRedir, curInputs, curQF, pipe, prevSep,
-			lead, fds, closed, closedParens, lastClose, cmdPos, compoundPos, len(shells), word})
+			lead, fds, closed, closedParens, lastClose, compoundPos, len(shells), word})
 		cur, curQF, curRedir, curInputs = nil, nil, nil, nil
 		fds, closed, closedParens, lastClose = descriptors{}, nil, nil, false
 		pipes++
@@ -438,7 +434,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		opened++
 		shells = append(shells, opened)
 		prevSep, lead = "(", "("
-		cmdPos, compoundPos = true, true
+		compoundPos = true
 	}
 	for i := 0; i < len(tokens); {
 		t := tokens[i]
@@ -461,7 +457,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			// `f ()` heads a definition, and runs nothing.
 			fn, cur, curQF = cur[k], cur[:k], curQF[:k]
 			i += 2
-			cmdPos, compoundPos = true, true
+			compoundPos = true
 			continue
 		}
 		if isOperator(t, quotedFrom[i], separators) {
@@ -593,7 +589,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				cur, curRedir, curInputs, curQF = f.cur, f.curRedir, f.curInputs, f.curQF
 				pipe, prevSep, lead, fds = f.pipe, f.prevSep, f.lead, f.fds
 				closed, closedParens, lastClose = f.closed, f.closedParens, f.lastClose
-				cmdPos, compoundPos = f.cmdPos, f.compoundPos
+				compoundPos = f.compoundPos
 				i++
 				if i < len(tokens) && quotedFrom[i] == gluedToClose {
 					if n := len(cur); f.word && n > 0 && i+1 < len(tokens) {
@@ -610,7 +606,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				pipe = pipes
 			}
 			prevSep, lead = t, t
-			cmdPos, compoundPos = true, true
+			compoundPos = true
 			i++
 			continue
 		}
@@ -678,6 +674,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			i++
 			continue
 		}
+		cmdPos := compoundPos
 		// A pattern word runs nothing, so only the `esac` ending one can
 		// close anything.
 		if compoundPos && quotedFrom[i] == NotQuoted && (!inPattern(clauses) || t == "esac") &&
@@ -724,7 +721,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		cur = append(cur, t)
 		curQF = append(curQF, quotedFrom[i])
 		opening := len(clauses) > 0 && clauses[len(clauses)-1] == "in"
-		cmdPos = trackCase(&clauses, t, cmdPos)
+		trackCase(&clauses, t, cmdPos)
 		// The `in` that opens the first pattern is no word of it.
 		patStarted = !opening || clauses[len(clauses)-1] != "pat"
 		i++
@@ -781,14 +778,14 @@ func inPattern(clauses []string) bool {
 // bash reads /x/f, silently.
 func isPipe(sep string) bool { return sep == "|" || sep == "|&" }
 
-// trackCase advances the `case` clause states for one word token and reports
-// whether the next word is still in command position. The three arms and their
-// order are scanDollarParen's, which is what keeps the two readings the same:
-// a clause waiting for its `in` sees nothing else, an `esac` closes the
-// innermost clause that has one, and `case` opens one only in command
-// position. An unterminated `case` leaves its clause open, so every segment
-// after the pattern stays marked -- the fail-closed direction.
-func trackCase(clauses *[]string, word string, cmdPos bool) bool {
+// trackCase advances the `case` clause states for one word token. The three
+// arms and their order are scanDollarParen's: a clause waiting for its `in`
+// sees nothing else, an `esac` closes the innermost clause that has one, and
+// `case` opens one only in command position, which is the compound tracker's
+// rather than cmdPosKeywords' -- `{ case`, `! case` and `} then case` are
+// all the keyword (Q217). An unterminated `case` leaves its clause open, so
+// every segment after the pattern stays marked -- the fail-closed direction.
+func trackCase(clauses *[]string, word string, cmdPos bool) {
 	n := len(*clauses)
 	state := ""
 	if n > 0 {
@@ -804,7 +801,6 @@ func trackCase(clauses *[]string, word string, cmdPos bool) bool {
 	case word == "case" && cmdPos:
 		*clauses = append(*clauses, "in")
 	}
-	return cmdPos && cmdPosKeywords[word]
 }
 
 // inCaseArm reports whether any open `case` is past its first pattern, which

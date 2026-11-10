@@ -1936,6 +1936,11 @@ func TestACaseArmDoesNotSettleWhatComesAfterIt(t *testing.T) {
 		{"reached through && inside an arm", "case x in y) true && SP=" + dir + ";; esac; cat $SP/" + name},
 		{"an unterminated case", "case x in y) SP=" + dir + "; cat $SP/" + name},
 		{"a cd in an arm", "case x in y) cd " + dir + ";; esac; cat " + name},
+		// Each read the arm's path, so a key beside the reader crossed (Q217).
+		{"a case inside braces", "{ case x in y) SP=" + dir + ";; esac; }; cat $SP/" + name},
+		{"a case after a bang", "! case x in y) SP=" + dir + ";; esac; cat $SP/" + name},
+		{"a case after time", "time case x in y) SP=" + dir + ";; esac; cat $SP/" + name},
+		{"a case after then behind a closer", "if { :; } then case x in y) SP=" + dir + ";; esac; fi; cat $SP/" + name},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, tc.command, t.TempDir()))

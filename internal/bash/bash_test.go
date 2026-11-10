@@ -65,6 +65,18 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 			[]bool{false, false, true, false}},
 		{"the word after a keyword is the keyword", "if x; then case q in r) P=1;; esac; fi",
 			[]bool{false, false, true, false, false}},
+		// Command position is the compound tracker's, which cmdPosKeywords is
+		// narrower than: each of these is the keyword on bash 5.3.15 (Q217).
+		{"the word after a brace", "{ case q in r) P=1;; esac; }; cat f",
+			[]bool{false, true, false, false, false}},
+		{"after a bang", "! case q in r) P=1;; esac; cat f",
+			[]bool{false, true, false, false}},
+		{"after time", "time case q in r) P=1;; esac; cat f",
+			[]bool{false, true, false, false}},
+		{"after then behind a closer", "if { :; } then case q in r) P=1;; esac; fi; cat f",
+			[]bool{false, false, true, false, false, false}},
+		{"a quoted brace is no keyword", "echo '{' case in; (cd /tmp); P=1",
+			[]bool{false, false, false}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			segs, err := Segments(tc.in)
