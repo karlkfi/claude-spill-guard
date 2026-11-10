@@ -96,6 +96,27 @@ func TestAnInPlaceSedReadsItsFileAndNotItsScript(t *testing.T) {
 			}
 		})
 	}
+
+	// GNU's --debug prints every input line even under the empty script, so
+	// the token after the empty one is read again: GNU sed 4.9 printed the
+	// key from it in each of these shapes (#256's review).
+	for _, form := range []string{
+		"sed --debug -i '' %s f.txt",
+		"sed -i '' --debug %s f.txt",
+		"sed -i '' %s --debug f.txt",
+		"sed --d -i '' %s f.txt",
+	} {
+		t.Run(form, func(t *testing.T) {
+			dir, name := planted(t)
+			code, stdout, stderr := drive(t, bashCall(t, fmt.Sprintf(form, name), dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, name) {
+				t.Errorf("reason = %q, want the planted file blocked", reason)
+			}
+		})
+	}
 }
 
 // The pattern is not a path. Opening it would be the wrong-argument-position

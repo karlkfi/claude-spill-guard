@@ -112,6 +112,7 @@ func Indirect(tokens []string) []string {
 func splitArgs(tokens []string, s spec) (files []string, seen map[string]bool, positionals []string) {
 	seen = make(map[string]bool)
 	endOpts := false
+	consumeEmpty := s.emptyValue != nil && !hasLongOption(tokens[1:], s.emptyValueUnless)
 	for i := 1; i < len(tokens); {
 		tok := tokens[i]
 		if !endOpts && tok == "--" {
@@ -156,7 +157,7 @@ func splitArgs(tokens []string, s spec) (files []string, seen map[string]bool, p
 				}
 				continue
 			}
-			if slices.Contains(s.emptyValue, tok) && i+1 < len(tokens) && tokens[i+1] == "" {
+			if consumeEmpty && slices.Contains(s.emptyValue, tok) && i+1 < len(tokens) && tokens[i+1] == "" {
 				i += 2
 				continue
 			}
@@ -181,4 +182,22 @@ func splitEq(tok string) (key, value string, ok bool) {
 		}
 	}
 	return tok, "", false
+}
+
+// hasLongOption reports whether args carries opt, or a prefix of it getopt_long
+// would expand, ahead of any `--`. GNU tools permute, so the position among the
+// operands does not matter.
+func hasLongOption(args []string, opt string) bool {
+	if opt == "" {
+		return false
+	}
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if len(a) > 2 && strings.HasPrefix(opt, a) {
+			return true
+		}
+	}
+	return false
 }

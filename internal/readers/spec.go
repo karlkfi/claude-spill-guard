@@ -100,8 +100,10 @@ type spec struct {
 	// `uniq IN OUT` is 1.
 	firstOutput int
 	// emptyValue names the flags that consume the next token only when it is
-	// empty. See the sed row.
-	emptyValue []string
+	// empty, unless emptyValueUnless appears among the options. See the sed
+	// row.
+	emptyValue       []string
+	emptyValueUnless string
 }
 
 // specs is the table. Only readers are here -- see the package comment for
@@ -174,14 +176,17 @@ var specs = map[string]spec{
 	// file, so X carries nothing out under GNU either. Consuming the empty
 	// token gives BSD's reading, which loses nothing GNU's would have sent.
 	// A non-empty token is left alone: as GNU's script it can be
-	// `w /dev/stdout`.
+	// `w /dev/stdout`. So is any token after GNU's --debug, which prints every
+	// input line even under an empty script, wherever it sits before `--` and
+	// abbreviated to as little as `--d` (driven on GNU sed 4.9).
 	"sed": {
-		consume:      map[string]int{"--expression": 1, "--line-length": 1, "-e": 1, "-l": 1},
-		fileFlags:    map[string]flagFiles{"--file": {1, []int{0}}, "-f": {1, []int{0}}},
-		prog:         1,
-		suppressProg: []string{"-e", "--expression", "-f", "--file"},
-		firstOutput:  -1,
-		emptyValue:   []string{"-i", "-I"},
+		consume:          map[string]int{"--expression": 1, "--line-length": 1, "-e": 1, "-l": 1},
+		fileFlags:        map[string]flagFiles{"--file": {1, []int{0}}, "-f": {1, []int{0}}},
+		prog:             1,
+		suppressProg:     []string{"-e", "--expression", "-f", "--file"},
+		firstOutput:      -1,
+		emptyValue:       []string{"-i", "-I"},
+		emptyValueUnless: "--debug",
 	},
 	"sort": {
 		consume:     map[string]int{"--batch-size": 1, "--buffer-size": 1, "--compress-program": 1, "--field-separator": 1, "--key": 1, "--output": 1, "--parallel": 1, "--random-source": 1, "--temporary-directory": 1, "-S": 1, "-T": 1, "-k": 1, "-o": 1, "-t": 1},
