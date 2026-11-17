@@ -7,7 +7,7 @@ go 1.26.5
 require (
 	github.com/golangci/golangci-lint/v2 v2.13.2
 	github.com/rhysd/actionlint v1.7.12
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/vuln v1.8.0
 )
 
