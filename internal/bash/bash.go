@@ -797,7 +797,9 @@ func continuesTime(cur []string, curQF []int, word string, wordQF int) bool {
 
 // trackCase advances the `case` clause states for one word token. The three
 // arms and their order are scanDollarParen's: a clause waiting for its `in`
-// sees nothing else, an `esac` closes the innermost clause that has one, and
+// sees nothing else, an `esac` closes the innermost clause that has one --
+// from an arm's body only in command position, so the `esac` in `echo esac`
+// is an operand there as it is to bash (Q259) -- and
 // `case` opens one only in command position, which is the compound tracker's
 // rather than cmdPosKeywords' -- `{ case`, `! case` and `} then case` are
 // all the keyword (Q217). An unterminated `case` leaves its clause open, so
@@ -813,7 +815,7 @@ func trackCase(clauses *[]string, word string, cmdPos bool) {
 		if word == "in" {
 			(*clauses)[n-1] = "pat"
 		}
-	case n > 0 && word == "esac":
+	case n > 0 && word == "esac" && (cmdPos || state != "body"):
 		*clauses = (*clauses)[:n-1]
 	case word == "case" && cmdPos:
 		*clauses = append(*clauses, "in")

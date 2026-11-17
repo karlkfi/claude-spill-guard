@@ -441,6 +441,32 @@ func TestASubscriptIsKeptWholeInCommandPosition(t *testing.T) {
 	}
 }
 
+// bash 5.3.15 runs a program named `-p` or `--`, then `b]=x`: `time` takes one
+// unquoted `-p`, then one `--`, and nothing after either (Q259, claude-bouncer
+// Q358). Read wider, the subscript stayed one word and the `cat` inside it was
+// never a command. Where the options are `time`'s, the word is an assignment
+// bash refuses and the subscript stays whole.
+func TestATimeOptionOutOfPlaceIsTheCommand(t *testing.T) {
+	for _, in := range []string{
+		"time -- -p FOO[a;b]=x cat f", "time -p -p FOO[a;b]=x cat f",
+		"time -- -- FOO[a;b]=x cat f", "time '-p' FOO[a;b]=x cat f",
+	} {
+		got := tokenize(t, in)
+		if want := []string{"FOO[a", ";", "b]=x", "cat", "f"}; len(got) < 5 ||
+			!equalStrings(got[len(got)-5:], want) {
+			t.Errorf("tokenize(%q) = %q, want it to end %q", in, got, want)
+		}
+	}
+	for _, in := range []string{
+		"time FOO[a;b]=x cat f", "time -p FOO[a;b]=x cat f",
+		"time -- FOO[a;b]=x cat f", "time -p -- FOO[a;b]=x cat f",
+	} {
+		if got := tokenize(t, in); !slices.Contains(got, "FOO[a;b]=x") {
+			t.Errorf("tokenize(%q) = %q, want the subscript whole", in, got)
+		}
+	}
+}
+
 // `$'\”` is one apostrophe to bash (claude-bouncer Q225). Read raw, it closed
 // a single-quoted run at the escaped quote and opened another at the real
 // close, so the line no longer lexed and every reader in the call deferred.

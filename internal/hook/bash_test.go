@@ -2459,6 +2459,104 @@ func TestASubscriptedPrefixIsPeeledAndTheOperandScanned(t *testing.T) {
 	}
 }
 
+// The fail-open Q259 names. `time` takes one unquoted `-p` then one `--`, so a
+// second option, or a quoted one, is the command bash runs, and the
+// subscript after it is an argument: the `;` inside the brackets separates and
+// the `cat` between them prints the file. The lexer read past any number of
+// options and kept the subscript one word, so the call crossed with no verdict
+// and no coverage record. Driven on bash 5.3.15: each of the first four exits
+// 127 and prints the key.
+//
+// The last four are the other direction and must stay allowed and silent: the
+// options are `time`'s, so the word is an assignment, bash says `not a valid
+// identifier`, and the `cat` never runs.
+func TestATimeOptionOutOfPlaceDoesNotHideACommand(t *testing.T) {
+	dir, name := planted(t)
+	sub := "FOO[a;cat " + name + ";b]=x true"
+	for _, command := range []string{
+		"time -- -p " + sub, "time -p -p " + sub, "time -- -- " + sub, "time '-p' " + sub,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, "aws-access-key-id") || !strings.Contains(reason, name) {
+				t.Errorf("reason does not name the rule and the file: %q", reason)
+			}
+		})
+	}
+	for _, command := range []string{
+		"time " + sub, "time -p " + sub, "time -- " + sub, "time -p -- " + sub,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 || stdout != "" || stderr != "" {
+				t.Errorf("= %d, %q, %q; want an allow with no record -- bash opens no file", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+// The same scan's `case` half (Q259, claude-bouncer #322). After `case a in
+// esac`, a clause with no patterns, bash reads a reserved word, so the `then`
+// and the `case` behind it are keywords and the pattern's `)` is the clause's.
+// Read as an operand, the `)` closed the substitution before the `cat`, which
+// crossed with no verdict and no record; driven on bash 5.3.15 it prints the
+// key. The other shapes already denied through another reading and are kept
+// so a change to that reading cannot reopen them.
+func TestACaseAfterACloserIsReadInsideItsSubstitution(t *testing.T) {
+	dir, name := planted(t)
+	arm := "case a in a) cat " + name + ";; esac"
+	for _, command := range []string{
+		"echo $( if case a in esac then " + arm + "; fi )",
+		"echo $( ! " + arm + " )",
+		"echo $( if { :; } then " + arm + "; fi )",
+		"echo $( if case a in a) :;; esac then " + arm + "; fi )",
+		"echo $(case a in a) echo esac x; cat " + name + ";; b) y;; esac)",
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			reason := reasonOf(t, stdout)
+			if !strings.Contains(reason, "aws-access-key-id") || !strings.Contains(reason, name) {
+				t.Errorf("reason does not name the rule and the file: %q", reason)
+			}
+		})
+	}
+}
+
+// The segmenter's copy of the `esac` reading, which is this repo's own code
+// rather than the port. An `esac` operand closed the clause, so the `cd` after
+// it was no longer marked as reached through a match and was followed: the
+// hook scanned sub/k.sh, which is clean, while bash -- whose arm never ran --
+// printed the key in ./k.sh. Driven on bash 5.3.15 and on a binary built at
+// 809a1b0, which allowed it with no record. The control without the operand
+// defers, which is what a `cd` nothing here can settle gets.
+func TestAnEsacOperandDoesNotEndTheArm(t *testing.T) {
+	dir, name := planted(t)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", name), []byte("clean\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{
+		"case b in a) echo esac; cd sub;; esac; cat " + name,
+		"case b in a) echo x; cd sub;; esac; cat " + name,
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 || stdout != "" || !strings.Contains(stderr, "changes directory first") {
+				t.Errorf("= %d, %q, %q; want a deferral recording the cd it cannot follow", code, stdout, stderr)
+			}
+		})
+	}
+}
+
 // The other direction, which is the one a widened scan gets wrong. Each word
 // below is a command name to bash, not a prefix, so the shell never reaches
 // the `cat` behind it and no file is opened -- driven on 5.3.15, where the

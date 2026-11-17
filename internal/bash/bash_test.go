@@ -36,6 +36,13 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 			[]bool{false, true, true, false}},
 		{"an unterminated case keeps marking", "case x in y) P=1; cat f",
 			[]bool{false, true, true}},
+		// An `esac` in an arm's body closes only in command position, as in
+		// scanDollarParen (Q259): bash prints `esac z` for the first. The
+		// second is the control, an arm closed without its `;;`.
+		{"esac as an operand closes nothing", "case x in y) echo esac z; cd a;; esac; cat f",
+			[]bool{false, true, true, false, false}},
+		{"esac after a separator closes the arm", "case x in y) P=1; esac; cat f",
+			[]bool{false, true, false, false}},
 		{"a case with no in marks nothing", "case x; cat f",
 			[]bool{false, false}},
 

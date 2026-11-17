@@ -132,6 +132,11 @@ func scanCasePattern(text string, start int) (int, bool) {
 // an operand -- mistaking one for the keyword would swallow the real close and
 // drop a substitution that reads fine today. A `)` at depth 0 still closes
 // whatever the clause state says, which keeps a missed `esac` costing nothing.
+// `esac` likewise, so `echo esac` in a clause ends no clause. Command position
+// reopens after `!` and `{` and after a closer -- `}`, `fi`, `done`, `esac` --
+// as well as after the words in cmdPosKeywords: missed there, the `case` in
+// `$( ! case a in a) cmd;; esac )` was an operand and its pattern's `)` closed
+// the substitution before `cmd`.
 func scanDollarParen(text string, start int) (string, int, bool) {
 	i, n, depth := start, len(text), 0
 	inSingle, inDouble := false, false
@@ -177,7 +182,7 @@ func scanDollarParen(text string, start int) (string, int, bool) {
 		if len(clauses) > 0 && clauses[len(clauses)-1] == "pat" {
 			if word, end, ok := matchWord(text, i); ok && word == "esac" {
 				clauses = clauses[:len(clauses)-1] // `case $x in esac` -- no clauses
-				cmdPos = false
+				cmdPos = true
 				i = end
 				continue
 			}
@@ -242,13 +247,13 @@ func scanDollarParen(text string, start int) (string, int, bool) {
 					clauses[len(clauses)-1] = "pat"
 				}
 			case word == "esac":
-				if state == "body" {
+				if state == "body" && cmdPos {
 					clauses = clauses[:len(clauses)-1]
 				}
 			case word == "case" && cmdPos:
 				clauses = append(clauses, "in")
 			}
-			cmdPos = cmdPos && cmdPosKeywords[word]
+			cmdPos = cmdPos && (cmdPosKeywords[word] || closeKeywords[word])
 			i = end
 			continue
 		}
@@ -285,7 +290,9 @@ func scanDollarParen(text string, start int) (string, int, bool) {
 			cmdPos = false
 			continue
 		}
-		cmdPos = c == '&' || c == '|' || c == '{'
+		// only standing alone in command position: `echo {` and `!case` are words
+		alone := i+1 >= n || text[i+1] == ' ' || text[i+1] == '\t' || text[i+1] == '\n'
+		cmdPos = c == '&' || c == '|' || (cmdPos && strings.IndexByte(punctKeywords, c) >= 0 && alone)
 		i++
 	}
 	return "", start, false

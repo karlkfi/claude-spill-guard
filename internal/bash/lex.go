@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -378,6 +379,11 @@ var cmdPosKeywords = map[string]bool{
 	"while": true, "until": true, "do": true, "time": true,
 }
 
+// Closers, after which bash still reads a reserved word: `fi then case ...`.
+var closeKeywords = map[string]bool{"fi": true, "done": true, "esac": true}
+
+const punctKeywords = "!{}"
+
 // assignPosKeywords is that set for the lexer deciding whether an assignment
 // word can follow: `! FOO[a b]=x cat f` and `{ FOO[a b]=x cat f; }` both peel.
 var assignPosKeywords = map[string]bool{
@@ -625,11 +631,12 @@ type lexer struct {
 	pushback []byte
 	// Upstream's command-position tracking (its Q217): whether an assignment
 	// word may stand next, whether the next word is a redirect's target,
-	// the open `(` and `case` constructs, and whether a `time` just ran.
+	// the open `(` and `case` constructs, and the options a `time` before the
+	// next word still accepts.
 	cmdPos      bool
 	redirTarget bool
 	frames      []lexFrame
-	afterTime   bool
+	afterTime   []string
 }
 
 // A lexFrame is an open `(`, holding the command position to restore at its
@@ -761,7 +768,7 @@ func (l *lexer) trackCmdPos(tok string, quotedFrom int, glued bool) {
 		} else if strings.ContainsAny(tok, "<>") && !strings.Contains(tok, "(") {
 			l.redirTarget = true
 		}
-		l.afterTime = false
+		l.afterTime = nil
 		return
 	}
 	if l.redirTarget {
@@ -771,7 +778,12 @@ func (l *lexer) trackCmdPos(tok string, quotedFrom int, glued bool) {
 	if isDigits(tok) && glued { // the fd of `2>f`
 		return
 	}
-	if l.afterTime && (tok == "-p" || tok == "--") { // `time -p FOO[a;b]=x cmd`
+	if slices.Contains(l.afterTime, tok) && quotedFrom == NotQuoted { // `time -p -- FOO[a;b]=x cmd`
+		if tok == "-p" {
+			l.afterTime = []string{"--"}
+		} else {
+			l.afterTime = nil
+		}
 		return
 	}
 	reserved := isReservedWord(tok, quotedFrom)
@@ -787,7 +799,10 @@ func (l *lexer) trackCmdPos(tok string, quotedFrom int, glued bool) {
 			return
 		}
 	}
-	l.afterTime = l.cmdPos && tok == "time" && reserved
+	l.afterTime = nil
+	if l.cmdPos && tok == "time" && reserved {
+		l.afterTime = []string{"-p", "--"}
+	}
 	l.cmdPos = l.cmdPos && (isAssignment(tok, quotedFrom) || reserved && assignPosKeywords[tok])
 }
 

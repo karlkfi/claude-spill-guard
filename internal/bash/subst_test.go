@@ -93,6 +93,52 @@ func TestCaseClauseDoesNotCloseSubstitution(t *testing.T) {
 	}
 }
 
+// `!`, `{` and a closer -- `}`, `fi`, `done`, `esac` -- leave bash reading a
+// reserved word, so a `case` after one is the keyword and its pattern's `)` is
+// the clause's (Q259, claude-bouncer #322). Each body below prints `in` under
+// bash 5.3. Read as an operand, `case` let that `)` close the substitution.
+func TestABangBraceOrCloserReopensCommandPosition(t *testing.T) {
+	clause := "case a in a) echo in;; esac"
+	for _, body := range []string{
+		" ! " + clause + " ",
+		" time ! ! " + clause + " ",
+		"{ " + clause + "; }",
+		" if { :; } then " + clause + "; fi ",
+		" if if :; then :; fi then " + clause + "; fi ",
+		" if while false; do :; done then " + clause + "; fi ",
+		" if case a in esac then " + clause + "; fi ",
+		" if case a in a) :;; esac then " + clause + "; fi ",
+	} {
+		in := "echo $(" + body + ") T"
+		if got := CommandSubstitutions(in, true); !equalStrings(got, []string{body}) {
+			t.Errorf("CommandSubstitutions(%q) = %q, want [%q]", in, got, body)
+		}
+	}
+}
+
+// The same words as operands open nothing: bash ends each at the pattern's `)`,
+// so `x` is an argument to it.
+func TestABangBraceOrCloserAsAnOperandOpensNothing(t *testing.T) {
+	for _, body := range []string{
+		" echo ! case a in a", "!case a in a", " echo { case a in a",
+		" echo } case a in a", " echo fi case a in a", " echo done case a in a",
+	} {
+		in := "echo $(" + body + ") x"
+		if got := CommandSubstitutions(in, true); !equalStrings(got, []string{body}) {
+			t.Errorf("CommandSubstitutions(%q) = %q, want [%q]", in, got, body)
+		}
+	}
+}
+
+// bash prints `esac x`, so the `b)` is a pattern, not the close.
+func TestEsacAsAnOperandEndsNoClause(t *testing.T) {
+	body := "case a in a) echo esac x;; b) y;; esac"
+	in := "echo $(" + body + ")"
+	if got := CommandSubstitutions(in, true); !equalStrings(got, []string{body}) {
+		t.Errorf("CommandSubstitutions(%q) = %q, want [%q]", in, got, body)
+	}
+}
+
 // A heredoc body inside a `$(…)` is data, so the scan steps over it (Q109).
 //
 // Read as shell syntax, an apostrophe in the body opened a single-quoted run
