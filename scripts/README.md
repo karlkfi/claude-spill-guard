@@ -77,8 +77,8 @@ file at the commit named below.
 
 | Here | Upstream path | Taken from | sha256 |
 |---|---|---|---|
-| [`queue.py`](vendor/claude-skills/queue.py) | `session-backlog/scripts/queue.py` | `f1fae51`, 2026-10-19 | `064f57c95bf39c41` |
-| [`alloc-queue-id.sh`](vendor/claude-skills/alloc-queue-id.sh) | `session-backlog/scripts/alloc-queue-id.sh` | `f1fae51`, 2026-10-19 | `be7bda85037a7aa3` |
+| [`queue.py`](vendor/claude-skills/queue.py) | `session-backlog/scripts/queue.py` | `97d70d8`, 2026-11-10 | `a9dddbc014635e8a` |
+| [`alloc-queue-id.sh`](vendor/claude-skills/alloc-queue-id.sh) | `session-backlog/scripts/alloc-queue-id.sh` | `1fe3798`, 2026-11-05 | `19c8cdc7df2a861e` |
 
 The digests are the first 16 hex characters of `shasum -a 256`, which
 reproduces them in one command:
@@ -111,10 +111,8 @@ shasum -a 256 scripts/vendor/claude-skills/queue.py
 The `log` line prints the value for the "Taken from" column, from the same
 revision the bytes came from, so neither half is typed by hand. It names the
 last commit that touched that file, which is why `queue.py` and
-`alloc-queue-id.sh` can carry different commits. The two rows above were
-written before this block existed and name the upstream tip each file was read
-at (`f1fae51`, which touched neither), so the column changes meaning at the next
-re-vendor. The `>` truncates the existing
+`alloc-queue-id.sh` can carry different commits. Both rows above were taken
+this way, from upstream `5eb02c2`. The `>` truncates the existing
 file rather than recreating it, so the `100755` mode in the index survives.
 
 ### The table above is what `make vendor` reads

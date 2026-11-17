@@ -32,7 +32,8 @@
 #
 #   --remote  remote holding the claims (default: origin)
 #   --store   per-item store to read the local floor from (default: docs/queue)
-#   --table   legacy STATUS.md to read the local floor from instead
+#   --table   legacy table to read the local floor from, on disk or in history
+#             (default: docs/STATUS.md). Both are always read.
 set -euo pipefail
 
 REF_NS='refs/queue-ids'
@@ -69,22 +70,26 @@ done
 [[ ${#titles[@]} -gt 0 ]] || die "give one title per ID; see --help"
 
 root="$(git rev-parse --show-toplevel)" || die "not in a git repository"
-[[ -n "$store" || -n "$table" ]] || store="$root/docs/queue"
+store="${store:-$root/docs/queue}"
+table="${table:-$root/docs/STATUS.md}"
 
 # The floor is the highest ID anyone has ever taken, from three sources that
 # each under-report on their own: the remote's claims miss IDs filed before the
 # namespace existed, the working tree misses every completed item, and history
 # misses IDs claimed but not yet filed.
+#
+# The table is read whichever layout is in use, because a store migrated from
+# one holds only the rows that were still open, and once the migration merges
+# the file is gone and only its history remembers the rest. --follow reaches
+# rows removed before a rename and rows filed and completed on a merged branch.
+# Any QN counts, not only a row's: a prose mention or the `**Next ID:**` counter
+# raising the floor just leaves a gap, which is harmless.
 highest_local() {
 	{
-		if [[ -n "$store" ]]; then
-			git -C "$root" log --diff-filter=A --name-only --pretty=format: -- "$store" 2>/dev/null || true
-			ls "$store" 2>/dev/null || true
-		fi
-		if [[ -n "$table" ]]; then
-			git -C "$root" log -p --pretty=format: -- "$table" 2>/dev/null || true
-			cat "$table" 2>/dev/null || true
-		fi
+		git -C "$root" log --diff-filter=A --name-only --pretty=format: -- "$store" 2>/dev/null || true
+		ls "$store" 2>/dev/null || true
+		git -C "$root" log -p --follow --pretty=format: -- "$table" 2>/dev/null || true
+		cat "$table" 2>/dev/null || true
 	} | grep -oE '\bQ[0-9]+\b' | grep -oE '[0-9]+' | sort -n | tail -1
 }
 
@@ -98,7 +103,7 @@ highest_claimed() {
 # a re-file, and refusing here would put a judgement call in a script.
 warn_near_duplicate() {
 	local title="$1" existing
-	existing="$( { [[ -n "$store" ]] && grep -h '^# ' "$store"/Q*.md 2>/dev/null; } || true)"
+	existing="$(grep -h '^# ' "$store"/Q*.md 2>/dev/null || true)"
 	[[ -n "$existing" ]] || return 0
 	local key
 	key="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]' '\n' |
@@ -133,6 +138,13 @@ claim() {
 	last_err="$(git -C "$root" push --force-with-lease="$ref:" --quiet \
 		"$remote" "${blob}:${ref}" 2>&1 >/dev/null)"
 }
+
+# Truncated history under-reads the floor and looks exactly like a clean read.
+# Warned rather than refused, because a claim above the old maximum makes the
+# answer correct anyway and nothing here can tell whether one does.
+if [[ "$(git -C "$root" rev-parse --is-shallow-repository)" == true ]]; then
+	printf 'alloc-queue-id: shallow clone: IDs older than the graft point cannot raise the floor, so a spent ID may be issued; run git fetch --unshallow first\n' >&2
+fi
 
 floor_local="$(highest_local || true)"
 floor_claimed="$(highest_claimed || true)"

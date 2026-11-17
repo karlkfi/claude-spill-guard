@@ -146,6 +146,11 @@ EXHIBIT_PREFIX = "exhibit:"
 _CITED_PATH = r"[\w./-]+"
 _CITED_EXT = re.compile(r"\.(?:go|py|sh|md|ya?ml|json|ts|js|rs|java)$")
 _CITED_FRAGMENT = r"[ \t]*\S[^`\n]*"
+# `path.py:N` written in prose to mean "a path, a colon, a line number" is the
+# numberless arm's shape with a fragment of one capital letter. A real fragment
+# that short pins nothing either, so it is dropped as a placeholder rather than
+# reported as a citation whose text the file no longer carries.
+_PLACEHOLDER_FRAGMENT = re.compile(r"[A-Z]\Z")
 CITATION_RE = re.compile(
     rf"(?<![\w./-])({_CITED_PATH}):(\d+)(?::({_CITED_FRAGMENT})(?=`))?"
     rf"|(?:(?<=`)|(?<=`{EXHIBIT_PREFIX}))({_CITED_PATH}):"
@@ -203,7 +208,10 @@ def split_citations(notes, store):
     checked, marked = [], []
     pos = 0
     while m := CITATION_RE.search(notes, pos):
-        path = citation_fields(m)[0]
+        path, line, fragment = citation_fields(m)
+        if line is None and _PLACEHOLDER_FRAGMENT.match(fragment):
+            pos = m.end()
+            continue
         if not (_CITED_EXT.search(path) or cited_file(store, path)):
             pos = m.start() + 1
             continue
@@ -1404,6 +1412,8 @@ def _label_flow(root, rel, sha):
 #      network round trip behind every one of those calls.
 
 REF_NS = "refs/queue-ids"
+# Read from the repo root, deleted or not: a migrated store's earlier ids live here.
+TABLE_REL = "docs/STATUS.md"
 
 # git gets a deadline because the failure here is a hang rather than an error:
 # an ssh remote that is not there sits in connect() for minutes, and an https
@@ -1509,7 +1519,35 @@ def _shipped_ids(rev, rel, root):
             # deletion commits is reported at the one a reader saw last.
             if ID_RE.match(stem):
                 found.setdefault(stem, head.strip())
+    for item_id, head in _table_removed_ids(rev, root).items():
+        found.setdefault(item_id, head)
     return found, None
+
+
+def _table_ids_at(rev, root):
+    """The ids holding a row in the legacy table at rev; none if it has no table."""
+    out, _ = _git_read(["show", f"{rev}:{TABLE_REL}"], root)
+    return {i for i in map(_row_id, out.split("\n")) if i}
+
+
+def _table_removed_ids(rev, root):
+    """{id: "<sha> <subject>"} for rows rev's table history removed.
+
+    A table row left no item file for `_shipped_ids` to see deleted. A reworded
+    row or one the migration carried into a file reads here as removed too, and
+    `cmd_claims` never asks about either, because rows in the table or the store
+    at the base are not added ids.
+    """
+    out, _ = _git_read(["log", "-p", "--follow", f"--format={LOG_FORMAT}", rev,
+                        "--", TABLE_REL], root)
+    found = {}
+    for chunk in out.split(LOG_MARK)[1:]:
+        head, _, patch = chunk.partition("\n")
+        for line in patch.split("\n"):
+            item_id = _row_id(line[1:]) if line.startswith("-|") else None
+            if item_id:
+                found.setdefault(item_id, head.strip())
+    return found
 
 
 def _coverage_at(store, base_ref):
@@ -1625,6 +1663,9 @@ def cmd_claims(args):
     before = _ids_at(base, rel, root)
     if before is None:
         return disclose(f"cannot read {rel} at {base[:12]}")
+    # A row in the table at the base is an id this branch moved, not one it
+    # filed, and a migration moves every open row at once with no claim on any.
+    before |= _table_ids_at(base, root)
     # The working tree rather than HEAD: the gate runs over a row that has been
     # written and not yet committed, which is when a hand-picked ID is cheapest
     # to fix — and it is the same reason the Makefile's file lists carry
@@ -1730,6 +1771,17 @@ def _row_cells(line):
     return out
 
 
+def _row_id(line):
+    """The id a table row carries in its first column, or None for any other line."""
+    if not line.startswith("|"):
+        return None
+    cells = _row_cells(line)
+    if len(cells) < 4:
+        return None
+    raw_id = re.sub(r"<[^>]*>", "", cells[1]).strip()
+    return raw_id if ID_RE.match(raw_id) else None
+
+
 def rebase_link(target):
     """Rewrite a link written relative to `docs/` for a file in `docs/queue/`.
 
@@ -1781,14 +1833,10 @@ def cmd_migrate(args):
             head = line[3:].strip().lower()
             section = head if head in ("queue", "deferred") else None
             continue
-        if not section or not line.startswith("|"):
+        raw_id = _row_id(line) if section else None
+        if not raw_id:
             continue
         cells = _row_cells(line)
-        if len(cells) < 4:
-            continue
-        raw_id = re.sub(r"<[^>]*>", "", cells[1]).strip()
-        if not ID_RE.match(raw_id):
-            continue
         # The status test below asks only whether the cell holds 🚫, so the
         # pre-counter format's ✅/▶/💤 all fall through to `ready` and put
         # shipped work back in the backlog. Unambiguous, too: the Deferred
@@ -1987,7 +2035,12 @@ def main(argv=None):
 
     args = p.parse_args(argv)
     try:
-        return args.fn(args)
+        rc = args.fn(args)
+        # Output smaller than stdout's buffer is never written until this
+        # flush, so without it a closed pipe raises at interpreter exit,
+        # outside the handler below.
+        sys.stdout.flush()
+        return rc
     except ValueError as e:
         # The rank algebra refuses a malformed key by raising, and `rank` is the
         # subcommand run by hand: a typo'd neighbour is an argument error, not a
