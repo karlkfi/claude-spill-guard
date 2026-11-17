@@ -43,6 +43,13 @@ func TestSegmentsMarksACaseArm(t *testing.T) {
 			[]bool{false, true, true, false, false}},
 		{"esac after a separator closes the arm", "case x in y) P=1; esac; cat f",
 			[]bool{false, true, false, false}},
+		// Quoted, it is no keyword at all, in a body or as a pattern.
+		{"a quoted esac closes nothing", "case x in y) 'esac' z; cd a;; esac; cat f",
+			[]bool{false, true, true, false, false}},
+		{"an escaped esac closes nothing", `case x in y) e\sac z; cd a;; esac; cat f`,
+			[]bool{false, true, true, false, false}},
+		{"a quoted esac is a pattern", "case x in y) :;; 'esac') cd a;; esac; cat f",
+			[]bool{false, true, true, true, false, false}},
 		{"a case with no in marks nothing", "case x; cat f",
 			[]bool{false, false}},
 

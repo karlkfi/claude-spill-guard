@@ -2535,7 +2535,10 @@ func TestACaseAfterACloserIsReadInsideItsSubstitution(t *testing.T) {
 // hook scanned sub/k.sh, which is clean, while bash -- whose arm never ran --
 // printed the key in ./k.sh. Driven on bash 5.3.15 and on a binary built at
 // 809a1b0, which allowed it with no record. The control without the operand
-// defers, which is what a `cd` nothing here can settle gets.
+// defers, which is what a `cd` nothing here can settle gets. A quoted `esac` is
+// no keyword either, in a body or as a pattern; the last row was allowed
+// before only because its quoted pattern closed the clause, so the `cd` was
+// followed into the arm bash happened to take.
 func TestAnEsacOperandDoesNotEndTheArm(t *testing.T) {
 	dir, name := planted(t)
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
@@ -2547,6 +2550,11 @@ func TestAnEsacOperandDoesNotEndTheArm(t *testing.T) {
 	for _, command := range []string{
 		"case b in a) echo esac; cd sub;; esac; cat " + name,
 		"case b in a) echo x; cd sub;; esac; cat " + name,
+		"case b in a) 'esac'; cd sub;; esac; cat " + name,
+		`case b in a) e\sac; cd sub;; esac; cat ` + name,
+		`case b in a) "esac" x; cd sub;; esac; cat ` + name,
+		"case b in a) :;; 'esac') cd sub;; esac; cat " + name,
+		"case esac in 'esac') cd sub;; esac; cat " + name,
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := drive(t, bashCall(t, command, dir))
@@ -2554,6 +2562,27 @@ func TestAnEsacOperandDoesNotEndTheArm(t *testing.T) {
 				t.Errorf("= %d, %q, %q; want a deferral recording the cd it cannot follow", code, stdout, stderr)
 			}
 		})
+	}
+}
+
+// A quoted `case` is a command name, so it opens no clause and the subshell's
+// `)` is the subshell's. Read as the keyword, that `)` ended a pattern, the
+// `cd` after it was marked as reached through a match, and the call deferred
+// where bash 5.3.15 prints the key in sub/.
+func TestAQuotedCaseOpensNoClause(t *testing.T) {
+	dir, name := planted(t)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, "sub", name)); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := drive(t, bashCall(t, "( 'case' a in b); cd sub; cat "+name, dir))
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, filepath.Join("sub", name)) {
+		t.Errorf("reason does not name sub/%s: %q", name, reason)
 	}
 }
 
