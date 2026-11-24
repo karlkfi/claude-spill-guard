@@ -2137,10 +2137,9 @@ bytes and the file's marker appears twice; with `{"decision":"block"}` it is
 working encodings suppress the splice and not merely the prompt, and the
 recommended one suppresses neither.
 
-**On exit 2 the reason travels on stderr, and stdout is discarded.** A hook that
-writes `spill-guard: blocked ...` to stdout and exits 2 stops the call and tells
-the model nothing about why. The `deny` object has no such trap, and no
-`PreToolUse:Bash hook error: [<path>]:` prefix wrapped around its reason.
+**On exit 2 the reason travels on stderr, and stdout is discarded.**
+A hook that writes `spill-guard: blocked ...` to stdout and exits 2 stops the call and tells the model nothing about why.
+The `deny` object has no such trap, and no `PreToolUse:Bash hook error: [<path>]:` prefix wrapped around its reason.
 
 ### The block encoding is per event, and the wrong one fails open
 
@@ -3543,7 +3542,7 @@ no reader would have called one.
 
 An array subscript disarms it too, and for the other reason. `FOO[0]=x cmd` is
 a prefix bash peels, so Q175 taught the scan to peel it -- and bash exports
-nothing from it, reporting `FOO[0]: not a valid identifier` and leaving the
+nothing from it, reporting that `FOO[0]` is `not a valid identifier` and leaving the
 name alone, driven on 5.3.15. So the word is a prefix and arms no variable, and
 `SPILL_GUARD_OVERRIDE[0]=r` has to be read that way at both sites rather than
 one: peeled, so the reader behind it is found, and refused, so the hatch is

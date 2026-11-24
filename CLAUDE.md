@@ -332,7 +332,7 @@ asks `SplitAssignment` and needs no other split.
 `[`, so `FOO[0]=x cat <key>` took the command head and the file crossed with no
 verdict and no coverage record -- the same silence the `+=` spelling had. Bash
 peels it and runs the command behind it, driven on 5.3.15: `FOO[0]=x cat f`
-prints f, warns `FOO[0]: not a valid identifier`, and leaves `FOO` untouched.
+prints f, warns that `FOO[0]` is `not a valid identifier`, and leaves `FOO` untouched.
 The brackets are counted by depth rather than matched by a regex, because
 `FOO[a[0]]=x` is one subscript and `FOO[a]b]=x` is a command name that opens no
 file. Three consequences do not share an answer, which is why `SplitAssignment`
@@ -812,7 +812,7 @@ was invisible to `make check` over the same tree:
   4.4+, so an errexit prologue that demands it kills the script on a fresh Mac
   — the prologue meant to harden `scripts/check-tools.sh` was what broke it.
   Ask for the option and carry on without it.
-- **GNU make 4.x prints `make[1]: Entering directory` on stdout** when
+- **GNU make 4.x prints `make[1]`'s `Entering directory` banner on stdout** when
   `MAKELEVEL` says sub-make; 3.81 never prints it. Anything parsing `make`
   output needs `--no-print-directory`, a stripped `MAKELEVEL`/`MAKEFLAGS` in
   the child env, and a parse that refuses an unrecognised line by name rather

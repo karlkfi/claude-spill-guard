@@ -26,16 +26,12 @@ different exit code on it. exit-status-guard shipped the same class of bug in
 guard never fired once. Both 126 and 127 were driven end to end here, and neither
 puts anything in the transcript.
 
-So `hooks.json` invokes a launcher, and the launcher's job when it cannot find a
-binary is to **deny** — naming the install command for the platform it is on.
-Missing binary is a blocking condition, not a quiet one. Spell it as a `deny`
-decision object on **stdout**. That blocks whatever the launcher then exits with
-— measured on 0, 1, 9 and 127 — so a launcher that writes its deny and then dies
-still blocks, which no other spelling gives you. The alternative, exit 2 with the
-reason on **stderr**, works but reaches the model wrapped in
-`PreToolUse:<tool> hook error: [<path>]:`. Writing the reason to stdout and
-exiting 2 is the one combination that blocks and explains nothing: stdout is
-discarded on exit 2.
+So `hooks.json` invokes a launcher, and the launcher's job when it cannot find a binary is to **deny** — naming the install command for the platform it is on.
+Missing binary is a blocking condition, not a quiet one.
+Spell it as a `deny` decision object on **stdout**.
+That blocks whatever the launcher then exits with — measured on 0, 1, 9 and 127 — so a launcher that writes its deny and then dies still blocks, which no other spelling gives you.
+The alternative, exit 2 with the reason on **stderr**, works but reaches the model wrapped in `PreToolUse:<tool> hook error: [<path>]:`.
+Writing the reason to stdout and exiting 2 is the one combination that blocks and explains nothing: stdout is discarded on exit 2.
 
 Resolution order:
 
