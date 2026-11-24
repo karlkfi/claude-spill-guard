@@ -15,10 +15,10 @@
 # in .github/workflows/tests.yml.
 #
 # The pinned linters are deliberately NOT in the list. golangci-lint,
-# govulncheck, actionlint and mdreflow are versioned in tools/go.mod and run through
-# a build from `tools/` (see tools/tools.go), so a contributor never installs
-# them and their absence from PATH is correct rather than a finding. Go is what
-# they need.
+# govulncheck, actionlint and mdreflow are versioned in tools/go.mod and run
+# through a build from `tools/` (see tools/tools.go), so a contributor never
+# installs them and their absence from PATH is correct rather than a finding.
+# Go is what they need.
 #
 # Two tiers, and the split is the whole design:
 #
