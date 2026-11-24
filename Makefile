@@ -12,7 +12,7 @@
 
 PYTHON ?= python3
 
-GATES := doctor gate-drift job-drift status-drift privacy-drift hooks-check launcher filter-rewrite script-modes vendor docs release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
+GATES := doctor gate-drift job-drift status-drift privacy-drift hooks-check launcher filter-rewrite script-modes vendor docs md-reflow-check release-claims release-scope release-notes channel-claims plugin-version queue action-pins test precision self-scan no-deps no-network vulns cross-compile
 
 doctor.desc         := scripts/check-tools.sh runs, and every required tool is present
 gate-drift.desc     := the gate list, the CI job list and the table in CLAUDE.md still agree
@@ -25,6 +25,7 @@ filter-rewrite.desc := the command a recursive-grep refusal names runs under bas
 script-modes.desc   := a shebang and the executable bit travel together, in the index, both ways
 vendor.desc         := every vendored copy still hashes to the digest scripts/README.md declares
 docs.desc           := every relative link in the repo markdown resolves
+md-reflow-check.desc := every Markdown file outside the named exclusions is one sentence per source line
 release-claims.desc := the prose holds whether or not a release exists, and the state is readable
 release-scope.desc  := no release-scope record survives the release it was written for
 release-notes.desc  := every published release body is still the notes file it came from
@@ -82,7 +83,7 @@ MERGED ?= false
 queue_strict = $(QUEUE_STRICT) $(if $(filter true,$(MERGED)),$(QUEUE_STRICT_MERGED))
 
 .DEFAULT_GOAL := help
-.PHONY: help check list-gates print-gates gates status privacy hooks $(GATES)
+.PHONY: help check list-gates print-gates gates status privacy md-reflow hooks $(GATES)
 
 help:
 	@printf 'spill-guard\n\n'
@@ -92,6 +93,7 @@ help:
 	@printf '  make gates        refresh the generated gate table in CLAUDE.md\n'
 	@printf '  make status       refresh the generated status table in README.md\n'
 	@printf '  make privacy      refresh the generated read/write block in PRIVACY.md\n'
+	@printf '  make md-reflow    reflow the Markdown to one sentence per line\n'
 	@printf '  make hooks        install the pre-commit hook (git core.hooksPath)\n'
 	@printf '  make doctor       report which required tools are missing, and how to get them\n\n'
 	@$(MAKE) --no-print-directory list-gates
@@ -115,8 +117,8 @@ check:
 	exit "$$rc"
 
 list-gates:
-	@printf '%-14s %s\n' 'GATE' 'WHAT IT COVERS'
-	@$(foreach g,$(GATES),printf '%-14s %s\n' $(call sq,$(g)) $(call sq,$($(g).desc));)
+	@printf '%-15s %s\n' 'GATE' 'WHAT IT COVERS'
+	@$(foreach g,$(GATES),printf '%-15s %s\n' $(call sq,$(g)) $(call sq,$($(g).desc));)
 
 # Tab-separated, for scripts/gates.py. Asking make rather than parsing the
 # Makefile keeps one parser: make's own.
@@ -137,6 +139,11 @@ status:
 # again: this rewrites, `privacy-drift` asserts.
 privacy:
 	$(PYTHON) scripts/check-privacy.py
+
+# Never place a line break in prose by hand: write the paragraph and run this.
+# `md-reflow-check` asserts it, by the same split as the three above.
+md-reflow:
+	$(PYTHON) scripts/check-md-reflow.py
 
 # Tracked hooks, so the store gates run before a commit rather than at review.
 # --no-verify skips them; a hook is a fast local echo of CI, not a second
@@ -200,6 +207,9 @@ vendor:
 
 docs:
 	$(PYTHON) scripts/check-doc-links.py
+
+md-reflow-check:
+	$(PYTHON) scripts/check-md-reflow.py --check
 
 # The second gate whose oracle is off this machine. `gh release list` is the
 # only reader that sees a draft, and a draft publishes no assets, so a tag

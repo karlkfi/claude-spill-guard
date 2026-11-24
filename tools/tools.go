@@ -22,7 +22,7 @@
 //
 // Build first rather than `go run`, which reports any non-zero exit from its
 // child as 1: govulncheck's 3 (a vulnerability was found) arrives as the tool
-// failing. All three build as of this pin; a new one is worth a
+// failing. All four build as of this pin; a new one is worth a
 // `go -C tools build -o /dev/null <path>` before a doc says it runs.
 //
 // The pattern is the Go wiki's: https://go.dev/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
@@ -30,6 +30,7 @@ package tools
 
 import (
 	_ "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"
+	_ "github.com/jbeda/mdreflow/cmd/mdreflow"
 	_ "github.com/rhysd/actionlint/cmd/actionlint"
 	_ "golang.org/x/vuln/cmd/govulncheck"
 )
