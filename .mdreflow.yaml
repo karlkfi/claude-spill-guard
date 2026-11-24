@@ -14,5 +14,7 @@ exclude:
   - "/docs/releases/v*.md"
   # The precision corpus, read for match counts and byte offsets. A directory
   # takes `/**`: a trailing slash alone does not match a file named on the
-  # command line, which is how scripts/check-md-reflow.py names them.
-  - "/testdata/corpus/*/**"
+  # command line, which is how scripts/check-md-reflow.py names them. And
+  # `/*/**` matches the page beside the directories too, so it is let back in.
+  - "/testdata/corpus/**"
+  - "!/testdata/corpus/README.md"

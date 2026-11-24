@@ -2083,7 +2083,7 @@ jobs:
       # struck in turn and has to redden the gate on a file it was holding back.
       - name: Every exclusion must be holding a file back
         run: |
-          if [ "$(grep -c '^  - ' .mdreflow.yaml)" -ne 2 ]; then
+          if [ "$(grep -c '^  - "/' .mdreflow.yaml)" -ne 2 ]; then
             cat .mdreflow.yaml
             echo "::error::the exclusions are not the two this step knows" >&2
             exit 1
@@ -2110,6 +2110,24 @@ jobs:
               exit 1
             fi
           done
+
+      # The other direction: an exclusion can hold back a file nobody meant.
+      # `/testdata/corpus/*/**` did, and the gate passed over this page.
+      - name: The corpus README must be in scope
+        run: |
+          printf '\nPlanted by the mutation\ncontrol.\n' >> testdata/corpus/README.md
+          make md-reflow-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- testdata/corpus/README.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::md-reflow-check passed with a wrapped paragraph in testdata/corpus/README.md" >&2
+            exit 1
+          fi
+          if ! grep -qx 'would reformat testdata/corpus/README.md' mutant.log; then
+            echo "::error::md-reflow-check failed, but not on the corpus README" >&2
+            exit 1
+          fi
 
       - name: A config that excludes everything must fail the gate
         run: |
