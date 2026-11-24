@@ -122,10 +122,9 @@ def prose_files():
 def sentences(path):
     """Every sentence in a file, with the line its paragraph starts on.
 
-    Paragraphs are flattened first because the prose here hard-wraps at 79
-    columns, so a claim is split across lines far more often than not. No fence
-    handling: both lexicons need an English aspect marker beside a release
-    referent, which no command line in this tree carries.
+    Paragraphs are flattened first, so a claim wrapped across lines is still
+    one sentence. No fence handling: both lexicons need an English aspect marker
+    beside a release referent, which no command line in this tree carries.
     """
     text = (ROOT / path).read_text(encoding="utf-8")
     for para in re.finditer(r"[^\n]+(?:\n[^\n]+)*", text):

@@ -1,18 +1,14 @@
 # spill-guard
 
-**A Claude Code hook that blocks secrets and US Social Security numbers before a
-call sends them to the API.**
+**A Claude Code hook that blocks secrets and US Social Security numbers before a call sends them to the API.**
 
 [![tests](https://img.shields.io/github/actions/workflow/status/karlkfi/claude-spill-guard/tests.yml?branch=main&label=tests)](https://github.com/karlkfi/claude-spill-guard/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/github/license/karlkfi/claude-spill-guard.svg)](LICENSE) [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-7e57c2)](#install)
 
-> `cat .env` is one keystroke, and the file is in the transcript before anyone
-> reads a line of it.
+> `cat .env` is one keystroke, and the file is in the transcript before anyone reads a line of it.
 
-Claude Code sends what it reads to the API, and there is no undo. Git secret
-scanners do not help, because a file read into a session is never committed.
-spill-guard runs before the call and stops it there. It is a net for the
-accident rather than a wall, and [what it does not catch](#what-it-does-not-catch)
-is worth reading before you rely on it.
+Claude Code sends what it reads to the API, and there is no undo.
+Git secret scanners do not help, because a file read into a session is never committed. spill-guard runs before the call and stops it there.
+It is a net for the accident rather than a wall, and [what it does not catch](#what-it-does-not-catch) is worth reading before you rely on it.
 
 ## What it blocks
 
@@ -26,15 +22,13 @@ is worth reading before you rely on it.
 | `grep -r password .` | Blocked, offering the same command with the output scanned |
 | `cat go.mod` | Allowed, and nothing is said |
 
-The other four are `~/.netrc`, `~/.git-credentials`, `~/.docker/config.json` and
-`~/.kube/config`. The path refusals exist because most of what those files hold
-matches no rule.
-No rule recognises an AWS secret access key, a netrc password or a
-base64 registry auth, so a clean scan of one of those files would report a safety
-the scan is not providing.
+The other four are `~/.netrc`, `~/.git-credentials`, `~/.docker/config.json` and `~/.kube/config`.
+The path refusals exist because most of what those files hold matches no rule.
+No rule recognises an AWS secret access key, a netrc password or a base64 registry auth, so a clean scan of one of those files would report a safety the scan is not providing.
 
-This is what comes back. The line breaks are added and the path is shortened. The
-rest is verbatim.
+This is what comes back.
+The line breaks are added and the path is shortened.
+The rest is verbatim.
 
 ```text
 > cat deploy.log
@@ -58,25 +52,20 @@ so read this as a net for the accident rather than as a claim that the path is
 guarded.
 ```
 
-On a tool call Claude gets the refusal in place of the result, so the way
-forward lands where the command gets rewritten.
+On a tool call Claude gets the refusal in place of the result, so the way forward lands where the command gets rewritten.
 
-It matches AWS key IDs, GitHub tokens of both kinds, Slack tokens and webhooks,
-Stripe live keys, OpenAI, Anthropic and Google API keys, Anthropic OAuth and
-session tokens, PEM private keys and JWTs. It also matches US Social Security
-numbers, in one narrow form: written `###-##-####`, with `ssn` or
-`social security` within 64 bytes before, in any case and spelled with a space,
-hyphen, underscore or nothing. Nine bare digits do not match, neither does a label
-after the number, and neither do the shapes SSA never assigns or its best-known
-examples. How many real numbers that finds is unmeasured. Payment cards,
-Chinese resident IDs and public IPv4 addresses ship disabled.
+It matches AWS key IDs, GitHub tokens of both kinds, Slack tokens and webhooks, Stripe live keys, OpenAI, Anthropic and Google API keys, Anthropic OAuth and session tokens, PEM private keys and JWTs.
+It also matches US Social Security numbers, in one narrow form: written `###-##-####`, with `ssn` or `social security` within 64 bytes before, in any case and spelled with a space, hyphen, underscore or nothing.
+Nine bare digits do not match, neither does a label after the number, and neither do the shapes SSA never assigns or its best-known examples.
+How many real numbers that finds is unmeasured.
+Payment cards, Chinese resident IDs and public IPv4 addresses ship disabled.
 [`rules/README.md`](rules/README.md) has what keeps each one quiet.
 
 ## Install
 
-Two halves. The binary does the reading, and the plugin tells Claude Code which
-calls to hand it. A plugin with no binary blocks every call it sees and names
-the install command in the refusal, so a half-finished install is loud.
+Two halves.
+The binary does the reading, and the plugin tells Claude Code which calls to hand it.
+A plugin with no binary blocks every call it sees and names the install command in the refusal, so a half-finished install is loud.
 
 **The binary**, on macOS and Linux:
 
@@ -92,12 +81,11 @@ curl.exe -fsSLO https://github.com/karlkfi/claude-spill-guard/releases/latest/do
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-Two steps rather than one. Piping the script into a shell works, and it is a
-strange way to open for a tool whose whole pitch is that nothing leaves your
-machine. Download it, read it, run it. It checks the download's signature with
-`cosign` or `gh`, and it refuses if you have neither.
-[`docs/installing.md`](docs/installing.md) has what it verifies, the `go install`
-route for a machine with neither, and what `spill-guard selftest` reports.
+Two steps rather than one.
+Piping the script into a shell works, and it is a strange way to open for a tool whose whole pitch is that nothing leaves your machine.
+Download it, read it, run it.
+It checks the download's signature with `cosign` or `gh`, and it refuses if you have neither.
+[`docs/installing.md`](docs/installing.md) has what it verifies, the `go install` route for a machine with neither, and what `spill-guard selftest` reports.
 
 **The plugin**, once the binary is there:
 
@@ -108,155 +96,116 @@ claude plugin install spill-guard@spill-guard
 
 Hooks are read when a session starts, so start a new one.
 
-On Windows without Git for Windows, Claude's shell is PowerShell. spill-guard
-scans `Read`, prompts and PowerShell command strings there, but not the files a
-PowerShell command opens. Those calls are recorded.
+On Windows without Git for Windows, Claude's shell is PowerShell. spill-guard scans `Read`, prompts and PowerShell command strings there, but not the files a PowerShell command opens.
+Those calls are recorded.
 
 ### Check that the hook is live
 
-A scanner that enforces nothing and a session with no secrets in it produce the
-same silence, so check. This needs no secret. Make a new folder with an empty
-`.env` in it and start `claude` there. On macOS and Linux:
+A scanner that enforces nothing and a session with no secrets in it produce the same silence, so check.
+This needs no secret.
+Make a new folder with an empty `.env` in it and start `claude` there.
+On macOS and Linux:
 
 ```bash
 mkdir spill-guard-check && cd spill-guard-check && touch .env && claude
 ```
 
-Ask Claude to run `cat .env` and then to read `.env` with its `Read` tool, then
-send a prompt with `@.env` in it. All three should come back blocked by
-spill-guard. If any one does not, the hook is not live, and nothing leaked,
-because the file is empty.
+Ask Claude to run `cat .env` and then to read `.env` with its `Read` tool, then send a prompt with `@.env` in it.
+All three should come back blocked by spill-guard.
+If any one does not, the hook is not live, and nothing leaked, because the file is empty.
 
-The file has to exist, since a missing `.env` is allowed. On Windows without Git
-for Windows the `cat` half does not block, for the reason under the plugin
-install.
+The file has to exist, since a missing `.env` is allowed.
+On Windows without Git for Windows the `cat` half does not block, for the reason under the plugin install.
 
 **A key you plant yourself will probably come back allowed**, with nothing said.
-AWS's documented example key and anything else ending in `EXAMPLE` are refused
-as placeholders, and `AKIA` plus sixteen `X`s falls below the entropy floor.
-`AKIA` plus sixteen random uppercase letters and digits is blocked. The values you reach for when
-testing are the ones the precision work exists to ignore, so that silence is the
-scanner working rather than failing open. `spill-guard selftest` is the check to
-reach for.
+AWS's documented example key and anything else ending in `EXAMPLE` are refused as placeholders, and `AKIA` plus sixteen `X`s falls below the entropy floor.
+`AKIA` plus sixteen random uppercase letters and digits is blocked.
+The values you reach for when testing are the ones the precision work exists to ignore, so that silence is the scanner working rather than failing open.
+`spill-guard selftest` is the check to reach for.
 
 ## What it does not catch
 
-The threat model is the accident. These go straight through, each driven through
-the binary unless it says otherwise:
+The threat model is the accident.
+These go straight through, each driven through the binary unless it says otherwise:
 
-- **An interpreter.** `python3 -c 'print(open(".env").read())'` and the `node`
-  equivalent pass, because the hook knows which argument of `cat` is a file and
-  has no way to know what a script opens.
-- **A shell shape the parser does not follow, or a command with no reader row.**
-  Over a file holding a key, `dd if=key.txt` and `cp key.txt /dev/stdout` pass because
-  neither is a known reader. `exec 3<key.txt; cat <&3` ([Q230](docs/queue/Q230.md))
-  and `while read l; do echo $l; done < key.txt` ([Q229](docs/queue/Q229.md)) pass
-  because the file arrives through a redirect the hook does not trace. Bash prints the
-  key in all four, and the hook leaves no verdict and no record. These are examples
-  and not the whole class.
-- **What a command prints.** `gh auth token`, `kubectl get secret db -o yaml` and
-  `aws configure get aws_secret_access_key` all pass. The hook decides before
-  the call runs, so it never sees the output.
-- **An MCP file reader.** By the manifest rather than a drive: `hooks/hooks.json`
-  matches `Read`, `Bash`, `Grep` and `PowerShell`, so an `mcp__…` tool never reaches
-  the hook.
-- **A value no rule knows.** A password in `deploy.env` passes `cat`, because the
-  path refusal covers `.env` and the credential files above rather than every
-  name with `env` in it.
-- **`!` bash mode and skill loads**, by the measurements in
-  [`docs/design/`](docs/design/README.md) rather than by this drive. `!cat` is not
-  a tool call, and a skill load names no file.
-- **Someone who means it.** A `SPILL_GUARD_OVERRIDE=<reason>` prefix on a `Bash`
-  command turns a block into a confirmation prompt.
+- **An interpreter.** `python3 -c 'print(open(".env").read())'` and the `node` equivalent pass, because the hook knows which argument of `cat` is a file and has no way to know what a script opens.
+- **A shell shape the parser does not follow, or a command with no reader row.** Over a file holding a key, `dd if=key.txt` and `cp key.txt /dev/stdout` pass because neither is a known reader.
+  `exec 3<key.txt; cat <&3` ([Q230](docs/queue/Q230.md)) and `while read l; do echo $l; done < key.txt` ([Q229](docs/queue/Q229.md)) pass because the file arrives through a redirect the hook does not trace. Bash prints the key in all four, and the hook leaves no verdict and no record. These are examples and not the whole class.
+- **What a command prints.** `gh auth token`, `kubectl get secret db -o yaml` and `aws configure get aws_secret_access_key` all pass.
+  The hook decides before the call runs, so it never sees the output.
+- **An MCP file reader.** By the manifest rather than a drive: `hooks/hooks.json` matches `Read`, `Bash`, `Grep` and `PowerShell`, so an `mcp__…` tool never reaches the hook.
+- **A value no rule knows.** A password in `deploy.env` passes `cat`, because the path refusal covers `.env` and the credential files above rather than every name with `env` in it.
+- **`!` bash mode and skill loads**, by the measurements in [`docs/design/`](docs/design/README.md) rather than by this drive.
+  `!cat` is not a tool call, and a skill load names no file.
+- **Someone who means it.** A `SPILL_GUARD_OVERRIDE=<reason>` prefix on a `Bash` command turns a block into a confirmation prompt.
 
 ## A finding blocks, a gap does not
 
-A rule match blocks, and so does a refused shape. A gap does not: an operand the
-scanner cannot resolve (`cat "$X"`), a directory it will not walk (`rg password
-.`), a buffer it cannot decode, or a scan past its 45-second budget. The hook
-writes no verdict, so your normal permission rules run unchanged, and the gap is
-recorded. `spill-guard coverage` counts those records, grouped by reason. A binary
-file with no byte-order mark is the exception: it leaves no record, and you get a
-message naming it instead.
+A rule match blocks, and so does a refused shape.
+A gap does not: an operand the scanner cannot resolve (`cat "$X"`), a directory it will not walk (`rg password .`), a buffer it cannot decode, or a scan past its 45-second budget.
+The hook writes no verdict, so your normal permission rules run unchanged, and the gap is recorded.
+`spill-guard coverage` counts those records, grouped by reason.
+A binary file with no byte-order mark is the exception: it leaves no record, and you get a message naming it instead.
 
-A gap was a block until 2026-09-05, and the measurement is what changed it. Over
-one week and 100 sessions on one machine, 509 of 540 blocks were gaps rather
-than findings, and after 505 of those 509 the session got a clean call through
-within four attempts by reading the same tree another way. The refusal was not
-withholding the bytes. It charged a turn.
+A gap was a block until 2026-09-05, and the measurement is what changed it.
+Over one week and 100 sessions on one machine, 509 of 540 blocks were gaps rather than findings, and after 505 of those 509 the session got a clean call through within four attempts by reading the same tree another way.
+The refusal was not withholding the bytes.
+It charged a turn.
 
-A gap does not normally hide a match beside it. `cat "$X" key.txt` and `cat $(echo
-a) key.txt` are denied on what they could read, and so is `cat` of an undecodable
-file beside one holding a key, and so are `echo a | xargs cat key.txt` and `timeout
-$T cat key.txt`, where the rest of the operand list is unknown. Other shapes cross
-with no record at all, as [what it does not catch](#what-it-does-not-catch) says.
+A gap does not normally hide a match beside it.
+`cat "$X" key.txt` and `cat $(echo a) key.txt` are denied on what they could read, and so is `cat` of an undecodable file beside one holding a key, and so are `echo a | xargs cat key.txt` and `timeout $T cat key.txt`, where the rest of the operand list is unknown.
+Other shapes cross with no record at all, as [what it does not catch](#what-it-does-not-catch) says.
 
-The budget is a limit on that. A scan takes the call's own text first and then its
-files smallest first, so a small file holding a key still blocks beside big ones.
-In the file the budget stops on, a key still blocks once its rule has been
-through that file. A key only the rule still running would find, or one in a
-file the budget never reaches, gets only a record, and a `cat` or `head` of that
-file crosses.
+The budget is a limit on that.
+A scan takes the call's own text first and then its files smallest first, so a small file holding a key still blocks beside big ones.
+In the file the budget stops on, a key still blocks once its rule has been through that file.
+A key only the rule still running would find, or one in a file the budget never reaches, gets only a record, and a `cat` or `head` of that file crosses.
 
-A command string holding a NUL would also be skipped as binary, but Claude Code
-refuses that call before any hook or shell runs. That was driven for `Bash` on
-2.1.282, 2.1.289, 2.1.290 and 2.1.309 and for `PowerShell` on 2.1.290, and CI
-re-checks the pinned version ([Q246](docs/queue/Q246.md)).
+A command string holding a NUL would also be skipped as binary, but Claude Code refuses that call before any hook or shell runs.
+That was driven for `Bash` on 2.1.282, 2.1.289, 2.1.290 and 2.1.309 and for `PowerShell` on 2.1.290, and CI re-checks the pinned version ([Q246](docs/queue/Q246.md)).
 
-An install with no binary still blocks, because the launcher refuses the call. So
-does a payload the binary cannot decode, which exits 2. The launcher itself is the
-exception: if it is missing, the hook command exits 127 and the call goes through
-with a hook error on record.
+An install with no binary still blocks, because the launcher refuses the call.
+So does a payload the binary cannot decode, which exits 2.
+The launcher itself is the exception: if it is missing, the hook command exits 127 and the call goes through with a hook error on record.
 
 ## What it costs
 
-About 10 ms per hook call. Medians ranged from 9.8 ms to 10.8 ms across four runs
-of 40 calls each, for a `Bash` `ls`, a `Read` of a 1.2 KB file and a short prompt.
-That is a pre-release build of v0.7.0 through the command `hooks/hooks.json` runs,
-on one Apple M5 Max at a load of about 6 on 2026-11-05, with small inputs. About
-2.5 ms of it is the cost of spawning any process from the measuring script. A
-larger file costs more: the binary alone took 4.7 to 6.0 ms on those inputs and 7.4
-to 7.7 ms on a 68 KB file. Your machine will differ.
+About 10 ms per hook call.
+Medians ranged from 9.8 ms to 10.8 ms across four runs of 40 calls each, for a `Bash` `ls`, a `Read` of a 1.2 KB file and a short prompt.
+That is a pre-release build of v0.7.0 through the command `hooks/hooks.json` runs, on one Apple M5 Max at a load of about 6 on 2026-11-05, with small inputs.
+About 2.5 ms of it is the cost of spawning any process from the measuring script.
+A larger file costs more: the binary alone took 4.7 to 6.0 ms on those inputs and 7.4 to 7.7 ms on a 68 KB file.
+Your machine will differ.
 
 ## How it is built
 
-- A static Go binary with no third-party runtime dependencies. `go.mod` requires
-  nothing, and `make no-deps` fails if that changes.
-- No `net`, `net/http` or `os/exec` anywhere in the build graph, enforced by
-  `make no-network` rather than by review. See [`PRIVACY.md`](PRIVACY.md) for
-  what it reads and the one file it writes.
-- A refusal names a rule, a path and a byte offset, and no fragment of the value,
-  because the refusal reaches the API too.
-- One ruleset, compiled into the binary. There is no project override, because a
-  file the model can write is a two-step bypass: disable the rule, then read the
-  secret.
+- A static Go binary with no third-party runtime dependencies.
+  `go.mod` requires nothing, and `make no-deps` fails if that changes.
+- No `net`, `net/http` or `os/exec` anywhere in the build graph, enforced by `make no-network` rather than by review.
+  See [`PRIVACY.md`](PRIVACY.md) for what it reads and the one file it writes.
+- A refusal names a rule, a path and a byte offset, and no fragment of the value, because the refusal reaches the API too.
+- One ruleset, compiled into the binary.
+  There is no project override, because a file the model can write is a two-step bypass: disable the rule, then read the secret.
 
 ## Why there are so few rules
 
-This replaces `coo-quack/sensitive-canary`, a Node plugin that audits clean and
-is safe to install. Its ruleset, run over 257 real text files from an infrastructure repo,
-produced **more than 5,600 matches across 9 rules, all of them PII noise and not
-one credential**. 71 of the 257 files flagged, which is 27.6%.
+This replaces `coo-quack/sensitive-canary`, a Node plugin that audits clean and is safe to install.
+Its ruleset, run over 257 real text files from an infrastructure repo, produced **more than 5,600 matches across 9 rules, all of them PII noise and not one credential**.
+71 of the 257 files flagged, which is 27.6%.
 
-`0400-2341068` was flagged 268 times as a Chinese phone number. It is a slice of
-the amdgpu DKMS version string `1:6.16.13.30300400-2341068`.
+`0400-2341068` was flagged 268 times as a Chinese phone number.
+It is a slice of the amdgpu DKMS version string `1:6.16.13.30300400-2341068`.
 
-Numeric PII patterns cannot be made precise by regex alone, so precision here
-comes from checksum validators, context gating, entropy floors and placeholder
-checks, and a numeric rule that cannot clear that ships off. `make precision` holds that: the shipped rules must
-report zero findings on [`testdata/corpus/clean/`](testdata/corpus/) and exactly
-one on each planted fixture. The clean corpus is adversarial, since on 2026-11-03
-the old `pii-postal-code` pattern reported 31 matches on it and `pii-phone-cn`
-reported 8.
+Numeric PII patterns cannot be made precise by regex alone, so precision here comes from checksum validators, context gating, entropy floors and placeholder checks, and a numeric rule that cannot clear that ships off.
+`make precision` holds that: the shipped rules must report zero findings on [`testdata/corpus/clean/`](testdata/corpus/) and exactly one on each planted fixture.
+The clean corpus is adversarial, since on 2026-11-03 the old `pii-postal-code` pattern reported 31 matches on it and `pii-phone-cn` reported 8.
 
-[`docs/design/language-choice.md`](docs/design/language-choice.md) has the full
-analysis, the benchmarks, and a list of confident claims that measurement killed.
+[`docs/design/language-choice.md`](docs/design/language-choice.md) has the full analysis, the benchmarks, and a list of confident claims that measurement killed.
 
 ## Status
 
 Generated from the tree by `make status`, and CI fails when it stops being true.
-[Releases](https://github.com/karlkfi/claude-spill-guard/releases) has the
-current version.
+[Releases](https://github.com/karlkfi/claude-spill-guard/releases) has the current version.
 
 <!-- status:begin -- generated by `make status`; derived from the tree, not hand-kept -->
 Every capability below is in place.
@@ -267,44 +216,32 @@ Every capability below is in place.
 | Run as a Claude Code hook | yes |
 | Ship a ruleset | yes |
 
-`spill-guard` builds and answers `coverage`, `filter`, `hook`, `selftest`,
-`version`.
+`spill-guard` builds and answers `coverage`, `filter`, `hook`, `selftest`, `version`.
 <!-- status:end -->
 
 ## Design docs
 
-- [`docs/design/`](docs/design/): the threat model, hook surface, scan pipeline,
-  rule schema, failure policy and CI.
-- [`docs/design/distribution.md`](docs/design/distribution.md): how the binary
-  gets onto a machine, and the launcher that denies when it is missing.
-- [`docs/installing.md`](docs/installing.md): what the install scripts verify,
-  and how to read `selftest`.
+- [`docs/design/`](docs/design/): the threat model, hook surface, scan pipeline, rule schema, failure policy and CI.
+- [`docs/design/distribution.md`](docs/design/distribution.md): how the binary gets onto a machine, and the launcher that denies when it is missing.
+- [`docs/installing.md`](docs/installing.md): what the install scripts verify, and how to read `selftest`.
 
 ## Other guards
 
-These watch different boundaries. The first five install from one marketplace,
-[`karlkfi/claude-bouncer`](https://github.com/karlkfi/claude-bouncer), as
-`<name>@claude-bouncer`.
+These watch different boundaries.
+The first five install from one marketplace, [`karlkfi/claude-bouncer`](https://github.com/karlkfi/claude-bouncer), as `<name>@claude-bouncer`.
 
-- [**workspace-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/workspace-guard):
-  prompts before guarded file commands read or write outside the project root.
-- [**branch-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/branch-guard):
-  auto-approves safe git, and pauses commits and pushes to a protected branch.
-- [**prod-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/prod-guard):
-  blocks mutating commands aimed at production.
-- [**exit-status-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/exit-status-guard):
-  denies commands whose exit status is the answer and gets discarded.
-- [**foreground-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/foreground-guard):
-  keeps blocking commands from stalling a session.
-- [**pr-sentinel**](https://github.com/karlkfi/claude-pr-sentinel): watches a PR
-  to green without merging it.
+- [**workspace-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/workspace-guard): prompts before guarded file commands read or write outside the project root.
+- [**branch-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/branch-guard): auto-approves safe git, and pauses commits and pushes to a protected branch.
+- [**prod-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/prod-guard): blocks mutating commands aimed at production.
+- [**exit-status-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/exit-status-guard): denies commands whose exit status is the answer and gets discarded.
+- [**foreground-guard**](https://github.com/karlkfi/claude-bouncer/tree/main/plugins/foreground-guard): keeps blocking commands from stalling a session.
+- [**pr-sentinel**](https://github.com/karlkfi/claude-pr-sentinel): watches a PR to green without merging it.
 
 ## Contributing
 
-Bugs, ideas and questions go in
-[GitHub Issues](https://github.com/karlkfi/claude-spill-guard/issues). A rule that
-flags ordinary work is a bug worth reporting, so include the exact text and the
-rule ID. For development conventions, see [`CLAUDE.md`](CLAUDE.md).
+Bugs, ideas and questions go in [GitHub Issues](https://github.com/karlkfi/claude-spill-guard/issues).
+A rule that flags ordinary work is a bug worth reporting, so include the exact text and the rule ID.
+For development conventions, see [`CLAUDE.md`](CLAUDE.md).
 
 ## License
 

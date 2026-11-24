@@ -8,8 +8,8 @@
 #
 # Two ecosystems, because two sets of third-party code run in a job holding the
 # repository token. Actions are the obvious half. tools/go.mod is the other:
-# it pins govulncheck, actionlint and golangci-lint, none of which the shipped
-# binary links -- `no-deps` reads the root module, and the root module still
+# it pins govulncheck, actionlint, golangci-lint and mdreflow, none of which the
+# shipped binary links -- `no-deps` reads the root module, and the root module still
 # requires nothing.
 version: 2
 updates:

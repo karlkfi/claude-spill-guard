@@ -2026,6 +2026,143 @@ jobs:
             exit 1
           fi
 
+  # Builds mdreflow from tools/, so it needs Go as well as Python.
+  md-reflow-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: The Markdown is one sentence per line
+        run: make md-reflow-check
+
+  # A formatter's check passes on any tree it was not pointed at, so most of
+  # this is about scope: what the exclusions let through, what they must not,
+  # and a scope that has gone empty.
+  md-reflow-check-mutation-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: A wrapped paragraph must fail the gate, and `make md-reflow` must repair it
+        run: |
+          printf '\nPlanted by the mutation\ncontrol. A second sentence.\n' >> README.md
+          make md-reflow-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::md-reflow-check passed with a wrapped paragraph in README.md" >&2
+            exit 1
+          fi
+          if ! grep -qx 'would reformat README.md' mutant.log; then
+            echo "::error::md-reflow-check failed, but not on README.md" >&2
+            exit 1
+          fi
+          make md-reflow
+          make md-reflow-check
+          if [ "$(tail -n 2 README.md)" != "$(printf 'Planted by the mutation control.\nA second sentence.')" ]; then
+            tail -n 4 README.md
+            echo "::error::make md-reflow left something other than one sentence per line" >&2
+            exit 1
+          fi
+          git checkout -- README.md
+
+      # An entry nothing needs would stay in the config unread, so each one is
+      # struck in turn and has to redden the gate on a file it was holding back.
+      - name: Every exclusion must be holding a file back
+        run: |
+          if [ "$(grep -c '^  - ' .mdreflow.yaml)" -ne 2 ]; then
+            cat .mdreflow.yaml
+            echo "::error::the exclusions are not the two this step knows" >&2
+            exit 1
+          fi
+          for arm in 'docs/releases/v:docs/releases/v0.8.0.md' \
+                     'testdata/corpus:testdata/corpus/clean/payments.md'; do
+            entry="${arm%%:*}"
+            file="${arm#*:}"
+            sed -i "\|^  - \"/$entry|d" .mdreflow.yaml
+            if git diff --quiet -- .mdreflow.yaml; then
+              echo "::error::the mutation changed nothing -- no exclusion opens on /$entry" >&2
+              exit 1
+            fi
+            make md-reflow-check > mutant.log 2>&1 && rc=0 || rc=$?
+            echo "check exit: $rc"
+            cat mutant.log
+            git checkout -- .mdreflow.yaml
+            if [ "$rc" -eq 0 ]; then
+              echo "::error::md-reflow-check passed with the /$entry exclusion struck" >&2
+              exit 1
+            fi
+            if ! grep -qx "would reformat $file" mutant.log; then
+              echo "::error::md-reflow-check failed, but not on $file" >&2
+              exit 1
+            fi
+          done
+
+      - name: A config that excludes everything must fail the gate
+        run: |
+          printf 'mode: sentence\nexclude:\n  - "*"\n' > .mdreflow.yaml
+          make md-reflow-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .mdreflow.yaml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::md-reflow-check passed having read nothing" >&2
+            exit 1
+          fi
+          if ! grep -q 'no Markdown in scope' mutant.log; then
+            echo "::error::md-reflow-check failed, but not on the empty scope" >&2
+            exit 1
+          fi
+
+      # mdreflow reads .gitignore, so a tracked file under an ignored path is
+      # skipped without the config saying so.
+      - name: A tracked file that .gitignore hides must fail the gate
+        run: |
+          mkdir -p tmp
+          printf 'Planted by the mutation\ncontrol.\n' > tmp/mutant.md
+          git add -f tmp/mutant.md
+          make md-reflow-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git rm -q -f tmp/mutant.md
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::md-reflow-check passed over a tracked file it never read" >&2
+            exit 1
+          fi
+          if ! grep -qx 'tmp/mutant.md: skipped (excluded by gitignore)' mutant.log; then
+            echo "::error::md-reflow-check failed, but not on the hidden file" >&2
+            exit 1
+          fi
+
+      - name: A config mdreflow cannot read must fail as the tool, not as a finding
+        run: |
+          printf 'no-such-key: true\n' >> .mdreflow.yaml
+          make md-reflow-check > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .mdreflow.yaml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::md-reflow-check passed on a config it could not read" >&2
+            exit 1
+          fi
+          if ! grep -q 'this is the tool failing, not an answer about the prose' mutant.log; then
+            echo "::error::md-reflow-check failed, but reported it as a finding about the prose" >&2
+            exit 1
+          fi
+
   release-claims:
     runs-on: ubuntu-latest
     # `gh release list` is the instrument, and reading releases is the whole of

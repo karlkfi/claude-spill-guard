@@ -1,8 +1,7 @@
 # Design
 
-spill-guard stops secrets and US Social Security numbers from reaching the
-Anthropic API through a Claude Code session. Detection is local heuristics only — a static Go binary,
-stdlib `regexp`, no network calls for any reason.
+spill-guard stops secrets and US Social Security numbers from reaching the Anthropic API through a Claude Code session.
+Detection is local heuristics only — a static Go binary, stdlib `regexp`, no network calls for any reason.
 
 This directory holds the design and the reasoning behind it:
 
@@ -13,86 +12,49 @@ This directory holds the design and the reasoning behind it:
 | [`language-choice.md`](language-choice.md) | Why Go, with the measurements. Verbatim from the analysis that started the project. |
 | [`brief.md`](brief.md) | The origin brief, kept as written. |
 
-**Status: it scans, and it is wired.** `spill-guard hook` reads a payload,
-scans what the call would have sent, and blocks — driven end to end against a
-live Claude Code on 2026-08-27, where a `Read` of a file carrying a Slack
-webhook came back denied with the rule, the path and the byte offset and no
-fragment of the value. `hooks/hooks.json` and the plugin manifests now point
-Claude Code at that binary, at `PreToolUse` on `Read`, `Bash`, `Grep` and
-`PowerShell` and at `UserPromptSubmit`; they were held back until there was a hook to fire, because
-a repo installable as a security tool scanning nothing is the failure this
-document indicts the predecessor for. `Bash` is scanned as a command string
-**and** as the files its readers are pointed at, `internal/readers` being the
-per-command table of which argument is a path. Nothing under
-[open questions](#open-questions) blocks that any more; the last of them is
-settled under
-[what gets scanned](#what-gets-scanned-is-the-crossing-not-the-hop).
+**Status: it scans, and it is wired.** `spill-guard hook` reads a payload, scans what the call would have sent, and blocks — driven end to end against a live Claude Code on 2026-08-27, where a `Read` of a file carrying a Slack webhook came back denied with the rule, the path and the byte offset and no fragment of the value.
+`hooks/hooks.json` and the plugin manifests now point Claude Code at that binary, at `PreToolUse` on `Read`, `Bash`, `Grep` and `PowerShell` and at `UserPromptSubmit`; they were held back until there was a hook to fire, because a repo installable as a security tool scanning nothing is the failure this document indicts the predecessor for.
+`Bash` is scanned as a command string **and** as the files its readers are pointed at, `internal/readers` being the per-command table of which argument is a path.
+Nothing under [open questions](#open-questions) blocks that any more; the last of them is settled under [what gets scanned](#what-gets-scanned-is-the-crossing-not-the-hop).
 
 ## The problem
 
-Claude Code sends what it reads to the API. `cat .env`, a `grep -r password`
-across a repo, a pasted stack trace carrying a bearer token — the content lands
-in the conversation and the conversation goes over the wire. There is no undo,
-and no moment where anything says a credential just left the machine.
+Claude Code sends what it reads to the API.
+`cat .env`, a `grep -r password` across a repo, a pasted stack trace carrying a bearer token — the content lands in the conversation and the conversation goes over the wire.
+There is no undo, and no moment where anything says a credential just left the machine.
 
-Git secret scanners do not cover this. `gitleaks` and its relatives watch the
-commit boundary; a file read into a session is never committed and never
-scanned. The boundary that matters here is the one between the local filesystem
-and the model's context.
+Git secret scanners do not cover this.
+`gitleaks` and its relatives watch the commit boundary; a file read into a session is never committed and never scanned.
+The boundary that matters here is the one between the local filesystem and the model's context.
 
 ## What it is not
 
 - **Not a git scanner.** The commit boundary already has good tools.
-- **Not a defense against a user who means it.** The escape hatch is one
-  inline `SPILL_GUARD_OVERRIDE=` prefix on a `Bash` command. This is a net for
-  the accident, not a wall against intent.
-- **Not remote anything.** No telemetry, no update check, no shared rule
-  source, no daemon.
-- **Not a recall play.** Twelve precise rules beat seventy noisy ones. The
-  inherited ruleset's defect was precision, not coverage — 27.6% of real files
-  flagged, more than 5,600 matches, zero of them credentials
-  ([`language-choice.md` §3](language-choice.md)).
-- **Not every reader in the class it defends.** v1 covers the three that are
-  measured — a `Read` path, a `Bash` reader's resolved operands, and an
-  `@path` in a prompt. The class is
-  [wider than those](#what-gets-scanned-is-the-crossing-not-the-hop), and
-  [driving the rest of it](#the-rest-of-the-class-driven) leaves three members
-  out, for two reasons between them. A search tool returns lines from files it
-  chooses, so nothing a `PreToolUse` hook opens can bound it — which is why
-  the `Grep` tool is now refused in `content` mode over a directory and routed
-  to [a filtered `grep`](#a-recursive-grep-is-scanned-through-a-filter-on-its-own-output)
-  rather than scanned. A skill load
-  carries a name rather than a path, so nothing here can resolve what it would
-  read. An MCP server's file reader is out on both at once: the hook sees the
-  call and a deny stops it, and which of a server's tools is bounded, and which
-  key of its payload is a path, are the server's own choices.
+- **Not a defense against a user who means it.** The escape hatch is one inline `SPILL_GUARD_OVERRIDE=` prefix on a `Bash` command.
+  This is a net for the accident, not a wall against intent.
+- **Not remote anything.** No telemetry, no update check, no shared rule source, no daemon.
+- **Not a recall play.** Twelve precise rules beat seventy noisy ones.
+  The inherited ruleset's defect was precision, not coverage — 27.6% of real files flagged, more than 5,600 matches, zero of them credentials ([`language-choice.md` §3](language-choice.md)).
+- **Not every reader in the class it defends.** v1 covers the three that are measured — a `Read` path, a `Bash` reader's resolved operands, and an `@path` in a prompt.
+  The class is [wider than those](#what-gets-scanned-is-the-crossing-not-the-hop), and [driving the rest of it](#the-rest-of-the-class-driven) leaves three members out, for two reasons between them.
+  A search tool returns lines from files it chooses, so nothing a `PreToolUse` hook opens can bound it — which is why the `Grep` tool is now refused in `content` mode over a directory and routed to [a filtered `grep`](#a-recursive-grep-is-scanned-through-a-filter-on-its-own-output) rather than scanned.
+  A skill load carries a name rather than a path, so nothing here can resolve what it would read.
+  An MCP server's file reader is out on both at once: the hook sees the call and a deny stops it, and which of a server's tools is bounded, and which key of its payload is a path, are the server's own choices.
 
-  **A subagent load is not one of them.** It was named here as an uncovered
-  member and it is covered: a subagent's own tool calls fire the same hooks
-  the parent's do, measured.
+  **A subagent load is not one of them.** It was named here as an uncovered member and it is covered: a subagent's own tool calls fire the same hooks the parent's do, measured.
 
-  **`!` bash mode is a member and it has no remedy here.** Typing `!cat
-  ~/.aws/credentials` runs the command locally and puts its output in the
-  model's context, and it is
-  [not a tool call](#-bash-mode-is-not-a-tool-call-so-pretooluse-never-sees-it),
-  so `PreToolUse` never sees it. Whether `UserPromptSubmit` does, and whether
-  the payload would carry the output if it did, is unmeasured. Unlike the
-  others this one is not a reader to be resolved: the bytes have already
-  crossed by the time anything is recorded.
+  **`!` bash mode is a member and it has no remedy here.** Typing `!cat ~/.aws/credentials` runs the command locally and puts its output in the model's context, and it is [not a tool call](#-bash-mode-is-not-a-tool-call-so-pretooluse-never-sees-it), so `PreToolUse` never sees it.
+  Whether `UserPromptSubmit` does, and whether the payload would carry the output if it did, is unmeasured.
+  Unlike the others this one is not a reader to be resolved: the bytes have already crossed by the time anything is recorded.
 
-  **Do not close what is left with a list of tool names, and do not close it
-  with a payload shape either.** The tool set is not fixed — nineteen deferred
-  tools announced in one `deferred_tools_delta` on 2026-08-28, fifteen on
-  2026-09-04 — and a `PreToolUse` matcher of `*` does see every tool including
-  ones installed later. What fails is the field test that matcher was to
-  carry: it misses the one member the drive found, because `Skill` names no
-  path at all. Membership is an argument about what the call returns, and that
-  argument is per tool.
+  **Do not close what is left with a list of tool names, and do not close it with a payload shape either.** The tool set is not fixed — nineteen deferred tools announced in one `deferred_tools_delta` on 2026-08-28, fifteen on 2026-09-04 — and a `PreToolUse` matcher of `*` does see every tool including ones installed later.
+  What fails is the field test that matcher was to carry: it misses the one member the drive found, because `Skill` names no path at all.
+  Membership is an argument about what the call returns, and that argument is per tool.
 
 ## The hook surface
 
-A hook can only stop content it sees before the model does. Three events see
-text, and they do not have the same power.
+A hook can only stop content it sees before the model does.
+Three events see text, and they do not have the same power.
 
 | Event | What it sees | Can it withhold? |
 |---|---|---|
@@ -100,49 +62,33 @@ text, and they do not have the same power.
 | `PreToolUse` | The tool call's arguments: a command string, a file path, a `Write` body | Yes — `deny` stops the call |
 | `PostToolUse` | The tool's result | **No.** The result is already sent — [measured below](#posttooluse-cannot-withhold-a-result) |
 
-`PreToolUse` on `Read` is stronger than it first looks. The hook gets the path
-before the tool runs, so it can open the file and scan it locally, then deny.
-The content never enters the transcript, and the design does not have to depend
-on what `PostToolUse` can withhold.
+`PreToolUse` on `Read` is stronger than it first looks.
+The hook gets the path before the tool runs, so it can open the file and scan it locally, then deny.
+The content never enters the transcript, and the design does not have to depend on what `PostToolUse` can withhold.
 
-`Bash` is the hard case. The hook sees the command, not its output, and the
-output of an arbitrary command cannot be predicted. Two partial answers, both
-worth having and neither complete:
+`Bash` is the hard case.
+The hook sees the command, not its output, and the output of an arbitrary command cannot be predicted.
+Two partial answers, both worth having and neither complete:
 
-1. Scan the command string itself. `curl -H "Authorization: Bearer sk-..."`
-   carries the secret in the argument, where the hook can see it.
-2. Resolve the file operands of the common readers (`cat`, `head`, `tail`,
-   `grep`) and scan those files, the same way `Read` is handled. Sibling
-   guards already parse Bash to this depth; workspace-guard's segmentation
-   layer is the thing to port rather than to rewrite, and so is the
-   per-command table above it that says which of a segment's tokens is a path.
-   That table is `internal/readers`, and its read/write split is this repo's
-   own: workspace-guard asks which files a command touches, writes included,
-   and this asks what is about to leave the machine, which is the reads.
-   A wrapper that runs the next word as the command -- `command cat f`,
-   `nice -n 5 cat f`, `timeout 5 cat f`, `env -C dir cat f` -- is peeled
-   first, by upstream's grammar for nineteen of them, so the reader behind it
-   is the one looked up. Before Q196 each was looked up by the wrapper's name,
-   found no row, and crossed unread. Where a wrapper hides the operands --
-   `xargs` takes them from its input -- or an option of its own cannot be
-   read, the call is a coverage failure rather than a guess.
+1. Scan the command string itself.
+   `curl -H "Authorization: Bearer sk-..."` carries the secret in the argument, where the hook can see it.
+2. Resolve the file operands of the common readers (`cat`, `head`, `tail`, `grep`) and scan those files, the same way `Read` is handled.
+   Sibling guards already parse Bash to this depth; workspace-guard's segmentation layer is the thing to port rather than to rewrite, and so is the per-command table above it that says which of a segment's tokens is a path.
+   That table is `internal/readers`, and its read/write split is this repo's own: workspace-guard asks which files a command touches, writes included, and this asks what is about to leave the machine, which is the reads.
+   A wrapper that runs the next word as the command -- `command cat f`, `nice -n 5 cat f`, `timeout 5 cat f`, `env -C dir cat f` -- is peeled first, by upstream's grammar for nineteen of them, so the reader behind it is the one looked up.
+   Before Q196 each was looked up by the wrapper's name, found no row, and crossed unread.
+   Where a wrapper hides the operands -- `xargs` takes them from its input -- or an option of its own cannot be read, the call is a coverage failure rather than a guess.
 
-Neither catches a command that synthesizes a secret at runtime. That is a
-stated limitation of content matching rather than a gap to close later, and
-`PostToolUse` does not close it either: the measurement below rules out catching
-`Bash` after the fact. What closes part of it is a third answer that matches
-nothing at all — [refusing the call on its shape](#a-shape-refused-where-there-is-nothing-to-match),
-for the case where the bytes exist only in the tool process and there is no
-buffer anywhere to open. The three are the whole answer for `Bash`, and none of
-them is a fast path in front of another.
+Neither catches a command that synthesizes a secret at runtime.
+That is a stated limitation of content matching rather than a gap to close later, and `PostToolUse` does not close it either: the measurement below rules out catching `Bash` after the fact.
+What closes part of it is a third answer that matches nothing at all — [refusing the call on its shape](#a-shape-refused-where-there-is-nothing-to-match), for the case where the bytes exist only in the tool process and there is no buffer anywhere to open.
+The three are the whole answer for `Bash`, and none of them is a fast path in front of another.
 
 ### `PostToolUse` cannot withhold a result
 
-Measured 2026-08-21 against Claude Code 2.1.220 on darwin/arm64. A `PostToolUse`
-hook on `Bash` denied a call whose output carried a marker string. The check is
-whether that marker reaches the session transcript under `~/.claude/projects/`,
-because the transcript is what went to the API — the hook's own return value
-proves nothing either way, which is the trap this measurement exists to avoid.
+Measured 2026-08-21 against Claude Code 2.1.220 on darwin/arm64.
+A `PostToolUse` hook on `Bash` denied a call whose output carried a marker string.
+The check is whether that marker reaches the session transcript under `~/.claude/projects/`, because the transcript is what went to the API — the hook's own return value proves nothing either way, which is the trap this measurement exists to avoid.
 
 Three ways of denying, one result:
 
@@ -152,58 +98,38 @@ Three ways of denying, one result:
 | exit 0, `{"decision":"block","reason":...}` | present | false |
 | exit 0, a `deny` decision object | present | false |
 
-A hook that exits 0 and does nothing produces a transcript identical in that
-respect. In all three deny runs the verdict arrives *after* the result, as a
-separate `attachment` entry, so the model reads the output and then reads the
-complaint about it. Its own recorded reasoning in the `decision: block` run:
+A hook that exits 0 and does nothing produces a transcript identical in that respect.
+In all three deny runs the verdict arrives *after* the result, as a separate `attachment` entry, so the model reads the output and then reads the complaint about it.
+Its own recorded reasoning in the `decision: block` run:
 
 > I did run the echo command successfully - it output "SPILL_Q2_MARKER_9K"
 
-By the time a `PostToolUse` hook runs, the output has been sent. The hook can
-append a warning about content the model already has. It cannot unsend it.
+By the time a `PostToolUse` hook runs, the output has been sent.
+The hook can append a warning about content the model already has.
+It cannot unsend it.
 
-**So the `PostToolUse` surface is worth having only as an after-the-fact
-warning**, which is close to worthless for this tool's purpose and must not be
-counted as a control. Everything spill-guard actually prevents has to be
-prevented at `UserPromptSubmit` or `PreToolUse`. For `Bash` that means the
-command string, its resolved file operands and the shapes refused below are the
-entire surface, so the segmentation layer this design ports from workspace-guard
-is load-bearing rather than an optimisation — all three answers are read off it.
+**So the `PostToolUse` surface is worth having only as an after-the-fact warning**, which is close to worthless for this tool's purpose and must not be counted as a control.
+Everything spill-guard actually prevents has to be prevented at `UserPromptSubmit` or `PreToolUse`.
+For `Bash` that means the command string, its resolved file operands and the shapes refused below are the entire surface, so the segmentation layer this design ports from workspace-guard is load-bearing rather than an optimisation — all three answers are read off it.
 
 ### A shape refused, where there is nothing to match
 
-Both answers above look for a secret's bytes. `env` has none to look at. The
-values live in the tool process's own environment, so at `PreToolUse` there is
-no buffer on disk for a rule to open, and `PostToolUse` cannot withhold the
-result once the command has run. A scanner that only matches values is
-structurally blind to it, and no rule added to `rules/spill-guard.json` changes
-that.
+Both answers above look for a secret's bytes.
+`env` has none to look at.
+The values live in the tool process's own environment, so at `PreToolUse` there is no buffer on disk for a rule to open, and `PostToolUse` cannot withhold the result once the command has run.
+A scanner that only matches values is structurally blind to it, and no rule added to `rules/spill-guard.json` changes that.
 
-So the third answer refuses the call on what it would do. `env` blocks, and the
-reason carries the filtered form — `printenv PATH HOME` for the variables you
-want, `${FOO:+set}` to check one is set without printing it, `env | cut -d= -f1`
-for the names alone. A deny rather than an ask, because the model applies what
-the reason names and a human is not interrupted.
+So the third answer refuses the call on what it would do.
+`env` blocks, and the reason carries the filtered form — `printenv PATH HOME` for the variables you want, `${FOO:+set}` to check one is set without printing it, `env | cut -d= -f1` for the names alone.
+A deny rather than an ask, because the model applies what the reason names and a human is not interrupted.
 
-**The threat model is accident, not an adversary.** Say it in the reason and
-say it here, because it is what makes the deny proportionate rather than
-theatre. A session that wants a value writes `printenv AWS_SECRET_ACCESS_KEY`
-and gets it; nothing here stops that, and this repo has already settled that a
-control the scanned content can talk its way past is worthless — the
-[no-in-band-bypass rule](#output-discipline) is the same argument one level
-down. What a shape deny stops is the ordinary case: a session reaching for
-`env` while debugging a `PATH` problem, and writing every variable into a
-transcript that keeps them. Measured 2026-08-31 on one machine, a `Bash` tool
-process carries 58 environment variables, and `CLAUDE_CODE_MESSAGING_TOKEN` is
-one of them — put there by the harness rather than by any config, so nothing a
-user edits removes it.
+**The threat model is accident, not an adversary.** Say it in the reason and say it here, because it is what makes the deny proportionate rather than theatre.
+A session that wants a value writes `printenv AWS_SECRET_ACCESS_KEY` and gets it; nothing here stops that, and this repo has already settled that a control the scanned content can talk its way past is worthless — the [no-in-band-bypass rule](#output-discipline) is the same argument one level down.
+What a shape deny stops is the ordinary case: a session reaching for `env` while debugging a `PATH` problem, and writing every variable into a transcript that keeps them.
+Measured 2026-08-31 on one machine, a `Bash` tool process carries 58 environment variables, and `CLAUDE_CODE_MESSAGING_TOKEN` is one of them — put there by the harness rather than by any config, so nothing a user edits removes it.
 
-**It may not fire on the careful form, and that is the bar it had to clear.**
-The careful form is what sessions already write, so a rule keyed on the command
-name would deny the very thing its own reason recommends and teach the session
-to stop filtering. Measured over 21,252 `Bash` calls in 303 transcript files on
-this machine, the seven days to 2026-09-04, driven through the shipped
-`envDumped` rather than through a probe written to describe it:
+**It may not fire on the careful form, and that is the bar it had to clear.** The careful form is what sessions already write, so a rule keyed on the command name would deny the very thing its own reason recommends and teach the session to stop filtering.
+Measured over 21,252 `Bash` calls in 303 transcript files on this machine, the seven days to 2026-09-04, driven through the shipped `envDumped` rather than through a probe written to describe it:
 
 | | |
 |---|---|
@@ -212,80 +138,47 @@ this machine, the seven days to 2026-09-04, driven through the shipped
 | Refused | **0** |
 | The same sweep with 15 synthetic dumps appended | 15 |
 
-The last row is the control. A zero over a sweep that has never been seen to
-fire says nothing, and this one fires on every planted case while declining
-5,380 real ones.
+The last row is the control.
+A zero over a sweep that has never been seen to fire says nothing, and this one fires on every planted case while declining 5,380 real ones.
 
-**What decides it is position in the pipeline, not the command name.** `env |
-cut -d= -f1` segments into a bare `env` and a `cut`, so nothing in the `env`
-segment's own tokens tells it apart from a dump. What does is whether anything
-consumes its output: a stage after it is being written to, and nothing after it
-means the tool result is. That is what `Segment.Pipe` is read for, with
-`Segment.StdoutAway` beside it: a later stage is a filter only where the dump's
-stdout reaches it. `env >&2 | cut -d= -f1` is refused, because the dump goes to
-stderr and the tool returns that, and `env 2>&1 | cut -d= -f1` is not. A
-redirect to a file is not read as a filter, so `env > vars.txt` is refused too.
-Re-taken with that reading on 2026-11-01, over 241,535 real `Bash` calls from
-2026-07-26 to 2026-11-02, no verdict moved; 16 driven control rows moved 5, and
-19 commands the segmenter could not split were left out.
+**What decides it is position in the pipeline, not the command name.** `env | cut -d= -f1` segments into a bare `env` and a `cut`, so nothing in the `env` segment's own tokens tells it apart from a dump.
+What does is whether anything consumes its output: a stage after it is being written to, and nothing after it means the tool result is.
+That is what `Segment.Pipe` is read for, with `Segment.StdoutAway` beside it: a later stage is a filter only where the dump's stdout reaches it.
+`env >&2 | cut -d= -f1` is refused, because the dump goes to stderr and the tool returns that, and `env 2>&1 | cut -d= -f1` is not.
+A redirect to a file is not read as a filter, so `env > vars.txt` is refused too.
+Re-taken with that reading on 2026-11-01, over 241,535 real `Bash` calls from 2026-07-26 to 2026-11-02, no verdict moved; 16 driven control rows moved 5, and 19 commands the segmenter could not split were left out.
 
-**Only the bare form of each command**: `env`, `printenv`, `set`, `export`,
-`export -p`, `declare -p`, `typeset -p`, and an inline `python`/`node` script
-naming `os.environ` or `process.env` without subscripting it. `env -0` still
-dumps and is not refused, and neither is `os.environ.items()`. Widening to
-catch them costs the precision above — every option this learns to see is
-another way to be wrong about a form somebody wrote deliberately — and
-`.keys()` sits on the other side of that line and is genuinely careful. The
-accident is the bare one. Under-firing on a deliberate spelling is a stated
-limitation; firing on `env | cut -d= -f1` would be a defect.
+**Only the bare form of each command**: `env`, `printenv`, `set`, `export`, `export -p`, `declare -p`, `typeset -p`, and an inline `python`/`node` script naming `os.environ` or `process.env` without subscripting it.
+`env -0` still dumps and is not refused, and neither is `os.environ.items()`.
+Widening to catch them costs the precision above — every option this learns to see is another way to be wrong about a form somebody wrote deliberately — and `.keys()` sits on the other side of that line and is genuinely careful.
+The accident is the bare one.
+Under-firing on a deliberate spelling is a stated limitation; firing on `env | cut -d= -f1` would be a defect.
 
-**Not `updatedInput`.** `PreToolUse` accepts it alongside the decision, so the
-hook could rewrite `env` into `env | cut -d= -f1` and allow it silently. Refuse
-that. Every measurement in this document was taken by driving a real hook and
-reading what reached a transcript, so the record saying what ran is what the
-whole verification posture rests on. A deny that names the fix costs one turn
-and leaves it honest.
+**Not `updatedInput`.** `PreToolUse` accepts it alongside the decision, so the hook could rewrite `env` into `env | cut -d= -f1` and allow it silently.
+Refuse that.
+Every measurement in this document was taken by driving a real hook and reading what reached a transcript, so the record saying what ran is what the whole verification posture rests on.
+A deny that names the fix costs one turn and leaves it honest.
 
-**The override reaches it like any other block.** `SPILL_GUARD_OVERRIDE=<why>
-env` is a confirmation rather than an allow, which is the right shape for a
-control whose threat model is accident: the session that means it says why, and
-a person is told before the environment leaves the machine.
+**The override reaches it like any other block.** `SPILL_GUARD_OVERRIDE=<why> env` is a confirmation rather than an allow, which is the right shape for a control whose threat model is accident: the session that means it says why, and a person is told before the environment leaves the machine.
 
-**And the confirmation names what else the call would send.** A refusal stops
-the call whatever its buffers hold, so without the hatch nothing beside it is
-scanned. With it, the walk goes on past the refusal and its buffers are scanned
-before the prompt is written, so a finding beside the refusal is named in it.
-Before Q250, `SPILL_GUARD_OVERRIDE=why cat key.txt .env` asked about the `.env`
-alone and approving sent the key. Driven 2026-11-09 on built binaries over a
-`.env`, an `env`, a recursive `grep` and a file named after the `.env`: all
-four named no rule on `main` and all four name it now, while the same calls
-without the hatch deny on the refusal and scan nothing, as before. Where that
-scan falls short, an operand that does not resolve or a budget that runs out,
-the prompt says part of the call went unread, whether or not it names a match:
-with no match named, that sentence is the only thing in it saying an approval
-sends more than the refusal names.
+**And the confirmation names what else the call would send.** A refusal stops the call whatever its buffers hold, so without the hatch nothing beside it is scanned.
+With it, the walk goes on past the refusal and its buffers are scanned before the prompt is written, so a finding beside the refusal is named in it.
+Before Q250, `SPILL_GUARD_OVERRIDE=why cat key.txt .env` asked about the `.env` alone and approving sent the key.
+Driven 2026-11-09 on built binaries over a `.env`, an `env`, a recursive `grep` and a file named after the `.env`: all four named no rule on `main` and all four name it now, while the same calls without the hatch deny on the refusal and scan nothing, as before.
+Where that scan falls short, an operand that does not resolve or a budget that runs out, the prompt says part of the call went unread, whether or not it names a match: with no match named, that sentence is the only thing in it saying an approval sends more than the refusal names.
 
-**What this does not do is guard a path.** The row that filed it carried a
-second half — refusing a read of `~/.claude/settings.json`, `.env`,
-`~/.aws/credentials` and the rest of that class — and that half is
-[below](#a-path-refused-where-no-rule-would-recognise-what-is-in-it), on a
-different argument and with one member fewer. It is reachable by content
-matching where this one is not, and its negative corpus was the thing that had
-to be measured before anything shipped: the measurement threw
-`~/.claude/settings.json` out of the class outright.
+**What this does not do is guard a path.** The row that filed it carried a second half — refusing a read of `~/.claude/settings.json`, `.env`, `~/.aws/credentials` and the rest of that class — and that half is [below](#a-path-refused-where-no-rule-would-recognise-what-is-in-it), on a different argument and with one member fewer.
+It is reachable by content matching where this one is not, and its negative corpus was the thing that had to be measured before anything shipped: the measurement threw `~/.claude/settings.json` out of the class outright.
 
 ### A path refused, where no rule would recognise what is in it
 
 The section above refuses a call because there is nothing anywhere to open.
-This one refuses a read of a file that is very much there, so it is a smaller
-claim and the whole job is stating it exactly.
+This one refuses a read of a file that is very much there, so it is a smaller claim and the whole job is stating it exactly.
 
-These paths are scannable. `internal/readers` resolves them, the pipeline opens
-them, and a value in one that matches a shipped rule blocks today with no help
-from here. What a path refusal adds is the rest of the file, and on this class
-the rest of the file is most of it. Driven 2026-09-04 on a binary built from
-`21f15a6`, against a fixture holding the `aws-secret-access-key` vector from
-`testdata/corpus/vectors/`:
+These paths are scannable.
+`internal/readers` resolves them, the pipeline opens them, and a value in one that matches a shipped rule blocks today with no help from here.
+What a path refusal adds is the rest of the file, and on this class the rest of the file is most of it.
+Driven 2026-09-04 on a binary built from `21f15a6`, against a fixture holding the `aws-secret-access-key` vector from `testdata/corpus/vectors/`:
 
 | the call | what the shipped binary does |
 |---|---|
@@ -294,23 +187,14 @@ the rest of the file is most of it. Driven 2026-09-04 on a binary built from
 | `cat .aws/credentials` — an AWS **secret** access key | exit 0, silent |
 | a `Read` of that same file | exit 0, silent |
 
-The shipped set is sixteen high-precision shapes, and not one of them matches
-an AWS secret access key, a netrc password, a base64 registry auth or a
-kubeconfig's `client-key-data`. That is what this class holds. So a clean scan
-of one of these files is a report on the thirteen of those shapes enabled by default
-and not a report on the file, and allowing the read on the strength of it is
-the shape of claim this whole document exists to refuse.
+The shipped set is sixteen high-precision shapes, and not one of them matches an AWS secret access key, a netrc password, a base64 registry auth or a kubeconfig's `client-key-data`.
+That is what this class holds.
+So a clean scan of one of these files is a report on the thirteen of those shapes enabled by default and not a report on the file, and allowing the read on the strength of it is the shape of claim this whole document exists to refuse.
 
-**Membership is read off the name, because that is what "credentials by
-convention" means.** `.env` and `.env.<anything>`, `~/.aws/credentials`,
-`.netrc` and `_netrc`, `.git-credentials`, `~/.docker/config.json`, and a
-kubeconfig — `~/.kube/config`, a file named `kubeconfig`, and `*.kubeconfig`.
+**Membership is read off the name, because that is what "credentials by convention" means.** `.env` and `.env.<anything>`, `~/.aws/credentials`, `.netrc` and `_netrc`, `.git-credentials`, `~/.docker/config.json`, and a kubeconfig — `~/.kube/config`, a file named `kubeconfig`, and `*.kubeconfig`.
 
-**`~/.claude/settings.json` is not in it, and the measurement is the reason.**
-It was the class's first-named member. Swept over 24,381 `Bash` calls and 521
-`Read` calls in 238 transcript files on this machine, the seven days to
-2026-09-04, by driving `internal/bash`, `internal/readers` and the shipped
-resolver over the real command strings:
+**`~/.claude/settings.json` is not in it, and the measurement is the reason.** It was the class's first-named member.
+Swept over 24,381 `Bash` calls and 521 `Read` calls in 238 transcript files on this machine, the seven days to 2026-09-04, by driving `internal/bash`, `internal/readers` and the shipped resolver over the real command strings:
 
 | | |
 |---|---|
@@ -321,81 +205,40 @@ resolver over the real command strings:
 | Reads of every other member of the class | **0** |
 | The same sweep with 12 planted class reads appended | 11 |
 
-The 29 are one habit. Twenty-six are the read-back half of the effort-setting
-step a dispatched worker session runs before anything else — a `printf` of one
-JSON line redirected into `.claude/settings.local.json`, followed by a `cat` of
-the file to confirm the write landed. So a rule denying this class fires 29
-times a week on somebody checking their own config, and mostly on the half of a
-write-then-verify that does the verifying. That is what the environment half
-calls worse than no rule: a guard that fires on the careful form teaches the
-session to stop being careful, and here the careful form *is* verifying a
-write.
+The 29 are one habit.
+Twenty-six are the read-back half of the effort-setting step a dispatched worker session runs before anything else — a `printf` of one JSON line redirected into `.claude/settings.local.json`, followed by a `cat` of the file to confirm the write landed.
+So a rule denying this class fires 29 times a week on somebody checking their own config, and mostly on the half of a write-then-verify that does the verifying.
+That is what the environment half calls worse than no rule: a guard that fires on the careful form teaches the session to stop being careful, and here the careful form *is* verifying a write.
 
-Say the bias out loud, because the number decided a product's scope. Those 26
-are generated by the way this repo dispatches work — a worker session writes an
-effort file and reads it back before it does anything else — and the change they
-removed a member from reaches everyone who installs the plugin, not this
-machine. The argument survives it: a guard that fires on a write-then-verify
-fires on the careful form wherever that habit exists, and 3 of the 29 are not
-that habit. But the *count* is this machine's, and a reader whose sessions never
-write that file should take the mechanism and re-measure the traffic.
+Say the bias out loud, because the number decided a product's scope.
+Those 26 are generated by the way this repo dispatches work — a worker session writes an effort file and reads it back before it does anything else — and the change they removed a member from reaches everyone who installs the plugin, not this machine.
+The argument survives it: a guard that fires on a write-then-verify fires on the careful form wherever that habit exists, and 3 of the 29 are not that habit.
+But the *count* is this machine's, and a reader whose sessions never write that file should take the mechanism and re-measure the traffic.
 
-The last row is the control, and it is 11 rather than 12 on purpose. The
-twelfth planted call is `tail -5 ~/.aws/config`, and `~/.aws/config` is out of
-the class — by convention it holds a region and a profile name where
-`credentials` holds the key. Convention is all that is, and it is worth saying
-plainly: the AWS CLI will read `aws_access_key_id` and `aws_secret_access_key`
-out of `config` under a `[profile …]` heading, so this exclusion rests on where
-credentials are conventionally written rather than on a property of the file.
-It is deliberately the narrow reading, because membership here is read off a
-name and a name that usually holds settings is not a name that means
-credentials. So the sweep fires on every member it should and declines the one
-it should, which is more than a uniform 12 would have said.
+The last row is the control, and it is 11 rather than 12 on purpose.
+The twelfth planted call is `tail -5 ~/.aws/config`, and `~/.aws/config` is out of the class — by convention it holds a region and a profile name where `credentials` holds the key.
+Convention is all that is, and it is worth saying plainly: the AWS CLI will read `aws_access_key_id` and `aws_secret_access_key` out of `config` under a `[profile …]` heading, so this exclusion rests on where credentials are conventionally written rather than on a property of the file.
+It is deliberately the narrow reading, because membership here is read off a name and a name that usually holds settings is not a name that means credentials.
+So the sweep fires on every member it should and declines the one it should, which is more than a uniform 12 would have said.
 
-**The careful form is a pipeline position, the same reading `env` gets.** `cat
-.env | cut -d= -f1` sends the names alone, so refusing it would fire on the
-careful form; a segment with a stage after it is writing to that stage, and one
-with nothing after it is writing to the tool result. Here that test buys
-something the environment case has nothing to buy with: the file is a buffer,
-so the filtered form is still opened and still matched against every rule.
-Driven — `cat matches.env | cut -d= -f1` blocks naming `aws-access-key-id`. The
-careful form keeps its content coverage instead of trading it for the deny,
-which is why the reason recommends it.
+**The careful form is a pipeline position, the same reading `env` gets.** `cat .env | cut -d= -f1` sends the names alone, so refusing it would fire on the careful form; a segment with a stage after it is writing to that stage, and one with nothing after it is writing to the tool result.
+Here that test buys something the environment case has nothing to buy with: the file is a buffer, so the filtered form is still opened and still matched against every rule.
+Driven — `cat matches.env | cut -d= -f1` blocks naming `aws-access-key-id`.
+The careful form keeps its content coverage instead of trading it for the deny, which is why the reason recommends it.
 
-**It reaches the readers `internal/readers` knows and no others, and the reason
-says so.** `python3 -c "print(open('~/.aws/credentials').read())"` names no
-operand this package can see and is not refused — driven, and pinned by a test.
-Q87 and Q127 drove the reader class between them, and nothing either found is a
-command carrying file operands, so the table is not about to grow into the
-hole. A reader who takes the deny for path protection will trust it further
-than it goes, so the reason calls itself a net for the
-accident rather than a claim that the path is guarded, exactly as the
-environment one does.
+**It reaches the readers `internal/readers` knows and no others, and the reason says so.** `python3 -c "print(open('~/.aws/credentials').read())"` names no operand this package can see and is not refused — driven, and pinned by a test.
+Q87 and Q127 drove the reader class between them, and nothing either found is a command carrying file operands, so the table is not about to grow into the hole.
+A reader who takes the deny for path protection will trust it further than it goes, so the reason calls itself a net for the accident rather than a claim that the path is guarded, exactly as the environment one does.
 
-**An input redirect used to walk past it, and that one was a bypass rather
-than a cap.** `cat < .env` was allowed where `cat .env` was refused, and `cat <
-~/.aws/credentials` where `cat ~/.aws/credentials` was. Driven 2026-09-04 on a
-binary built from `c47d7bc`, against fixtures holding a password and an AWS
-secret access key — deliberately nothing a shipped rule matches, so no content
-verdict could account for either arm, and an unguarded path in the same run
-stayed silent as the negative control. The cause was upstream of this check:
-`internal/bash` strips a redirect out of a segment's tokens into
-`Segment.Redirects`, `readers.Files` reads tokens, so the target was never an
-operand and never reached here. It defeated content matching and this refusal
-alike, which is what made it a bypass and not one more thing the class declines
-to cover.
+**An input redirect used to walk past it, and that one was a bypass rather than a cap.** `cat < .env` was allowed where `cat .env` was refused, and `cat < ~/.aws/credentials` where `cat ~/.aws/credentials` was.
+Driven 2026-09-04 on a binary built from `c47d7bc`, against fixtures holding a password and an AWS secret access key — deliberately nothing a shipped rule matches, so no content verdict could account for either arm, and an unguarded path in the same run stayed silent as the negative control.
+The cause was upstream of this check: `internal/bash` strips a redirect out of a segment's tokens into `Segment.Redirects`, `readers.Files` reads tokens, so the target was never an operand and never reached here.
+It defeated content matching and this refusal alike, which is what made it a bypass and not one more thing the class declines to cover.
 
-**Closed by recording the operator, and sized through the segmenter first.**
-`Segment.Redirects` is a list of targets with no operator, and upstream still
-keeps it that way at `49ce73b`: its question, whether a path is outside the
-workspace, has the same answer for a read and a write, so it never needed one.
-This repo's does not, so `Segment.Inputs` carries the `<` subset beside it and
-the hook appends it to a known reader's operands, where resolution, the
-regular-file check and the guarded class ask of `cat < .env` what they ask of
-`cat .env`. Q131, the row that filed this, counted a 215-segment ceiling with a
-regex. Over 28,187 `Bash` calls
-in the week to 2026-09-04 the segmenter finds 360 segments carrying an input
-redirect, 219 on a reader the table knows and 141 on a command with no row:
+**Closed by recording the operator, and sized through the segmenter first.** `Segment.Redirects` is a list of targets with no operator, and upstream still keeps it that way at `49ce73b`: its question, whether a path is outside the workspace, has the same answer for a read and a write, so it never needed one.
+This repo's does not, so `Segment.Inputs` carries the `<` subset beside it and the hook appends it to a known reader's operands, where resolution, the regular-file check and the guarded class ask of `cat < .env` what they ask of `cat .env`.
+Q131, the row that filed this, counted a 215-segment ceiling with a regex.
+Over 28,187 `Bash` calls in the week to 2026-09-04 the segmenter finds 360 segments carrying an input redirect, 219 on a reader the table knows and 141 on a command with no row:
 
 | command | has a row | segments with `<` |
 |---|---|---|
@@ -413,22 +256,13 @@ redirect, 219 on a reader the table knows and 141 on a command with no row:
 | `tail` | yes | 1 |
 | 17 other names | no | 37 |
 
-Three decisions come off that table. **Every reader in the table**, not only
-the ones that emit content: `wc` is 155 of the 219, `wc -l big.log` is already
-scanned as an operand and blocks on a finding, so a split would allow `wc -l <
-big.log` on the finding that blocks it written the other way — the row's own
-inconsistency, inverted. The precision cost Q131 weighed is the operand path's
-and not a new one. **Known readers only**: `python3 - < script.py` is
-the limitation the operand path already states, that what a command does with
-its stdin is not something the tokens say, and 77 of the 141 are that shape.
-**A `<(…)` is not an input**: the lexer leaves it as `<` and `(`, upstream
-records the paren as a target, 49 of the 219 were that shape, and a `(` handed
-to the resolver is a relative path that defers whenever the payload has no
-`cwd`.
+Three decisions come off that table.
+**Every reader in the table**, not only the ones that emit content: `wc` is 155 of the 219, `wc -l big.log` is already scanned as an operand and blocks on a finding, so a split would allow `wc -l < big.log` on the finding that blocks it written the other way — the row's own inconsistency, inverted.
+The precision cost Q131 weighed is the operand path's and not a new one.
+**Known readers only**: `python3 - < script.py` is the limitation the operand path already states, that what a command does with its stdin is not something the tokens say, and 77 of the 141 are that shape.
+**A `<(…)` is not an input**: the lexer leaves it as `<` and `(`, upstream records the paren as a target, 49 of the 219 were that shape, and a `(` handed to the resolver is a relative path that defers whenever the payload has no `cwd`.
 
-Driven on binaries built from `main` and from this change, over every one of
-the 1,431 calls in that week whose command carries a bare `<`, each with its
-own `cwd`:
+Driven on binaries built from `main` and from this change, over every one of the 1,431 calls in that week whose command carries a bare `<`, each with its own `cwd`:
 
 | `main` | this change | calls |
 |---|---|---|
@@ -437,84 +271,44 @@ own `cwd`:
 | deny | deny | 11 |
 | allow | deferred | 43 |
 
-Nothing moved to deny or ask. The 43 that moved are `wc` with a target that
-expands (41) or is relative after a `cd` (2) — the coverage deferral the
-operand path already gives `wc -l $S/x.log`, now given to `wc -l < $S/x.log`: a
-stderr line and a coverage record, no prompt and no block. The positive control
-is the row's own two tables re-driven on the same pair of binaries: every
-redirect spelling — `cat <`, `cat <.env`, `head -n 20 <`, `grep -c AKIA <`,
-`wc -l <`, over the planted key and over `.env` and `.aws/credentials` — allows
-on `main` and denies on this change, while `cat < notes.txt`, `python3 - <
-planted.env`, `cat < .env | cut -d= -f1` and `diff <(sort a) <(sort b)` allow
-on both.
+Nothing moved to deny or ask.
+The 43 that moved are `wc` with a target that expands (41) or is relative after a `cd` (2) — the coverage deferral the operand path already gives `wc -l $S/x.log`, now given to `wc -l < $S/x.log`: a stderr line and a coverage record, no prompt and no block.
+The positive control is the row's own two tables re-driven on the same pair of binaries: every redirect spelling — `cat <`, `cat <.env`, `head -n 20 <`, `grep -c AKIA <`, `wc -l <`, over the planted key and over `.env` and `.aws/credentials` — allows on `main` and denies on this change, while `cat < notes.txt`, `python3 - < planted.env`, `cat < .env | cut -d= -f1` and `diff <(sort a) <(sort b)` allow on both.
 
-**An `@` token is a read too, and is refused the same way.** It splices the
-file with no tool call ([`@path` is an operand](#path-is-an-operand-not-a-hop)),
-so until Q236 `see @.env` got the content scan alone and exited 0 silent. The
-reason is written for the person who typed the token. Swept first, since the
-class was measured on tool calls: over 2,999 transcript files here on
-2026-11-09, 185 path-like `@` tokens in 7,668 typed prompts and 1,403 `file`
-attachments named no member of the class, while a planted control came back 2
-of 3 tokens and 1 of 2 attachments, missing only `src/main.go` and `.env.example`.
+**An `@` token is a read too, and is refused the same way.** It splices the file with no tool call ([`@path` is an operand](#path-is-an-operand-not-a-hop)), so until Q236 `see @.env` got the content scan alone and exited 0 silent.
+The reason is written for the person who typed the token.
+Swept first, since the class was measured on tool calls: over 2,999 transcript files here on 2026-11-09, 185 path-like `@` tokens in 7,668 typed prompts and 1,403 `file` attachments named no member of the class, while a planted control came back 2 of 3 tokens and 1 of 2 attachments, missing only `src/main.go` and `.env.example`.
 
-**Reads only.** A *write* to one of these changes what some other tool then
-does — an environment variable injected, a registry credential replaced — which
-is not a spill and is not this tool's goal. `echo … > .env` is not refused, and
-picking the write control up on the way past is how a scanner turns into a
-permissions system nobody asked it to be.
+**Reads only.** A *write* to one of these changes what some other tool then does — an environment variable injected, a registry credential replaced — which is not a spill and is not this tool's goal.
+`echo … > .env` is not refused, and picking the write control up on the way past is how a scanner turns into a permissions system nobody asked it to be.
 
-**What is deliberately out, beyond `settings.json`.** `.env.example`,
-`.env.sample`, `.env.template` and `.env.dist`, which exist to be committed and
-to hold placeholders — that one is reasoned from the convention rather than
-measured, because the sweep found no `.env` read of any spelling to measure.
-And the whole `*.env` family: `deploy.env` is a name somebody chose where
-`.env` is a convention. This repo is its own example — `testdata/corpus/` holds
-`aws-access-key-id.env` and `stripe-live-secret-key.env`, and the selftest
-plants `deploy.env`, so the suffix would refuse three of the fixtures the tool
-is tested with. Under-firing on a spelling is the trade the environment half
-already takes for `env -0`.
+**What is deliberately out, beyond `settings.json`.** `.env.example`, `.env.sample`, `.env.template` and `.env.dist`, which exist to be committed and to hold placeholders — that one is reasoned from the convention rather than measured, because the sweep found no `.env` read of any spelling to measure.
+And the whole `*.env` family: `deploy.env` is a name somebody chose where `.env` is a convention.
+This repo is its own example — `testdata/corpus/` holds `aws-access-key-id.env` and `stripe-live-secret-key.env`, and the selftest plants `deploy.env`, so the suffix would refuse three of the fixtures the tool is tested with.
+Under-firing on a spelling is the trade the environment half already takes for `env -0`.
 
 ### What gets scanned is the crossing, not the hop
 
-Scanning every field of every hook payload is the safe-looking default and it is
-how a scanner becomes noise: one secret reported at the `Read`, again at the
-`Write` that copies it, again at the heredoc that echoes it. Scanning only what
-a human typed is the opposite error — it catches the pasted credential and
-nothing the model moves.
+Scanning every field of every hook payload is the safe-looking default and it is how a scanner becomes noise: one secret reported at the `Read`, again at the `Write` that copies it, again at the heredoc that echoes it.
+Scanning only what a human typed is the opposite error — it catches the pasted credential and nothing the model moves.
 
-Authorship is the wrong axis for both. The boundary this tool defends is the
-local filesystem to the model's context, and the question a hook input answers
-is whether its bytes have crossed it yet. A `Write` body composed out of a file
-the model read is neither human-typed nor runtime-written, and deciding which it
-is has no answer because the question does not apply to it.
+Authorship is the wrong axis for both.
+The boundary this tool defends is the local filesystem to the model's context, and the question a hook input answers is whether its bytes have crossed it yet.
+A `Write` body composed out of a file the model read is neither human-typed nor runtime-written, and deciding which it is has no answer because the question does not apply to it.
 
-**Whatever the model composed has already crossed.** The model emits the
-`tool_use` block, so every byte of it is API output before the `PreToolUse` hook
-is called. Denying that call stops a file being written; it unsends nothing. So
-`Write.content`, `Edit.old_string` and `new_string`, a heredoc body inside a
-`Bash` command, and the `description` beside it are re-emissions, and a finding
-on one of them names a crossing that happened at an earlier hop.
+**Whatever the model composed has already crossed.** The model emits the `tool_use` block, so every byte of it is API output before the `PreToolUse` hook is called.
+Denying that call stops a file being written; it unsends nothing.
+So `Write.content`, `Edit.old_string` and `new_string`, a heredoc body inside a `Bash` command, and the `description` beside it are re-emissions, and a finding on one of them names a crossing that happened at an earlier hop.
 
-**What a hook opens for itself has not crossed.** `PreToolUse` on `Read` carries
-the path and no content, so the hook reads the file, and those bytes are still
-on the local side until it allows the call. Same for the file operands the
-`Bash` reader spec resolves, and for an `@path` in a prompt, which is the same
-shape arriving through `UserPromptSubmit` — [below](#path-is-an-operand-not-a-hop).
+**What a hook opens for itself has not crossed.** `PreToolUse` on `Read` carries the path and no content, so the hook reads the file, and those bytes are still on the local side until it allows the call.
+Same for the file operands the `Bash` reader spec resolves, and for an `@path` in a prompt, which is the same shape arriving through `UserPromptSubmit` — [below](#path-is-an-operand-not-a-hop).
 
-Those three are the readers v1 covers, and they are instances rather than the
-class. The class is *any hook input naming a filesystem path whose result comes
-back as content*, and an installed MCP file or transcript reader is a member of
-it that no rule here mentions. Under the old axis those were runtime output and
-excluded with `PostToolUse`; under this one they are uncrossed hops where a deny
-works, so the axis opens that obligation rather than discharging it — and the
-MCP reader is [driven](#the-rest-of-the-class-driven) now, where the deny does
-work and the member stays out anyway. Enumerating
-the readers is backlog work, not something this section settles.
+Those three are the readers v1 covers, and they are instances rather than the class.
+The class is *any hook input naming a filesystem path whose result comes back as content*, and an installed MCP file or transcript reader is a member of it that no rule here mentions.
+Under the old axis those were runtime output and excluded with `PostToolUse`; under this one they are uncrossed hops where a deny works, so the axis opens that obligation rather than discharging it — and the MCP reader is [driven](#the-rest-of-the-class-driven) now, where the deny does work and the member stays out anyway.
+Enumerating the readers is backlog work, not something this section settles.
 
-Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, by logging the
-raw stdin of a hook wired to all three events in a throwaway project and driving
-a session that read a file, wrote its contents to a second file, and ran `cat`
-on the first:
+Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, by logging the raw stdin of a hook wired to all three events in a throwaway project and driving a session that read a file, wrote its contents to a second file, and ran `cat` on the first:
 
 | Payload field | Where the bytes come from | Crossed already | Scan |
 |---|---|---|---|
@@ -528,88 +322,48 @@ on the first:
 | `PreToolUse` `Edit.old_string`, `Edit.new_string` | the model | Yes | No |
 | `PostToolUse.tool_response` | the tool, and [already sent](#posttooluse-cannot-withhold-a-result) | Yes | No |
 
-`Read`'s `tool_input` was `{"file_path": …}` and nothing else, which is what
-makes the hook's own open the only way to see the content. `Write`'s carried the
-full 55-byte body the model had assembled from the `Read` that preceded it,
-and the `Bash` heredoc arrived intact inside `command`. Every payload also
-carried `session_id`, `prompt_id`, `cwd`, `transcript_path` and, for a tool, a
-`tool_use_id` beginning `toolu_`.
+`Read`'s `tool_input` was `{"file_path": …}` and nothing else, which is what makes the hook's own open the only way to see the content.
+`Write`'s carried the full 55-byte body the model had assembled from the `Read` that preceded it, and the `Bash` heredoc arrived intact inside `command`.
+Every payload also carried `session_id`, `prompt_id`, `cwd`, `transcript_path` and, for a tool, a `tool_use_id` beginning `toolu_`.
 
-**The `Bash` command string is scanned, and the reason is authorship rather than
-crossing.** By the rule above a model-composed command has already crossed and a
-finding on it would be a warning, which
-[the `PostToolUse` verdict](#posttooluse-cannot-withhold-a-result) says not to
-count as a control. It is scanned anyway because it is the one payload field
-whose authorship is not settled, and failing closed on an unsettled case is this
-project's rule — the cost is one short string per `Bash` call with no file to
-open.
+**The `Bash` command string is scanned, and the reason is authorship rather than crossing.** By the rule above a model-composed command has already crossed and a finding on it would be a warning, which [the `PostToolUse` verdict](#posttooluse-cannot-withhold-a-result) says not to count as a control.
+It is scanned anyway because it is the one payload field whose authorship is not settled, and failing closed on an unsettled case is this project's rule — the cost is one short string per `Bash` call with no file to open.
 
-The argument for that exception used to be that every `PreToolUse` in the
-2026-08-27 drive carried a `toolu_` id, so every one was model-issued. That
-reasoning does not hold and the exception outlives it. A prefix says which code
-path issued a call rather than who composed it — over every `tool_use` in this
-machine's transcripts, [6 of 185,227 begin
-`call_`](#-bash-mode-is-not-a-tool-call-so-pretooluse-never-sees-it) and all six
-are ordinary model work. And the one route by which a human runs a command
-directly, `!` bash mode, is now measured: it is not a tool call at all, so it
-never reaches `PreToolUse` in any form. That closes the route the exception was
-imagined for and leaves the exception standing, because nothing has enumerated
-the routes.
+The argument for that exception used to be that every `PreToolUse` in the 2026-08-27 drive carried a `toolu_` id, so every one was model-issued.
+That reasoning does not hold and the exception outlives it.
+A prefix says which code path issued a call rather than who composed it — over every `tool_use` in this machine's transcripts, [6 of 185,227 begin `call_`](#-bash-mode-is-not-a-tool-call-so-pretooluse-never-sees-it) and all six are ordinary model work.
+And the one route by which a human runs a command directly, `!` bash mode, is now measured: it is not a tool call at all, so it never reaches `PreToolUse` in any form.
+That closes the route the exception was imagined for and leaves the exception standing, because nothing has enumerated the routes.
 
-None of that reopens the axis. Crossing decides what is worth scanning and
-authorship is not a second test — the carve-out is fail-closed and named as
-such, and correcting the evidence under it changes what the carve-out rests on
-rather than what the rule is. A measurement about who typed something is about
-the size of this exception and about nothing else in the table above.
+None of that reopens the axis.
+Crossing decides what is worth scanning and authorship is not a second test — the carve-out is fail-closed and named as such, and correcting the evidence under it changes what the carve-out rests on rather than what the rule is.
+A measurement about who typed something is about the size of this exception and about nothing else in the table above.
 
-**The carve-out holds the arguments of a call that reads, and not the body of a
-call that writes.** A path through `cat` sits in the command string and blocks,
-so the same path through `Read` or `Grep` was the one spelling that exited 0
-unread. These fields are short and name what to fetch. `Write.content` and
-`Edit` stay out because they repeat what an earlier hop returned, which is the
-noise this section exists to delete, and a block on any of these still unsends
-nothing. Measured 2026-11-04 over 2,925 transcripts on one machine, 2026-07-26
-onward, each list carrying a planted key that fired: the shipped rules match 0
-of 10,075 distinct `Read` `file_path` values, 0 of 387 `Grep` `path` and 0 of 69
-`glob`. No call carried `type`. A clean corpus file holds the same shapes.
+**The carve-out holds the arguments of a call that reads, and not the body of a call that writes.** A path through `cat` sits in the command string and blocks, so the same path through `Read` or `Grep` was the one spelling that exited 0 unread.
+These fields are short and name what to fetch.
+`Write.content` and `Edit` stay out because they repeat what an earlier hop returned, which is the noise this section exists to delete, and a block on any of these still unsends nothing.
+Measured 2026-11-04 over 2,925 transcripts on one machine, 2026-07-26 onward, each list carrying a planted key that fired: the shipped rules match 0 of 10,075 distinct `Read` `file_path` values, 0 of 387 `Grep` `path` and 0 of 69 `glob`.
+No call carried `type`.
+A clean corpus file holds the same shapes.
 
-**Dedup on the content hash is not the mechanism, and would cost more than the
-repetition it removes.** The repetition it targets is real — the same secret at
-four hops — but the rule above deletes three of those hops structurally, without
-keeping anything. Making the scanner quiet by remembering what it has already
-reported would instead need the `Finding` digest to survive between hook
-invocations, and each of those is a fresh process — five invocations in one
-session came back with five distinct PIDs under one parent, measured the same
-day — so the set becomes a file on disk keyed by `session_id`. Three things
-follow, and each of them is a rule this project already made:
+**Dedup on the content hash is not the mechanism, and would cost more than the repetition it removes.** The repetition it targets is real — the same secret at four hops — but the rule above deletes three of those hops structurally, without keeping anything.
+Making the scanner quiet by remembering what it has already reported would instead need the `Finding` digest to survive between hook invocations, and each of those is a fresh process — five invocations in one session came back with five distinct PIDs under one parent, measured the same day — so the set becomes a file on disk keyed by `session_id`.
+Three things follow, and each of them is a rule this project already made:
 
-- **The file inverts.** `Digest` is the first eight bytes of
-  `sha256(rule id, NUL, value)`, and the rule id is public in
-  `rules/spill-guard.json`. Sixty-four bits pins a guess uniquely, so for any
-  low-entropy value the file is the plaintext with a short walk in front of
-  it. The `pii` family is all such values: a US SSN is 10⁹ candidates, which
-  is 7 minutes of single-core Python, measured 2026-08-27 as the best of three
-  runs of 1,000,000 digests, scaled. "Never put a raw secret in a struct that
-  outlives the match" is not satisfied by writing a recoverable derivation of
-  one to disk instead.
-- **A cache silences the scanner, which is the fail-open direction.** A stale,
-  corrupt, or planted entry means a real secret goes unreported and the run
-  looks clean, and there is no in-band signal that anything was suppressed. This
-  project blocks on every internal error for that reason.
-- **It is state, and state has to be reaped.** A per-session file outlives the
-  session that made it. The brief rules out a daemon and a persistent process;
-  a directory of digest sets nobody deletes is the same obligation arriving
-  through a side door.
+- **The file inverts.** `Digest` is the first eight bytes of `sha256(rule id, NUL, value)`, and the rule id is public in `rules/spill-guard.json`.
+  Sixty-four bits pins a guess uniquely, so for any low-entropy value the file is the plaintext with a short walk in front of it.
+  The `pii` family is all such values: a US SSN is 10⁹ candidates, which is 7 minutes of single-core Python, measured 2026-08-27 as the best of three runs of 1,000,000 digests, scaled.
+  "Never put a raw secret in a struct that outlives the match" is not satisfied by writing a recoverable derivation of one to disk instead.
+- **A cache silences the scanner, which is the fail-open direction.** A stale, corrupt, or planted entry means a real secret goes unreported and the run looks clean, and there is no in-band signal that anything was suppressed.
+  This project blocks on every internal error for that reason.
+- **It is state, and state has to be reaped.** A per-session file outlives the session that made it.
+  The brief rules out a daemon and a persistent process; a directory of digest sets nobody deletes is the same obligation arriving through a side door.
 
 ### `@path` is an operand, not a hop
 
-Typing `@secret.txt` in a prompt puts the file's contents in front of the model,
-and **no hook of any kind runs for it**. Measured 2026-08-27 on 2.1.238, in a
-project wiring all three events to a stdin logger. The marker column is read
-from the session transcript named by the hook payload's own `transcript_path`,
-not from what the run printed — a hook's stdout proves nothing here for the same
-reason it proves nothing [for `PostToolUse`](#posttooluse-cannot-withhold-a-result),
-and a blocked turn prints nothing whatever the splice did:
+Typing `@secret.txt` in a prompt puts the file's contents in front of the model, and **no hook of any kind runs for it**.
+Measured 2026-08-27 on 2.1.238, in a project wiring all three events to a stdin logger.
+The marker column is read from the session transcript named by the hook payload's own `transcript_path`, not from what the run printed — a hook's stdout proves nothing here for the same reason it proves nothing [for `PostToolUse`](#posttooluse-cannot-withhold-a-result), and a blocked turn prints nothing whatever the splice did:
 
 | Prompt | Hook records | `tool_use_id` in transcript | Marker in transcript |
 |---|---|---|---|
@@ -618,49 +372,28 @@ and a blocked turn prints nothing whatever the splice did:
 | `… @secret … Do not use any tool.` — near-miss token, file untouched | 1 — `UserPromptSubmit` | 0 | 0, in 21,384 bytes |
 | `… @secret.txt …` again, `UserPromptSubmit` exiting 2 | 1 — `UserPromptSubmit` | 0 | 0, in 1,404 bytes |
 
-Three things that table has to do at once. The `Read` control makes row one an
-absence rather than a dead hook. The **zero `tool_use_id`** makes it a splice
-rather than a hop the design already covers — content arriving is not evidence
-of a splice, because a model free to call `Read` produces the same content by a
-route `PreToolUse` does see. And the near-miss row shows the splice is keyed to
-an exact token: `@secret` next to a file named `secret.txt` moves nothing.
+Three things that table has to do at once.
+The `Read` control makes row one an absence rather than a dead hook.
+The **zero `tool_use_id`** makes it a splice rather than a hop the design already covers — content arriving is not evidence of a splice, because a model free to call `Read` produces the same content by a route `PreToolUse` does see.
+And the near-miss row shows the splice is keyed to an exact token: `@secret` next to a file named `secret.txt` moves nothing.
 
-**That is not a limitation to declare, because the operand is visible.**
-`UserPromptSubmit.prompt` carries `@secret.txt` as literal text, unexpanded, and
-denying there suppressed the crossing rather than merely the echo: the deny
-arm's whole transcript is 1,404 bytes against 21,722, with the marker absent
-from it. So the prompt is two things at once: content to scan,
-and a carrier of file operands, in the same way a `Bash` command string is. The
-resolution rule is the `Bash` reader spec's problem restated with a simpler
-grammar, and it belongs in the scan set rather than in
-[what this is not](#what-it-is-not).
+**That is not a limitation to declare, because the operand is visible.** `UserPromptSubmit.prompt` carries `@secret.txt` as literal text, unexpanded, and denying there suppressed the crossing rather than merely the echo: the deny arm's whole transcript is 1,404 bytes against 21,722, with the marker absent from it.
+So the prompt is two things at once: content to scan, and a carrier of file operands, in the same way a `Bash` command string is.
+The resolution rule is the `Bash` reader spec's problem restated with a simpler grammar, and it belongs in the scan set rather than in [what this is not](#what-it-is-not).
 
-Getting it wrong is the failure this project indicts its predecessor for. A user
-who types `@.env` is doing the most obvious dangerous thing available, and a
-scanner that reports clean on it is reporting a safety it is not providing.
+Getting it wrong is the failure this project indicts its predecessor for.
+A user who types `@.env` is doing the most obvious dangerous thing available, and a scanner that reports clean on it is reporting a safety it is not providing.
 
 #### The token grammar, and the harness as its own oracle
 
-A spliced file arrives in the transcript as an attachment whose
-`attachment.type` is `file` and whose `filename` is the absolute path the
-harness itself resolved the token to. So the resolver does not have to be
-validated by reading that field and agreeing with it: the census is kept in
-`internal/hook/testdata/prompt-oracle.json` and a test compares against it on
-every run. What re-takes the census itself, against a pinned harness and
-without a credential, is
-[the job over that surface](#which-surfaces-a-gate-can-drive).
+A spliced file arrives in the transcript as an attachment whose `attachment.type` is `file` and whose `filename` is the absolute path the harness itself resolved the token to.
+So the resolver does not have to be validated by reading that field and agreeing with it: the census is kept in `internal/hook/testdata/prompt-oracle.json` and a test compares against it on every run.
+What re-takes the census itself, against a pinned harness and without a credential, is [the job over that surface](#which-surfaces-a-gate-can-drive).
 
-**Take the census on `attachment.type == "file"`, never on a raw count of
-`"type":"attachment"`.** Skill listings, token reminders, deferred-tool deltas
-and hook records all carry that key, so the raw count is non-zero whether or
-not a file crossed: over the twenty-three transcripts the table below is drawn
-from it ranges 5 to 14, and the ten arms where nothing was spliced at all still
-returned 5 or 6. It read 5 to 9 over the first eighteen, which is the argument
-against calibrating on it made by the census itself. What makes it survive a spot-check is that it is not
-uninformative: it goes to 0 on a turn the hook blocked, so a driver who checks
-a deny arm first sees it working and stops filtering. Separating a blocked turn
-from an allowed one is a different question from whether a file crossed, which
-is the only one this section needs.
+**Take the census on `attachment.type == "file"`, never on a raw count of `"type":"attachment"`.** Skill listings, token reminders, deferred-tool deltas and hook records all carry that key, so the raw count is non-zero whether or not a file crossed: over the twenty-three transcripts the table below is drawn from it ranges 5 to 14, and the ten arms where nothing was spliced at all still returned 5 or 6.
+It read 5 to 9 over the first eighteen, which is the argument against calibrating on it made by the census itself.
+What makes it survive a spot-check is that it is not uninformative: it goes to 0 on a turn the hook blocked, so a driver who checks a deny arm first sees it working and stops filtering.
+Separating a blocked turn from an allowed one is a different question from whether a file crossed, which is the only one this section needs.
 
 Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
 
@@ -682,71 +415,46 @@ Driven 2026-08-28 against 2.1.238 under `-p`, in the same throwaway project:
 | `@logo.png` | A `file` attachment whose `content.type` is `image`, carrying no text |
 | `@heap.dump`, a NUL in its first bytes | A `file` attachment whose `content.type` is `text`, carrying the whole file — NUL included, and a marker placed after it crossed |
 
-That last row is the one with a consequence, and it is closed. The resolver
-opens such a file and hands it on; [the pipeline](#pipeline) skipped a buffer
-with a NUL in the first 8 KiB, so a credential inside one was allowed — first
-in silence, then with a notice reporting that nothing had looked. On this
-surface the pipeline now matches those bytes rather than declining them, which
-is [a buffer whose bytes cross anyway](#a-buffer-whose-bytes-cross-anyway-measured)
-below. Driven 2026-09-03 on a built binary: a NUL, then an AWS-shaped key,
-under `@` — exit 0 with a notice before, and after it a block naming
-`aws-access-key-id` at the offset the key sits at in the file.
+That last row is the one with a consequence, and it is closed.
+The resolver opens such a file and hands it on; [the pipeline](#pipeline) skipped a buffer with a NUL in the first 8 KiB, so a credential inside one was allowed — first in silence, then with a notice reporting that nothing had looked.
+On this surface the pipeline now matches those bytes rather than declining them, which is [a buffer whose bytes cross anyway](#a-buffer-whose-bytes-cross-anyway-measured) below.
+Driven 2026-09-03 on a built binary: a NUL, then an AWS-shaped key, under `@` — exit 0 with a notice before, and after it a block naming `aws-access-key-id` at the offset the key sits at in the file.
 
-The `Read` and `Bash` surfaces still decline it, and that is a cost measurement
-rather than a second verdict axis. The section below has the table.
+The `Read` and `Bash` surfaces still decline it, and that is a cost measurement rather than a second verdict axis.
+The section below has the table.
 
-Two of those set the resolver's shape where the measurement runs out, and they
-go opposite ways.
+Two of those set the resolver's shape where the measurement runs out, and they go opposite ways.
 
-The **leading-boundary** rule is matched rather than widened, because thirty
-characters of the set that could have shown a looser harness came back the
-other way, and a resolver treating `foo@x.env` as a token would block every
-prompt that writes an address beside a real filename.
+The **leading-boundary** rule is matched rather than widened, because thirty characters of the set that could have shown a looser harness came back the other way, and a resolver treating `foo@x.env` as a token would block every prompt that writes an address beside a real filename.
 
-The **trailing trim** and the **whitespace class** are widened past what is
-driven, and the resolver got both wrong before it got them right. Three
-fail-opens, in the order they were found:
+The **trailing trim** and the **whitespace class** are widened past what is driven, and the resolver got both wrong before it got them right.
+Three fail-opens, in the order they were found:
 
-1. **The trim set was five characters somebody typed.** One prompt naming nine
-   spliced files put eight through unscanned while a plain `@ok.txt` in it
-   blocked. The set is now the ASCII punctuation set bar `/`; every ASCII
-   punctuation character driven is trimmed except `_`.
-2. **The space test was ASCII-only.** U+00A0 splits, so `@a<NBSP>@b` was one
-   token naming nothing and both files were invisible rather than skipped.
-3. **`unicode.IsSpace` was still wrong**, and this is the one worth
-   generalising. The argument for it was that it is a strict superset of the
-   six ASCII characters, so widening could not lose a boundary — true, and
-   beside the point. The exposure is a boundary the *harness* has and Go does
-   not, and there is one: Unicode removed U+FEFF from `White_Space` in 4.0.1.
-   Go implements the current standard and the harness splits on U+FEFF anyway,
-   so a BOM-led paste went unscanned.
+1. **The trim set was five characters somebody typed.** One prompt naming nine spliced files put eight through unscanned while a plain `@ok.txt` in it blocked.
+   The set is now the ASCII punctuation set bar `/`; every ASCII punctuation character driven is trimmed except `_`.
+2. **The space test was ASCII-only.** U+00A0 splits, so `@a<NBSP>@b` was one token naming nothing and both files were invisible rather than skipped.
+3. **`unicode.IsSpace` was still wrong**, and this is the one worth generalising.
+   The argument for it was that it is a strict superset of the six ASCII characters, so widening could not lose a boundary — true, and beside the point.
+   The exposure is a boundary the *harness* has and Go does not, and there is one: Unicode removed U+FEFF from `White_Space` in 4.0.1.
+   Go implements the current standard and the harness splits on U+FEFF anyway, so a BOM-led paste went unscanned.
 
-A hand-written table invites the question *where did these characters come
-from*. `unicode.IsSpace` forecloses it, which is what makes the stdlib idiom
-the more dangerous of the two: the standard moved in 2003 and the harness did
-not follow.
+A hand-written table invites the question *where did these characters come from*.
+`unicode.IsSpace` forecloses it, which is what makes the stdlib idiom the more dangerous of the two: the standard moved in 2003 and the harness did not follow.
 
-The asymmetry is why all three repairs widen rather than match: under-trimming
-leaves a file unscanned and spliced anyway, while over-trimming names a path
-that does not exist and costs one `os.Stat`. Only one direction is a
-fail-open. The resolver over-scans on U+0085 for exactly that reason — Go calls
-it a space, the harness does not, and the oracle declares the divergence rather
-than hiding it.
+The asymmetry is why all three repairs widen rather than match: under-trimming leaves a file unscanned and spliced anyway, while over-trimming names a path that does not exist and costs one `os.Stat`.
+Only one direction is a fail-open.
+The resolver over-scans on U+0085 for exactly that reason — Go calls it a space, the harness does not, and the oracle declares the divergence rather than hiding it.
 
-**None of this is a claim that the boundary class is settled.** Six codepoints
-have been driven. The rest of the class is not, and the way to extend it is to
-drive more rather than to reason from whichever standard looks authoritative.
+**None of this is a claim that the boundary class is settled.** Six codepoints have been driven.
+The rest of the class is not, and the way to extend it is to drive more rather than to reason from whichever standard looks authoritative.
 
 ### `!` bash mode is not a tool call, so `PreToolUse` never sees it
 
-Typing `!git status` in an interactive session runs the command locally and puts
-its output in front of the model. The question this settles is whether that
-crossing arrives as a `Bash` tool call, because if it did, the command string
-would be a genuinely human-typed `PreToolUse` payload and scanning it would be a
-control rather than a hedge.
+Typing `!git status` in an interactive session runs the command locally and puts its output in front of the model.
+The question this settles is whether that crossing arrives as a `Bash` tool call, because if it did, the command string would be a genuinely human-typed `PreToolUse` payload and scanning it would be a control rather than a hedge.
 
-It does not. Measured 2026-09-04 over 1,661 session transcripts on this machine,
-2026-07-26 to 2026-09-04, by walking every entry rather than by driving a hook:
+It does not.
+Measured 2026-09-04 over 1,661 session transcripts on this machine, 2026-07-26 to 2026-09-04, by walking every entry rather than by driving a hook:
 
 | | |
 |---|---|
@@ -757,80 +465,42 @@ It does not. Measured 2026-09-04 over 1,661 session transcripts on this machine,
 | …carrying their own `<bash-stdout>` | 58 |
 | Model-issued `Bash` tool calls in the same corpus | 143,678 |
 
-A tool call has one shape here: an assistant entry carrying a `tool_use`, then a
-user entry carrying the matching `tool_result`. A bash-mode entry is neither
-half of one. It is a user entry whose text already holds the command *and its
-output*, which is the tell — the command had run before anything was recorded,
-so there was no call for a `PreToolUse` hook to stop. The 143,678 in the last
-row are the control: the same walk over the same files finds tool calls in
-quantity, so the zeros are a reading and not a walk that could not fire.
+A tool call has one shape here: an assistant entry carrying a `tool_use`, then a user entry carrying the matching `tool_result`.
+A bash-mode entry is neither half of one.
+It is a user entry whose text already holds the command *and its output*, which is the tell — the command had run before anything was recorded, so there was no call for a `PreToolUse` hook to stop.
+The 143,678 in the last row are the control: the same walk over the same files finds tool calls in quantity, so the zeros are a reading and not a walk that could not fire.
 
-**The text reaches the model, and where the bytes sit is what establishes it.**
-The command and its output are in the entry's own `message.content` — the
-conversation payload, not a sidecar field — and 58 of the 62 carry their
-`<bash-stdout>` there. That is an argument about location and needs no
-assumption about what any field is for. `isMeta` corroborates and does not
-carry it: all 62 are `isMeta` false where the same corpus has 3,022 typed
-entries that are `isMeta` true, which establishes that the field varies rather
-than what it means. Their bodies run to 8,909 bytes at the largest, median 195.
-A
-`!cat ~/.aws/credentials` puts the file in the context with **no hook of any
-kind established to have run for it**, which is the same shape as `@path` above
-and without that one's remedy: `@path` leaves an operand in the prompt to
-resolve, and this leaves nothing — the command has run by the time anything is
-recorded.
+**The text reaches the model, and where the bytes sit is what establishes it.** The command and its output are in the entry's own `message.content` — the conversation payload, not a sidecar field — and 58 of the 62 carry their `<bash-stdout>` there.
+That is an argument about location and needs no assumption about what any field is for.
+`isMeta` corroborates and does not carry it: all 62 are `isMeta` false where the same corpus has 3,022 typed entries that are `isMeta` true, which establishes that the field varies rather than what it means.
+Their bodies run to 8,909 bytes at the largest, median 195.
+A `!cat ~/.aws/credentials` puts the file in the context with **no hook of any kind established to have run for it**, which is the same shape as `@path` above and without that one's remedy: `@path` leaves an operand in the prompt to resolve, and this leaves nothing — the command has run by the time anything is recorded.
 
-**Whether `UserPromptSubmit` fires for one is not settled, and this instrument
-cannot settle it.** The chronos hook on this machine has fired on every
-`UserPromptSubmit` since 2026-08-19T04:11Z and Claude Code records each firing
-as an attachment, so a transcript says per turn whether the hook ran. Over the
-22 bash-mode turns inside that window it ran for 7 and not for 11, with a
-further 4 that are followed by a typed prompt rather than by the assistant, none
-of which fired — and the per-session controls disagree with each other:
-one session has an ordinary-prompt control of 2 of 2 with 0 of 2 bash-mode
-turns firing, and two sessions have a control of 1 of 1 with the bash-mode turn
-firing. The obvious mechanism, that the output rides on the next submission, is
-refuted by the same data: 18 of the 22 are followed directly by an assistant
-turn, and the split there is 7 fired to 11 not.
+**Whether `UserPromptSubmit` fires for one is not settled, and this instrument cannot settle it.** The chronos hook on this machine has fired on every `UserPromptSubmit` since 2026-08-19T04:11Z and Claude Code records each firing as an attachment, so a transcript says per turn whether the hook ran.
+Over the 22 bash-mode turns inside that window it ran for 7 and not for 11, with a further 4 that are followed by a typed prompt rather than by the assistant, none of which fired — and the per-session controls disagree with each other: one session has an ordinary-prompt control of 2 of 2 with 0 of 2 bash-mode turns firing, and two sessions have a control of 1 of 1 with the bash-mode turn firing.
+The obvious mechanism, that the output rides on the next submission, is refuted by the same data: 18 of the 22 are followed directly by an assistant turn, and the split there is 7 fired to 11 not.
 
-**And a firing would still not answer the question this repo has.** What matters
-is whether the payload's `prompt` field carries the `<bash-stdout>`, because
-that is the only thing a scanner could match. Nothing short of capturing the
-payload answers that, which needs an interactive session, which needs a pty. The
-attempt was refused by the harness classifier on 2026-09-04, the third such
-refusal on record for this measurement.
+**And a firing would still not answer the question this repo has.** What matters is whether the payload's `prompt` field carries the `<bash-stdout>`, because that is the only thing a scanner could match.
+Nothing short of capturing the payload answers that, which needs an interactive session, which needs a pty.
+The attempt was refused by the harness classifier on 2026-09-04, the third such refusal on record for this measurement.
 
-**The `toolu_` prefix is not an authorship marker, so do not build the residual
-on it.** *What gets scanned is the crossing, not the hop* used to scan the
-`Bash` command string on the grounds that every `PreToolUse` in the 2026-08-27
-drive carried a `toolu_` id. Over every
-`tool_use` in this corpus, 185,221 ids begin `toolu_` and **6 begin `call_`** —
-and those six are ordinary model work (`ls ~/.cargo/bin`, `queue.py render`, a
-`gh pr list`), not anything a human typed. So the prefix says which code path
-issued the call and not who composed it, and a probe that reads its absence as
-*not model-composed* would misread all six.
+**The `toolu_` prefix is not an authorship marker, so do not build the residual on it.** *What gets scanned is the crossing, not the hop* used to scan the `Bash` command string on the grounds that every `PreToolUse` in the 2026-08-27 drive carried a `toolu_` id.
+Over every `tool_use` in this corpus, 185,221 ids begin `toolu_` and **6 begin `call_`** — and those six are ordinary model work (`ls ~/.cargo/bin`, `queue.py render`, a `gh pr list`), not anything a human typed.
+So the prefix says which code path issued the call and not who composed it, and a probe that reads its absence as *not model-composed* would misread all six.
 
 ### The rest of the class, driven
 
-The three surfaces above are instances. The class is *any hook input naming a
-filesystem path whose result comes back as content*, and closing it with a list
-of tool names goes stale in silence: a tool installed after the list was
-written is waved through, and nothing reports that a call went unscanned. The
-tool set moves. One bare `claude -p` session announced nineteen deferred tools
-in a single `deferred_tools_delta` on 2026-08-28 and another announced fifteen
-on 2026-09-04.
+The three surfaces above are instances.
+The class is *any hook input naming a filesystem path whose result comes back as content*, and closing it with a list of tool names goes stale in silence: a tool installed after the list was written is waved through, and nothing reports that a call went unscanned.
+The tool set moves.
+One bare `claude -p` session announced nineteen deferred tools in a single `deferred_tools_delta` on 2026-08-28 and another announced fifteen on 2026-09-04.
 
-The replacement this repo proposed was a payload test — a `tool_input` field
-whose value is a filesystem path, under a `PreToolUse` matcher of `*`. Driving
-it says the test is wrong in both directions, and the expensive error is not
-the one the proposal expected.
+The replacement this repo proposed was a payload test — a `tool_input` field whose value is a filesystem path, under a `PreToolUse` matcher of `*`.
+Driving it says the test is wrong in both directions, and the expensive error is not the one the proposal expected.
 
-Measured 2026-09-04 against Claude Code 2.1.251 on darwin/arm64. A hook logging
-raw stdin was wired to `PreToolUse` with a matcher of `*` and to
-`UserPromptSubmit`, in a throwaway project holding one skill and two files, and
-every verdict below is read from the session transcript the payload's own
-`transcript_path` names rather than from what the run printed. Ten arms were
-driven and seven tools reached the hook:
+Measured 2026-09-04 against Claude Code 2.1.251 on darwin/arm64.
+A hook logging raw stdin was wired to `PreToolUse` with a matcher of `*` and to `UserPromptSubmit`, in a throwaway project holding one skill and two files, and every verdict below is read from the session transcript the payload's own `transcript_path` names rather than from what the run printed.
+Ten arms were driven and seven tools reached the hook:
 
 | Tool | `tool_input` keys | In the class |
 |---|---|---|
@@ -842,92 +512,47 @@ driven and seven tools reached the hook:
 | `WebFetch` | `url`, `prompt` | No — not the filesystem |
 | `Write` | `file_path`, `content` | No — model-composed, and [already crossed](#what-gets-scanned-is-the-crossing-not-the-hop) |
 
-**A skill load is a member, and it names no path.** `Skill`'s whole
-`tool_input` is `{"skill": "probe-skill"}`. The file's text then arrives as an
-injected `user` turn opening `Base directory for this skill:`, and no
-`UserPromptSubmit` fires for that turn — the arm logged two records, the
-prompt and the `Skill` call, and nothing else. So that call is the only hop
-where anything can decide, and it is an uncrossed one: with the same prompt in
-the same directory and only the hook's verdict differing, a marker planted in
-the skill body crossed once where the hook allowed and zero times where it
-denied.
+**A skill load is a member, and it names no path.** `Skill`'s whole `tool_input` is `{"skill": "probe-skill"}`.
+The file's text then arrives as an injected `user` turn opening `Base directory for this skill:`, and no `UserPromptSubmit` fires for that turn — the arm logged two records, the prompt and the `Skill` call, and nothing else.
+So that call is the only hop where anything can decide, and it is an uncrossed one: with the same prompt in the same directory and only the hook's verdict differing, a marker planted in the skill body crossed once where the hook allowed and zero times where it denied.
 
-The payload test cannot see any of that. What the payload carries is a name
-the harness resolves, and resolving it back is not a field-level operation:
-`probe-skill` resolved under the project's own `.claude/skills/`, and `brevity`
-in the same session resolved to `/Users/karl/.claude/skills/brevity`, outside
-the project root. A resolver here would have to reproduce a search order this
-repo has not driven — and getting it wrong reports clean on a file nothing
-opened, which is the failure this project indicts its predecessor for, while
-failing closed on it blocks every skill invocation in every session. **So the
-member stays out, and the reason is resolution rather than bounding.**
+The payload test cannot see any of that.
+What the payload carries is a name the harness resolves, and resolving it back is not a field-level operation: `probe-skill` resolved under the project's own `.claude/skills/`, and `brevity` in the same session resolved to `/Users/karl/.claude/skills/brevity`, outside the project root.
+A resolver here would have to reproduce a search order this repo has not driven — and getting it wrong reports clean on a file nothing opened, which is the failure this project indicts its predecessor for, while failing closed on it blocks every skill invocation in every session.
+**So the member stays out, and the reason is resolution rather than bounding.**
 
-**A subagent load is not a member and needs nothing.** `Agent` carries a prompt
-the model composed, so its own payload has already crossed. What the subagent
-reads afterwards is covered, because its tool calls fire the same hooks: one
-`Explore` agent issued five `Bash` calls and all five reached the hook, under
-the parent's `session_id` and carrying an `agent_id` the parent's own calls do
-not have. [What this is not](#what-it-is-not) named a skill or subagent load as
-one uncovered member. It is two, and only one of them was ever uncovered.
+**A subagent load is not a member and needs nothing.** `Agent` carries a prompt the model composed, so its own payload has already crossed.
+What the subagent reads afterwards is covered, because its tool calls fire the same hooks: one `Explore` agent issued five `Bash` calls and all five reached the hook, under the parent's `session_id` and carrying an `agent_id` the parent's own calls do not have.
+[What this is not](#what-it-is-not) named a skill or subagent load as one uncovered member.
+It is two, and only one of them was ever uncovered.
 
-**The search tool is the member that cannot be bounded, and this machine's
-default tool set has none.** A search takes a pattern and a root and returns matching lines from
-files it chooses, so bounding it means scanning the tree, which is not
-something a `PreToolUse` hook can do per call. The drive does not touch that
-argument. What it adds is that neither `Grep` nor `Glob` was in the tool set at
-all: a session asked to search file contents reached `ToolSearch` for
-`select:Grep,Glob`, got nothing back, and reported it had neither. The search
-affordance that is present is the `Explore` subagent, which is the paragraph
-above.
+**The search tool is the member that cannot be bounded, and this machine's default tool set has none.** A search takes a pattern and a root and returns matching lines from files it chooses, so bounding it means scanning the tree, which is not something a `PreToolUse` hook can do per call.
+The drive does not touch that argument.
+What it adds is that neither `Grep` nor `Glob` was in the tool set at all: a session asked to search file contents reached `ToolSearch` for `select:Grep,Glob`, got nothing back, and reported it had neither.
+The search affordance that is present is the `Explore` subagent, which is the paragraph above.
 
-**The tool exists, outside the default set, and the hook matches it.** A walk
-of this machine's 2,346 transcripts on 2026-10-01 found 161 `Grep` `tool_use`
-blocks between 2026-08-02 and that evening, and every one came back `No such
-tool available: Grep`. That is the default set: driven 2026-11-01 on Claude
-Code 2.1.290, a `claude -p` session lists neither `Grep` nor `Glob` in its
-init event, and one started with `--tools Grep` lists it and runs it. With a
-`PreToolUse` hook matching `Grep` and logging stdin, the payload's
-`tool_input` carried `pattern`, `path` and `output_mode` under the names the
-model had been writing. The build's own input schema, read out of the binary,
-gives `output_mode` the values `content`, `files_with_matches` and `count` and
-defaults it to `files_with_matches`, and a call driven with no mode returned a
-path list. Its other fields — `glob`, `type`, `-A`, `-B`, `-C`, `-n`, `-o`,
-`head_limit`, `offset`, `multiline` — filter or trim, and the context and
-line-number ones are ignored outside `content`.
+**The tool exists, outside the default set, and the hook matches it.** A walk of this machine's 2,346 transcripts on 2026-10-01 found 161 `Grep` `tool_use` blocks between 2026-08-02 and that evening, and every one came back `No such tool available: Grep`.
+That is the default set: driven 2026-11-01 on Claude Code 2.1.290, a `claude -p` session lists neither `Grep` nor `Glob` in its init event, and one started with `--tools Grep` lists it and runs it.
+With a `PreToolUse` hook matching `Grep` and logging stdin, the payload's `tool_input` carried `pattern`, `path` and `output_mode` under the names the model had been writing.
+The build's own input schema, read out of the binary, gives `output_mode` the values `content`, `files_with_matches` and `count` and defaults it to `files_with_matches`, and a call driven with no mode returned a path list.
+Its other fields — `glob`, `type`, `-A`, `-B`, `-C`, `-n`, `-o`, `head_limit`, `offset`, `multiline` — filter or trim, and the context and line-number ones are ignored outside `content`.
 
-So a search over a tree is a crossing the hook is pointed at, and it still
-cannot bound one, so it does not try: a `content` search over a directory is
-refused and the reason names the `grep` that pipes the same search through the
-filter, `files_with_matches` and `count` pass, an absent mode passes as the
-default it is, and a `path` naming one file is scanned whole the way a `Read`
-of it is. That pass is only as good as the default it reads: a build that
-changed it to `content` would send a no-mode search's lines over a directory
-with no block and no coverage record, and nothing in CI re-takes the reading. Driven through the built hook in that session, the refusal arrived
-in the transcript as an `is_error` tool result carrying the whole reason, so
-the model reads it as it reads a `Bash` deny.
+So a search over a tree is a crossing the hook is pointed at, and it still cannot bound one, so it does not try: a `content` search over a directory is refused and the reason names the `grep` that pipes the same search through the filter, `files_with_matches` and `count` pass, an absent mode passes as the default it is, and a `path` naming one file is scanned whole the way a `Read` of it is.
+That pass is only as good as the default it reads: a build that changed it to `content` would send a no-mode search's lines over a directory with no block and no coverage record, and nothing in CI re-takes the reading.
+Driven through the built hook in that session, the refusal arrived in the transcript as an `is_error` tool result carrying the whole reason, so the model reads it as it reads a `Bash` deny.
 
-**The fourth member is driven, and it splits inside one server.** Three
-readings settle a candidate, in this order, because each is cheap only where
-the one before it came back yes:
+**The fourth member is driven, and it splits inside one server.** Three readings settle a candidate, in this order, because each is cheap only where the one before it came back yes:
 
 1. **Does the hook see the call at all?** A matcher of `*` and a stdin log.
-2. **Has the content crossed already?** Only what the hook can open for itself
-   is stoppable, and a deny that leaves the marker in the transcript says it
-   was not.
-3. **Can the hook bound what the call would return?** One file is bounded. A
-   tree walk is not, and neither is a name the harness resolves by a rule
-   nobody here has driven.
+2. **Has the content crossed already?** Only what the hook can open for itself is stoppable, and a deny that leaves the marker in the transcript says it was not.
+3. **Can the hook bound what the call would return?** One file is bounded.
+   A tree walk is not, and neither is a name the harness resolves by a rule nobody here has driven.
 
-Measured 2026-09-07 against Claude Code 2.1.261 on darwin/arm64. `~/.claude.json`
-declared no MCP server, for any project, and there is no `node` here to run the
-published ones — so the server is 89 lines of stdlib Python speaking JSON-RPC
-over stdio, loaded with `--mcp-config` and `--strict-mcp-config` so it was the
-only one in the session. It declares two tools over that one transport:
-`read_file`, taking a `path`, and `search_tree`, taking a `root` and a
-`pattern`. Five `claude -p` runs over the three arms below, the `read_file`
-pair driven twice — the second time with the server logging the requests it
-received. Every verdict is read from the transcript the payload's own
-`transcript_path` names rather than from what the run printed:
+Measured 2026-09-07 against Claude Code 2.1.261 on darwin/arm64.
+`~/.claude.json` declared no MCP server, for any project, and there is no `node` here to run the published ones — so the server is 89 lines of stdlib Python speaking JSON-RPC over stdio, loaded with `--mcp-config` and `--strict-mcp-config` so it was the only one in the session.
+It declares two tools over that one transport: `read_file`, taking a `path`, and `search_tree`, taking a `root` and a `pattern`.
+Five `claude -p` runs over the three arms below, the `read_file` pair driven twice — the second time with the server logging the requests it received.
+Every verdict is read from the transcript the payload's own `transcript_path` names rather than from what the run printed:
 
 | Arm | The hook saw | `tools/call` reached the server | Planted marker in the transcript |
 |---|---|---|---|
@@ -935,246 +560,122 @@ received. Every verdict is read from the transcript the payload's own
 | `read_file`, hook denies | the same call | **no** | **0** |
 | `search_tree`, hook allows | `mcp__q127fs__search_tree`, `tool_input` `{"root": …, "pattern": …}` | yes | 3, and 3 for a second marker |
 
-**Readings 1 and 2 come back yes, and both are facts about the harness rather
-than about this server.** The call arrives under a `*` matcher as
-`mcp__<server>__<tool>`, carrying the arguments object verbatim, and a deny
-stops it before dispatch: on the denied run the server logged `initialize`,
-`notifications/initialized` and `tools/list` and no `tools/call` at all, so the
-file was never opened. That is a stronger reading than the marker count, which
-would also be zero if the call had run and its result been discarded. Same
-prompt, same directory, only the hook's verdict differing.
+**Readings 1 and 2 come back yes, and both are facts about the harness rather than about this server.** The call arrives under a `*` matcher as `mcp__<server>__<tool>`, carrying the arguments object verbatim, and a deny stops it before dispatch: on the denied run the server logged `initialize`, `notifications/initialized` and `tools/list` and no `tools/call` at all, so the file was never opened.
+That is a stronger reading than the marker count, which would also be zero if the call had run and its result been discarded.
+Same prompt, same directory, only the hook's verdict differing.
 
-**Reading 3 comes back per tool, which is what keeps the member out.**
-`read_file` names one file in one key and is bounded. `search_tree`, on the
-same server over the same transport, names a directory and a pattern, and its
-result carried a line from `nested/deeper/buried.txt` — a file no operand
-named. That is the tree-walk argument above, arriving inside a member that had
-just passed the same reading for its other tool.
+**Reading 3 comes back per tool, which is what keeps the member out.** `read_file` names one file in one key and is bounded.
+`search_tree`, on the same server over the same transport, names a directory and a pattern, and its result carried a line from `nested/deeper/buried.txt` — a file no operand named.
+That is the tree-walk argument above, arriving inside a member that had just passed the same reading for its other tool.
 
-**The split is inside one server, and that is the transferable half.** Not
-between servers, and not between protocols — the same server over the same
-transport served a bounded tool and an unbounded one, so membership cannot be
-decided per server or per protocol any more than it can be decided per payload
-shape. A rule per server would not have helped: it would have had to answer for
-both of these tools at once, and they need opposite answers. The key holding a
-path was `path` on one and `root` on the other, both the server's own schema,
-passed through unchanged — so the thing a resolver would have to key on is the
-one thing the call does not carry. This is the section's opening rejection
-arriving from a new direction: a payload-shape test fails here for exactly the
-reason it failed on `Skill`, which is that the shape is not what decides.
+**The split is inside one server, and that is the transferable half.** Not between servers, and not between protocols — the same server over the same transport served a bounded tool and an unbounded one, so membership cannot be decided per server or per protocol any more than it can be decided per payload shape.
+A rule per server would not have helped: it would have had to answer for both of these tools at once, and they need opposite answers.
+The key holding a path was `path` on one and `root` on the other, both the server's own schema, passed through unchanged — so the thing a resolver would have to key on is the one thing the call does not carry.
+This is the section's opening rejection arriving from a new direction: a payload-shape test fails here for exactly the reason it failed on `Skill`, which is that the shape is not what decides.
 
-Both tools carry the same `mcp__q127fs__` prefix, so any matcher written
-against a server admits the unbounded one with the bounded one, and failing
-closed over that prefix blocks every MCP tool in every session, which is the
-skill load's objection. **The member stays out, and the reason is both of the
-other two at once**: it fails reading 3 for the same cause the search tool
-does, and it fails resolution for the same cause the skill load does, with
-nothing in the payload to tell one of its tools from the other.
+Both tools carry the same `mcp__q127fs__` prefix, so any matcher written against a server admits the unbounded one with the bounded one, and failing closed over that prefix blocks every MCP tool in every session, which is the skill load's objection.
+**The member stays out, and the reason is both of the other two at once**: it fails reading 3 for the same cause the search tool does, and it fails resolution for the same cause the skill load does, with nothing in the payload to tell one of its tools from the other.
 
-**Stoppable and scanned are two claims, and this member is the first to
-separate them.** The deny works — reading 2 — so a hook wired to these calls
-could stop one. Nothing here is wired to them: `hooks/hooks.json` matches
-`Read|Bash|Grep|PowerShell`, which no `mcp__…` name matches, so a file an MCP server reads is
-not scanned and a session that installs one has a reader this scanner does not
-cover. The consequence is stated rather than fixed, and reading only the second
-half of it gets the posture backwards: the hook is not powerless on that
-surface, it is not pointed at it.
+**Stoppable and scanned are two claims, and this member is the first to separate them.** The deny works — reading 2 — so a hook wired to these calls could stop one.
+Nothing here is wired to them: `hooks/hooks.json` matches `Read|Bash|Grep|PowerShell`, which no `mcp__…` name matches, so a file an MCP server reads is not scanned and a session that installs one has a reader this scanner does not cover.
+The consequence is stated rather than fixed, and reading only the second half of it gets the posture backwards: the hook is not powerless on that surface, it is not pointed at it.
 
 ## Pipeline
 
-Per buffer, in order. Each stage exists to keep the next one off work it does
-not need to do.
+Per buffer, in order.
+Each stage exists to keep the next one off work it does not need to do.
 
-1. **Decode what declares itself.** A UTF-16 byte-order mark — `FF FE` or
-   `FE FF` — is decoded to UTF-8 and the rest of the pipeline reads that. A
-   mark is a declaration the file makes about itself, not an inference drawn
-   from its bytes, so this settles nothing the NUL check below stays out of.
-   Windows PowerShell 5.1 is the file class it is for: `>`, `>>` and
-   `Out-File` write UTF-16LE, and every Unicode encoding but UTF-7 writes a
-   mark, so the encoding a Windows script leaves behind always says what it
-   is — [`about_Character_Encoding`][psenc], read 2026-08-27, and the citation
-   is here rather than in a commit message because it is the only evidence
-   this repository has for the claim: there is no `pwsh` on the runners or on
-   a maintainer's Mac, so nothing can drive it. PowerShell 6 and later default
-   to `utf8NoBOM`, which has no NUL and always scanned. `Start-Transcript` is
-   the near miss worth naming: it writes UTF-8 with a mark, not UTF-16, so a
-   transcript is only in this class when a program's output was redirected
-   into it. `FF FE 00 00` is UTF-32LE and opens with the whole UTF-16LE mark,
-   so the longer mark is tested first and named rather than decoded.
+1. **Decode what declares itself.** A UTF-16 byte-order mark — `FF FE` or `FE FF` — is decoded to UTF-8 and the rest of the pipeline reads that.
+   A mark is a declaration the file makes about itself, not an inference drawn from its bytes, so this settles nothing the NUL check below stays out of.
+   Windows PowerShell 5.1 is the file class it is for: `>`, `>>` and `Out-File` write UTF-16LE, and every Unicode encoding but UTF-7 writes a mark, so the encoding a Windows script leaves behind always says what it is — [`about_Character_Encoding`][psenc], read 2026-08-27, and the citation is here rather than in a commit message because it is the only evidence this repository has for the claim: there is no `pwsh` on the runners or on a maintainer's Mac, so nothing can drive it.
+   PowerShell 6 and later default to `utf8NoBOM`, which has no NUL and always scanned.
+   `Start-Transcript` is the near miss worth naming: it writes UTF-8 with a mark, not UTF-16, so a transcript is only in this class when a program's output was redirected into it.
+   `FF FE 00 00` is UTF-32LE and opens with the whole UTF-16LE mark, so the longer mark is tested first and named rather than decoded.
 
 [psenc]: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_character_encoding
 
-   A finding reports a byte offset, so a decoded match is mapped back to the
-   offset in the file. The decode and the map are one walk over the code
-   units, which is what stops them disagreeing.
+   A finding reports a byte offset, so a decoded match is mapped back to the offset in the file.
+   The decode and the map are one walk over the code units, which is what stops them disagreeing.
 
-2. **Skip binaries.** A NUL byte in the first 8 KiB of what step 1 produced
-   means skip. In the benchmark corpus one PNG was 55% of all bytes, and the
-   three language prototypes disagreed on it because Go keeps raw bytes where
-   Rust and Python substitute U+FFFD.
+2. **Skip binaries.** A NUL byte in the first 8 KiB of what step 1 produced means skip.
+   In the benchmark corpus one PNG was 55% of all bytes, and the three language prototypes disagreed on it because Go keeps raw bytes where Rust and Python substitute U+FFFD.
 
-   This stage is cheap and it has to stay ahead of the expensive ones, which
-   is a constraint on step 1 rather than on this one: a decode that runs to
-   the end of the buffer before anything decides to skip it inverts the whole
-   reason for the order. So the decode produces the sniff window first, this
-   check reads it, and the rest of the buffer is decoded only if it passes.
-   The window is a decision identical to the whole buffer's, not an
-   approximation of it, because this check never reads past 8 KiB. Measured
-   2026-08-27 on a 64 MiB UTF-16 buffer whose fourth character is a NUL:
-   189 ms and 32 MiB allocated and discarded, against a bound of 1 MiB the
-   test now holds it to.
+   This stage is cheap and it has to stay ahead of the expensive ones, which is a constraint on step 1 rather than on this one: a decode that runs to the end of the buffer before anything decides to skip it inverts the whole reason for the order.
+   So the decode produces the sniff window first, this check reads it, and the rest of the buffer is decoded only if it passes.
+   The window is a decision identical to the whole buffer's, not an approximation of it, because this check never reads past 8 KiB.
+   Measured 2026-08-27 on a 64 MiB UTF-16 buffer whose fourth character is a NUL: 189 ms and 32 MiB allocated and discarded, against a bound of 1 MiB the test now holds it to.
 
-   UTF-16 written with no mark still lands here and is still skipped. Nothing
-   in such a buffer declares its encoding, and the alternative — reading
-   alternating NULs across the sniff window as UTF-16 rather than as binary —
-   is exactly the heuristic the NUL check was chosen instead of. It is a
-   stated gap rather than a silent one, which is what step 6 is for.
+   UTF-16 written with no mark still lands here and is still skipped.
+   Nothing in such a buffer declares its encoding, and the alternative — reading alternating NULs across the sniff window as UTF-16 rather than as binary — is exactly the heuristic the NUL check was chosen instead of.
+   It is a stated gap rather than a silent one, which is what step 6 is for.
 
-   A caller whose buffer crosses whatever this returns takes a second entry
-   point, which runs the match loop over the raw bytes and reports the skip
-   beside the findings rather than instead of them. The trade above is about
-   work, and there is none to save once the bytes are on their way. Only a
-   prompt does that today — [a buffer whose bytes cross
-   anyway](#a-buffer-whose-bytes-cross-anyway-measured) has the cost table that
-   keeps the other two surfaces on the skip.
+   A caller whose buffer crosses whatever this returns takes a second entry point, which runs the match loop over the raw bytes and reports the skip beside the findings rather than instead of them.
+   The trade above is about work, and there is none to save once the bytes are on their way.
+   Only a prompt does that today — [a buffer whose bytes cross anyway](#a-buffer-whose-bytes-cross-anyway-measured) has the cost table that keeps the other two surfaces on the skip.
 
-   The check gives two reasons, not one, and which it gives is decided by
-   whether step 1 decoded. A buffer whose UTF-16 mark this stage read, and
-   whose *decoded* window then holds a NUL, is still skipped and by this same
-   check — but its text was read before the NUL was found, where the other
-   class's was not. Step 6 keys on that, so the two cannot share a reason
-   without the verdict losing the thing it routes on.
+   The check gives two reasons, not one, and which it gives is decided by whether step 1 decoded.
+   A buffer whose UTF-16 mark this stage read, and whose *decoded* window then holds a NUL, is still skipped and by this same check — but its text was read before the NUL was found, where the other class's was not.
+   Step 6 keys on that, so the two cannot share a reason without the verdict losing the thing it routes on.
 
-   **Declaration is the axis, and step 1 reads two of the three marks — UTF-8's
-   is a declaration it does not read.** That is a gap rather than a decision,
-   and it is a measured fail-open rather than a nicety.
-   `EF BB BF` is a byte-order mark by the same registry as `FF FE`, declares
-   UTF-8, and is what PowerShell 7's `Out-File -Encoding utf8BOM`, Notepad and
-   Visual Studio emit. Step 1 has no arm for it, so such a buffer reaches this
-   check undecoded, its NUL is read raw, and it is skipped and allowed exactly
-   as an image is. Driven end to end on a built binary: a UTF-8 mark, a NUL and
-   an AWS-shaped key exits 0 on empty stdout, while the same file without the
-   NUL denies and names the rule — at byte 29 against 26, the three bytes of the
-   mark, which is its own evidence that nothing decoded it.
+   **Declaration is the axis, and step 1 reads two of the three marks — UTF-8's is a declaration it does not read.** That is a gap rather than a decision, and it is a measured fail-open rather than a nicety.
+   `EF BB BF` is a byte-order mark by the same registry as `FF FE`, declares UTF-8, and is what PowerShell 7's `Out-File -Encoding utf8BOM`, Notepad and Visual Studio emit.
+   Step 1 has no arm for it, so such a buffer reaches this check undecoded, its NUL is read raw, and it is skipped and allowed exactly as an image is.
+   Driven end to end on a built binary: a UTF-8 mark, a NUL and an AWS-shaped key exits 0 on empty stdout, while the same file without the NUL denies and names the rule — at byte 29 against 26, the three bytes of the mark, which is its own evidence that nothing decoded it.
 
-   Whether step 1 should grow that arm is a separate question, and `Q102`
-   carries it rather than this section. The mark alone cannot be the trigger:
-   63 files in this machine's Go module cache carry `EF BB BF` and 61 are
-   ordinary text — `.html`, `.yaml`, `.md`, `.json`, `.env` and a
-   Windows-authored `.wxs` among them. Of the 2 that also carry a NUL, both are
-   `.wasm`.
+   Whether step 1 should grow that arm is a separate question, and `Q102` carries it rather than this section.
+   The mark alone cannot be the trigger: 63 files in this machine's Go module cache carry `EF BB BF` and 61 are ordinary text — `.html`, `.yaml`, `.md`, `.json`, `.env` and a Windows-authored `.wxs` among them.
+   Of the 2 that also carry a NUL, both are `.wasm`.
 
-   **That is a cost reading and it does not bound the benefit.** It says what an
-   arm on mark-plus-NUL would cost here; it says nothing about how often a
-   Windows-authored file carries the mark, a NUL and a credential, because that
-   population is exactly as unobservable on these machines as the UTF-16 one.
+   **That is a cost reading and it does not bound the benefit.** It says what an arm on mark-plus-NUL would cost here; it says nothing about how often a Windows-authored file carries the mark, a NUL and a credential, because that population is exactly as unobservable on these machines as the UTF-16 one.
 
-3. **Literal prefilter.** Word-boundary search for each credential rule's
-   keywords, 255–307 MiB/s against 1.0 MiB/s for the regex pass — roughly 280x.
-   Use word boundaries, not `strings.Contains`: naive matching finds `sk-`
-   inside `disk-containerd-…`, and one broad keyword (`AC`) took the file hit
-   rate from 1.2% to 18.9% on real files. The prefilter gates the credential
-   family only. Numeric PII rules have no literal to anchor on, so `us-ssn`,
-   the one that ships enabled, pays a pass over every buffer.
+3. **Literal prefilter.** Word-boundary search for each credential rule's keywords, 255–307 MiB/s against 1.0 MiB/s for the regex pass — roughly 280x.
+   Use word boundaries, not `strings.Contains`: naive matching finds `sk-` inside `disk-containerd-…`, and one broad keyword (`AC`) took the file hit rate from 1.2% to 18.9% on real files.
+   The prefilter gates the credential family only.
+   Numeric PII rules have no literal to anchor on, so `us-ssn`, the one that ships enabled, pays a pass over every buffer.
 
-4. **Match, one rule at a time.** Never fold the patterns into a single
-   alternation. Measured at 0.5x in Go and 0.7x in Rust: the DFA state space
-   explodes and the lazy-DFA cache thrashes on heterogeneous input. Two engines,
-   same result.
+4. **Match, one rule at a time.** Never fold the patterns into a single alternation.
+   Measured at 0.5x in Go and 0.7x in Rust: the DFA state space explodes and the lazy-DFA cache thrashes on heterogeneous input.
+   Two engines, same result.
 
-   **Where every match a rule can produce begins at one of its keywords, it
-   runs at the positions step 3 found rather than over the buffer.** Ten of
-   the twelve credential rules open on `\b`, which is an empty-width op at the head
-   of the compiled program: `regexp` derives no literal prefix from it, so it
-   has nothing to skip towards and runs the NFA over every byte to arrive back
-   at positions the prefilter had already found and thrown away. Deleting the
-   `\b` is not the repair — it is what keeps `ghp_` from matching inside
-   `xghp_`, and precision is the product. Keeping the positions is.
+   **Where every match a rule can produce begins at one of its keywords, it runs at the positions step 3 found rather than over the buffer.** Ten of the twelve credential rules open on `\b`, which is an empty-width op at the head of the compiled program: `regexp` derives no literal prefix from it, so it has nothing to skip towards and runs the NFA over every byte to arrive back at positions the prefilter had already found and thrown away.
+   Deleting the `\b` is not the repair — it is what keeps `ghp_` from matching inside `xghp_`, and precision is the product.
+   Keeping the positions is.
 
-   All eight take that arm. Measured 2026-09-07 over this repository's own
-   text, about 1.73 MB in 196 text files, which names every keyword the ruleset
-   gates on and so clears every prefilter: the shipped set goes from 7.36–7.39
-   MB/s to 77.66–77.80 MB/s, and per rule from 51.3–63.0 MB/s to 243–4,383.
-   Both arms are in `internal/scan/bench_test.go`, one binary over one buffer,
-   and it refuses to time them until they report the same findings. The size is
-   approximate because `docs/` is in the corpus, so this paragraph is one of
-   the files it measures and an exact figure falsifies itself on the commit
-   that writes it. The test's floors are what pin the
-   corpus; the rates are what to read.
+   All eight take that arm.
+   Measured 2026-09-07 over this repository's own text, about 1.73 MB in 196 text files, which names every keyword the ruleset gates on and so clears every prefilter: the shipped set goes from 7.36–7.39 MB/s to 77.66–77.80 MB/s, and per rule from 51.3–63.0 MB/s to 243–4,383.
+   Both arms are in `internal/scan/bench_test.go`, one binary over one buffer, and it refuses to time them until they report the same findings.
+   The size is approximate because `docs/` is in the corpus, so this paragraph is one of the files it measures and an exact figure falsifies itself on the commit that writes it.
+   The test's floors are what pin the corpus; the rates are what to read.
 
-   Five conditions decide it and none is about speed. Four belong to the loader
-   (`internal/rules/anchor.go`): the pattern opens on `\b`, nothing in it asks
-   where the text begins, every string it can match begins with one of the
-   keywords, and its longest match is bounded. The fifth is
-   `internal/scan/prefilter.go`'s, because it is about the boundary that file
-   checks — every keyword opens on a word byte, without which a hit and the
-   pattern's own `\b` are different predicates in both directions.
+   Five conditions decide it and none is about speed.
+   Four belong to the loader (`internal/rules/anchor.go`): the pattern opens on `\b`, nothing in it asks where the text begins, every string it can match begins with one of the keywords, and its longest match is bounded.
+   The fifth is `internal/scan/prefilter.go`'s, because it is about the boundary that file checks — every keyword opens on a word byte, without which a hit and the pattern's own `\b` are different predicates in both directions.
 
-   The bound is a cost condition rather than a correctness one, and `jwt` is
-   what it was written about. `eyJ[A-Za-z0-9_-]{8,}` keeps the engine's threads
-   alive for as long as the class matches, so one attempt reads to the end of
-   the buffer: on 64 KiB of `-eyJ` repeated — a hit every four bytes, and every
-   byte in the class — running it at each hit took 29.8 s against 12.2 ms for
-   one whole-buffer pass.
+   The bound is a cost condition rather than a correctness one, and `jwt` is what it was written about.
+   `eyJ[A-Za-z0-9_-]{8,}` keeps the engine's threads alive for as long as the class matches, so one attempt reads to the end of the buffer: on 64 KiB of `-eyJ` repeated — a hit every four bytes, and every byte in the class — running it at each hit took 29.8 s against 12.2 ms for one whole-buffer pass.
 
-   **So `jwt` was bounded rather than the loop, and then split rather than
-   bounded.** Q133 rewrote its three repeats as `{8,1000}` and `{10,1000}`,
-   RE2's own cap, which gave the rule a reach of 3,008 and the anchored arm
-   with it — the largest single change the pipeline has taken, because `eyJ`
-   heads any base64-encoded JSON object and so turns up in lock files, JWKS
-   documents and CI configuration, each of which was buying a whole-buffer
-   NFA pass. Measured 2026-09-07 over the corpus above: the rule alone went
-   from 61.1–62.9 MB/s to 757–764, and the shipped set from 35.14–35.51 to
-   77.66–77.80.
+   **So `jwt` was bounded rather than the loop, and then split rather than bounded.** Q133 rewrote its three repeats as `{8,1000}` and `{10,1000}`, RE2's own cap, which gave the rule a reach of 3,008 and the anchored arm with it — the largest single change the pipeline has taken, because `eyJ` heads any base64-encoded JSON object and so turns up in lock files, JWKS documents and CI configuration, each of which was buying a whole-buffer NFA pass.
+   Measured 2026-09-07 over the corpus above: the rule alone went from 61.1–62.9 MB/s to 757–764, and the shipped set from 35.14–35.51 to 77.66–77.80.
 
-   It also bought a recall ceiling. The `eyJ` in front of each repeat is
-   written out, so a header or payload segment could reach 1,003 bytes and a
-   token carrying a longer one went unmatched — and 1,000 is what compiles
-   rather than a measurement of how long a token gets. Two populations were
-   read and neither reached it, which is why nothing here noticed: 4.66 GB
-   in 244,089 files under Go's module cache held 118 JWT-shaped runs, header
-   at most 102 and payload at most 883; 2.28 GB in 2,338 session transcripts
-   held 31, at 36 and 222. Both are corpora of documentation samples, so
-   both are a floor on what a live token can be, and a production access
-   token with many claims is past the ceiling.
+   It also bought a recall ceiling.
+   The `eyJ` in front of each repeat is written out, so a header or payload segment could reach 1,003 bytes and a token carrying a longer one went unmatched — and 1,000 is what compiles rather than a measurement of how long a token gets.
+   Two populations were read and neither reached it, which is why nothing here noticed: 4.66 GB in 244,089 files under Go's module cache held 118 JWT-shaped runs, header at most 102 and payload at most 883; 2.28 GB in 2,338 session transcripts held 31, at 36 and 222.
+   Both are corpora of documentation samples, so both are a floor on what a live token can be, and a production access token with many claims is past the ceiling.
 
-   **Q164 removed it by splitting the two jobs the pattern was doing,
-   because only one of them has to span the secret.** Detection is
-   `\b(eyJ[A-Za-z0-9_-]{8})` — a base64url-encoded JSON object starts here —
-   bounded by construction, reach 11, the smallest in the set. Extent is a
-   forward walk over the segment class: three runs, two dots, the first two
-   opening on `eyJ`, and no ceiling, because a loop has none. The pipeline
-   runs the extent between the match and the validators and widens the
-   capture to what it returned.
+   **Q164 removed it by splitting the two jobs the pattern was doing, because only one of them has to span the secret.** Detection is `\b(eyJ[A-Za-z0-9_-]{8})` — a base64url-encoded JSON object starts here — bounded by construction, reach 11, the smallest in the set.
+   Extent is a forward walk over the segment class: three runs, two dots, the first two opening on `eyJ`, and no ceiling, because a loop has none.
+   The pipeline runs the extent between the match and the validators and widens the capture to what it returned.
 
-   That is one call site, ahead of every check, which is what makes it
-   structurally impossible to hand a check a prefix of what was found — the
-   failure `jwt-sample-key` used to be one bound away from, where a
-   truncated signature makes the HMAC comparison fail and a *published
-   sample* is reported as a credential. What can still go wrong is a walk
-   that stops in the wrong place, so `internal/validate/extent_test.go`
-   drives the end against every byte class that can follow a token.
+   That is one call site, ahead of every check, which is what makes it structurally impossible to hand a check a prefix of what was found — the failure `jwt-sample-key` used to be one bound away from, where a truncated signature makes the HMAC comparison fail and a *published sample* is reported as a credential.
+   What can still go wrong is a walk that stops in the wrong place, so `internal/validate/extent_test.go` drives the end against every byte class that can follow a token.
 
-   An extent may refuse, and does for about 95% of what the pattern matches:
-   measured over 0.46 GB in 60,000 files of this tree and Go's module cache,
-   554 `eyJ` keyword hits and 27 reaching a second `eyJ` segment past a dot.
-   Refusing is what lets the pattern be eleven bytes. The walk's only exit
-   is a byte test against a `len(buf)`-bounded index, so the end of the
-   buffer is the *same* terminator as a byte outside the class rather than
-   a missing one — a property of the loop rather than of today's callers,
-   and worth saying because a scan that never returned would surface as a
-   blocking verdict on the budget rather than as a crash. **And a refusal
-   reports how far it settled**, which is load-bearing rather than tidy:
-   every start inside one segment run reaches the same end of that run and
-   so meets the same byte after it, so a refusal there is a refusal for all
-   of them. Without that skip a buffer of unbroken segment bytes carrying a
-   hit every few bytes walks the whole run once per hit — quadratic, where a
-   bounded pattern is linear with a large constant, so the extent would lose
-   to the thing it replaced at four times the size having beaten it at 64
-   KiB.
+   An extent may refuse, and does for about 95% of what the pattern matches: measured over 0.46 GB in 60,000 files of this tree and Go's module cache, 554 `eyJ` keyword hits and 27 reaching a second `eyJ` segment past a dot.
+   Refusing is what lets the pattern be eleven bytes.
+   The walk's only exit is a byte test against a `len(buf)`-bounded index, so the end of the buffer is the *same* terminator as a byte outside the class rather than a missing one — a property of the loop rather than of today's callers, and worth saying because a scan that never returned would surface as a blocking verdict on the budget rather than as a crash.
+   **And a refusal reports how far it settled**, which is load-bearing rather than tidy: every start inside one segment run reaches the same end of that run and so meets the same byte after it, so a refusal there is a refusal for all of them.
+   Without that skip a buffer of unbroken segment bytes carrying a hit every few bytes walks the whole run once per hit — quadratic, where a bounded pattern is linear with a large constant, so the extent would lose to the thing it replaced at four times the size having beaten it at 64 KiB.
 
-   Measured 2026-09-07, both rulesets in one process, minimum of three,
-   against the ruleset exactly as Q133 shipped it:
+   Measured 2026-09-07, both rulesets in one process, minimum of three, against the ruleset exactly as Q133 shipped it:
 
    | Buffer | Q133 bounded | With the extent |
    |---|---|---|
@@ -1183,33 +684,19 @@ not need to do.
    | 1 MiB of back-to-back JWTs, anchored, 6,721 findings both | 13.8 MB/s | 56.9 MB/s |
    | 1 MiB of `-eyJ` repeated, anchored | 16,733 ms | 2.4 ms |
 
-   **Read the first row as the answer to "is it faster".** It is not: on
-   ordinary text the shipped set does not move, because `jwt` was already
-   anchored and the other nine rules are what the time goes on. What the
-   split buys is recall, which the ceiling was costing silently, and it buys
-   it for nothing. The rows under it are where the cost went instead — the
-   realistic worst case, a buffer that is mostly tokens, is 4.1x faster and
-   reports the same findings, and the adversarial buffer the 45-second
-   budget was the backstop for is no longer a class this rule has.
+   **Read the first row as the answer to "is it faster".** It is not: on ordinary text the shipped set does not move, because `jwt` was already anchored and the other nine rules are what the time goes on.
+   What the split buys is recall, which the ceiling was costing silently, and it buys it for nothing.
+   The rows under it are where the cost went instead — the realistic worst case, a buffer that is mostly tokens, is 4.1x faster and reports the same findings, and the adversarial buffer the 45-second budget was the backstop for is no longer a class this rule has.
 
-   Those absolutes are below the Q133 figures above because the machine was
-   loaded when they were taken: the control arm — every `Anchor` cleared,
-   the same patterns through the same code — read 7.12–7.40 MB/s at the
-   start of that session and 3.31–3.42 MB/s at the end, and an untouched
-   rule's fixed cost doubled across the same pair. That is why all four rows
-   are two rulesets in one process. Read the columns against each other,
-   never against another run.
+   Those absolutes are below the Q133 figures above because the machine was loaded when they were taken: the control arm — every `Anchor` cleared, the same patterns through the same code — read 7.12–7.40 MB/s at the start of that session and 3.31–3.42 MB/s at the end, and an untouched rule's fixed cost doubled across the same pair.
+   That is why all four rows are two rulesets in one process.
+   Read the columns against each other, never against another run.
 
-   A bounded rule can still be handed more hits than they are worth, so the
-   loop counts them first. One attempt reads at most the rule's reach and the
-   pass reads the buffer once, so past `len(buf) / (reach + 8)` hits the pass is
-   the cheaper arm and it runs. That charges every attempt its worst case, which
-   most do not spend, and the direction is deliberate: over-charging costs
-   throughput on a buffer nobody has, and under-charging costs it on every
-   buffer, in the arm nothing measures.
+   A bounded rule can still be handed more hits than they are worth, so the loop counts them first.
+   One attempt reads at most the rule's reach and the pass reads the buffer once, so past `len(buf) / (reach + 8)` hits the pass is the cheaper arm and it runs.
+   That charges every attempt its worst case, which most do not spend, and the direction is deliberate: over-charging costs throughput on a buffer nobody has, and under-charging costs it on every buffer, in the arm nothing measures.
 
-5. **Validate.** This is where precision comes from, and regex is not where it
-   lives:
+5. **Validate.** This is where precision comes from, and regex is not where it lives:
 
    | Name in `validators` | Check | Applies to |
    |---|---|---|
@@ -1223,17 +710,14 @@ not need to do.
    | `reserved-range` | Reserved-range exclusion | IP rules — RFC1918, loopback, link-local, documentation ranges, `0.0.0.0` |
    | `context-label` | Proximity to one of the rule's `labels` | Bare numeric runs, which count only near a label like `phone:` or `ssn=` |
 
-6. **Report.** Rule ID, path, byte offset. Nothing else — and, beside the
-   findings, whether the buffer was read at all. A scanner that reports an
-   unread file the way it reports a file it read and found nothing in reports
-   a safety it is not providing, so every path that declines to read names its
-   reason and the caller carries that as far as the user.
+6. **Report.** Rule ID, path, byte offset.
+   Nothing else — and, beside the findings, whether the buffer was read at all.
+   A scanner that reports an unread file the way it reports a file it read and found nothing in reports a safety it is not providing, so every path that declines to read names its reason and the caller carries that as far as the user.
 
 ## Rule schema
 
-Rules are data. The shipped set lives in `rules/spill-guard.json`, and it is
-the only set: the sibling guards read a project file beside theirs, and this
-one deliberately does not — [Output discipline](#output-discipline) has why.
+Rules are data.
+The shipped set lives in `rules/spill-guard.json`, and it is the only set: the sibling guards read a project file beside theirs, and this one deliberately does not — [Output discipline](#output-discipline) has why.
 
 ```json
 {
@@ -1249,8 +733,8 @@ one deliberately does not — [Output discipline](#output-discipline) has why.
 }
 ```
 
-A numeric PII rule is the other shape. It has no literal to prefilter on, so
-`keywords` is empty and `labels` carries the words the value has to sit near:
+A numeric PII rule is the other shape.
+It has no literal to prefilter on, so `keywords` is empty and `labels` carries the words the value has to sit near:
 
 ```json
 {
@@ -1280,224 +764,133 @@ A numeric PII rule is the other shape. It has no literal to prefilter on, so
 | `extent` | Names a walk that says where the match really ends, run before the validators and widening the group they read. Omitted for every rule but `jwt`; see [Pipeline](#pipeline), step 4. |
 | `enabled` | Ships `true` for every `credential` rule and for `us-ssn`, `false` for the other `pii` rules. |
 
-`labels` and `keywords` are both word-boundary literal lists and they are not
-interchangeable. `keywords` runs before the regex and gates the credential
-family; `labels` is read by the context-proximity check after a match, and
-gates nothing. Spending `keywords` on a numeric rule's labels would hand that
-rule the prefilter [the pipeline](#pipeline) says it does not have, and that
-absence is what an enabled `pii` rule pays for on every buffer. So the loader refuses
-them there, naming the family: an author who writes keywords onto a `pii` rule
-has asked for a literal gate and would otherwise be given the ungated
-full-corpus pass the prefilter exists to avoid, with nothing in the output to
-tell a gated rule from an ungated one.
+`labels` and `keywords` are both word-boundary literal lists and they are not interchangeable.
+`keywords` runs before the regex and gates the credential family; `labels` is read by the context-proximity check after a match, and gates nothing.
+Spending `keywords` on a numeric rule's labels would hand that rule the prefilter [the pipeline](#pipeline) says it does not have, and that absence is what an enabled `pii` rule pays for on every buffer.
+So the loader refuses them there, naming the family: an author who writes keywords onto a `pii` rule has asked for a literal gate and would otherwise be given the ungated full-corpus pass the prefilter exists to avoid, with nothing in the output to tell a gated rule from an ungated one.
 
-**The proximity window is not per-rule.** `NearLabel` takes one and the loader
-always passes `internal/validate`'s `DefaultLabelWindow`, measured at 64 bytes.
-A per-rule override is defensible in the abstract — a postal code sits closer to
-its label than a free-text address does — but there is nothing to set one from.
-The measurement behind 64 found no knee to sit in, and its own doc comment says
-the corpus was the wrong shape and the number has to be re-taken against
-`testdata/corpus`. A per-rule window would freeze that provisional number into
-every rule that overrode it, where the re-measurement cannot reach it. So a
-rule carrying `window` is rejected at startup rather than ignored. Adding the
-field later breaks no rule file written before it; taking it away once rules
-have set it does.
+**The proximity window is not per-rule.** `NearLabel` takes one and the loader always passes `internal/validate`'s `DefaultLabelWindow`, measured at 64 bytes.
+A per-rule override is defensible in the abstract — a postal code sits closer to its label than a free-text address does — but there is nothing to set one from.
+The measurement behind 64 found no knee to sit in, and its own doc comment says the corpus was the wrong shape and the number has to be re-taken against `testdata/corpus`.
+A per-rule window would freeze that provisional number into every rule that overrode it, where the re-measurement cannot reach it.
+So a rule carrying `window` is rejected at startup rather than ignored.
+Adding the field later breaks no rule file written before it; taking it away once rules have set it does.
 
-A rule names every check that has to pass, including the two that read a field
-of its own — `entropy` reads the rule's floor and `context-label` reads its
-labels. Presence and configuration are separate on purpose. A numeric rule
-whose author wrote the labels and left the validator off is an ungated numeric
-regex, which is the shape that produced more than 5,600 matches and no
-credentials, so naming the check is what turns that omission into a startup
-error. The loader rejects a rule carrying configuration no check reads. `keywords` on a
-non-credential family is the same rejection reached without a validator name:
-the stage that would read it is the prefilter rather than a check, and it reads
-one family.
+A rule names every check that has to pass, including the two that read a field of its own — `entropy` reads the rule's floor and `context-label` reads its labels.
+Presence and configuration are separate on purpose.
+A numeric rule whose author wrote the labels and left the validator off is an ungated numeric regex, which is the shape that produced more than 5,600 matches and no credentials, so naming the check is what turns that omission into a startup error.
+The loader rejects a rule carrying configuration no check reads.
+`keywords` on a non-credential family is the same rejection reached without a validator name: the stage that would read it is the prefilter rather than a check, and it reads one family.
 
-**It rejects the mirror image too: a check named with configuration that can
-never let it pass.** `context-label` with no labels — absent, empty, or nothing
-but empty strings — searches for nothing and so reports nothing. An entropy
-floor above what the captured group can reach does the same: Shannon's ceiling
-is log2 of the distinct byte count, so an eight-byte capture cannot exceed 3
-bits however random it is, and a floor of 3.5 on one disables the rule outright.
-Either way the rule loads, compiles, runs on every file and reports nothing,
-which is exactly what a clean scan looks like from outside. That is the argument
-that already fails a rule whose regex does not compile, so it gets the same
-answer.
+**It rejects the mirror image too: a check named with configuration that can never let it pass.** `context-label` with no labels — absent, empty, or nothing but empty strings — searches for nothing and so reports nothing.
+An entropy floor above what the captured group can reach does the same: Shannon's ceiling is log2 of the distinct byte count, so an eight-byte capture cannot exceed 3 bits however random it is, and a floor of 3.5 on one disables the rule outright.
+Either way the rule loads, compiles, runs on every file and reports nothing, which is exactly what a clean scan looks like from outside.
+That is the argument that already fails a rule whose regex does not compile, so it gets the same answer.
 
-**And a third direction, between the two: a check named with a value it can
-read and do nothing with.** `entropy` with no floor is the one that reaches a
-rule file — `EntropyAtLeast` is `Shannon(s) >= min`, Shannon is never negative,
-and so a floor of zero admits the empty string, a run of one byte and a NUL
-alike. The author who meant to write a floor and forgot gets exactly what
-leaving the check off would have given them, and no error either way. The same
-reading refuses `keywords` that name no literal: `[""]` satisfies a length test
-and gates nothing, and what that costs depends on the consumer — silence the
-rule, or spend the full pass the keyword was there to avoid — so the loader
-settles it rather than leaving every consumer to invent an answer.
+**And a third direction, between the two: a check named with a value it can read and do nothing with.** `entropy` with no floor is the one that reaches a rule file — `EntropyAtLeast` is `Shannon(s) >= min`, Shannon is never negative, and so a floor of zero admits the empty string, a run of one byte and a NUL alike.
+The author who meant to write a floor and forgot gets exactly what leaving the check off would have given them, and no error either way.
+The same reading refuses `keywords` that name no literal: `[""]` satisfies a length test and gates nothing, and what that costs depends on the consumer — silence the rule, or spend the full pass the keyword was there to avoid — so the loader settles it rather than leaving every consumer to invent an answer.
 
-The bound has two terms and takes the smaller. Both come off the rule's own
-regex.
+The bound has two terms and takes the smaller.
+Both come off the rule's own regex.
 
-The length term is the **longest** string the group can capture rather than the
-shortest. A group matching 8 to 64 bytes allows 3 bits at its shortest and 6 at
-its longest, so measuring the shortest would refuse a working rule at startup —
-the failure this check exists to prevent, pointed the other way.
+The length term is the **longest** string the group can capture rather than the shortest.
+A group matching 8 to 64 bytes allows 3 bits at its shortest and 6 at its longest, so measuring the shortest would refuse a working rule at startup — the failure this check exists to prevent, pointed the other way.
 
-The alphabet term is how many distinct byte values the group can draw on, since
-a capture holds at most that many however long it runs. `[a-f0-9]{32}` is capped
-at log2(16) = 4 bits rather than the log2(32) = 5 its length allows, so a floor
-of 4.5 on a hex key rule is refused rather than loaded dead. That floor is the
-base64 threshold carried over onto a hex charset, which is the ordinary way to
-write the mistake rather than a constructed one.
+The alphabet term is how many distinct byte values the group can draw on, since a capture holds at most that many however long it runs.
+`[a-f0-9]{32}` is capped at log2(16) = 4 bits rather than the log2(32) = 5 its length allows, so a floor of 4.5 on a hex key rule is refused rather than loaded dead.
+That floor is the base64 threshold carried over onto a hex charset, which is the ordinary way to write the mistake rather than a constructed one.
 
-Both terms over-estimate rather than under-estimate, because the two errors are
-not symmetric: missing a dead rule leaves this check half-done, while refusing a
-live one takes the scanner down. An operator neither walk names widens — to 256
-bytes on the length, to every byte value on the alphabet.
+Both terms over-estimate rather than under-estimate, because the two errors are not symmetric: missing a dead rule leaves this check half-done, while refusing a live one takes the scanner down.
+An operator neither walk names widens — to 256 bytes on the length, to every byte value on the alphabet.
 
-The slack left over is a union that knows which symbols the group can emit and
-not which of them co-occur in one match. `(a{6}|b{6})` unions to two symbols and
-caps at 1 bit, where every string it matches is one repeated symbol at Shannon
-0. `(?:ab){1,3}` is not that case: six bytes over two symbols caps it at 1 bit,
-which `ababab` reaches exactly.
+The slack left over is a union that knows which symbols the group can emit and not which of them co-occur in one match.
+`(a{6}|b{6})` unions to two symbols and caps at 1 bit, where every string it matches is one repeated symbol at Shannon 0.
+`(?:ab){1,3}` is not that case: six bytes over two symbols caps it at 1 bit, which `ababab` reaches exactly.
 
 ## Loading the ruleset
 
-The file is one JSON object with a `rules` array, so a top-level key added
-later needs no format change. `id`, `family`, `description`, `regex` and
-`enabled` are required of a rule; the rest default to absent, and `enabled` has
-no default because a rule that does not say is a rule somebody has not decided
-about. Every entry has to be a whole rule: the loader merges nothing over the
-shipped set, so a partial entry is a rule missing fields and is refused as one.
+The file is one JSON object with a `rules` array, so a top-level key added later needs no format change.
+`id`, `family`, `description`, `regex` and `enabled` are required of a rule; the rest default to absent, and `enabled` has no default because a rule that does not say is a rule somebody has not decided about.
+Every entry has to be a whole rule: the loader merges nothing over the shipped set, so a partial entry is a rule missing fields and is refused as one.
 
-Turning a shipped rule off is an edit to `rules/spill-guard.json` — set its
-`enabled` to `false` — and a pull request somebody reviews. That is the whole
-of the local-tuning story, and it is deliberate.
+Turning a shipped rule off is an edit to `rules/spill-guard.json` — set its `enabled` to `false` — and a pull request somebody reviews.
+That is the whole of the local-tuning story, and it is deliberate.
 
-**A field the schema has no room for is a load failure.** Go's `encoding/json`
-drops an unknown field in silence unless the decoder is told not to — measured,
-not read — and every field here only ever makes a rule stricter, so a
-misspelled one leaves a rule that loads, compiles, runs, and reports either
-nothing or everything. `window` is the field this catches by design.
+**A field the schema has no room for is a load failure.** Go's `encoding/json` drops an unknown field in silence unless the decoder is told not to — measured, not read — and every field here only ever makes a rule stricter, so a misspelled one leaves a rule that loads, compiles, runs, and reports either nothing or everything.
+`window` is the field this catches by design.
 
-Every problem is reported in one run. A rule author who has to fix them one at
-a time is a rule author who stops running the loader.
+Every problem is reported in one run.
+A rule author who has to fix them one at a time is a rule author who stops running the loader.
 
-`gitleaks` is a safe ruleset to borrow from. Its `go.mod` carries no PCRE or
-`regexp2` dependency and it uses stdlib `regexp`, so a non-RE2 rule would panic
-at its startup rather than ship.
+`gitleaks` is a safe ruleset to borrow from.
+Its `go.mod` carries no PCRE or `regexp2` dependency and it uses stdlib `regexp`, so a non-RE2 rule would panic at its startup rather than ship.
 
-RE2 has no lookaround and no backreferences. Nine of the inherited rules use
-them and need rewriting; most are `(?<![A-Za-z0-9])X(?![A-Za-z0-9])` boundary
-guards, which the `group` field handles — capture a wider window, post-filter in
-code. RE2 also caps bounded repetition at 1000, so `{1,1024}` becomes `{1,1000}`.
+RE2 has no lookaround and no backreferences.
+Nine of the inherited rules use them and need rewriting; most are `(?<![A-Za-z0-9])X(?![A-Za-z0-9])` boundary guards, which the `group` field handles — capture a wider window, post-filter in code.
+RE2 also caps bounded repetition at 1000, so `{1,1024}` becomes `{1,1000}`.
 [`language-choice.md` §4](language-choice.md) names all nine.
 
 ## Block on a finding, defer on a gap, and prove both
 
-The sibling guards fail **silent**: an unparseable input or a missing registry
-means no opinion, because a hook that runs on every Bash call must never be the
-reason ordinary work fails. spill-guard used to invert that wholesale. It now
-splits, because the inversion was measured and only half of it was earning its
-cost.
+The sibling guards fail **silent**: an unparseable input or a missing registry means no opinion, because a hook that runs on every Bash call must never be the reason ordinary work fails. spill-guard used to invert that wholesale.
+It now splits, because the inversion was measured and only half of it was earning its cost.
 
 **A finding blocks.** A rule matched something, and that is the product.
 
-**A shape refusal blocks.** An `env` dump, or a read of one of the six
-guarded credential-path classes: the tool knows there is something to stop and no rule
-could recognise it.
+**A shape refusal blocks.** An `env` dump, or a read of one of the six guarded credential-path classes: the tool knows there is something to stop and no rule could recognise it.
 
-**A coverage failure defers.** An operand that will not resolve, a buffer
-nothing decoded, a scan past its budget — the hook writes no verdict at all, so
-the permission flow that would have run without it runs unchanged. Not an
-explicit `allow`, which would suppress the user's own rules; this has no
-opinion to spend on them, because it could not read the call.
+**A coverage failure defers.** An operand that will not resolve, a buffer nothing decoded, a scan past its budget — the hook writes no verdict at all, so the permission flow that would have run without it runs unchanged.
+Not an explicit `allow`, which would suppress the user's own rules; this has no opinion to spend on them, because it could not read the call.
 
-**A gap does not hide a finding beside it.** The walk goes on past an operand it
-cannot settle, everything it did collect is scanned — the prompt or command
-string, and every file that resolved — and a match there blocks, with a notice
-that part of the call went unread. Only a call where nothing readable matched
-defers. Until Q204 the first failure returned no buffers at all, so `echo <a
-key>; cat $X` and a key typed beside an `@` token with no working directory
-both exited 0 with no verdict.
+**A gap does not hide a finding beside it.** The walk goes on past an operand it cannot settle, everything it did collect is scanned — the prompt or command string, and every file that resolved — and a match there blocks, with a notice that part of the call went unread.
+Only a call where nothing readable matched defers.
+Until Q204 the first failure returned no buffers at all, so `echo <a key>; cat $X` and a key typed beside an `@` token with no working directory both exited 0 with no verdict.
 
-A buffer nothing decoded is the same case. Until Q244 a declared encoding this
-build cannot read deferred ahead of the findings, so `cat key.txt notes.utf32`,
-`echo <a key>; cat notes.utf32` and a prompt holding a key beside
-`@notes.utf32` all exited 0 with no verdict. They block now, and the notice names
-the unread buffer. They write no coverage record, as with Q204: the record exists
-because a deferred call is quiet to the person, and this one is not. Until Q245
-a `Grep` pattern beside a path that will not resolve was not read at all, the
-same case. A scan past its budget [blocks too](#the-order-the-budget-spends).
+A buffer nothing decoded is the same case.
+Until Q244 a declared encoding this build cannot read deferred ahead of the findings, so `cat key.txt notes.utf32`, `echo <a key>; cat notes.utf32` and a prompt holding a key beside `@notes.utf32` all exited 0 with no verdict.
+They block now, and the notice names the unread buffer.
+They write no coverage record, as with Q204: the record exists because a deferred call is quiet to the person, and this one is not.
+Until Q245 a `Grep` pattern beside a path that will not resolve was not read at all, the same case.
+A scan past its budget [blocks too](#the-order-the-budget-spends).
 
-A call whose operand list is what is unsettled was the exception until Q254, and
-three of its four arms read the literals on the line now, with the record beside
-them. `xargs` appends its input after them; a wrapper whose options this cannot
-read, as in `timeout $T cat f`, still hands them to the command behind it; and a
-`for` list keeps its literal items beside a stand-in for the one it cannot expand,
-where upstream poisons the name. bash 5.3.15 prints the key for each. The price is
-a block where the command reads nothing: macOS `xargs` runs nothing on empty
-input, `timeout $T` with `T` unset takes `cat` for its duration, and `timeout $T
-foo cat f` blocks over a file `foo` was handed. Over the 240,454 distinct `Bash`
-commands in this machine's transcripts on 2026-11-09, the wrapper arm took 244
-segments and 5 had a literal operand, 4 of them an `xargs -I{}` placeholder that
-names no file; 258 commands had a `for` list mixing a literal with a non-literal.
+A call whose operand list is what is unsettled was the exception until Q254, and three of its four arms read the literals on the line now, with the record beside them.
+`xargs` appends its input after them; a wrapper whose options this cannot read, as in `timeout $T cat f`, still hands them to the command behind it; and a `for` list keeps its literal items beside a stand-in for the one it cannot expand, where upstream poisons the name. bash 5.3.15 prints the key for each. The price is a block where the command reads nothing: macOS `xargs` runs nothing on empty input, `timeout $T` with `T` unset takes `cat` for its duration, and `timeout $T foo cat f` blocks over a file `foo` was handed.
+Over the 240,454 distinct `Bash` commands in this machine's transcripts on 2026-11-09, the wrapper arm took 244 segments and 5 had a literal operand, 4 of them an `xargs -I{}` placeholder that names no file; 258 commands had a `for` list mixing a literal with a non-literal.
 
-The file-list flag, as in `wc --files0-from=l f`, reads the list and leaves the
-rest of the line unread. The list crosses: GNU `wc` and `sort` and `file -f` print
-each name in it they cannot open, so a key there reaches the output, and on BSD,
-where `sort` ignores it and `wc` has no such flag, the block costs a call that
-sends nothing. The other operands do not cross, since GNU `wc` and `sort` refuse
-one beside the flag and BSD `sort` ignores it. 0 of the same commands carried the
-flag. `TestAnUnsettledOperandListStillReadsALiteral`,
-`TestAFileListIsReadAndWhatItNamesIsNot` and
-`TestAnUnsettledOperandListLeavesTheseUnread` pin the three.
+The file-list flag, as in `wc --files0-from=l f`, reads the list and leaves the rest of the line unread.
+The list crosses: GNU `wc` and `sort` and `file -f` print each name in it they cannot open, so a key there reaches the output, and on BSD, where `sort` ignores it and `wc` has no such flag, the block costs a call that sends nothing.
+The other operands do not cross, since GNU `wc` and `sort` refuse one beside the flag and BSD `sort` ignores it.
+0 of the same commands carried the flag.
+`TestAnUnsettledOperandListStillReadsALiteral`, `TestAFileListIsReadAndWhatItNamesIsNot` and `TestAnUnsettledOperandListLeavesTheseUnread` pin the three.
 
 An unquoted substitution looked like a fifth, and it was a parser defect (Q252).
-The segmenter ended the command at the `(` of `$(`, `$((`, `<(` and `>(`, so `cat
-$(x) f` reached the walk as `cat $(`, then `x`, then `f`, and `f` was a command
-name no reader row matches. Upstream's group loop splits there too and needs
-nothing else: driven at `claude-bouncer` 87361d7, workspace-guard denies `cat $(x)
-README.md` on the `$(`. Here a gap has deferred since 2026-09-05, so the walk went
-on and found no file. Now the body's segments come first and the command resumes
-at the `)`, with the words after it among its own. That also ended two false
-denies, `echo $(date) cat f` and `echo $(date) env`, which read the words as a
-command.
+The segmenter ended the command at the `(` of `$(`, `$((`, `<(` and `>(`, so `cat $(x) f` reached the walk as `cat $(`, then `x`, then `f`, and `f` was a command name no reader row matches.
+Upstream's group loop splits there too and needs nothing else: driven at `claude-bouncer` 87361d7, workspace-guard denies `cat $(x) README.md` on the `$(`.
+Here a gap has deferred since 2026-09-05, so the walk went on and found no file.
+Now the body's segments come first and the command resumes at the `)`, with the words after it among its own.
+That also ended two false denies, `echo $(date) cat f` and `echo $(date) env`, which read the words as a command.
 
-Two costs come with it, and both are pinned. `grep $(true) f` blocks though bash
-treats `f` as the pattern and never opens it, since nothing here can tell how many
-words a substitution makes, and `grep $(x) f` reading `f` is the common case. And
-an unquoted substitution at a pattern or a flag's value now writes a record even
-over a clean file, because its output can add a file operand: `grep $(echo x k) f`
-opens `k`.
+Two costs come with it, and both are pinned.
+`grep $(true) f` blocks though bash treats `f` as the pattern and never opens it, since nothing here can tell how many words a substitution makes, and `grep $(x) f` reading `f` is the common case.
+And an unquoted substitution at a pattern or a flag's value now writes a record even over a clean file, because its output can add a file operand: `grep $(echo x k) f` opens `k`.
 
-Some shapes denied only because of the split, and they had to keep working by
-another route:
+Some shapes denied only because of the split, and they had to keep working by another route:
 
-- **A prefix.** A word with no literal text ahead of the command name is read past,
-  repeatedly and after a wrapper's own peel: `$(a) $(b) cat f`, `${X:-$(a)} cat f`,
-  `timeout 5 $(a) cat f`. A `cd` behind one loses the directory.
-- **A word glued to the `)`** stays on its word, so `$(x)/cat f` runs a cat and
-  `$(x)/nothing cat f` does not.
-- **A wrapper's lost grammar.** `sudo -u $(whoami) cat f` reads past the
-  substitution, which also blocks `env X=$(a) echo cat f`, where `f` is only echoed.
-  Q254 extended the reading to every lost grammar and counted the shape at 0 of
-  244 such segments.
-- **A process substitution** holds its word, since dropping it moved the operands:
-  `grep -v <(x) f` took `f` for the pattern. After an assignment it holds none, or
-  it would take the command's place in `X=<(x) cat f`, so `X=1 <(x) cat f` blocks
-  though bash runs the pipe and opens no `f`.
-- **`time`** takes one `-p` then one `--` as its keyword. `time -p cat f` crossed
-  silently on `main`, and `time -p $(x) cat f` blocked only because of the split.
+- **A prefix.** A word with no literal text ahead of the command name is read past, repeatedly and after a wrapper's own peel: `$(a) $(b) cat f`, `${X:-$(a)} cat f`, `timeout 5 $(a) cat f`.
+  A `cd` behind one loses the directory.
+- **A word glued to the `)`** stays on its word, so `$(x)/cat f` runs a cat and `$(x)/nothing cat f` does not.
+- **A wrapper's lost grammar.** `sudo -u $(whoami) cat f` reads past the substitution, which also blocks `env X=$(a) echo cat f`, where `f` is only echoed.
+  Q254 extended the reading to every lost grammar and counted the shape at 0 of 244 such segments.
+- **A process substitution** holds its word, since dropping it moved the operands: `grep -v <(x) f` took `f` for the pattern.
+  After an assignment it holds none, or it would take the command's place in `X=<(x) cat f`, so `X=1 <(x) cat f` blocks though bash runs the pipe and opens no `f`.
+- **`time`** takes one `-p` then one `--` as its keyword.
+  `time -p cat f` crossed silently on `main`, and `time -p $(x) cat f` blocked only because of the split.
 
-A substitution anywhere in the command word writes a record, since its output can
-name any program and any file, so `$(echo cat) f`, `"$(echo cat)" f` and `$(x)/python3
-f`, silent on `main`, now say so. That is the floor for what follows.
+A substitution anywhere in the command word writes a record, since its output can name any program and any file, so `$(echo cat) f`, `"$(echo cat)" f` and `$(x)/python3 f`, silent on `main`, now say so.
+That is the floor for what follows.
 
-Driven 2026-11-05 on binaries built from `main` and from this change, over the
-35,011 distinct real commands on this machine holding a `$(`, `<(` or `>(`, all from
-one scratch directory, so a relative operand named no file:
+Driven 2026-11-05 on binaries built from `main` and from this change, over the 35,011 distinct real commands on this machine holding a `$(`, `<(` or `>(`, all from one scratch directory, so a relative operand named no file:
 
 | `main` | this change | commands |
 |---|---|---|
@@ -1507,10 +900,9 @@ one scratch directory, so a relative operand named no file:
 | a notice | nothing | 2 |
 | no verdict, a record | deny on a rule | 1 |
 
-The 370 are the price of the record above, and most of the ones read are a throttling
-`$(script prefix) go test` that runs what it names. The 69 include `diff <(sed …)`,
-the shape Q216 named. To say something about file operands, the same commands went
-through both binaries patched so that every operand read as a file holding a key:
+The 370 are the price of the record above, and most of the ones read are a throttling `$(script prefix) go test` that runs what it names.
+The 69 include `diff <(sed …)`, the shape Q216 named.
+To say something about file operands, the same commands went through both binaries patched so that every operand read as a file holding a key:
 
 | | commands |
 |---|---|
@@ -1518,27 +910,18 @@ through both binaries patched so that every operand read as a file holding a key
 | of those, no deny here | 46 |
 | no deny on `main`, deny here | 16 |
 
-Of the 46, 35 name only words a script finds inside a `<(…)` body, and reading the
-other 11 found the same class spelled another way: a body word behind `$K`, a
-followed `cd`, or an escape. `main` read a body's words as the outer reader's
-operands, as in `diff <(git show x:f)` naming `git`. Those denies were accidents, but
-not always empty ones: `diff <(fold f)` read `f` on `main`, and here `fold` is a
-command with no row, which is the design's stated limit.
+Of the 46, 35 name only words a script finds inside a `<(…)` body, and reading the other 11 found the same class spelled another way: a body word behind `$K`, a followed `cd`, or an escape.
+`main` read a body's words as the outer reader's operands, as in `diff <(git show x:f)` naming `git`.
+Those denies were accidents, but not always empty ones: `diff <(fold f)` read `f` on `main`, and here `fold` is a command with no row, which is the design's stated limit.
 
-These denies moved in the rows driven by hand, and the list is not exhaustive. `env
-$(x) cat f` and `nice $(x)/cat f` now write a record: the first may be a `-C`, and
-the second is a word the wrapper cannot read. `$((5)) cat f`, `echo $(date) cat f`,
-`echo <(date) cat f` and `echo $(date) env` no longer deny, and bash opens no `f` and
-dumps nothing in any of them. `$X $(a) cat f` no longer denies either and writes no
-record, though bash prints `f`: it is Q225's class, as `$X cat f` is silent on `main`.
+These denies moved in the rows driven by hand, and the list is not exhaustive.
+`env $(x) cat f` and `nice $(x)/cat f` now write a record: the first may be a `-C`, and the second is a word the wrapper cannot read.
+`$((5)) cat f`, `echo $(date) cat f`, `echo <(date) cat f` and `echo $(date) env` no longer deny, and bash opens no `f` and dumps nothing in any of them. `$X $(a) cat f` no longer denies either and writes no record, though bash prints `f`: it is Q225's class, as `$X cat f` is silent on `main`.
 
-**A payload that does not decode still blocks on exit 2.** Not JSON, no event,
-an event this binary cannot withhold at. That is the hook being invoked wrongly
-rather than a scanner failing to read something, and it is the signal that says
-a broken install is broken.
+**A payload that does not decode still blocks on exit 2.** Not JSON, no event, an event this binary cannot withhold at.
+That is the hook being invoked wrongly rather than a scanner failing to read something, and it is the signal that says a broken install is broken.
 
-Why the split, measured over the week to 2026-09-05, 540 verdicts across 100
-sessions on one machine:
+Why the split, measured over the week to 2026-09-05, 540 verdicts across 100 sessions on one machine:
 
 | | Count | Share |
 |---|---|---|
@@ -1546,88 +929,57 @@ sessions on one machine:
 | Findings | 31 | 5.7% |
 | Shape refusals, budget overruns | 0 | 0% |
 
-Of 69 confirmed confirmation prompts in the same window, 49 (71%) were coverage
-failures — 47 of those on one reason, an operand carrying a `$`. And after a
-coverage block, the session got a clean call through within four attempts
-**99.2% of the time** (505 of 509), reading the same tree by another route. The
-block was not withholding the bytes. It charged a turn, and then a person's
-attention, for a refusal the next call walked around. A scanner that trains its
-users to click through is one that gets uninstalled, and precision is the
-product.
+Of 69 confirmed confirmation prompts in the same window, 49 (71%) were coverage failures — 47 of those on one reason, an operand carrying a `$`.
+And after a coverage block, the session got a clean call through within four attempts **99.2% of the time** (505 of 509), reading the same tree by another route.
+The block was not withholding the bytes.
+It charged a turn, and then a person's attention, for a refusal the next call walked around.
+A scanner that trains its users to click through is one that gets uninstalled, and precision is the product.
 
-What replaces the block is a **coverage record**, on two sinks: a line on
-stderr, which reaches neither the model nor the person and rides into the
-transcript's `hook_success` attachment; and a capped JSONL under
-`$XDG_STATE_HOME/spill-guard/` that `spill-guard coverage` groups and counts.
-Both are best-effort — a sink that cannot be written must never change the
-verdict, or a full disk rebuilds the friction on the machines least able to
-diagnose it.
+What replaces the block is a **coverage record**, on two sinks: a line on stderr, which reaches neither the model nor the person and rides into the transcript's `hook_success` attachment; and a capped JSONL under `$XDG_STATE_HOME/spill-guard/` that `spill-guard coverage` groups and counts.
+Both are best-effort — a sink that cannot be written must never change the verdict, or a full disk rebuilds the friction on the machines least able to diagnose it.
 
-The record is what keeps this from being a retreat. The old block did not close
-gaps; it deferred them to a retry. The log makes the gap countable, which is
-the first time the question *which resolver limitation costs the most* has had
-an instrument pointed at it.
+The record is what keeps this from being a retreat.
+The old block did not close gaps; it deferred them to a retry.
+The log makes the gap countable, which is the first time the question *which resolver limitation costs the most* has had an instrument pointed at it.
 
 The predecessor shows why this needs more than a policy statement.
-`coo-quack/sensitive-canary` exits 2 to block on internal error — correct — but
-it needs Node ≥22.6 for `--experimental-strip-types`, and on Node 18 it exits
-**9**. Claude Code does not treat 9 as blocking, so the plugin sat installed,
-checking nothing, reporting nothing. A single static binary removes that whole
-class. It does not remove the obligation to measure the harness's exit-code
-contract instead of reading it in the docs, which
-[the section below](#the-exit-code-contract-measured) now does.
+`coo-quack/sensitive-canary` exits 2 to block on internal error — correct — but it needs Node ≥22.6 for `--experimental-strip-types`, and on Node 18 it exits **9**.
+Claude Code does not treat 9 as blocking, so the plugin sat installed, checking nothing, reporting nothing.
+A single static binary removes that whole class.
+It does not remove the obligation to measure the harness's exit-code contract instead of reading it in the docs, which [the section below](#the-exit-code-contract-measured) now does.
 
 Two mechanisms carry this:
 
-- **`spill-guard selftest`** feeds a canary secret through the full hook path
-  and asserts a block. If the hook is not live, this is how you find out.
-- **The contract is measured, not read.** Only exit 2 blocks, a `deny` object on
-  stdout blocks whatever the exit code, and a hook that cannot run at all does
-  neither ([below](#the-exit-code-contract-measured)). That is a property of
-  the harness rather than of spill-guard, so it can move under a Claude Code
-  upgrade: re-run the probe against a new version instead of trusting the
-  table.
+- **`spill-guard selftest`** feeds a canary secret through the full hook path and asserts a block.
+  If the hook is not live, this is how you find out.
+- **The contract is measured, not read.** Only exit 2 blocks, a `deny` object on stdout blocks whatever the exit code, and a hook that cannot run at all does neither ([below](#the-exit-code-contract-measured)).
+  That is a property of the harness rather than of spill-guard, so it can move under a Claude Code upgrade: re-run the probe against a new version instead of trusting the table.
 
 ### An unread buffer is not a clean one, and the two reasons are not alike
 
-Step 6 has every path that declines to read name its reason. What the hook does
-with that reason is a second decision, and it comes out differently for the two
-the pipeline can give. The axis is the one step 1 already runs on: a byte-order
-mark is a declaration the buffer makes about itself, and a NUL in the sniff
-window is an inference drawn from its bytes. What is recorded is a buffer that
-declared itself text and could not be read.
+Step 6 has every path that declines to read name its reason.
+What the hook does with that reason is a second decision, and it comes out differently for the two the pipeline can give.
+The axis is the one step 1 already runs on: a byte-order mark is a declaration the buffer makes about itself, and a NUL in the sniff window is an inference drawn from its bytes.
+What is recorded is a buffer that declared itself text and could not be read.
 
-**A declared encoding this build cannot decode is recorded.** A UTF-32 mark says
-the file is text, so the class is text by declaration and credential-shaped
-bytes can be in it. The skip is a decoder this build does not have rather than a
-trade it made — step 1 names the encoding because no measurement said the class
-was worth carrying. Recording costs close to nothing, because close to nothing
-is written in UTF-32, and the record names the file and the reason, so whoever
-sweeps the coverage log can convert it. Where nothing else in the call matched,
-the call proceeds and the override is not consulted, because there is no block
-left to downgrade. A match beside it blocks and writes no record.
+**A declared encoding this build cannot decode is recorded.** A UTF-32 mark says the file is text, so the class is text by declaration and credential-shaped bytes can be in it.
+The skip is a decoder this build does not have rather than a trade it made — step 1 names the encoding because no measurement said the class was worth carrying.
+Recording costs close to nothing, because close to nothing is written in UTF-32, and the record names the file and the reason, so whoever sweeps the coverage log can convert it.
+Where nothing else in the call matched, the call proceeds and the override is not consulted, because there is no block left to downgrade.
+A match beside it blocks and writes no record.
 
-**The binary skip is not recorded.** That one *is* the trade, and step 2 took it
-against a measurement — one PNG was 55% of the benchmark corpus. Denying every
-image read is not a convenience cost: a hook that does it gets uninstalled, and
-an uninstalled scanner enforces nothing, which lands on the same side of the
-ledger as failing open. What it gets instead is the notice the next section
-measures, to the person rather than to the log: neither arm stops the call, and
-the split is which channel says so.
+**The binary skip is not recorded.** That one *is* the trade, and step 2 took it against a measurement — one PNG was 55% of the benchmark corpus.
+Denying every image read is not a convenience cost: a hook that does it gets uninstalled, and an uninstalled scanner enforces nothing, which lands on the same side of the ledger as failing open.
+What it gets instead is the notice the next section measures, to the person rather than to the log: neither arm stops the call, and the split is which channel says so.
 
 #### An allowed skip says so, and the channel for saying it is measured
 
-Not blocking is not the same as not saying. Step 6 asks every path that
-declines to read to name its reason and have the caller carry that as far as
-the user, and an allow meant exit 0 on an empty stdout — the one silence the
-hook produces that is not a scan which ran. It now writes a `systemMessage`
-naming the buffer and the reason, and the call goes through carrying it.
+Not blocking is not the same as not saying.
+Step 6 asks every path that declines to read to name its reason and have the caller carry that as far as the user, and an allow meant exit 0 on an empty stdout — the one silence the hook produces that is not a scan which ran.
+It now writes a `systemMessage` naming the buffer and the reason, and the call goes through carrying it.
 
 Which field does that is a measurement rather than a reading of the docs.
-Driven 2026-09-01 against Claude Code 2.1.251 on darwin/arm64: seven arms of a
-real `UserPromptSubmit` hook in a throwaway project, each emitting one marker
-one way, read back out of the `--output-format stream-json` stream and the
-session transcript both.
+Driven 2026-09-01 against Claude Code 2.1.251 on darwin/arm64: seven arms of a real `UserPromptSubmit` hook in a throwaway project, each emitting one marker one way, read back out of the `--output-format stream-json` stream and the session transcript both.
 
 | The hook writes (exit 0 unless noted) | The stream | The transcript |
 |---|---|---|
@@ -1638,79 +990,45 @@ session transcript both.
 | `{"systemMessage": marker}` | `system`/`informational`, `level` `notice` | `hook_system_message` |
 | `{"…additionalContext": marker}` | — | `hook_additional_context` |
 
-**Of the six driven, `systemMessage` is the only one that reaches the
-person.** The two that carry
-text to the model — `additionalContext` and a hook's plain stdout — reach it
-while telling nobody, and a hook's stderr on exit 0 reaches neither: absent from
-the stream, absent from the transcript, absent from the session. The
-`systemMessage` rows are the control for the blanks, since the same instrument
-found the marker there. None of the seven withheld anything; the `systemMessage`
-arm's transcript carries the user message and reaches the same next step the
-control does.
+**Of the six driven, `systemMessage` is the only one that reaches the person.** The two that carry text to the model — `additionalContext` and a hook's plain stdout — reach it while telling nobody, and a hook's stderr on exit 0 reaches neither: absent from the stream, absent from the transcript, absent from the session.
+The `systemMessage` rows are the control for the blanks, since the same instrument found the marker there.
+None of the seven withheld anything; the `systemMessage` arm's transcript carries the user message and reaches the same next step the control does.
 
-**Routing it to the person rather than the model is the decision, not a
-detail.** The remedies are a human's to take — convert the file, arm an
-override — and the model can take neither. The same text sent to the model
-would be spent on every image read: 59 of the 1,878 distinct `Read` targets in
-this machine's transcripts that still exist on disk are binary, 58 of them PNGs
-and one a PDF. Targets that did not survive are outside that denominator, so it
-is a rate over durable files rather than over all reads.
+**Routing it to the person rather than the model is the decision, not a detail.** The remedies are a human's to take — convert the file, arm an override — and the model can take neither.
+The same text sent to the model would be spent on every image read: 59 of the 1,878 distinct `Read` targets in this machine's transcripts that still exist on disk are binary, 58 of them PNGs and one a PDF.
+Targets that did not survive are outside that denominator, so it is a rate over durable files rather than over all reads.
 
-**The notice names the two text populations, because the reason cannot.**
-`SkippedBinary` is one reason over a NUL in the sniff window, so UTF-16 written
-with no byte-order mark and a UTF-8 mark ahead of a NUL both arrive wearing a
-screenshot's label. Naming them is what lets a reader who knows their file is
-text act on a notice that says *binary* — and it is why this closes both
-members without deciding anything about the UTF-8 decode arm, which is `Q102`.
-A prompt now matches the raw bytes as well, which reaches the UTF-8 member's
-credential without a decode arm and does nothing for the UTF-16 one, whose key
-is a NUL to the byte. The notice is what both still get.
+**The notice names the two text populations, because the reason cannot.** `SkippedBinary` is one reason over a NUL in the sniff window, so UTF-16 written with no byte-order mark and a UTF-8 mark ahead of a NUL both arrive wearing a screenshot's label.
+Naming them is what lets a reader who knows their file is text act on a notice that says *binary* — and it is why this closes both members without deciding anything about the UTF-8 decode arm, which is `Q102`.
+A prompt now matches the raw bytes as well, which reaches the UTF-8 member's credential without a decode arm and does nothing for the UTF-16 one, whose key is a NUL to the byte.
+The notice is what both still get.
 
-**`PreToolUse` takes the same field, and it is driven rather than inferred.**
-An earlier revision of this section reasoned that it was safe to emit there
-without a measurement, because `claude -p` could not authenticate on the machine
-at the time and the exit-code table already rules out the direction that
-matters. The measurement was taken once the CLI could log in again, on a `Bash`
-call, and it agrees:
+**`PreToolUse` takes the same field, and it is driven rather than inferred.** An earlier revision of this section reasoned that it was safe to emit there without a measurement, because `claude -p` could not authenticate on the machine at the time and the exit-code table already rules out the direction that matters.
+The measurement was taken once the CLI could log in again, on a `Bash` call, and it agrees:
 
 | the hook writes on `PreToolUse` | the stream | the transcript | the call |
 |---|---|---|---|
 | nothing — the control | — | — | runs |
 | `{"systemMessage": marker}` | `PreToolUse:Bash says: <marker>`, `level` `notice` | `hook_system_message`, `hookEvent` `PreToolUse` | runs |
 
-Both arms' `tool_result` carries the command's own marker, so the field informs
-without withholding on this event too. The control shows no marker of ours and
-does show an unrelated `UserPromptSubmit` notice, which is what says the reader
-was working on the run that found nothing.
+Both arms' `tool_result` carries the command's own marker, so the field informs without withholding on this event too.
+The control shows no marker of ours and does show an unrelated `UserPromptSubmit` notice, which is what says the reader was working on the run that found nothing.
 
-So `systemMessage` is **not** per event the way the block encodings are, and one
-field serves both. That is worth stating explicitly, because everything else
-about hook output in this document is per event, and the reasonable prior — the
-one this section held for a day — was that this would be too.
+So `systemMessage` is **not** per event the way the block encodings are, and one field serves both.
+That is worth stating explicitly, because everything else about hook output in this document is per event, and the reasonable prior — the one this section held for a day — was that this would be too.
 
-It also explains the corpus zero rather than leaving it hanging: across 1,654
-session transcripts here, all 407 `hook_system_message` attachments carried
-`UserPromptSubmit` or `Stop`, and none carried `PreToolUse` because no installed
-hook had ever emitted one there. The population was empty, not the capability.
+It also explains the corpus zero rather than leaving it hanging: across 1,654 session transcripts here, all 407 `hook_system_message` attachments carried `UserPromptSubmit` or `Stop`, and none carried `PreToolUse` because no installed hook had ever emitted one there.
+The population was empty, not the capability.
 
 #### A blocking verdict carries the notice too, on a channel that is per event
 
-The notice above fires on the one branch that neither blocked nor scanned. A
-call that *also* blocks — findings in one buffer, an allowed skip in another —
-said so to the model and nothing to the person, and `found()`'s own sentence,
-*N rule match(es) in what this call would have sent*, is a claim about coverage
-that only a call every buffer of which was read can make. Any multi-buffer call
-reaches it: a `Bash` segment naming a `.env` and a `.png`, or a prompt carrying
-`@deploy.env` and `@logo.png`, blocks on the first and was silent about the
-second.
+The notice above fires on the one branch that neither blocked nor scanned.
+A call that *also* blocks — findings in one buffer, an allowed skip in another — said so to the model and nothing to the person, and `found()`'s own sentence, *N rule match(es) in what this call would have sent*, is a claim about coverage that only a call every buffer of which was read can make.
+Any multi-buffer call reaches it: a `Bash` segment naming a `.env` and a `.png`, or a prompt carrying `@deploy.env` and `@logo.png`, blocks on the first and was silent about the second.
 
-Putting a `systemMessage` beside a decision object changes an encoding this
-document measured rather than reasoned about, so it was driven before it was
-written. Driven 2026-09-03 against Claude Code 2.1.251 on darwin/arm64, nine
-arms of a real hook in a throwaway project, read back out of
-`--output-format stream-json`. The four arms that emitted the field were read
-in the session transcript as well, where each arrives as the
-`hook_system_message` attachment Q84 measured, or does not:
+Putting a `systemMessage` beside a decision object changes an encoding this document measured rather than reasoned about, so it was driven before it was written.
+Driven 2026-09-03 against Claude Code 2.1.251 on darwin/arm64, nine arms of a real hook in a throwaway project, read back out of `--output-format stream-json`.
+The four arms that emitted the field were read in the session transcript as well, where each arrives as the `hook_system_message` attachment Q84 measured, or does not:
 
 | The hook writes on `PreToolUse` (Bash) | The person is shown | The call |
 |---|---|---|
@@ -1727,127 +1045,71 @@ in the session transcript as well, where each arrives as the
 | the same, plus `systemMessage` | the reason. **Nothing of the field** | blocked |
 | `systemMessage` alone — the control | the notice, `level` `notice` | runs |
 
-**So the field is per event once a decision object is beside it, and the
-section above is not wrong about the case it measured.** `systemMessage` alone
-serves both events; beside a block on `UserPromptSubmit` it is dropped without
-a word. The two `systemMessage`-alone rows are the control for that blank, and
-each event's block-alone row is the control that says the arm blocked at all.
+**So the field is per event once a decision object is beside it, and the section above is not wrong about the case it measured.** `systemMessage` alone serves both events; beside a block on `UserPromptSubmit` it is dropped without a word.
+The two `systemMessage`-alone rows are the control for that blank, and each event's block-alone row is the control that says the arm blocked at all.
 
-**That event needs no field, which is why this is a routing choice rather than
-a gap.** Its block reason is itself shown to the person, as `UserPromptSubmit
-operation blocked by hook: …` at `level` `warning` — something the `PreToolUse`
-deny reason does not do, where the reason reaches the model and the person sees
-it only if the model repeats it. So the notice joins the reason there and rides
-its own field here, and on both events it lands in front of the person who can
-act on it. `carry` in `internal/hook/verdict.go` is that one decision, and the
-verdicts on either side of it do not re-derive it.
+**That event needs no field, which is why this is a routing choice rather than a gap.** Its block reason is itself shown to the person, as `UserPromptSubmit operation blocked by hook: …` at `level` `warning` — something the `PreToolUse` deny reason does not do, where the reason reaches the model and the person sees it only if the model repeats it.
+So the notice joins the reason there and rides its own field here, and on both events it lands in front of the person who can act on it.
+`carry` in `internal/hook/verdict.go` is that one decision, and the verdicts on either side of it do not re-derive it.
 
-**The notice still reports that nothing looked.** It says what went unread and
-refuses to say anything about what did not: *no verdict on this call is a
-report on its text — a buffer nothing decoded is never reported as a clean
-one*. Reading it as coverage is the failure this whole section exists against,
-and a block beside it makes that reading easier rather than harder, because the
-block sounds like a verdict on the call.
+**The notice still reports that nothing looked.** It says what went unread and refuses to say anything about what did not: *no verdict on this call is a report on its text — a buffer nothing decoded is never reported as a clean one*.
+Reading it as coverage is the failure this whole section exists against, and a block beside it makes that reading easier rather than harder, because the block sounds like a verdict on the call.
 
-**The claim is about the buffer's text, not about whether anything looked at
-its bytes**, and the two come apart the moment a buffer can be matched without
-being decoded. Q118 drove the merge of that capability against the earlier
-wording and read back a block reason that named a finding *in* a file and then
-said no verdict covered it — one paragraph, both halves true of a different
-verb, and a green suite behind them. So the sentence is written against the
-distinction that survives, which is *decoded*.
+**The claim is about the buffer's text, not about whether anything looked at its bytes**, and the two come apart the moment a buffer can be matched without being decoded.
+Q118 drove the merge of that capability against the earlier wording and read back a block reason that named a finding *in* a file and then said no verdict covered it — one paragraph, both halves true of a different verb, and a green suite behind them.
+So the sentence is written against the distinction that survives, which is *decoded*.
 
-The confirmation takes it for a sharper reason than the block does. An override
-downgrades a block to an ask, and approving is the whole of what that prompt is
-for: a human told what they are about to send and not told what nothing opened
-is approving a coverage nobody has.
+The confirmation takes it for a sharper reason than the block does.
+An override downgrades a block to an ask, and approving is the whole of what that prompt is for: a human told what they are about to send and not told what nothing opened is approving a coverage nobody has.
 
 The residue was two populations rather than one, and one of them is now closed.
-UTF-16 written with no mark lands in the binary skip and is allowed with it —
-step 2's own stated gap, where nothing declares anything and separating it is
-the heuristic the NUL check was chosen instead of. That one stands. The second
-*did* declare itself: a UTF-16 mark whose decoded sniff window holds a `U+0000`
-is classified as binary deliberately, after the decode, on the rule that a NUL
-in decoded text describes the text rather than the encoding. It satisfied the
-description of what is recorded and was allowed anyway, because step 2 routed on
-decoded content where this routes on declaration and one skip reason stood for
-both.
+UTF-16 written with no mark lands in the binary skip and is allowed with it — step 2's own stated gap, where nothing declares anything and separating it is the heuristic the NUL check was chosen instead of.
+That one stands.
+The second *did* declare itself: a UTF-16 mark whose decoded sniff window holds a `U+0000` is classified as binary deliberately, after the decode, on the rule that a NUL in decoded text describes the text rather than the encoding.
+It satisfied the description of what is recorded and was allowed anyway, because step 2 routed on decoded content where this routes on declaration and one skip reason stood for both.
 
 #### A declared encoding whose decoded text is binary is recorded
 
-Step 2 gives that case its own reason now, so it arrives here as a reason
-nothing was taught and is recorded on the same default that catches one — a
-`Skip` that `blocks()` does not know is treated as declared rather than as
-allowed. The classification is untouched — the buffer is still binary, and
-still binary because of its decoded content, which is step 2's rule read on its
-own terms and was never the thing in dispute. What a separate reason adds is the
-declaration, which is what this arm has always routed on.
+Step 2 gives that case its own reason now, so it arrives here as a reason nothing was taught and is recorded on the same default that catches one — a `Skip` that `blocks()` does not know is treated as declared rather than as allowed.
+The classification is untouched — the buffer is still binary, and still binary because of its decoded content, which is step 2's rule read on its own terms and was never the thing in dispute.
+What a separate reason adds is the declaration, which is what this arm has always routed on.
 
-**The argument is not how often the class turns up, and this repository cannot
-find out.** Measured 2026-08-31, twice. Over the same session corpus as the
-section below: 2 of 40,416 `Bash` operands carry a UTF-16 mark, neither of them
-decoding to binary, and the `Read` and prompt surfaces have none at all. Over
-`~/go/pkg/mod` and this repository's own tree — 245,397 files, every marked one
-listed rather than sampled — 43 carry a UTF-16 mark, **none** decodes to binary,
-and nothing carries a UTF-32 mark. Widened to `~/workspace`, `~/.claude`, `~/go`
-and the Go toolchain, 6,589,166 files, the shape is the same: 45 marked, none
-decoding to binary, no UTF-32 mark, and every organic one still in the module
-cache.
+**The argument is not how often the class turns up, and this repository cannot find out.** Measured 2026-08-31, twice.
+Over the same session corpus as the section below: 2 of 40,416 `Bash` operands carry a UTF-16 mark, neither of them decoding to binary, and the `Read` and prompt surfaces have none at all.
+Over `~/go/pkg/mod` and this repository's own tree — 245,397 files, every marked one listed rather than sampled — 43 carry a UTF-16 mark, **none** decodes to binary, and nothing carries a UTF-32 mark.
+Widened to `~/workspace`, `~/.claude`, `~/go` and the Go toolchain, 6,589,166 files, the shape is the same: 45 marked, none decoding to binary, no UTF-32 mark, and every organic one still in the module cache.
 
-**21 of those 43 are organic**, in seven unrelated modules: `subosito/gotenv`,
-`docker/cli`, `golang.org/x/net`'s `html/charset`, `gopkg.in/ini.v1`,
-`aws/smithy-go`, `BurntSushi/toml` and `Azure/go-autorest`. So a byte-order mark
-is not itself a Windows artifact, on a machine with no `pwsh` at all. The other
-22 are copies of this repository's planted fixture across worktrees, and that
-count moves as worktrees come and go.
+**21 of those 43 are organic**, in seven unrelated modules: `subosito/gotenv`, `docker/cli`, `golang.org/x/net`'s `html/charset`, `gopkg.in/ini.v1`, `aws/smithy-go`, `BurntSushi/toml` and `Azure/go-autorest`.
+So a byte-order mark is not itself a Windows artifact, on a machine with no `pwsh` at all.
+The other 22 are copies of this repository's planted fixture across worktrees, and that count moves as worktrees come and go.
 
-An earlier draft of this paragraph said every marked file was one of ours. That
-was read off the first 25 of a listing the walk had ordered by root, so the
-module cache never entered the sample — the fixtures were simply first. The
-correction is why the sentence now names a fully enumerated population.
+An earlier draft of this paragraph said every marked file was one of ours.
+That was read off the first 25 of a listing the walk had ordered by root, so the module cache never entered the sample — the fixtures were simply first.
+The correction is why the sentence now names a fully enumerated population.
 
-Both are close to worthless as a measure of how often the class turns up, and
-step 1 says why: the file class the decode exists for is Windows PowerShell 5.1,
-and there is no `pwsh` on the runners or on a maintainer's Mac. A near-zero
-drawn from machines that cannot produce the population is not evidence the
-population is rare — it is a measurement of the platform. So the case for the
-split had to be made on something other than frequency.
+Both are close to worthless as a measure of how often the class turns up, and step 1 says why: the file class the decode exists for is Windows PowerShell 5.1, and there is no `pwsh` on the runners or on a maintainer's Mac.
+A near-zero drawn from machines that cannot produce the population is not evidence the population is rare — it is a measurement of the platform.
+So the case for the split had to be made on something other than frequency.
 
-What the 43 do establish is the **cost**, which is a different question and one
-this machine can answer. Every one of them is `Scanned` — they decode as UTF-16
-and their sniff windows hold no NUL — so not one changes verdict under this
-change. The flip costs nothing on the only marked-file population observable
-here. Note what that is not: it is not evidence about the newly-recorded class,
-which has zero organic observations, and the two must not be run together.
+What the 43 do establish is the **cost**, which is a different question and one this machine can answer.
+Every one of them is `Scanned` — they decode as UTF-16 and their sniff windows hold no NUL — so not one changes verdict under this change.
+The flip costs nothing on the only marked-file population observable here.
+Note what that is not: it is not evidence about the newly-recorded class, which has zero organic observations, and the two must not be run together.
 
-**What settles it is `FF FE 00 00`.** Those bytes are the UTF-32LE mark and
-equally a UTF-16LE mark followed by `U+0000`, and step 1 resolves them
-longer-mark-first because that is what the Unicode standard says to do. Before
-the split, that resolution decided *block against allow*: a UTF-16LE buffer
-whose first character was a `U+0000` took the UTF-32 arm and blocked, while the
-same buffer with the `U+0000` one character later took the binary skip and was
-allowed. Two neighbours, the same encoding, the same credential, opposite
-verdicts, and the only difference between them an ambiguity nobody here chose.
-Now both are recorded, and the two readings differ only over which encoding to
-name — the most such an ambiguity should ever cost.
-`TestAUTF16NULIsNamedAsDeclaredWhereverItSits` is that pair. Undo the split and
-it fails on the `NUL second` arm alone: `NUL first` stays green, because it
-never went through the UTF-16 branch.
+**What settles it is `FF FE 00 00`.** Those bytes are the UTF-32LE mark and equally a UTF-16LE mark followed by `U+0000`, and step 1 resolves them longer-mark-first because that is what the Unicode standard says to do.
+Before the split, that resolution decided *block against allow*: a UTF-16LE buffer whose first character was a `U+0000` took the UTF-32 arm and blocked, while the same buffer with the `U+0000` one character later took the binary skip and was allowed.
+Two neighbours, the same encoding, the same credential, opposite verdicts, and the only difference between them an ambiguity nobody here chose.
+Now both are recorded, and the two readings differ only over which encoding to name — the most such an ambiguity should ever cost.
+`TestAUTF16NULIsNamedAsDeclaredWhereverItSits` is that pair.
+Undo the split and it fails on the `NUL second` arm alone: `NUL first` stays green, because it never went through the UTF-16 branch.
 
 #### The verdict is per reason and not per surface, measured
 
 The binary allow is argued from `Read`, where an image is opened on purpose.
-The reason is what the hook is handed; the surface is not, so the allow reaches
-`Bash` operands and prompt `@` targets on an argument that was never about
-them. The case for a second axis is that those populations look different —
-nobody `cat`s a PNG by accident, and what a reader is pointed at when the
-operand *is* binary might be a heap dump with a token in it.
+The reason is what the hook is handed; the surface is not, so the allow reaches `Bash` operands and prompt `@` targets on an argument that was never about them.
+The case for a second axis is that those populations look different — nobody `cat`s a PNG by accident, and what a reader is pointed at when the operand *is* binary might be a heap dump with a token in it.
 
-Measured 2026-08-31 over the 1,580 session transcripts under
-`~/.claude/projects/` (898,099 records, 128,963 `Bash` calls, 12,271 typed
-prompts) by running this repository's own `bashTargets`, `promptTargets` and
-`scan.Buffer` over every call in them and classifying each buffer the way the
-pipeline would:
+Measured 2026-08-31 over the 1,580 session transcripts under `~/.claude/projects/` (898,099 records, 128,963 `Bash` calls, 12,271 typed prompts) by running this repository's own `bashTargets`, `promptTargets` and `scan.Buffer` over every call in them and classifying each buffer the way the pipeline would:
 
 | Surface | Buffers reaching the pipeline | Skipped binary | Rate |
 |---|---|---|---|
@@ -1855,132 +1117,80 @@ pipeline would:
 | prompt `@` targets | 130 | 4 — *all of them fixtures this repo wrote* | 3.1%, and none of it organic |
 | `Read` `file_path` | 3,026 | 96 | 3.2% |
 
-Read the prompt row with its caveat attached. At 3.1% beside `Read`'s 3.2% it
-invites the reading that the two surfaces behave alike, and they are as unlike
-as the corpus can make them: strike the fixtures and the row is 0 of 126.
+Read the prompt row with its caveat attached.
+At 3.1% beside `Read`'s 3.2% it invites the reading that the two surfaces behave alike, and they are as unlike as the corpus can make them: strike the fixtures and the row is 0 of 126.
 
-The rates are not what settles it. What those 21 and 4 buffers *are*, is:
+The rates are not what settles it.
+What those 21 and 4 buffers *are*, is:
 
-- All 21 `Bash` buffers are an executable or an image somebody opened on
-  purpose: the Claude Code binary itself 13 times, `powermetrics` 4, two
-  favicons, and one `.dylib` a sibling repository built for a trace probe.
-- All 4 prompt buffers are this repository's own fixtures — two `logo.png` and
-  two `heap.dump`, written into worktree scratchpads by the sessions that drove
-  the `@` measurement above. Nothing organic was observed in 881 `@` tokens.
+- All 21 `Bash` buffers are an executable or an image somebody opened on purpose: the Claude Code binary itself 13 times, `powermetrics` 4, two favicons, and one `.dylib` a sibling repository built for a trace probe.
+- All 4 prompt buffers are this repository's own fixtures — two `logo.png` and two `heap.dump`, written into worktree scratchpads by the sessions that drove the `@` measurement above.
+  Nothing organic was observed in 881 `@` tokens.
 
-  That denominator needs the same name sweep the `Bash` bullet below describes,
-  and for a sharper reason. `promptTargets` skips a token whose file is gone, so
-  the content sweep classified 130 buffers out of 881 tokens — 14.8% of its own
-  denominator, worse attrition than the `Bash` arm's. Sweeping all 881 by name
-  instead, deleted targets included, returns four binary-shaped names and they
-  are the same four fixtures: `heap.dump` twice and `logo.png` twice.
+  That denominator needs the same name sweep the `Bash` bullet below describes, and for a sharper reason.
+  `promptTargets` skips a token whose file is gone, so the content sweep classified 130 buffers out of 881 tokens — 14.8% of its own denominator, worse attrition than the `Bash` arm's.
+  Sweeping all 881 by name instead, deleted targets included, returns four binary-shaped names and they are the same four fixtures: `heap.dump` twice and `logo.png` twice.
 
-  The remainder is `.txt`, `.head`, `.md`, `.zshrc` and extensionless paths —
-  and five `.env` tokens, which are two names in two prompts rather than five
-  occasions. Four of them are `deploy.env`, `deploy.env-`, `deploy.env#` and
-  `deploy.env%%`, typed in one prompt to the millisecond to drive the
-  punctuation trim; the fifth is `secret.env`. Both are fixtures, and by where
-  they came from rather than by what they are called: every prompt in the corpus
-  naming an `@…env` token sits in a `claude-spill-guard` worktree or its
-  scratchpad. So are the `.txtzzz` and zero-width-suffixed tokens the grammar
-  drives left behind.
+  The remainder is `.txt`, `.head`, `.md`, `.zshrc` and extensionless paths — and five `.env` tokens, which are two names in two prompts rather than five occasions.
+  Four of them are `deploy.env`, `deploy.env-`, `deploy.env#` and `deploy.env%%`, typed in one prompt to the millisecond to drive the punctuation trim; the fifth is `secret.env`.
+  Both are fixtures, and by where they came from rather than by what they are called: every prompt in the corpus naming an `@…env` token sits in a `claude-spill-guard` worktree or its scratchpad.
+  So are the `.txtzzz` and zero-width-suffixed tokens the grammar drives left behind.
 
-  **None observed is not a rate of zero.** Nought events in 881 puts the 95%
-  upper bound near 0.34%, so what the corpus supports is that nothing organic
-  turned up, not that nothing organic exists. It changes no decision here — the
-  residue routes to Q84 regardless of surface — and it is the sentence most
-  likely to be quoted later as though it were a measured rate.
+  **None observed is not a rate of zero.** Nought events in 881 puts the 95% upper bound near 0.34%, so what the corpus supports is that nothing organic turned up, not that nothing organic exists.
+  It changes no decision here — the residue routes to Q84 regardless of surface — and it is the sentence most likely to be quoted later as though it were a measured rate.
 
-  The self-reference cuts three ways and the third is the one worth writing
-  down. It does not make the defect unreal: the crossing happens and step 2
-  still skips those bytes. It does make frequency the wrong axis, which is what
-  the row said. And it leaves the prompt arm with no organic data in *either*
-  direction — an absence of events rather than a low rate, which is normally a
-  weak thing to decide on. Here it is the criterion the row itself set.
+  The self-reference cuts three ways and the third is the one worth writing down.
+  It does not make the defect unreal: the crossing happens and step 2 still skips those bytes.
+  It does make frequency the wrong axis, which is what the row said.
+  And it leaves the prompt arm with no organic data in *either* direction — an absence of events rather than a low rate, which is normally a weak thing to decide on.
+  Here it is the criterion the row itself set.
 
-  It is also wider than the binary targets. Once the `.env` tokens are counted,
-  **every security-shaped token in these 881 is one this project wrote**, and
-  the organic remainder is `.txt`, `.head`, `.md`, `.zshrc` and paths with no
-  extension. That is the honest statement of what this corpus can support: not
-  that credential-shaped prompt traffic is rare, but that there is none of it
-  here to measure, because the only sessions that produced any were the ones
-  driving this scanner.
+  It is also wider than the binary targets.
+  Once the `.env` tokens are counted, **every security-shaped token in these 881 is one this project wrote**, and the organic remainder is `.txt`, `.head`, `.md`, `.zshrc` and paths with no extension.
+  That is the honest statement of what this corpus can support: not that credential-shaped prompt traffic is rare, but that there is none of it here to measure, because the only sessions that produced any were the ones driving this scanner.
 
-  **Reviewing this section demonstrated it.** The counts above were taken at 881
-  `@` tokens and 5 `.env` names. Re-running the same census while the change was
-  under review returned 883 and 7, and the entire delta is one prompt — a
-  message between two sessions arguing about this paragraph, in which the phrase
-  `@…env` is itself taken as a file token. Two more security-shaped tokens
-  entered the corpus while the pull request adding this sentence was open, and
-  both came from the sessions reviewing it. That is not a caveat about the
-  numbers going stale. It is the finding, and it is about the numerator rather
-  than the denominator: **the security-shaped count moves whenever this
-  repository is worked on and does not otherwise.**
+  **Reviewing this section demonstrated it.** The counts above were taken at 881 `@` tokens and 5 `.env` names.
+  Re-running the same census while the change was under review returned 883 and 7, and the entire delta is one prompt — a message between two sessions arguing about this paragraph, in which the phrase `@…env` is itself taken as a file token.
+  Two more security-shaped tokens entered the corpus while the pull request adding this sentence was open, and both came from the sessions reviewing it.
+  That is not a caveat about the numbers going stale.
+  It is the finding, and it is about the numerator rather than the denominator: **the security-shaped count moves whenever this repository is worked on and does not otherwise.**
 
-  The token total is not that count and does not behave that way. Of the 883,
-  365 come from `claude-spill-guard` sessions and 518 from everything else,
-  `github-actions-gateway` alone contributing 356 — so ordinary work on other
-  projects moves the denominator, as it should. What it has never once moved is
-  the numerator: every `.env` name and every binary `@` target traces to a
-  `claude-spill-guard` worktree or its scratchpad. A corpus with organic `@`
-  traffic and no organic *credential-shaped* `@` traffic is exactly the shape
-  that makes a frequency argument unavailable here.
-- The population the split exists to catch is absent. The table classifies
-  files as they stand today, and 37,710 of the 83,141 resolvable operands point
-  at something since deleted — which is exactly what a heap dump does, so the
-  content sweep alone would not settle this. A second sweep over the operand
-  *names* covers the deleted ones, because a name survives its file: of 103,330
-  file operands named across those `Bash` calls, resolvable or not and present
-  or not, **none** is a `.dump`, a `.pack`, an SQLite file or a core file.
+  The token total is not that count and does not behave that way.
+  Of the 883, 365 come from `claude-spill-guard` sessions and 518 from everything else, `github-actions-gateway` alone contributing 356 — so ordinary work on other projects moves the denominator, as it should.
+  What it has never once moved is the numerator: every `.env` name and every binary `@` target traces to a `claude-spill-guard` worktree or its scratchpad.
+  A corpus with organic `@` traffic and no organic *credential-shaped* `@` traffic is exactly the shape that makes a frequency argument unavailable here.
+- The population the split exists to catch is absent.
+  The table classifies files as they stand today, and 37,710 of the 83,141 resolvable operands point at something since deleted — which is exactly what a heap dump does, so the content sweep alone would not settle this.
+  A second sweep over the operand *names* covers the deleted ones, because a name survives its file: of 103,330 file operands named across those `Bash` calls, resolvable or not and present or not, **none** is a `.dump`, a `.pack`, an SQLite file or a core file.
   Fourteen carry a binary-shaped name at all, and eight of those are images.
 
-So a surface split would fire 25 times in that corpus, block the wrong thing 23
-of them, and catch two files this project wrote to demonstrate the defect. That
-is not a second policy this repository can keep true. The verdict stays keyed on
-the reason alone.
+So a surface split would fire 25 times in that corpus, block the wrong thing 23 of them, and catch two files this project wrote to demonstrate the defect.
+That is not a second policy this repository can keep true.
+The verdict stays keyed on the reason alone.
 
-**Read the whole of it as a dated reading rather than a property of the tree.**
-It is one maintainer's agent sessions on one machine, no gate re-runs it, and
-nothing in CI can: the transcripts are not in the repository. "The population is
-absent" means absent from this corpus, whose composition shows what it is — the
-commonest `Bash` operand extensions are `.log`, `.md`, `.go`, `.sh` and `.py`.
-A forensics or data-science user reads differently and this cannot speak for
-them. That bounds the claim rather than undermining it, because the tool is a
-net for the accident rather than a wall against intent, and accidental frequency
-is what an ordinary-session corpus measures well.
+**Read the whole of it as a dated reading rather than a property of the tree.** It is one maintainer's agent sessions on one machine, no gate re-runs it, and nothing in CI can: the transcripts are not in the repository.
+"The population is absent" means absent from this corpus, whose composition shows what it is — the commonest `Bash` operand extensions are `.log`, `.md`, `.go`, `.sh` and `.py`.
+A forensics or data-science user reads differently and this cannot speak for them.
+That bounds the claim rather than undermining it, because the tool is a net for the accident rather than a wall against intent, and accidental frequency is what an ordinary-session corpus measures well.
 
-What the measurement does not retire is the crossing. A binary buffer carrying
-a credential is still allowed on every surface, and the remedy the corpus
-supports is telling the user the buffer went unread — which needs no ruling on
-which surface it happened on, and is Q84 rather than this. It is no longer
-allowed in silence, and on a prompt it is no longer unread: the section below
-is the third answer this one did not weigh.
+What the measurement does not retire is the crossing.
+A binary buffer carrying a credential is still allowed on every surface, and the remedy the corpus supports is telling the user the buffer went unread — which needs no ruling on which surface it happened on, and is Q84 rather than this.
+It is no longer allowed in silence, and on a prompt it is no longer unread: the section below is the third answer this one did not weigh.
 
-A reason the hook has not been taught blocks. `internal/scan` can grow one
-without `internal/hook` being told, and of the two directions that mismatch can
-fail in, only one of them ships a scanner that waves a buffer through.
+A reason the hook has not been taught blocks.
+`internal/scan` can grow one without `internal/hook` being told, and of the two directions that mismatch can fail in, only one of them ships a scanner that waves a buffer through.
 
 #### A buffer whose bytes cross anyway, measured
 
-The section above settles the verdict and leaves the crossing open. It weighed
-two answers, block and allow, and there is a third: a scanner can **match**
-such a buffer, which costs no verdict at all — a raw pass over an image finds
-nothing and the call goes through.
+The section above settles the verdict and leaves the crossing open.
+It weighed two answers, block and allow, and there is a third: a scanner can **match** such a buffer, which costs no verdict at all — a raw pass over an image finds nothing and the call goes through.
 
-That option stayed out of view because the binary skip reads as a judgement
-about what the bytes are when it is a trade about work. One PNG was 55% of the
-benchmark corpus in [`language-choice.md`](language-choice.md) against a regex
-pass at 1.0 MiB/s, so the pipeline declines the buffer rather than spend the
-loop on it. Where the bytes are already on their way there is nothing to trade.
-A prompt `@` token is that case: the harness splices the file into the context
-whole, NUL included, so it has been read off disk and the crossing happens
-whatever the hook returns.
+That option stayed out of view because the binary skip reads as a judgement about what the bytes are when it is a trade about work.
+One PNG was 55% of the benchmark corpus in [`language-choice.md`](language-choice.md) against a regex pass at 1.0 MiB/s, so the pipeline declines the buffer rather than spend the loop on it.
+Where the bytes are already on their way there is nothing to trade.
+A prompt `@` token is that case: the harness splices the file into the context whole, NUL included, so it has been read off disk and the crossing happens whatever the hook returns.
 
-**The trade is still real on the other two surfaces, which is why this is a
-second entry point rather than a change to the skip.** Measured 2026-09-03 on
-darwin/arm64 over 4,000 binary files under `/usr/bin`, `/usr/lib`,
-`~/go/pkg/mod` and `/System/Applications` — 1,414.7 MiB, matched raw against the
-shipped ruleset:
+**The trade is still real on the other two surfaces, which is why this is a second entry point rather than a change to the skip.** Measured 2026-09-03 on darwin/arm64 over 4,000 binary files under `/usr/bin`, `/usr/lib`, `~/go/pkg/mod` and `/System/Applications` — 1,414.7 MiB, matched raw against the shipped ruleset:
 
 | | |
 |---|---|
@@ -1991,91 +1201,48 @@ shipped ruleset:
 | the Claude Code binary, 2.1.238 | 306.4 MiB, **36.5s**, 9 rules ran |
 | the Claude Code binary, 2.1.251 | 188.0 MiB, 24.8s, 9 rules ran |
 
-The last two rows decide it. That binary is the commonest binary `Bash` operand
-in the corpus above — 13 of the 21 — and 36.5s of match loop against a
-60-second hook timeout is not a cost to take where the population is real. On
-the prompt surface the population is empty: of 881 `@` tokens, the only
-binary-shaped names are four fixtures this repository wrote.
+The last two rows decide it.
+That binary is the commonest binary `Bash` operand in the corpus above — 13 of the 21 — and 36.5s of match loop against a 60-second hook timeout is not a cost to take where the population is real.
+On the prompt surface the population is empty: of 881 `@` tokens, the only binary-shaped names are four fixtures this repository wrote.
 
-The 0 is a measurement rather than a silence. The same probe over a 54-byte
-binary fixture holding an AWS-shaped key returns one finding, so it can come
-back non-empty.
+The 0 is a measurement rather than a silence.
+The same probe over a 54-byte binary fixture holding an AWS-shaped key returns one finding, so it can come back non-empty.
 
-**The crossing does not separate the surfaces, and the argument that said it
-did was wrong.** Q118 proposed that the harness had decided such a file is text
-on this surface and not elsewhere. Driven 2026-09-03 against Claude Code
-2.1.251, a `Read` of the same NUL-bearing file returned its content whole with
-a marker past the NUL intact — so `Read` crosses exactly as a splice does, and
-what separates the two is the cost table above and nothing else.
+**The crossing does not separate the surfaces, and the argument that said it did was wrong.** Q118 proposed that the harness had decided such a file is text on this surface and not elsewhere.
+Driven 2026-09-03 against Claude Code 2.1.251, a `Read` of the same NUL-bearing file returned its content whole with a marker past the NUL intact — so `Read` crosses exactly as a splice does, and what separates the two is the cost table above and nothing else.
 
-**It is coverage and not a second verdict axis.** `blocks()` still takes a
-reason and never an event, `scan.ScannedRaw` allows for `scan.SkippedBinary`'s
-reason, and the notice still goes out. What moved is which entry point
-`scanCall` picks, chosen by whether the trade has anything left to trade rather
-than by what a call is allowed to do.
+**It is coverage and not a second verdict axis.** `blocks()` still takes a reason and never an event, `scan.ScannedRaw` allows for `scan.SkippedBinary`'s reason, and the notice still goes out.
+What moved is which entry point `scanCall` picks, chosen by whether the trade has anything left to trade rather than by what a call is allowed to do.
 
-**The notice survives the scan, because a raw pass is not a decode.** The sniff
-cannot tell an image from text this build does not read — UTF-16 with no
-byte-order mark, a UTF-8 mark ahead of a NUL — and a raw pass over the second
-finds nothing whatever is written in it. So a matched buffer is still reported
-as one nothing decoded, and the sentence moved from *nothing scanned this* to
-*nothing decoded this*: the property both populations share, and the one a
-reader has a remedy for.
+**The notice survives the scan, because a raw pass is not a decode.** The sniff cannot tell an image from text this build does not read — UTF-16 with no byte-order mark, a UTF-8 mark ahead of a NUL — and a raw pass over the second finds nothing whatever is written in it.
+So a matched buffer is still reported as one nothing decoded, and the sentence moved from *nothing scanned this* to *nothing decoded this*: the property both populations share, and the one a reader has a remedy for.
 
-**It over-reads, on the precedent this document already set.** A text splice is
-bounded at 2,000 lines and a directory listing at 1,000 entries, and the
-resolver reads the whole file and the whole directory anyway: where the harness
-sends a subset, reading all of it reports bytes the harness did not send, and
-only the other direction can report a clean result for something that crossed.
-The binary row is where the bound is unmeasured — `heap.dump` crossed whole,
-and a file with few newlines has few lines to be capped at — so the resolver
-reads what is there.
+**It over-reads, on the precedent this document already set.** A text splice is bounded at 2,000 lines and a directory listing at 1,000 entries, and the resolver reads the whole file and the whole directory anyway: where the harness sends a subset, reading all of it reports bytes the harness did not send, and only the other direction can report a clean result for something that crossed.
+The binary row is where the bound is unmeasured — `heap.dump` crossed whole, and a file with few newlines has few lines to be capped at — so the resolver reads what is there.
 
-**The match is bounded even though the read is not, and that bound is what
-keeps this from being a regression.** Measured 2026-09-03 on a buffer carrying
-every keyword the shipped ruleset gates on, so nothing prefilters away: the raw
-pass ran at 6.8 MiB/s and crossed the 60-second hook timeout at about 410 MiB.
-[Pipeline step 4](#pipeline) has since moved that rate by 5.8x, which moves the
-crossing with it and leaves every figure below a larger margin than the one it
-was chosen against.
-Past that timeout the hook is killed and writes nothing at all, so an unbounded
-raw pass would take a buffer the skip reports in 44 ms and make it one nobody
-hears about — trading the notice for silence, which is the direction this
-design does not go. `scan.rawLimit` is 32 MiB, which the rate puts at 4.7 s of
-match loop and a driven hook puts at 4.3 s of wall clock — a buffer of exactly
-that size carrying every keyword, with the key in its last bytes so the loop
-cannot stop early. Fourteen times inside the timeout. Above it the answer is
-`SkippedBinary` and the notice goes out exactly as it does without this entry
-point, so coverage is added below the limit and nothing is taken away above it.
+**The match is bounded even though the read is not, and that bound is what keeps this from being a regression.** Measured 2026-09-03 on a buffer carrying every keyword the shipped ruleset gates on, so nothing prefilters away: the raw pass ran at 6.8 MiB/s and crossed the 60-second hook timeout at about 410 MiB.
+[Pipeline step 4](#pipeline) has since moved that rate by 5.8x, which moves the crossing with it and leaves every figure below a larger margin than the one it was chosen against.
+Past that timeout the hook is killed and writes nothing at all, so an unbounded raw pass would take a buffer the skip reports in 44 ms and make it one nobody hears about — trading the notice for silence, which is the direction this design does not go.
+`scan.rawLimit` is 32 MiB, which the rate puts at 4.7 s of match loop and a driven hook puts at 4.3 s of wall clock — a buffer of exactly that size carrying every keyword, with the key in its last bytes so the loop cannot stop early.
+Fourteen times inside the timeout.
+Above it the answer is `SkippedBinary` and the notice goes out exactly as it does without this entry point, so coverage is added below the limit and nothing is taken away above it.
 
-A size limit rather than a deadline, and the two turned out not to be
-alternatives. Nothing inside the pipeline can be interrupted — the match loop
-and `os.ReadFile` both take no context — so a deadline written here could only
-be a check between rules, and one pass over a 306 MiB buffer is the granularity
-that defeats that.
-[The budget](#the-scanners-own-budget-and-overrunning-it-is-recorded) sits a
-layer up and works by outrunning the scan rather than by stopping it. It does
-not retire this limit, because the two answer differently above their
-thresholds: past the budget the call is deferred and the gap recorded, with
-nothing shown to the person, and past this limit it is the allow the skip
-already gives, with the notice out in 39ms. For a 306 MiB executable that is the
-right answer and a record nobody is shown is not.
+A size limit rather than a deadline, and the two turned out not to be alternatives.
+Nothing inside the pipeline can be interrupted — the match loop and `os.ReadFile` both take no context — so a deadline written here could only be a check between rules, and one pass over a 306 MiB buffer is the granularity that defeats that.
+[The budget](#the-scanners-own-budget-and-overrunning-it-is-recorded) sits a layer up and works by outrunning the scan rather than by stopping it.
+It does not retire this limit, because the two answer differently above their thresholds: past the budget the call is deferred and the gap recorded, with nothing shown to the person, and past this limit it is the allow the skip already gives, with the notice out in 39ms.
+For a 306 MiB executable that is the right answer and a record nobody is shown is not.
 
-What this closes is one surface. A credential in a binary-looking `@` target
-blocks, and so does one behind a UTF-8 byte-order mark ahead of a NUL, which is
-[Q102](../queue/Q102.md)'s member reached without a decode arm — on a prompt
-only. On `Read` and `Bash` both are still allowed with a notice, and
-`docs/releases/` says so.
+What this closes is one surface.
+A credential in a binary-looking `@` target blocks, and so does one behind a UTF-8 byte-order mark ahead of a NUL, which is [Q102](../queue/Q102.md)'s member reached without a decode arm — on a prompt only.
+On `Read` and `Bash` both are still allowed with a notice, and `docs/releases/` says so.
 
 ## The exit-code contract, measured
 
-Measured 2026-08-21 against Claude Code 2.1.220 on darwin/arm64. A throwaway
-project ran a `PreToolUse` hook on `Bash` that appended to a log, wrote a chosen
-shape to stdout or stderr, and exited a chosen code. The tool call under test
-was `echo PROBE_RAN_MARKER_7X`, and the observable is whether that marker came
-back in a `tool_result` in the `--output-format stream-json` transcript. The
-hook's own log separates *the hook never ran* from *the hook ran and was
-ignored*.
+Measured 2026-08-21 against Claude Code 2.1.220 on darwin/arm64.
+A throwaway project ran a `PreToolUse` hook on `Bash` that appended to a log, wrote a chosen shape to stdout or stderr, and exited a chosen code.
+The tool call under test was `echo PROBE_RAN_MARKER_7X`, and the observable is whether that marker came back in a `tool_result` in the `--output-format stream-json` transcript.
+The hook's own log separates *the hook never ran* from *the hook ran and was ignored*.
 
 The call is blocked if **either** signal says so, and they are independent:
 
@@ -2084,8 +1251,8 @@ The call is blocked if **either** signal says so, and they are independent:
 | A `deny` decision object on stdout | whatever the exit code | the `permissionDecisionReason`, verbatim |
 | Exit code 2 | whatever is on stdout | `PreToolUse:Bash hook error: [<path>]: <the hook's stderr>` |
 
-Anything else runs. The cells driven, all of them with an empty stderr unless
-noted:
+Anything else runs.
+The cells driven, all of them with an empty stderr unless noted:
 
 | Hook exit | Hook stdout | The tool call |
 |---|---|---|
@@ -2098,44 +1265,25 @@ noted:
 | 2 | empty, plain text, or text on stderr | **blocked** |
 | 0, 1, 9, 127 | a `deny` decision object | **blocked** |
 
-**Only exit 2 blocks, and the documentation was right about it.** 1, 9, 126 and
-127 all let the call through. The predecessor's Node-18 exit 9 is a measurement
-now instead of an inference.
+**Only exit 2 blocks, and the documentation was right about it.** 1, 9, 126 and 127 all let the call through.
+The predecessor's Node-18 exit 9 is a measurement now instead of an inference.
 
-**The exit code is not what makes a missing binary harmless.** A hook exiting 2
-with nothing on either stream still blocks, and the model is told `No stderr
-output`. Empty stdout is not the operative part of the failure the launcher
-exists to prevent; the non-2 exit code is.
+**The exit code is not what makes a missing binary harmless.** A hook exiting 2 with nothing on either stream still blocks, and the model is told `No stderr output`.
+Empty stdout is not the operative part of the failure the launcher exists to prevent; the non-2 exit code is.
 
-**A deny on stdout outranks the exit code — on `PreToolUse`.** The same `deny`
-object blocked the call on exits 0, 1, 9 and 127, and the reason reached the
-model byte-identical in all four. So a launcher that writes its deny and then
-dies still blocks, which is the one shape here that fails closed on its own.
-Prefer it *for the event it was measured on*, and read the next paragraph before
-writing it anywhere else.
+**A deny on stdout outranks the exit code — on `PreToolUse`.** The same `deny` object blocked the call on exits 0, 1, 9 and 127, and the reason reached the model byte-identical in all four.
+So a launcher that writes its deny and then dies still blocks, which is the one shape here that fails closed on its own.
+Prefer it *for the event it was measured on*, and read the next paragraph before writing it anywhere else.
 
-**The encoding is per event, and generalising this row fails open on the one a
-human types into.** On `UserPromptSubmit` a `permissionDecision` of `deny` is
-accepted and ignored, and **naming the event correctly does not rescue it** — an
-object stamped `"hookEventName": "UserPromptSubmit"` is ignored exactly as one
-stamped `PreToolUse` is, both around 22 KB with the marker twice in each. Read
-the marker count rather than the byte total: transcript size varies by kilobytes
-across runs of the same arm, so a pair of exact sizes reads as a signature and is
-not one. `permissionDecision` has no meaning on that event whatever it is labelled,
-so the shape that blocks there is `decision: block`. That clause is here because
-the obvious repair for the sentence before it is to fix the event name, and that
-repair does nothing. The encoder and the full table belong with the `hook`
-subcommand that writes them; what matters here is that the sentence above stops
-at `PreToolUse`.
+**The encoding is per event, and generalising this row fails open on the one a human types into.** On `UserPromptSubmit` a `permissionDecision` of `deny` is accepted and ignored, and **naming the event correctly does not rescue it** — an object stamped `"hookEventName": "UserPromptSubmit"` is ignored exactly as one stamped `PreToolUse` is, both around 22 KB with the marker twice in each.
+Read the marker count rather than the byte total: transcript size varies by kilobytes across runs of the same arm, so a pair of exact sizes reads as a signature and is not one.
+`permissionDecision` has no meaning on that event whatever it is labelled, so the shape that blocks there is `decision: block`.
+That clause is here because the obvious repair for the sentence before it is to fix the event name, and that repair does nothing.
+The encoder and the full table belong with the `hook` subcommand that writes them; what matters here is that the sentence above stops at `PreToolUse`.
 
-The reading this section needs is the one about `@path`, because
-[the operand](#path-is-an-operand-not-a-hop) rides in on that event. Driven
-2026-08-27 on 2.1.238 with a prompt naming `@secret.txt`, reading the session
-transcript rather than stdout: with a `deny` object the transcript is 22,086
-bytes and the file's marker appears twice; with `{"decision":"block"}` it is
-1,214 bytes with the marker absent; with exit 2, 1,404 bytes, absent. So both
-working encodings suppress the splice and not merely the prompt, and the
-recommended one suppresses neither.
+The reading this section needs is the one about `@path`, because [the operand](#path-is-an-operand-not-a-hop) rides in on that event.
+Driven 2026-08-27 on 2.1.238 with a prompt naming `@secret.txt`, reading the session transcript rather than stdout: with a `deny` object the transcript is 22,086 bytes and the file's marker appears twice; with `{"decision":"block"}` it is 1,214 bytes with the marker absent; with exit 2, 1,404 bytes, absent.
+So both working encodings suppress the splice and not merely the prompt, and the recommended one suppresses neither.
 
 **On exit 2 the reason travels on stderr, and stdout is discarded.**
 A hook that writes `spill-guard: blocked ...` to stdout and exits 2 stops the call and tells the model nothing about why.
@@ -2143,10 +1291,8 @@ The `deny` object has no such trap, and no `PreToolUse:Bash hook error: [<path>]
 
 ### The block encoding is per event, and the wrong one fails open
 
-Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, the same way:
-a real hook in a throwaway project, `--output-format stream-json` read for
-whether the content reached the model. The `PreToolUse` column re-drives the
-table above on the newer version and agrees with it.
+Measured 2026-08-27 against Claude Code 2.1.238 on darwin/arm64, the same way: a real hook in a throwaway project, `--output-format stream-json` read for whether the content reached the model.
+The `PreToolUse` column re-drives the table above on the newer version and agrees with it.
 
 | Hook writes | `PreToolUse` on `Bash` | `UserPromptSubmit` |
 |---|---|---|
@@ -2154,69 +1300,45 @@ table above on the newer version and agrees with it.
 | `{"decision":"block","reason":…}` | **blocked**, reason verbatim | **blocked**, reason verbatim |
 | nothing, exit 2, reason on stderr | **blocked**, reason wrapped | **blocked**, reason wrapped |
 
-**The deny object is accepted and ignored on `UserPromptSubmit`.** The prompt
-goes to the model and answers normally, with no warning in the transcript and
-nothing on either stream — the same silence a hook that found nothing produces.
-So a hook entry that writes one encoding for both events reports a safety it is
-not providing on half of what it is wired to, which is this project's own
-failure mode arriving in the verdict writer.
+**The deny object is accepted and ignored on `UserPromptSubmit`.** The prompt goes to the model and answers normally, with no warning in the transcript and nothing on either stream — the same silence a hook that found nothing produces.
+So a hook entry that writes one encoding for both events reports a safety it is not providing on half of what it is wired to, which is this project's own failure mode arriving in the verdict writer.
 
-`internal/hook` therefore encodes per event: the deny object at `PreToolUse`,
-matching this table, and `decision`/`reason` at `UserPromptSubmit`. Nothing
-derives one from the other.
+`internal/hook` therefore encodes per event: the deny object at `PreToolUse`, matching this table, and `decision`/`reason` at `UserPromptSubmit`.
+Nothing derives one from the other.
 
-**The launcher cannot do that, and for a while it did not have to.** It never
-learns which event it was invoked for — `hooks.json` points it at both, and the
-payload naming the event goes past on stdin, which it passes through rather
-than reads. So it wrote the deny object, matching the `PreToolUse` row and
-nothing else, and until `hooks.json` existed nothing invoked it at all. The
-moment the prompt entry was wired, a fresh install with no binary yet denied
-`Read` and `Bash` loudly and let every prompt through — half loud, which is
-worse than silent, because the visible denials are evidence the guard is live.
-Driven end to end on 2.1.251 in both directions: with the deny object the
-prompt reached the model, and with `{"decision":"block","reason":…}` it came
-back `UserPromptSubmit operation blocked by hook` with the reason verbatim.
+**The launcher cannot do that, and for a while it did not have to.** It never learns which event it was invoked for — `hooks.json` points it at both, and the payload naming the event goes past on stdin, which it passes through rather than reads.
+So it wrote the deny object, matching the `PreToolUse` row and nothing else, and until `hooks.json` existed nothing invoked it at all.
+The moment the prompt entry was wired, a fresh install with no binary yet denied `Read` and `Bash` loudly and let every prompt through — half loud, which is worse than silent, because the visible denials are evidence the guard is live.
+Driven end to end on 2.1.251 in both directions: with the deny object the prompt reached the model, and with `{"decision":"block","reason":…}` it came back `UserPromptSubmit operation blocked by hook` with the reason verbatim.
 
-A component blind to the event has to write the row that holds for every event,
-which is the second one. `scripts/check-launcher.py` refuses the `PreToolUse`
-shape by name rather than merely accepting the right one, because the wrong
-shape is valid JSON and a valid verdict and fails only on the surface nothing
-was testing.
+A component blind to the event has to write the row that holds for every event, which is the second one.
+`scripts/check-launcher.py` refuses the `PreToolUse` shape by name rather than merely accepting the right one, because the wrong shape is valid JSON and a valid verdict and fails only on the surface nothing was testing.
 
-**Exit 2 is what is left when the event is unreadable.** A payload that is not
-JSON, or that names no event, gives nothing to write a decision object in — the
-shape depends on the event. Exit 2 blocks both events without one, so that is
-where a payload nobody can act on lands, with the reason on stderr.
+**Exit 2 is what is left when the event is unreadable.** A payload that is not JSON, or that names no event, gives nothing to write a decision object in — the shape depends on the event.
+Exit 2 blocks both events without one, so that is where a payload nobody can act on lands, with the reason on stderr.
 
 ### The two shapes that fail open
 
-Both were driven end to end, not reasoned about. Neither hook can write stdout
-at all, so neither has the `deny` escape above:
+Both were driven end to end, not reasoned about.
+Neither hook can write stdout at all, so neither has the `deny` escape above:
 
 | Configuration | What happens |
 |---|---|
 | `hooks.json` names a path that does not exist | the shell exits 127, the tool runs, `is_error` is false |
 | `hooks.json` names a file at mode 644 | the shell exits 126, the tool runs, `is_error` is false |
 
-Neither produces a warning anywhere in the transcript, and neither reaches the
-model. This is the case [`distribution.md`](distribution.md) argues the launcher
-exists to prevent, measured on both of the exit codes that get there.
+Neither produces a warning anywhere in the transcript, and neither reaches the model.
+This is the case [`distribution.md`](distribution.md) argues the launcher exists to prevent, measured on both of the exit codes that get there.
 
-Two conditions that do **not** change any of the above, each measured on exits
-0, 2 and 127: running under `--permission-mode bypassPermissions`, and running
-in a workspace whose trust dialog has never been accepted. The untrusted
-workspace has its `permissions.allow` entries ignored with a warning on stderr,
-and its hooks run anyway.
+Two conditions that do **not** change any of the above, each measured on exits 0, 2 and 127: running under `--permission-mode bypassPermissions`, and running in a workspace whose trust dialog has never been accepted.
+The untrusted workspace has its `permissions.allow` entries ignored with a warning on stderr, and its hooks run anyway.
 
 ### The hook command has to parse under two shells
 
-The launcher turns every failure it can see into a deny, and none of that runs if
-the shell cannot parse the line that starts it. On Windows with no Git for Windows,
-Claude Code runs hook commands under PowerShell, where `"<path>" hook` is a parse
-error. It exits 1, and only 2 blocks. Driven 2026-11-04 on Claude Code 2.1.290 on
-`windows-latest` through [a fake of the API](#which-surfaces-a-gate-can-drive), with
-`C:\Program Files\Git` renamed: a `Read` of a planted key returned the key, a prompt
-carrying one reached the API, and a machine with no binary installed denied nothing.
+The launcher turns every failure it can see into a deny, and none of that runs if the shell cannot parse the line that starts it.
+On Windows with no Git for Windows, Claude Code runs hook commands under PowerShell, where `"<path>" hook` is a parse error.
+It exits 1, and only 2 blocks.
+Driven 2026-11-04 on Claude Code 2.1.290 on `windows-latest` through [a fake of the API](#which-surfaces-a-gate-can-drive), with `C:\Program Files\Git` renamed: a `Read` of a planted key returned the key, a prompt carrying one reached the API, and a machine with no binary installed denied nothing.
 Run [41782955505](https://github.com/karlkfi/claude-spill-guard/actions/runs/41782955505).
 
 Five spellings were driven, on Linux, macOS and Windows with and without Git Bash:
@@ -2239,54 +1361,35 @@ echo --% >/dev/null;: ' | out-null
 & "${CLAUDE_PLUGIN_ROOT}/hooks/run-spill-guard.cmd" hook; if ($null -eq $LASTEXITCODE) { exit 127 }; exit $LASTEXITCODE #'
 ```
 
-To a POSIX shell the quote on line 1 runs to line 2, so both are a no-op, and line 3
-runs and exits. To PowerShell, `--%` stops parsing at the pipe, `<# … #>` hides line
-3, and line 5 runs.
+To a POSIX shell the quote on line 1 runs to line 2, so both are a no-op, and line 3 runs and exits.
+To PowerShell, `--%` stops parsing at the pipe, `<# … #>` hides line 3, and line 5 runs.
 
 Three pieces look removable and are not:
 
-- **The `: '` and `#'` quote lines 4 and 5 away from POSIX shells.** sh and bash
-  exit before reaching them, but zsh parses the whole string before running any of
-  it, and a bare `&` there is a parse error, exit 1. Driven 2026-11-04 on macOS on
-  2.1.290 under a `CLAUDE_CODE_SHELL_PREFIX` that runs zsh, without them: a planted
-  key crossed, in three spellings of that prefix.
-- **`exit $LASTEXITCODE`.** Without it `-Command` reports 1 for any failing native
-  command, so spill-guard's own refusal on exit 2 would stop blocking.
-- **The `if` before it.** A launcher that never started leaves that variable null,
-  and `exit $null` is exit 0, which would mean no scan and no hook error. It exits
-  127, as the POSIX half does. Under both that still lets the call through, with a
-  hook error on record, because the launcher's deny cannot run when the launcher is
-  what is missing.
+- **The `: '` and `#'` quote lines 4 and 5 away from POSIX shells.** sh and bash exit before reaching them, but zsh parses the whole string before running any of it, and a bare `&` there is a parse error, exit 1.
+  Driven 2026-11-04 on macOS on 2.1.290 under a `CLAUDE_CODE_SHELL_PREFIX` that runs zsh, without them: a planted key crossed, in three spellings of that prefix.
+- **`exit $LASTEXITCODE`.** Without it `-Command` reports 1 for any failing native command, so spill-guard's own refusal on exit 2 would stop blocking.
+- **The `if` before it.** A launcher that never started leaves that variable null, and `exit $null` is exit 0, which would mean no scan and no hook error.
+  It exits 127, as the POSIX half does.
+  Under both that still lets the call through, with a hook error on record, because the launcher's deny cannot run when the launcher is what is missing.
 
-`make launcher` drives the string under each shell it finds on each platform, and
-`launcher-mutation-control` removes each of these and requires the gate to go red.
-`hook-harness.yml` drives it through the real harness, Windows PowerShell 5.1 and a
-non-ASCII path included.
+`make launcher` drives the string under each shell it finds on each platform, and `launcher-mutation-control` removes each of these and requires the gate to go red.
+`hook-harness.yml` drives it through the real harness, Windows PowerShell 5.1 and a non-ASCII path included.
 
-**The `PowerShell` tool is read as text and no further.** It is on when Git Bash is
-missing, its payload is `{"command", "description"}`, and `Get-Content planted.txt`
-returned the key to the model on that run. The command string is scanned, and a key
-in it blocks. Its operands need a reader table this repo does not have and the bash
-port cannot segment PowerShell, so every such call defers with a coverage record.
-That is a real gap on that machine, not a clean result, and a read of `.env` through
-it is not refused either. An interactive session was not driven, only `claude -p`,
-and whether the server flag that turns this tool on beside Git Bash is on for any
-account cannot be read from here.
+**The `PowerShell` tool is read as text and no further.** It is on when Git Bash is missing, its payload is `{"command", "description"}`, and `Get-Content planted.txt` returned the key to the model on that run.
+The command string is scanned, and a key in it blocks.
+Its operands need a reader table this repo does not have and the bash port cannot segment PowerShell, so every such call defers with a coverage record.
+That is a real gap on that machine, not a clean result, and a read of `.env` through it is not refused either.
+An interactive session was not driven, only `claude -p`, and whether the server flag that turns this tool on beside Git Bash is on for any account cannot be read from here.
 
 ### The third shape is a timeout, and it is the one this repo configures
 
-`hooks/hooks.json` sets `"timeout": 60` on both entries. Driven 2026-09-03
-against Claude Code 2.1.251 on darwin/arm64: **a hook that runs past its
-timeout is killed, whatever it was going to say is discarded, and the call
-proceeds.** On both events.
+`hooks/hooks.json` sets `"timeout": 60` on both entries.
+Driven 2026-09-03 against Claude Code 2.1.251 on darwin/arm64: **a hook that runs past its timeout is killed, whatever it was going to say is discarded, and the call proceeds.** On both events.
 
-The hook logged its entry, slept, wrote a reason to stderr and exited a chosen
-code. `UserPromptSubmit` ran under a `HOME` of its own holding no credential,
-the route [the CI section](#which-surfaces-a-gate-can-drive)
-describes. `PreToolUse` needs one, a hook
-there firing only once the model has chosen a tool call, so it ran under
-`--settings` with `--setting-sources project` to keep this machine's own guards
-out of the arm.
+The hook logged its entry, slept, wrote a reason to stderr and exited a chosen code.
+`UserPromptSubmit` ran under a `HOME` of its own holding no credential, the route [the CI section](#which-surfaces-a-gate-can-drive) describes.
+`PreToolUse` needs one, a hook there firing only once the model has chosen a tool call, so it ran under `--settings` with `--setting-sources project` to keep this machine's own guards out of the arm.
 
 | Event | Timeout | The hook | The call |
 |---|---|---|---|
@@ -2296,104 +1399,67 @@ out of the arm.
 | `PreToolUse` on `Bash` | 30s | exits 2 after 1s | **blocked**, reason reaches the model |
 | `PreToolUse` on `Bash` | 2s | exits 2 after 10s | runs |
 
-Every timed-out arm lands where the same hook lands when it exits 0 on purpose,
-and each event has its own tell. On `UserPromptSubmit` the prompt reaches a
-turn — `num_turns` 1, against 0 for the block control, whose transcript instead
-holds `UserPromptSubmit operation blocked by hook` with the reason. On
-`PreToolUse` the command runs and its marker comes back in the result, with
-`permission_denials` empty where the block control lists the call. So the exit
-code stops mattering, and a hook that would have blocked allows.
+Every timed-out arm lands where the same hook lands when it exits 0 on purpose, and each event has its own tell.
+On `UserPromptSubmit` the prompt reaches a turn — `num_turns` 1, against 0 for the block control, whose transcript instead holds `UserPromptSubmit operation blocked by hook` with the reason.
+On `PreToolUse` the command runs and its marker comes back in the result, with `permission_denials` empty where the block control lists the call.
+So the exit code stops mattering, and a hook that would have blocked allows.
 
-The process was killed rather than ignored. Its log carries a line on entry and
-one after the sleep, and the timed-out arms hold only the first; wall clock
-tracked the timeout and not the sleep, 2.36s at `timeout: 2` and 60.38s at
-`timeout: 60`.
+The process was killed rather than ignored.
+Its log carries a line on entry and one after the sleep, and the timed-out arms hold only the first; wall clock tracked the timeout and not the sleep, 2.36s at `timeout: 2` and 60.38s at `timeout: 60`.
 
-**Unlike the other two, this one is written down.** The transcript of the
-60-second arm carries this, with the path elided:
+**Unlike the other two, this one is written down.** The transcript of the 60-second arm carries this, with the path elided:
 
 ```json
 {"type":"hook_cancelled","hookName":"UserPromptSubmit","hookEvent":"UserPromptSubmit",
  "toolUseID":"eb9d4d8c-…","command":"…","durationMs":60021,"timedOut":true,"timeoutMs":60000}
 ```
 
-The `PreToolUse` record is the same shape, `hookName` reading `PreToolUse:Bash`
-and the pair reading 2020 against 2000. Who reads either is not established. It reached neither the `--output-format json`
-result nor stderr, and the model's own answer named no hook, so nothing here
-shows it arriving at either audience while the call is happening. Whether an
-interactive client renders it was not driven.
+The `PreToolUse` record is the same shape, `hookName` reading `PreToolUse:Bash` and the pair reading 2020 against 2000.
+Who reads either is not established.
+It reached neither the `--output-format json` result nor stderr, and the model's own answer named no hook, so nothing here shows it arriving at either audience while the call is happening.
+Whether an interactive client renders it was not driven.
 
-**60 was a hedge and the hedge resolved the wrong way.** The argument was that a
-longer timeout cannot make an unmeasured behaviour worse — safer if expiry
-allows, a stall if it blocks. Expiry allows. The direction was right, and the
-value is load-bearing now rather than cautious: every second under the ceiling
-is a second in which a scan that did not finish is a scan that never happened.
+**60 was a hedge and the hedge resolved the wrong way.** The argument was that a longer timeout cannot make an unmeasured behaviour worse — safer if expiry allows, a stall if it blocks.
+Expiry allows.
+The direction was right, and the value is load-bearing now rather than cautious: every second under the ceiling is a second in which a scan that did not finish is a scan that never happened.
 
-**No encoding in the tables above reaches this.** Both blocking shapes need the
-hook to write something or exit 2, and a killed process does neither. Nothing
-this repo ships can turn an expiry into a block.
+**No encoding in the tables above reaches this.** Both blocking shapes need the hook to write something or exit 2, and a killed process does neither.
+Nothing this repo ships can turn an expiry into a block.
 
 **So the budget has to be the scanner's own**, which is the section below.
 
 ### The scanner's own budget, and overrunning it is recorded
 
-`internal/hook` gives the scan **45 seconds** and keeps 15 of the 60 for
-itself. A scan still running at the end of the 45 stops. If nothing it got
-through matched, it does what this design does with a buffer it could not read:
-it defers, and the record names the budget. The override is not consulted there,
-because there is no block left to downgrade.
+`internal/hook` gives the scan **45 seconds** and keeps 15 of the 60 for itself.
+A scan still running at the end of the 45 stops.
+If nothing it got through matched, it does what this design does with a buffer it could not read: it defers, and the record names the budget.
+The override is not consulted there, because there is no block left to downgrade.
 [A match in what it got through blocks](#the-order-the-budget-spends).
 
-There is no third answer to weigh. Fifteen seconds later the process is killed
-and the call proceeds with no verdict and no record from this hook — the
-harness's own `hook_cancelled` line, measured above, is all that remains, and
-nothing showed it reaching anyone. So the choice at the deadline is between
-recording the gap and leaving it to that line, and a gap nobody is shown is
-what this whole file is about.
+There is no third answer to weigh.
+Fifteen seconds later the process is killed and the call proceeds with no verdict and no record from this hook — the harness's own `hook_cancelled` line, measured above, is all that remains, and nothing showed it reaching anyone.
+So the choice at the deadline is between recording the gap and leaving it to that line, and a gap nobody is shown is what this whole file is about.
 
-**A size cap is the cheaper half and is not the fix.** A cap answers before
-reading and a deadline answers during, and three things walk past the first.
-Cost is not a function of size: Q122, since completed, measured the same 64
-MiB at 9,746 MiB/s as binary, 1,055 MiB/s as text no rule gates on, and 6.5
-MiB/s as text carrying every keyword — the third now 32.84, which narrows the
-spread from 1,500x to 300x and leaves the argument where it was — so a cap
-tight enough to bound the third refuses the other two for nothing. A call adds
-up rather than arriving one file at a time — the same row has `cat` over four
-128 MiB files at 78.1 seconds,
-with no file in it near any plausible cap. And a directory operand has no size
-to cap at all, which is what made this the section the directory-operand
-question was waiting on — [answered below](#a-directory-operand-is-refused-rather-than-walked-and-that-is-a-decision-now).
+**A size cap is the cheaper half and is not the fix.** A cap answers before reading and a deadline answers during, and three things walk past the first.
+Cost is not a function of size: Q122, since completed, measured the same 64 MiB at 9,746 MiB/s as binary, 1,055 MiB/s as text no rule gates on, and 6.5 MiB/s as text carrying every keyword — the third now 32.84, which narrows the spread from 1,500x to 300x and leaves the argument where it was — so a cap tight enough to bound the third refuses the other two for nothing.
+A call adds up rather than arriving one file at a time — the same row has `cat` over four 128 MiB files at 78.1 seconds, with no file in it near any plausible cap.
+And a directory operand has no size to cap at all, which is what made this the section the directory-operand question was waiting on — [answered below](#a-directory-operand-is-refused-rather-than-walked-and-that-is-a-decision-now).
 
 Blocking was the verdict when the rows below were taken, and the cells say so.
-They are not re-taken for the deferral, which changes what is written at
-45.011s and nothing about when: a run that reaches the budget writes a coverage
-record instead of a deny and the call proceeds. What the rows measure — that the
-deadline outruns a scan the harness would otherwise kill — is unchanged.
+They are not re-taken for the deferral, which changes what is written at 45.011s and nothing about when: a run that reaches the budget writes a coverage record instead of a deny and the call proceeds.
+What the rows measure — that the deadline outruns a scan the harness would otherwise kill — is unchanged.
 
-**A deadline is available even though nothing here takes a `context`.**
-`os.ReadFile` takes none and neither does the match loop, which is why a fifo
-had to be refused up front rather than read with a limit — `fifo_unix_test.go`
-says so, against that question. That argument is about *interrupting* the work,
-and a deadline does not have to: the scan runs on its own goroutine, the verdict
-is written by the one waiting on it, and the process exit collects whatever was
-still running. Go preempts a goroutine in a tight match loop asynchronously, so
-the timer is scheduled without the scan yielding. That is the load-bearing
-mechanism claim and it is driven rather than read —
-`TestTheDeadlineFiresWhileTheMatchLoopIsRunning` stops on the clock over a
-buffer that its control arm, given time, blocks on for a key planted in it.
-The control is timed and has to take at least 30 times the short arm's
-budget, so a faster match loop fails the test outright rather than making it
-flaky.
+**A deadline is available even though nothing here takes a `context`.** `os.ReadFile` takes none and neither does the match loop, which is why a fifo had to be refused up front rather than read with a limit — `fifo_unix_test.go` says so, against that question.
+That argument is about *interrupting* the work, and a deadline does not have to: the scan runs on its own goroutine, the verdict is written by the one waiting on it, and the process exit collects whatever was still running.
+Go preempts a goroutine in a tight match loop asynchronously, so the timer is scheduled without the scan yielding.
+That is the load-bearing mechanism claim and it is driven rather than read — `TestTheDeadlineFiresWhileTheMatchLoopIsRunning` stops on the clock over a buffer that its control arm, given time, blocks on for a key planted in it.
+The control is timed and has to take at least 30 times the short arm's budget, so a faster match loop fails the test outright rather than making it flaky.
 
 #### Driven end to end, on built binaries
 
-The fixture is ordinary text carrying one occurrence of each keyword the shipped
-ruleset gates on, with the planted key from
-[`testdata/corpus/planted/aws-access-key-id.env`](../../testdata/corpus/planted/aws-access-key-id.env)
-in its last bytes — so a run that reaches the end has to emit a real deny, and a
-scan that never started is not mistaken for one that finished. `Read` surface,
-warm page cache, Apple M5 Max, Go 1.26.5, 2026-09-04. Wall clock is the whole
-process, which is the quantity the harness's 60 is charged against.
+The fixture is ordinary text carrying one occurrence of each keyword the shipped ruleset gates on, with the planted key from [`testdata/corpus/planted/aws-access-key-id.env`](../../testdata/corpus/planted/aws-access-key-id.env) in its last bytes — so a run that reaches the end has to emit a real deny, and a scan that never started is not mistaken for one that finished.
+`Read` surface, warm page cache, Apple M5 Max, Go 1.26.5, 2026-09-04.
+Wall clock is the whole process, which is the quantity the harness's 60 is charged against.
 
 | Fixture | `v0.1.0`..`main` | with the budget |
 |---|---|---|
@@ -2401,39 +1467,23 @@ process, which is the quantity the harness's 60 is charged against.
 | 400 MiB | 54.448s, denies | **45.010s, blocks on the budget** |
 | 500 MiB | **68.130s**, denies — 8s past the ceiling | **45.011s, blocks on the budget** |
 
-The 128 MiB row is the control, and it is the one that says the deadline has not
-replaced the scanner: same verdict, same rule, either side. The 500 MiB row is
-the case the row was filed for.
+The 128 MiB row is the control, and it is the one that says the deadline has not replaced the scanner: same verdict, same rule, either side.
+The 500 MiB row is the case the row was filed for.
 
-**Those sizes moved when the match loop stopped scanning the whole buffer for a
-rule whose keywords say where to look** ([step 4](#pipeline)). The same 500 MiB
-fixture, built the same way and driven on a built binary, now denies
-`aws-access-key-id` in 14.9–17.7s over four consecutive runs rather than
-blocking on the budget, and the in-process pair behind that is 32.84 MiB/s
-against 5.68 for the arm with no rule anchored, min of three in one process.
-That 5.68 is the 6.5 MiB/s arm above re-measured — the same fixture on a
-different day, 14% apart — so the 5.05x there and the 5.78x here are one change
-measured twice rather than two changes.
-The rows above are not re-taken here and cannot honestly be: they were taken on
-a quiet machine, and this one carried a load average of 72 while these runs
-were made — one such run did block at 45.046s on the same fixture, which is the
-measurement failing rather than a second answer.
+**Those sizes moved when the match loop stopped scanning the whole buffer for a rule whose keywords say where to look** ([step 4](#pipeline)).
+The same 500 MiB fixture, built the same way and driven on a built binary, now denies `aws-access-key-id` in 14.9–17.7s over four consecutive runs rather than blocking on the budget, and the in-process pair behind that is 32.84 MiB/s against 5.68 for the arm with no rule anchored, min of three in one process.
+That 5.68 is the 6.5 MiB/s arm above re-measured — the same fixture on a different day, 14% apart — so the 5.05x there and the 5.78x here are one change measured twice rather than two changes.
+The rows above are not re-taken here and cannot honestly be: they were taken on a quiet machine, and this one carried a load average of 72 while these runs were made — one such run did block at 45.046s on the same fixture, which is the measurement failing rather than a second answer.
 
-What the change moves is which fixture reaches the budget, not whether the
-budget fires. That half is driven by `TestAScanThatOverrunsItsBudgetDefers`
-against a budget already spent, on all three surfaces, and is untouched here.
-A fixture that does reach the budget, and the table re-taken beside it, is
-[Q132](../queue/Q132.md).
+What the change moves is which fixture reaches the budget, not whether the budget fires.
+That half is driven by `TestAScanThatOverrunsItsBudgetDefers` against a budget already spent, on all three surfaces, and is untouched here.
+A fixture that does reach the budget, and the table re-taken beside it, is [Q132](../queue/Q132.md).
 
-**What Claude Code does past the budget, and past the timeout, is observed now
-rather than composed.** The rows above are hook-process wall times, and the
-kill at 60 seconds was a separate measurement. Driven 2026-11-01 against Claude
-Code 2.1.290 under `claude -p` with a clean `HOME`, the credential-free route
-[`check-prompt-oracle.py`](../../scripts/check-prompt-oracle.py) uses. A
-built binary was the only `UserPromptSubmit` hook, at `timeout: 60`. One prompt
-named six fixtures of 400 MiB each, 2,404 MiB in all, cut from real text as
-described under [What 45 costs](#what-45-costs-and-why-it-is-not-smaller), each
-ending in the planted key. Load average was 96–130 on 18 cores.
+**What Claude Code does past the budget, and past the timeout, is observed now rather than composed.** The rows above are hook-process wall times, and the kill at 60 seconds was a separate measurement.
+Driven 2026-11-01 against Claude Code 2.1.290 under `claude -p` with a clean `HOME`, the credential-free route [`check-prompt-oracle.py`](../../scripts/check-prompt-oracle.py) uses.
+A built binary was the only `UserPromptSubmit` hook, at `timeout: 60`.
+One prompt named six fixtures of 400 MiB each, 2,404 MiB in all, cut from real text as described under [What 45 costs](#what-45-costs-and-why-it-is-not-smaller), each ending in the planted key.
+Load average was 96–130 on 18 cores.
 
 | Binary | Wall | Transcript | Coverage log | The prompt |
 |---|---|---|---|---|
@@ -2442,88 +1492,59 @@ ending in the planted key. Load average was 96–130 on 18 cores.
 | this tree, the six fixtures | 54.855s | no hook attachment | one record, the 45s budget | proceeds |
 | budget raised to 600s, the six fixtures | 64.607s | `hook_cancelled`, `durationMs` 60143, `timedOut` true | nothing | proceeds |
 
-The first two rows are the controls: both binaries are wired and block, so the
-two rows under them are binaries that ran rather than ones that never started.
-The fourth is the fail-open this section was written against, now seen whole:
-killed at 60.143s, the verdict discarded, the prompt through, and no record
-from this hook anywhere. The third is what the budget replaced it with. The
-walls include the harness's own startup, about ten seconds at that load.
+The first two rows are the controls: both binaries are wired and block, so the two rows under them are binaries that ran rather than ones that never started.
+The fourth is the fail-open this section was written against, now seen whole: killed at 60.143s, the verdict discarded, the prompt through, and no record from this hook anywhere.
+The third is what the budget replaced it with.
+The walls include the harness's own startup, about ten seconds at that load.
 
-**And the harness spliced none of the six.** On the same version, 255 KiB of
-real text arrived as 2,000 lines and 257 KiB arrived as nothing, and a smaller
-file can be refused as well: 64 KiB of 80-column lines arrived whole and 128
-KiB of them arrived as nothing. The bytes that ran the scan past its budget
-were therefore bytes the harness was not going to send.
+**And the harness spliced none of the six.** On the same version, 255 KiB of real text arrived as 2,000 lines and 257 KiB arrived as nothing, and a smaller file can be refused as well: 64 KiB of 80-column lines arrived whole and 128 KiB of them arrived as nothing.
+The bytes that ran the scan past its budget were therefore bytes the harness was not going to send.
 
-None of this moves
-[the over-read](#a-buffer-whose-bytes-cross-anyway-measured): the limit is the
-harness's, measured on one version, and reading less than the harness sends is
-the only direction that can report a clean result for something that crossed.
+None of this moves [the over-read](#a-buffer-whose-bytes-cross-anyway-measured): the limit is the harness's, measured on one version, and reading less than the harness sends is the only direction that can report a clean result for something that crossed.
 
-Two numbers fall out of the first table's pair of builds. The deadline lands within **11ms** of the
-budget measured from process spawn, so the launcher, this binary's startup, the
-timer's lateness and the write together are 11ms of the 15,000 the margin holds.
-And this fixture runs at 7.34 MiB/s where Q122, since completed, measured 6.5
-and [#92](https://github.com/karlkfi/claude-spill-guard/pull/92)'s session
-measured 6.8 — three fixtures, three rates, a 60-second crossing anywhere from
-390 to 440 MiB. That spread is not noise to average away. It is the reason the
-bound is a clock and not a byte count.
+Two numbers fall out of the first table's pair of builds.
+The deadline lands within **11ms** of the budget measured from process spawn, so the launcher, this binary's startup, the timer's lateness and the write together are 11ms of the 15,000 the margin holds.
+And this fixture runs at 7.34 MiB/s where Q122, since completed, measured 6.5 and [#92](https://github.com/karlkfi/claude-spill-guard/pull/92)'s session measured 6.8 — three fixtures, three rates, a 60-second crossing anywhere from 390 to 440 MiB.
+That spread is not noise to average away.
+It is the reason the bound is a clock and not a byte count.
 
 #### The order the budget spends
 
-An overrun used to reach no verdict on any buffer in the call, so a small file
-named beside big ones crossed with nothing said about it. Driven on 2.1.290 with
-a build of `162fcf9` at the shipped budget, at load 115, six 400 MiB fixtures
-followed by `@notes.txt`, a copy of the planted key file: the run took 49.702s
-and the prompt proceeded with `notes.txt` attached, key included.
+An overrun used to reach no verdict on any buffer in the call, so a small file named beside big ones crossed with nothing said about it.
+Driven on 2.1.290 with a build of `162fcf9` at the shipped budget, at load 115, six 400 MiB fixtures followed by `@notes.txt`, a copy of the planted key file: the run took 49.702s and the prompt proceeded with `notes.txt` attached, key included.
 
 That was two defects, and each needed its own fix.
 
-**A finding already made was thrown away.** With the key file first and a budget
-cut to 1s, the scan matched it and the overrun then discarded the match. The scan
-now stores each finished buffer's result in its own atomic slot, and the deadline
-gathers the slots once. A match there blocks, carrying
-[the notice](#a-blocking-verdict-carries-the-notice-too-on-a-channel-that-is-per-event) that the verdict stops
-short, and writes no record, as a walk's failure does.
+**A finding already made was thrown away.** With the key file first and a budget cut to 1s, the scan matched it and the overrun then discarded the match.
+The scan now stores each finished buffer's result in its own atomic slot, and the deadline gathers the slots once.
+A match there blocks, carrying [the notice](#a-blocking-verdict-carries-the-notice-too-on-a-channel-that-is-per-event) that the verdict stops short, and writes no record, as a walk's failure does.
 
-**Gathering once is not a tidy-up.** The first shape gathered after every buffer,
-which is quadratic in the buffers. `for f in *; do cat "$f"; done` over 150,000
-six-byte files and a larger key file denied in 9.09s on base and deferred at 45.03s
-on that shape, with the same result when the small files were binary. It now
-denies in 4.31s, and 3.71s for the binary files.
+**Gathering once is not a tidy-up.** The first shape gathered after every buffer, which is quadratic in the buffers.
+`for f in *; do cat "$f"; done` over 150,000 six-byte files and a larger key file denied in 9.09s on base and deferred at 45.03s on that shape, with the same result when the small files were binary.
+It now denies in 4.31s, and 3.71s for the binary files.
 
-**A buffer behind the overrun was never read.** The scan now takes what is in
-memory first, since that costs no read, and then files smallest first. The harness's limit is why that is the right order: it spliced
-none of the 400 MiB fixtures, so on a prompt the bytes that use up a budget are
-not the bytes that cross. Size order reaches everything under any such limit
-before anything over it, and it needs no number here that could go stale when the
-limit moves.
+**A buffer behind the overrun was never read.** The scan now takes what is in memory first, since that costs no read, and then files smallest first.
+The harness's limit is why that is the right order: it spliced none of the 400 MiB fixtures, so on a prompt the bytes that use up a budget are not the bytes that cross.
+Size order reaches everything under any such limit before anything over it, and it needs no number here that could go stale when the limit moves.
 
-**That is an order and not [the size cap refused above](#the-scanners-own-budget-and-overrunning-it-is-recorded).**
-Nothing is left out for being big. A big buffer is read if the budget reaches it,
-and a match in it blocks. Findings still come back in the call's order, so the
-sort never shows in a verdict's text.
+**That is an order and not [the size cap refused above](#the-scanners-own-budget-and-overrunning-it-is-recorded).** Nothing is left out for being big.
+A big buffer is read if the budget reaches it, and a match in it blocks.
+Findings still come back in the call's order, so the sort never shows in a verdict's text.
 
-**The file reads moved too, because a read has no deadline.** Every file used to
-be read into memory before the first match, so a slow read could spend the budget
-with nothing looked at, the prompt's own text included. A target now carries its
-size and reads itself when its turn comes. That is unmeasured on a slow disk,
-since every run here is on a warm page cache. It did cut peak memory on the
-six-fixture call, below, to about a third: 2,411 MiB to 810 MiB here, and 3,798 MiB
-to 1,246 MiB in a review of this change on another run.
+**The file reads moved too, because a read has no deadline.** Every file used to be read into memory before the first match, so a slow read could spend the budget with nothing looked at, the prompt's own text included.
+A target now carries its size and reads itself when its turn comes.
+That is unmeasured on a slow disk, since every run here is on a warm page cache.
+It did cut peak memory on the six-fixture call, below, to about a third: 2,411 MiB to 810 MiB here, and 3,798 MiB to 1,246 MiB in a review of this change on another run.
 
-**A budget per buffer was the other proposal, and it was argued against rather
-than built.** The shares have to add up to 45 seconds, so with seven buffers the
-small file gets 6.4 seconds it does not need and each big one loses whatever the
-others left unused. And nothing can interrupt a buffer at the end of its share:
-the goroutine has to be abandoned, still using a core, for the rest of the scan.
-Scanning every buffer at once gives the same independence without the shares. It
-was not built either, because size order already reaches the small file first.
+**A budget per buffer was the other proposal, and it was argued against rather than built.** The shares have to add up to 45 seconds, so with seven buffers the small file gets 6.4 seconds it does not need and each big one loses whatever the others left unused.
+And nothing can interrupt a buffer at the end of its share: the goroutine has to be abandoned, still using a core, for the rest of the scan.
+Scanning every buffer at once gives the same independence without the shares.
+It was not built either, because size order already reaches the small file first.
 
-Driven 2026-11-04 on built binaries, load 4–6, with six 400 MiB fixtures of
-keyword-bearing text and the planted key file as `notes.txt`. Base is `1a4d9db`.
-The fixtures repeat one line, so they say nothing about rate. All they have to do
-is run out the budget, and the deferring rows show they did.
+Driven 2026-11-04 on built binaries, load 4–6, with six 400 MiB fixtures of keyword-bearing text and the planted key file as `notes.txt`.
+Base is `1a4d9db`.
+The fixtures repeat one line, so they say nothing about rate.
+All they have to do is run out the budget, and the deferring rows show they did.
 
 | Budget | Call | Base | This build |
 |---|---|---|---|
@@ -2535,108 +1556,63 @@ is run out the budget, and the deferring rows show they did.
 | 45s | six fixtures then `@notes.txt` | 45.032s, defers | 45.016s, blocks |
 | 45s | `cat` six fixtures then `notes.txt` | 45.029s, defers | 45.016s, blocks |
 
-Through `claude -p` on 2.1.290 under a clean `HOME`, at the 1s budget and load
-4–5, the base build attached `notes.txt` with the key in the transcript and wrote a coverage
-record in both prompt orders. This build wrote no record, and the prompt was
-blocked before anything was attached. The controls on this build: `@notes.txt`
-alone blocks in 0.008s, and one fixture alone still defers at 1.020s.
+Through `claude -p` on 2.1.290 under a clean `HOME`, at the 1s budget and load 4–5, the base build attached `notes.txt` with the key in the transcript and wrote a coverage record in both prompt orders.
+This build wrote no record, and the prompt was blocked before anything was attached.
+The controls on this build: `@notes.txt` alone blocks in 0.008s, and one fixture alone still defers at 1.020s.
 
 Three things it does not close:
 
-- **A key whose rule is still running when the deadline arrives.** A finding in
-  the buffer the deadline stops on is now kept as soon as its rule is through
-  that buffer, rather than once every rule is. Driven 2026-11-09 at the 1s
-  budget, load about 29, over a 400 MiB file with the planted key at byte 0:
-  `head -5 big.log` deferred at 1.069s on `16ce3b6` and denies at 1.639s on this
-  build. The same file without its key line still defers, at 1.030s. What is
-  left is a key that only the rule still running recognises: that rule has
-  handed back nothing, because `FindAllSubmatchIndex` returns no match until it
-  has walked the whole buffer.
-- **A key in a buffer the budget never reaches.** Enough smaller buffers can
-  spend the budget first. On a prompt the harness's limit bounds what that can
-  cost. `cat big-1 big-2` has no such limit, so a key in the larger file defers
-  with a record.
-- **The wait.** The scan runs to the deadline to name every match, so these blocks
-  arrive at 45 seconds rather than at the first finding.
+- **A key whose rule is still running when the deadline arrives.** A finding in the buffer the deadline stops on is now kept as soon as its rule is through that buffer, rather than once every rule is.
+  Driven 2026-11-09 at the 1s budget, load about 29, over a 400 MiB file with the planted key at byte 0: `head -5 big.log` deferred at 1.069s on `16ce3b6` and denies at 1.639s on this build.
+  The same file without its key line still defers, at 1.030s.
+  What is left is a key that only the rule still running recognises: that rule has handed back nothing, because `FindAllSubmatchIndex` returns no match until it has walked the whole buffer.
+- **A key in a buffer the budget never reaches.** Enough smaller buffers can spend the budget first.
+  On a prompt the harness's limit bounds what that can cost.
+  `cat big-1 big-2` has no such limit, so a key in the larger file defers with a record.
+- **The wait.** The scan runs to the deadline to name every match, so these blocks arrive at 45 seconds rather than at the first finding.
 
 #### What 45 costs, and why it is not smaller
 
-The margin was measured twice more, from inside. A hook invocation over a
-payload naming no file, driven through the shell and the launcher: 7.02ms at
-best over 30 runs, 7.49ms median, one 350ms outlier on a machine already
-carrying other work. The verdict written after the deadline fires, timed over a
-64 MiB buffer at four budgets: under 10ms idle and under 37ms with twice as many
-CPU-bound goroutines running as the machine has cores. Fifteen seconds is nearly
-forty times the worst two of those added together, and it is not sized to them —
-it is sized so that being wrong about scheduling on somebody else's machine
-costs nothing.
+The margin was measured twice more, from inside.
+A hook invocation over a payload naming no file, driven through the shell and the launcher: 7.02ms at best over 30 runs, 7.49ms median, one 350ms outlier on a machine already carrying other work.
+The verdict written after the deadline fires, timed over a 64 MiB buffer at four budgets: under 10ms idle and under 37ms with twice as many CPU-bound goroutines running as the machine has cores.
+Fifteen seconds is nearly forty times the worst two of those added together, and it is not sized to them — it is sized so that being wrong about scheduling on somebody else's machine costs nothing.
 
-What the budget costs is the verdict on the calls that would have finished
-between 45 and 60 seconds, which at the worst measured rate is a call adding up
-to between 293 and 390 MiB. Nothing in the two populations this repo has counted
-comes near either end: nothing outside `.git` in this worktree exceeds 5 MiB,
-and the largest session transcript on the author's machine is 35.4 MiB, which
-is 5.4 seconds.
+What the budget costs is the verdict on the calls that would have finished between 45 and 60 seconds, which at the worst measured rate is a call adding up to between 293 and 390 MiB.
+Nothing in the two populations this repo has counted comes near either end: nothing outside `.git` in this worktree exceeds 5 MiB, and the largest session transcript on the author's machine is 35.4 MiB, which is 5.4 seconds.
 
-**Over real text the scan costs 60–73 MiB/s of CPU, and load moves the
-wall-clock crossing by several times that.** Measured 2026-11-01 on a binary
-built from `162fcf9`, `Read` surface, warm page cache, Apple M5 Max, Go 1.27.1.
-The fixtures are text files from the Go module cache, concatenated in sorted
-order, each file used once and none carrying a NUL; the first 128 MiB was
-15,266 files when cut, and the cache grows, so a rebuild cuts differently. Real text already clears the prefilter: with nothing planted but the key
-at its end, that 128 MiB holds 35 findings, and planting one of each keyword moved its CPU time
-from 2.082s to 2.115s. Six disjoint 400 MiB parts ran at 60.4–73.3 MiB/s of CPU
-time, with the budget lifted so each one finished, and on every part both
-binaries finished they report the same match count. Each part is one run, and
-the 21% spread between them does not separate content from core placement: the
-same 128 MiB took 2.097–2.156s of CPU by default and 2.393–2.593s under
-`taskpolicy -b`, which keeps it on the efficiency cores.
+**Over real text the scan costs 60–73 MiB/s of CPU, and load moves the wall-clock crossing by several times that.** Measured 2026-11-01 on a binary built from `162fcf9`, `Read` surface, warm page cache, Apple M5 Max, Go 1.27.1.
+The fixtures are text files from the Go module cache, concatenated in sorted order, each file used once and none carrying a NUL; the first 128 MiB was 15,266 files when cut, and the cache grows, so a rebuild cuts differently.
+Real text already clears the prefilter: with nothing planted but the key at its end, that 128 MiB holds 35 findings, and planting one of each keyword moved its CPU time from 2.082s to 2.115s.
+Six disjoint 400 MiB parts ran at 60.4–73.3 MiB/s of CPU time, with the budget lifted so each one finished, and on every part both binaries finished they report the same match count.
+Each part is one run, and the 21% spread between them does not separate content from core placement: the same 128 MiB took 2.097–2.156s of CPU by default and 2.393–2.593s under `taskpolicy -b`, which keeps it on the efficiency cores.
 
-The budget charges wall clock, and on this machine wall clock was not the
-CPU's. At a load average of 73–84 from parallel sessions on 18 cores, the same
-six parts took 1.2x to 11.4x their CPU time, 6.9s to 66.4s. Through the shipped
-binary at 58–119, one part was recorded at the budget on all three runs, and
-two others on one run and two runs of three. The earliest runs, with load at
-9.5 before them and 42 after, put the two 128 MiB fixtures at 2.220–2.472s wall. So
-the slower-machine argument below arrives on the fastest machine here as load.
+The budget charges wall clock, and on this machine wall clock was not the CPU's.
+At a load average of 73–84 from parallel sessions on 18 cores, the same six parts took 1.2x to 11.4x their CPU time, 6.9s to 66.4s.
+Through the shipped binary at 58–119, one part was recorded at the budget on all three runs, and two others on one run and two runs of three.
+The earliest runs, with load at 9.5 before them and 42 after, put the two 128 MiB fixtures at 2.220–2.472s wall.
+So the slower-machine argument below arrives on the fastest machine here as load.
 
-Two readings are still untaken. Every run here is on a warm page cache: macOS
-evicts it only through `purge`, which needs root, so a cold read was not tried.
+Two readings are still untaken.
+Every run here is on a warm page cache: macOS evicts it only through `purge`, which needs root, so a cold read was not tried.
 And every figure is this one machine, which no benchmark here retires.
 
-A smaller budget is the change to argue for rather than against, and the
-argument that stops it is the slower machine. 45 seconds is a wall clock, so it
-needs no per-machine tuning to stay under the ceiling — but the *population* it
-gives up on does scale with single-core speed. A 35.4 MiB transcript is 5.4s
-here and would be 16s on a machine three times slower, which a 10-second budget
-leaves unread and this one does not. The stall is the objection on the other
-side, and it is weaker than it looks: the alternative to waiting 45 seconds was
-never a quick answer, it was waiting 60 and getting no answer at all.
+A smaller budget is the change to argue for rather than against, and the argument that stops it is the slower machine.
+45 seconds is a wall clock, so it needs no per-machine tuning to stay under the ceiling — but the *population* it gives up on does scale with single-core speed.
+A 35.4 MiB transcript is 5.4s here and would be 16s on a machine three times slower, which a 10-second budget leaves unread and this one does not.
+The stall is the objection on the other side, and it is weaker than it looks: the alternative to waiting 45 seconds was never a quick answer, it was waiting 60 and getting no answer at all.
 
 ### A directory operand is refused rather than walked, and that is a decision now
 
-`grep -rn pat docs/` and `rg pat docs/` name a directory. `internal/readers`
-returns it as a read operand because it is one, and `bashTargets` refuses the
-call, because a directory is not a regular file; a `Read` whose `file_path` is
-one takes the same branch, and since 2026-09-05 that branch defers and records
-rather than blocking. It reaches **7.1%** of the `Bash` calls that carry a
-reader operand — 5,036 of 70,480, measured over this machine's transcripts by
-driving the real segmenter, and a floor rather than a rate, since `grep -rn pat
-docs` with no trailing separator is a directory operand too and is not in the
-count.
+`grep -rn pat docs/` and `rg pat docs/` name a directory.
+`internal/readers` returns it as a read operand because it is one, and `bashTargets` refuses the call, because a directory is not a regular file; a `Read` whose `file_path` is one takes the same branch, and since 2026-09-05 that branch defers and records rather than blocking.
+It reaches **7.1%** of the `Bash` calls that carry a reader operand — 5,036 of 70,480, measured over this machine's transcripts by driving the real segmenter, and a floor rather than a rate, since `grep -rn pat docs` with no trailing separator is a directory operand too and is not in the count.
 
-Three answers were open. Scanning the directory listing is a fail-open over
-every file in the tree and was never in contention. What decides between the
-other two is below, and neither argument is the one the question started with:
-that one was *an unbounded walk that overruns allows the call*, and
-[the budget](#the-scanners-own-budget-and-overrunning-it-is-recorded) has taken
-it away — an overrunning walk is recorded now, like anything else, rather than
-killed with only the harness's cancellation record behind it.
+Three answers were open.
+Scanning the directory listing is a fail-open over every file in the tree and was never in contention.
+What decides between the other two is below, and neither argument is the one the question started with: that one was *an unbounded walk that overruns allows the call*, and [the budget](#the-scanners-own-budget-and-overrunning-it-is-recorded) has taken it away — an overrunning walk is recorded now, like anything else, rather than killed with only the harness's cancellation record behind it.
 
-**Nothing in the operand says what a walk would cost.** Measured 2026-09-04 by
-walking each root with `filepath.WalkDir` and putting every regular file through
-`scan.Buffer` with the shipped ruleset, symlinks not followed, on an M5 Max
-already carrying other work:
+**Nothing in the operand says what a walk would cost.** Measured 2026-09-04 by walking each root with `filepath.WalkDir` and putting every regular file through `scan.Buffer` with the shipped ruleset, symlinks not followed, on an M5 Max already carrying other work:
 
 | Root | Files | Read | Walk and scan |
 |---|---|---|---|
@@ -2646,17 +1622,12 @@ already carrying other work:
 | `~/go/pkg/mod` | 239,648 | 5,167.5 MiB | 94.245 s |
 | a `github-actions-gateway` checkout | 568,883+ | 10,342.9+ MiB | **unfinished at 120 s** |
 
-Four orders of magnitude, and the operand is one token either way. Two of the
-five are past the 45-second budget, so on those a walk buys a stall and then the
-same coverage record a refusal writes in microseconds. The three that fit are
-the honest cost of refusing, and the top row is the one the row was filed about.
+Four orders of magnitude, and the operand is one token either way.
+Two of the five are past the 45-second budget, so on those a walk buys a stall and then the same coverage record a refusal writes in microseconds.
+The three that fit are the honest cost of refusing, and the top row is the one the row was filed about.
 
-**A walk reads a different file set from the one the command would send, and by
-how much depends on which reader named the directory.** `grep -r` reads
-everything under the root; ripgrep honours `.gitignore` and `.ignore` and skips
-hidden files unless told otherwise. Driven on ripgrep 14.1.1 over a five-file
-fixture — `.env`, `.ignore`, the `ignored.txt` that `.ignore` names,
-`visible.txt`, and `sub/deep.txt`:
+**A walk reads a different file set from the one the command would send, and by how much depends on which reader named the directory.** `grep -r` reads everything under the root; ripgrep honours `.gitignore` and `.ignore` and skips hidden files unless told otherwise.
+Driven on ripgrep 14.1.1 over a five-file fixture — `.env`, `.ignore`, the `ignored.txt` that `.ignore` names, `visible.txt`, and `sub/deep.txt`:
 
 | | Files it would read |
 |---|---|
@@ -2664,79 +1635,37 @@ fixture — `.env`, `.ignore`, the `ignored.txt` that `.ignore` names,
 | `rg --files`, defaults | **2** — `visible.txt`, `sub/deep.txt` |
 | `rg --files --hidden --no-ignore` | 5 |
 
-The `.env` is in the first set and not the second. At repository scale the gap
-is wider: in the `claude-spill-guard` checkout `rg --files` reports **211** files
-where the walk above found 11,815 and 1,132 findings in them, because
-`.gitignore` excludes `.claude/worktrees/`. So a walk under an `rg` operand
-would block that call on content ripgrep was never going to open, which is a
-false positive by this design's own definition — and **precision is the
-product**. The inherited ruleset flagged 27.6% of real files with zero true
-positives, and this is the same failure arriving through the operand resolver
-instead of through a regex.
+The `.env` is in the first set and not the second.
+At repository scale the gap is wider: in the `claude-spill-guard` checkout `rg --files` reports **211** files where the walk above found 11,815 and 1,132 findings in them, because `.gitignore` excludes `.claude/worktrees/`.
+So a walk under an `rg` operand would block that call on content ripgrep was never going to open, which is a false positive by this design's own definition — and **precision is the product**.
+The inherited ruleset flagged 27.6% of real files with zero true positives, and this is the same failure arriving through the operand resolver instead of through a regex.
 
-**Closing that gap means re-implementing the readers' traversal, one reader at a
-time.** `--glob`, `--type`, `--max-depth`, `--max-filesize`, `--hidden`,
-`--no-ignore` and the ignore-file stack all change ripgrep's set; `--include`,
-`--exclude`, `--exclude-dir` and `-r` against `-R` change `grep`'s. That is the
-class of work this repo refuses by name for shell parsing — it fails silently in
-both directions — and there is no shortcut past it, because the only way to
-learn which files a command reads is to run it, and `os/exec` is forbidden
-across this build graph.
+**Closing that gap means re-implementing the readers' traversal, one reader at a time.** `--glob`, `--type`, `--max-depth`, `--max-filesize`, `--hidden`, `--no-ignore` and the ignore-file stack all change ripgrep's set; `--include`, `--exclude`, `--exclude-dir` and `-r` against `-R` change `grep`'s.
+That is the class of work this repo refuses by name for shell parsing — it fails silently in both directions — and there is no shortcut past it, because the only way to learn which files a command reads is to run it, and `os/exec` is forbidden across this build graph.
 
-**The narrower version does not survive either**, and it is named here because
-it is the obvious next proposal: walk only for `grep`, whose plain `-r` really
-does read everything under the root, and keep refusing `rg`. That is correct for
-a `grep -r` carrying no filter flags and silently wrong for one that does, so
-what it buys is the flagless form and what it costs is a traversal rule that is
-right or wrong depending on a flag nobody looked at. It also does nothing about
-the bottom of the table: `grep -r pat ~/go/pkg/mod` is 94 seconds, so the
-carve-out converts an instant refusal into a 45-second one.
+**The narrower version does not survive either**, and it is named here because it is the obvious next proposal: walk only for `grep`, whose plain `-r` really does read everything under the root, and keep refusing `rg`.
+That is correct for a `grep -r` carrying no filter flags and silently wrong for one that does, so what it buys is the flagless form and what it costs is a traversal rule that is right or wrong depending on a flag nobody looked at.
+It also does nothing about the bottom of the table: `grep -r pat ~/go/pkg/mod` is 94 seconds, so the carve-out converts an instant refusal into a 45-second one.
 
-**So the refusal stands, and it is a decision rather than a side effect.** The
-reason names the case and the remedy — *name the files instead* — rather than
-reporting the mode class, and
-`TestADirectoryOperandSaysSoAndSaysWhatToDoInstead` pins that wording. What it
-costs is the top rows of the table: a `grep -rn pat docs/` that a walk would
-have covered in 13 ms goes through unread, with the record as the only trace.
-The alternative on the bottom rows is a scanner reporting on a file set the
-command would not have sent.
+**So the refusal stands, and it is a decision rather than a side effect.** The reason names the case and the remedy — *name the files instead* — rather than reporting the mode class, and `TestADirectoryOperandSaysSoAndSaysWhatToDoInstead` pins that wording.
+What it costs is the top rows of the table: a `grep -rn pat docs/` that a walk would have covered in 13 ms goes through unread, with the record as the only trace.
+The alternative on the bottom rows is a scanner reporting on a file set the command would not have sent.
 
-**The reason has to name its own subject, because when it was written nothing
-here parsed a recursion flag.** grep's are parsed now and a recursive grep gets
-[its own refusal](#a-recursive-grep-is-scanned-through-a-filter-on-its-own-output),
-but `rg` walks by default and still meets this one, so the subject stays named. `-rn`, `-r`, `--recursive` and no flag at all reach one
-return — driven on a built binary, four arms, byte-identical reasons — so a
-clause reading *this reads files rather than walking them* is false of the
-three spellings that do walk, and the recursive form is the one this refusal
-meets: `grep -rn pat docs/` is the 7.1% measured above. It was read that way:
-a friction report on 0.2.0 filed the refusal as a flag-parsing defect and
-proposed the cluster `-rn` as the first hypothesis to test, when there is no
-flag parser to have a bug in. So the clause says **this scanner** reads files
-rather than walking a tree, and
-`TestADirectoryOperandSaysSoAndSaysWhatToDoInstead` runs its four arms against
-that substring — a grep with no recursion, `cat`, `head` and `rg` since the
-recursive grep moved to its own refusal. The remedy stays *name the files instead* even though a
-recursive caller wanted a tree, because the repair that fits their intent is a
-reader with no row — `git grep` — and a refusal that routes the model to an
-unscanned command is a bypass this hook would be recommending. Since the
-deferral the reason reaches the coverage record rather than the model, so the
-reader it is written for is whoever runs `spill-guard coverage`; the wording
-argument is the same for that reader, and the bypass argument is why it still
-does not name `git grep`.
+**The reason has to name its own subject, because when it was written nothing here parsed a recursion flag.** grep's are parsed now and a recursive grep gets [its own refusal](#a-recursive-grep-is-scanned-through-a-filter-on-its-own-output), but `rg` walks by default and still meets this one, so the subject stays named.
+`-rn`, `-r`, `--recursive` and no flag at all reach one return — driven on a built binary, four arms, byte-identical reasons — so a clause reading *this reads files rather than walking them* is false of the three spellings that do walk, and the recursive form is the one this refusal meets: `grep -rn pat docs/` is the 7.1% measured above.
+It was read that way: a friction report on 0.2.0 filed the refusal as a flag-parsing defect and proposed the cluster `-rn` as the first hypothesis to test, when there is no flag parser to have a bug in.
+So the clause says **this scanner** reads files rather than walking a tree, and `TestADirectoryOperandSaysSoAndSaysWhatToDoInstead` runs its four arms against that substring — a grep with no recursion, `cat`, `head` and `rg` since the recursive grep moved to its own refusal.
+The remedy stays *name the files instead* even though a recursive caller wanted a tree, because the repair that fits their intent is a reader with no row — `git grep` — and a refusal that routes the model to an unscanned command is a bypass this hook would be recommending.
+Since the deferral the reason reaches the coverage record rather than the model, so the reader it is written for is whoever runs `spill-guard coverage`; the wording argument is the same for that reader, and the bypass argument is why it still does not name `git grep`.
 
 #### A recursive grep is scanned through a filter on its own output
 
-Both arguments above are about reading the *files*. Neither reaches grep's
-*output*, which is what crosses and is a buffer — so for grep the refusal now
-names a form that scans it, and this subsection reopens the decision for that
-one reader on purpose.
+Both arguments above are about reading the *files*.
+Neither reaches grep's *output*, which is what crosses and is a buffer — so for grep the refusal now names a form that scans it, and this subsection reopens the decision for that one reader on purpose.
 
-The traffic is why, as Q203 counted it — the figures are carried from that
-row and were not re-taken for this change. Of 2,400 coverage records from 2026-09-07 to 2026-10-01,
-1,364 (56.8%) were a directory operand and 1,361 of those were `grep`; of the
-637 that replayed and parsed, 636 were recursive and 305 carried `--include` or
-`--exclude`. The cost is a turn per unfiltered call, accepted on 2026-10-01
-against the 2026-09-05 measurement that made coverage failures defer.
+The traffic is why, as Q203 counted it — the figures are carried from that row and were not re-taken for this change.
+Of 2,400 coverage records from 2026-09-07 to 2026-10-01, 1,364 (56.8%) were a directory operand and 1,361 of those were `grep`; of the 637 that replayed and parsed, 636 were recursive and 305 carried `--include` or `--exclude`.
+The cost is a turn per unfiltered call, accepted on 2026-10-01 against the 2026-09-05 measurement that made coverage failures defer.
 
 | Shape | Answer |
 |---|---|
@@ -2747,142 +1676,74 @@ against the 2026-09-05 measurement that made coverage failures defer.
 | `grep -n pat dir` | unchanged: no recursion, so the directory reason above |
 | `rg pat dir` | unchanged: not offered the filter until the coverage log says it is worth a turn |
 
-**Position in the pipeline is the test, as it is for `env`.** A filter stage
-after the grep in its own pipeline is the careful form; one in a different
-pipeline of the same string filters nothing of this one's. It counts only
-where grep's stdout still reaches it. `grep -rn pat dir >&2 | spill-guard
-filter` sends the matches to stderr, which the tool result carries, so
-`Segment.StdoutAway` reads the redirects in order and the filter is not
-counted. A `{ …; }`, loop or subshell piped as a whole is one stage, so a grep
-inside one is filtered by the stage it feeds. Driven on bash 5.3.15 (Q208).
+**Position in the pipeline is the test, as it is for `env`.** A filter stage after the grep in its own pipeline is the careful form; one in a different pipeline of the same string filters nothing of this one's.
+It counts only where grep's stdout still reaches it.
+`grep -rn pat dir >&2 | spill-guard filter` sends the matches to stderr, which the tool result carries, so `Segment.StdoutAway` reads the redirects in order and the filter is not counted.
+A `{ …; }`, loop or subshell piped as a whole is one stage, so a grep inside one is filtered by the stage it feeds.
+Driven on bash 5.3.15 (Q208).
 
-**A stage between the grep and the filter can copy around it, and then the
-filter does not count.** Driven on bash 5.3.15 with the built filter and a
-planted key, `| tee /dev/stderr |`, `| tee >(cat >&2) |` and `| cat >&2 |` each
-put the key in the tool result while the filter withheld its own copy (Q233).
-So `copiedAround` refuses a stage that sends its stdout away, and one that
-writes to a device other than `/dev/null` or to a name it cannot settle. The
-names it reads are redirect targets, `tee` and `gtee` operands, and `dd`'s
-`of=`. A name is judged where it lands rather than how it is spelled: it is
-resolved against the directory the `cd` tracker holds and cleaned, so
-`//dev/stderr`, `../../dev/stderr` and `cd / && … | tee dev/stderr` count as
-the device, and a name that exists and is not a regular file is refused too,
-which takes in a symlink to `/dev/stderr`. An `env -C` or `sudo -D` ahead of
-the writer moves where its operands land, and a wrapper whose options this
-cannot read is refused, since the writer may be behind it. Each of those put
-the key on stderr before this, driven in review of #254. A
-copy to a regular file is allowed when nothing else in the string can read it.
-`grep -rn pat dir | tee out.log | spill-guard filter` is allowed, because a
-later call that reads `out.log` is scanned when it runs. Adding `; cat out.log`
-gets it refused, because the hook resolves that operand before the file is
-written. The program of an awk or sed stage is not read, and neither is any
-other command that takes an output path: Q257.
+**A stage between the grep and the filter can copy around it, and then the filter does not count.** Driven on bash 5.3.15 with the built filter and a planted key, `| tee /dev/stderr |`, `| tee >(cat >&2) |` and `| cat >&2 |` each put the key in the tool result while the filter withheld its own copy (Q233).
+So `copiedAround` refuses a stage that sends its stdout away, and one that writes to a device other than `/dev/null` or to a name it cannot settle.
+The names it reads are redirect targets, `tee` and `gtee` operands, and `dd`'s `of=`.
+A name is judged where it lands rather than how it is spelled: it is resolved against the directory the `cd` tracker holds and cleaned, so `//dev/stderr`, `../../dev/stderr` and `cd / && … | tee dev/stderr` count as the device, and a name that exists and is not a regular file is refused too, which takes in a symlink to `/dev/stderr`.
+An `env -C` or `sudo -D` ahead of the writer moves where its operands land, and a wrapper whose options this cannot read is refused, since the writer may be behind it.
+Each of those put the key on stderr before this, driven in review of #254.
+A copy to a regular file is allowed when nothing else in the string can read it.
+`grep -rn pat dir | tee out.log | spill-guard filter` is allowed, because a later call that reads `out.log` is scanned when it runs.
+Adding `; cat out.log` gets it refused, because the hook resolves that operand before the file is written.
+The program of an awk or sed stage is not read, and neither is any other command that takes an output path: Q257.
 
-The recursion flags
-are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`,
-`--dereference-recursive`, `-d recurse`, and a digit option such as `-2` —
-and a flag after an operand counts, because the greps permute: driven,
-`grep hello d -r -l` on BSD grep 2.6.0 and on ugrep 7.8.4 lists the file.
+The recursion flags are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`, `--dereference-recursive`, `-d recurse`, and a digit option such as `-2` — and a flag after an operand counts, because the greps permute: driven, `grep hello d -r -l` on BSD grep 2.6.0 and on ugrep 7.8.4 lists the file.
 
-**A quiet flag after an operand is honoured, and that is a measured trade.**
-GNU grep with `POSIXLY_CORRECT` set stops reading options at the first operand,
-so its `grep -rn pat dir -l` takes `-l` for a file and prints matched lines,
-and the hook cannot read the command's environment. Refusing a quiet flag in
-that position was built and replayed on 2026-11-01 over this machine's
-transcripts: 240,204 `Bash` calls, of which 42,448 distinct commands mention
-`grep` beside a flag it reads and still have their working directory. 86
-changed verdict, every one from allowed to refused, all of them this rule —
-shapes such as `grep -rn pat . --include='*.go' -l`, which ugrep and BSD grep
-answer with file names only. Of the 240,859 `Bash` calls on record when the
-next count was taken, 11 name `POSIXLY_CORRECT`, and all 11 are this repo's
-own probes of and notes on this case. So the flag is honoured, and the case it
-misses is GNU-only and needs an environment no session here has set.
+**A quiet flag after an operand is honoured, and that is a measured trade.** GNU grep with `POSIXLY_CORRECT` set stops reading options at the first operand, so its `grep -rn pat dir -l` takes `-l` for a file and prints matched lines, and the hook cannot read the command's environment.
+Refusing a quiet flag in that position was built and replayed on 2026-11-01 over this machine's transcripts: 240,204 `Bash` calls, of which 42,448 distinct commands mention `grep` beside a flag it reads and still have their working directory.
+86 changed verdict, every one from allowed to refused, all of them this rule — shapes such as `grep -rn pat . --include='*.go' -l`, which ugrep and BSD grep answer with file names only.
+Of the 240,859 `Bash` calls on record when the next count was taken, 11 name `POSIXLY_CORRECT`, and all 11 are this repo's own probes of and notes on this case.
+So the flag is honoured, and the case it misses is GNU-only and needs an environment no session here has set.
 
-**Three greps are read at once, because `grep` in Claude Code's Bash tool is
-not always grep.** Driven 2026-11-01 on Claude Code 2.1.290, the shell snapshot
-each `Bash` call sources defines `grep` as a function that runs ugrep 7.8.4
-out of the Claude Code binary itself. The function's text is a string in that
-binary, and no shell startup file on the machine defines it. Which installs
-turn it on is not measured here. ugrep reads two shapes differently from GNU
-and BSD grep, and both are read its way:
+**Three greps are read at once, because `grep` in Claude Code's Bash tool is not always grep.** Driven 2026-11-01 on Claude Code 2.1.290, the shell snapshot each `Bash` call sources defines `grep` as a function that runs ugrep 7.8.4 out of the Claude Code binary itself.
+The function's text is a string in that binary, and no shell startup file on the machine defines it.
+Which installs turn it on is not measured here. ugrep reads two shapes differently from GNU and BSD grep, and both are read its way:
 
 | Command, no file operand | GNU and BSD grep | ugrep 7.8.4 | Read as |
 |---|---|---|---|
 | `grep -2 pat` | `-2` is a context width; reads stdin | `-2` is a depth and turns on recursion; walks `.` | recursive |
 | `grep --context -r pat` | BSD 2.6.0 takes `--context`'s value only after `=`, so walks `.` | `-r` is the value; exits 2 | both ways, so recursive |
 
-The first costs a turn on a machine whose `grep` is GNU or BSD:
-`cmd | grep -2 pat` is refused there and offered the filtered rewrite, though
-it reads only the pipe. In the replay described above, neither this reading
-nor the `--context` one changed the verdict on any recorded command. Where the
-function is in place, the same command reads
-the pipe *and* walks the working directory, which is the crossing this refusal
-exists for, written by a session that asked for two lines of context. An unknown
-long option stays refused for the same reason: `grep --depth=3 pat` walks `.`
-on ugrep, and the table of options this reads holds GNU's and BSD's.
+The first costs a turn on a machine whose `grep` is GNU or BSD: `cmd | grep -2 pat` is refused there and offered the filtered rewrite, though it reads only the pipe.
+In the replay described above, neither this reading nor the `--context` one changed the verdict on any recorded command.
+Where the function is in place, the same command reads the pipe *and* walks the working directory, which is the crossing this refusal exists for, written by a session that asked for two lines of context.
+An unknown long option stays refused for the same reason: `grep --depth=3 pat` walks `.` on ugrep, and the table of options this reads holds GNU's and BSD's.
 
-**Which tokens are files is read by the same rules.** `internal/readers` keeps
-its own table of the options that take a value, and its grep row disagreed
-with this one in twelve places: ten options it did not consume and two it did. So `grep --color id key.env` read `id` as the
-value and `key.env` as the pattern, and the hook allowed a call that printed
-the key on both greps, driven 2026-11-01. `grepFiles` in
-`internal/hook/grep.go` now spells a long-option prefix out and reads
-`--context` both ways before asking that table, and a test holds the two tables
-in step option by option.
+**Which tokens are files is read by the same rules.** `internal/readers` keeps its own table of the options that take a value, and its grep row disagreed with this one in twelve places: ten options it did not consume and two it did.
+So `grep --color id key.env` read `id` as the value and `key.env` as the pattern, and the hook allowed a call that printed the key on both greps, driven 2026-11-01.
+`grepFiles` in `internal/hook/grep.go` now spells a long-option prefix out and reads `--context` both ways before asking that table, and a test holds the two tables in step option by option.
 
-**The rewrite is checked before it is offered.** Appending a stage pipes the
-string's last pipeline, so `echo $(grep -r x .)` produced a rewrite this hook
-refused in turn — driven, before the check existed — and a model following it
-would loop. So the rewrite is segmented and held to the refusal's own test, and
-where it fails, or the string ends in `&`, a comment or a second line, the
-reason says what to append instead. Two further conditions keep the one reason
-here that repeats the caller's string safe to repeat: every rune printable, and
-no rule matching it, because the refusal is reached before the command string
-is scanned and a key typed into a pattern would otherwise go straight back out.
+**The rewrite is checked before it is offered.** Appending a stage pipes the string's last pipeline, so `echo $(grep -r x .)` produced a rewrite this hook refused in turn — driven, before the check existed — and a model following it would loop.
+So the rewrite is segmented and held to the refusal's own test, and where it fails, or the string ends in `&`, a comment or a second line, the reason says what to append instead.
+Two further conditions keep the one reason here that repeats the caller's string safe to repeat: every rune printable, and no rule matching it, because the refusal is reached before the command string is scanned and a key typed into a pattern would otherwise go straight back out.
 
-**The filter blocks, and redaction is asked for by name.** On a finding it
-writes nothing to stdout, names the rule and the output line on stderr, and
-exits 3, which `pipefail` reports apart from grep's 0, 1 and 2; a filter that
-cannot run exits 4. It reads the whole stream first, because a block has to
-withhold everything and the private-key rule spans lines. `--redact` writes the
-output with each value replaced by `[spill-guard redacted: <rule>]` and says so,
-for a session that needs the rest of the output and has no better way to get
-it: what it reads is then not the file, and a marker copied back by an edit
-would replace a live value, which is why it is not the default.
+**The filter blocks, and redaction is asked for by name.** On a finding it writes nothing to stdout, names the rule and the output line on stderr, and exits 3, which `pipefail` reports apart from grep's 0, 1 and 2; a filter that cannot run exits 4.
+It reads the whole stream first, because a block has to withhold everything and the private-key rule spans lines.
+`--redact` writes the output with each value replaced by `[spill-guard redacted: <rule>]` and says so, for a session that needs the rest of the output and has no better way to get it: what it reads is then not the file, and a marker copied back by an edit would replace a live value, which is why it is not the default.
 
-**What it does not reach.** grep prefixes each line with `path:` or `path-`, and
-the private-key rule allows only a diff's `+` or `-` before a PEM line, so a key
-block printed with `-A` context arrives as lines that rule does not match — the
-same shape as Q187 and Q193. Output this cannot decode — a UTF-32 mark — is
-withheld rather than passed, since the filter was asked for by name and
-withholding is its only power. And the binary's own path is spliced into the
-rewrite, forward-slashed for Git Bash on Windows; `make filter-rewrite` runs the
-rewrite under a real bash on Linux, macOS and Windows, which is the only thing
-here that executes it.
+**What it does not reach.** grep prefixes each line with `path:` or `path-`, and the private-key rule allows only a diff's `+` or `-` before a PEM line, so a key block printed with `-A` context arrives as lines that rule does not match — the same shape as Q187 and Q193.
+Output this cannot decode — a UTF-32 mark — is withheld rather than passed, since the filter was asked for by name and withholding is its only power.
+And the binary's own path is spliced into the rewrite, forward-slashed for Git Bash on Windows; `make filter-rewrite` runs the rewrite under a real bash on Linux, macOS and Windows, which is the only thing here that executes it.
 
 ### A glob operand is expanded, because bash settles it before the command runs
 
-A pattern is the one unresolved operand whose file set *is* settled at
-`PreToolUse`: bash expands it against the filesystem before the command sees an
-argv, no reader flag alters what the shell produced, and this process reads the
-same filesystem. That is what keeps it out of the directory refusal above. A
-walk has to agree with each reader's own traversal; an expansion has to agree
-with one shell's globbing, under options this can enumerate.
+A pattern is the one unresolved operand whose file set *is* settled at `PreToolUse`: bash expands it against the filesystem before the command sees an argv, no reader flag alters what the shell produced, and this process reads the same filesystem.
+That is what keeps it out of the directory refusal above.
+A walk has to agree with each reader's own traversal; an expansion has to agree with one shell's globbing, under options this can enumerate.
 
-**Measured 2026-09-06** over this machine's transcripts: 95 calls carried the
-glob refusal, 135 glob operands among them, and every one was a plain POSIX
-pattern -- `internal/hook/*.go`, `docs/queue/*.md`. 0 carried `shopt`, `set -f`
-or `GLOBIGNORE`; 1 carried an `eval`. Q135 had measured 51 of 393 refusals on
-the arm two days earlier, the same shape throughout.
+**Measured 2026-09-06** over this machine's transcripts: 95 calls carried the glob refusal, 135 glob operands among them, and every one was a plain POSIX pattern -- `internal/hook/*.go`, `docs/queue/*.md`.
+0 carried `shopt`, `set -f` or `GLOBIGNORE`; 1 carried an `eval`.
+Q135 had measured 51 of 393 refusals on the arm two days earlier, the same shape throughout.
 
-**What the expansion assumes is the shell's options, and they were read rather
-than assumed.** The Bash tool's shell restores the options of the shell it was
-snapshotted from, and 62 of 62 bash snapshots under `~/.claude/shell-snapshots/`
-restore `dotglob`, `nullglob`, `failglob`, `globstar`, `nocaseglob` and
-`extglob` unset, which are the defaults. So `filepath.Glob` runs under those,
-and where bash 5.3.15 and Go disagree under them the pattern is translated, its
-matches are filtered, or it is refused. Driven over one fixture, 36 patterns,
-and `TestTheExpansionAgreesWithBash` holds the table:
+**What the expansion assumes is the shell's options, and they were read rather than assumed.** The Bash tool's shell restores the options of the shell it was snapshotted from, and 62 of 62 bash snapshots under `~/.claude/shell-snapshots/` restore `dotglob`, `nullglob`, `failglob`, `globstar`, `nocaseglob` and `extglob` unset, which are the defaults.
+So `filepath.Glob` runs under those, and where bash 5.3.15 and Go disagree under them the pattern is translated, its matches are filtered, or it is refused.
+Driven over one fixture, 36 patterns, and `TestTheExpansionAgreesWithBash` holds the table:
 
 | Shape | bash 5.3.15, default options | `filepath.Glob` | Here |
 |---|---|---|---|
@@ -2895,142 +1756,63 @@ and `TestTheExpansionAgreesWithBash` holds the table:
 | `d/nomatch*` | the literal token | the empty set | nothing crosses, unless a file by that literal name exists -- then bash opens it, and so does this. `app/[id]/page.tsx` is a Next.js route, and `filepath.Glob` reads its `[id]` as a class matching nothing; the literal is included whenever it is on disk, quoted or not, since the lexer has removed the quotes. Found in review as a fail-open: five spellings of `cat x[1].env` exited 0 with nothing scanned and nothing recorded |
 | `d/[` | the literal token | `ErrBadPattern`, but only on reaching an entry to match | refused before Glob, so the answer does not turn on what the directory holds |
 
-**Anything in the string that could change the options puts the pattern back
-on the record.** `shopt` with any argument, `set -f`, `set -o noglob`, an
-assignment to `GLOBIGNORE` -- which turns `dotglob` on as a side effect -- and
-`eval` or `source`, which can do any of those. Whether the segment persists
-does not matter: `(shopt -s dotglob; cat *)` applies to the `cat` beside it.
-Two shapes were driven and left alone because they do not change the set: a
-prefix assignment on the reading command, since bash expands the operands
-before `GLOBIGNORE=x cat *` assigns, and the environment, which bash 5.3.15
-ignores for that variable -- so nothing here reads one, and `PRIVACY.md` is
-unchanged. A queued substitution body reads the flag at the point it was
-written, as it reads its directory and its variable map there: a pattern
-written before a `shopt` in the same string expands under the options bash
-actually had, where inheriting the end of the string recorded it on a change
-that had not happened yet.
+**Anything in the string that could change the options puts the pattern back on the record.** `shopt` with any argument, `set -f`, `set -o noglob`, an assignment to `GLOBIGNORE` -- which turns `dotglob` on as a side effect -- and `eval` or `source`, which can do any of those.
+Whether the segment persists does not matter: `(shopt -s dotglob; cat *)` applies to the `cat` beside it.
+Two shapes were driven and left alone because they do not change the set: a prefix assignment on the reading command, since bash expands the operands before `GLOBIGNORE=x cat *` assigns, and the environment, which bash 5.3.15 ignores for that variable -- so nothing here reads one, and `PRIVACY.md` is unchanged.
+A queued substitution body reads the flag at the point it was written, as it reads its directory and its variable map there: a pattern written before a `shopt` in the same string expands under the options bash actually had, where inheriting the end of the string recorded it on a change that had not happened yet.
 
-**A quoted pattern is the same boundary, in the precision direction, and it is
-the half still open.** Quoting decides what a word is, and the assignment and
-reserved-word readings above now honour that; a glob pattern does not, because
-the expansion runs over the stripped token. So `cat "*.env"` and `cat \*.env`
-arrive as
-`*.env` and expand, where bash would open one file named `*.env`. Every file
-bash would send is in the set and files it would not are too -- including the
-other half of the same class, `cat 'x[1].env'` beside a real `x1.env`, where
-bash sends the literal alone and this sends both.
+**A quoted pattern is the same boundary, in the precision direction, and it is the half still open.** Quoting decides what a word is, and the assignment and reserved-word readings above now honour that; a glob pattern does not, because the expansion runs over the stripped token.
+So `cat "*.env"` and `cat \*.env` arrive as `*.env` and expand, where bash would open one file named `*.env`.
+Every file bash would send is in the set and files it would not are too -- including the other half of the same class, `cat 'x[1].env'` beside a real `x1.env`, where bash sends the literal alone and this sends both.
 `TestAQuotedGlobExpandsWhereBashWouldNot` pins both halves.
 
-**A matched directory meets the directory refusal above**, as it would had the
-session typed the name: `grep -rn pat docs/*` expands to `docs/design`, and
-that is the walk this design refuses. The measured population has no such call
-in it.
+**A matched directory meets the directory refusal above**, as it would had the session typed the name: `grep -rn pat docs/*` expands to `docs/design`, and that is the walk this design refuses.
+The measured population has no such call in it.
 
-**What this machine cannot show is another machine's rc file, and the
-instrument that might have was driven and does not reach.** The snapshot
-restores whatever the user's shell had, so on a machine whose `.bashrc` sets
-`dotglob`, every pattern in the tool's shell reaches hidden files and the
-filter here drops them: a gap of exactly the hidden files, on exactly the
-machines that opted into them. `nocaseglob` and `globstar` widen the set the
-same way; `nullglob` and `failglob` narrow it, which is the harmless direction.
+**What this machine cannot show is another machine's rc file, and the instrument that might have was driven and does not reach.** The snapshot restores whatever the user's shell had, so on a machine whose `.bashrc` sets `dotglob`, every pattern in the tool's shell reaches hidden files and the filter here drops them: a gap of exactly the hidden files, on exactly the machines that opted into them.
+`nocaseglob` and `globstar` widen the set the same way; `nullglob` and `failglob` narrow it, which is the harmless direction.
 
-**Measured 2026-09-07** on Claude Code 2.1.260, over the 63 snapshots there:
-3,720 `shopt` lines across the 62 bash ones, where 15 options come back `-s` in
-every snapshot and all six globbing options come back `-u` in every snapshot --
-so the probe can report a set option, and reports none of these set. That an rc file's
-option would reach the snapshot at all is driven rather than read off the
-file's shape: bash 5.3.15 started on an rc file holding `shopt -s dotglob`
-reports `-s` for it, and the same shell on an rc file setting nothing reports
-`-u`. The snapshot's block is that shell's own `shopt -p`, differing from a
-non-interactive shell's in `login_shell` and `expand_aliases` alone. The 63rd
-file is a zsh snapshot carrying no `shopt` line at all, which is the subject
-of *And the shell it is expanded by* below rather than of this paragraph: a
-shell with no `shopt` has no options for the filter here to read. Claude Code narrows one option itself: every Bash tool
-call runs `source <snapshot> ... && shopt -u extglob`, so `extglob` cannot be
-on for a tool shell whatever the rc file says.
+**Measured 2026-09-07** on Claude Code 2.1.260, over the 63 snapshots there: 3,720 `shopt` lines across the 62 bash ones, where 15 options come back `-s` in every snapshot and all six globbing options come back `-u` in every snapshot -- so the probe can report a set option, and reports none of these set.
+That an rc file's option would reach the snapshot at all is driven rather than read off the file's shape: bash 5.3.15 started on an rc file holding `shopt -s dotglob` reports `-s` for it, and the same shell on an rc file setting nothing reports `-u`.
+The snapshot's block is that shell's own `shopt -p`, differing from a non-interactive shell's in `login_shell` and `expand_aliases` alone.
+The 63rd file is a zsh snapshot carrying no `shopt` line at all, which is the subject of *And the shell it is expanded by* below rather than of this paragraph: a shell with no `shopt` has no options for the filter here to read.
+Claude Code narrows one option itself: every Bash tool call runs `source <snapshot> ... && shopt -u extglob`, so `extglob` cannot be on for a tool shell whatever the rc file says.
 
-**The hook cannot find its own session's snapshot, so reading one is not a fix
-that can be built.** Driven by installing a probe hook and reading what Claude
-Code hands one. The payload carries `session_id`, `transcript_path`, `cwd`,
-`scratchpad_dir`, `permission_mode` and the tool input, and no shell state. The
-environment carries 55 variables, none naming a snapshot and no `BASH_ENV` or
-`ENV`; the hook is a child of the `claude` process rather than of the tool
-shell, and at `PreToolUse` that shell does not exist yet. The filename is a
-millisecond timestamp and six random characters, so there is no session id to
-match on, and newest-by-mtime is not a fallback -- this session's snapshot was
-4th of 63 by mtime, five seconds behind a newer one, within a minute of the
-session opening. The transcript the payload does name is no route either: 18 of
-the 200 most recent transcripts mention a snapshot path, every mention is
-command output a session happened to print, against a positive control of 168
-carrying `toolUseResult`.
+**The hook cannot find its own session's snapshot, so reading one is not a fix that can be built.** Driven by installing a probe hook and reading what Claude Code hands one.
+The payload carries `session_id`, `transcript_path`, `cwd`, `scratchpad_dir`, `permission_mode` and the tool input, and no shell state.
+The environment carries 55 variables, none naming a snapshot and no `BASH_ENV` or `ENV`; the hook is a child of the `claude` process rather than of the tool shell, and at `PreToolUse` that shell does not exist yet.
+The filename is a millisecond timestamp and six random characters, so there is no session id to match on, and newest-by-mtime is not a fallback -- this session's snapshot was 4th of 63 by mtime, five seconds behind a newer one, within a minute of the session opening.
+The transcript the payload does name is no route either: 18 of the 200 most recent transcripts mention a snapshot path, every mention is command output a session happened to print, against a positive control of 168 carrying `toolUseResult`.
 
-So the gap is stated rather than closed, and it is bounded to a machine whose
-rc file sets one of the five options Claude Code does not unset. Scanning the
-superset instead -- dropping the hidden-file filter so nothing is missed -- is
-the direction this design refuses: a block on a file the command never sends is
-a false positive, and precision is the product. Nothing here reads a snapshot,
-so `PRIVACY.md` is unchanged.
+So the gap is stated rather than closed, and it is bounded to a machine whose rc file sets one of the five options Claude Code does not unset.
+Scanning the superset instead -- dropping the hidden-file filter so nothing is missed -- is the direction this design refuses: a block on a file the command never sends is a false positive, and precision is the product.
+Nothing here reads a snapshot, so `PRIVACY.md` is unchanged.
 
 ### And the shell it is expanded by is a setting, not a constant
 
-Everything above assumes the tool shell is bash. **Measured 2026-09-19 on
-Claude Code 2.1.275, it is bash only where something on the machine names
-bash.** How often that holds across machines is not measured here and one
-machine cannot measure it. Claude Code picks the shell before it
-runs anything: `CLAUDE_CODE_SHELL` if its path holds `bash` or `zsh` -- a
-substring over the whole path, not a basename -- and is executable, then
-`SHELL` on the same two conditions, and otherwise `zsh` and `bash` resolved on
-`$PATH` plus a fixed list over `/bin`, `/usr/bin`, `/usr/local/bin` and
-`/opt/homebrew/bin`. That list is **name-major** -- all four zsh paths before
-any bash path -- with the `PATH` hit for the preferred name unshifted ahead of
-it and the other pushed behind, and the whole order reverses only when `SHELL`
-holds `bash`. Read out of the shipped binary in the 2.1.270 CLI
-and in the 2.1.275 the desktop app runs -- 882 bytes in each and
-alpha-equivalent rather than byte-identical, since the minifier renames 10 of
-its 16 identifiers between builds, so the two carry the same ladder and not the
-same bytes. So a machine whose `SHELL` is unset, or names `fish` or `/bin/sh`, gets
-zsh. Do not read that lean as the common case: the thing that names a shell is
-almost always the login shell, and it reaches the ladder on every machine that
-has one.
+Everything above assumes the tool shell is bash.
+**Measured 2026-09-19 on Claude Code 2.1.275, it is bash only where something on the machine names bash.** How often that holds across machines is not measured here and one machine cannot measure it.
+Claude Code picks the shell before it runs anything: `CLAUDE_CODE_SHELL` if its path holds `bash` or `zsh` -- a substring over the whole path, not a basename -- and is executable, then `SHELL` on the same two conditions, and otherwise `zsh` and `bash` resolved on `$PATH` plus a fixed list over `/bin`, `/usr/bin`, `/usr/local/bin` and `/opt/homebrew/bin`.
+That list is **name-major** -- all four zsh paths before any bash path -- with the `PATH` hit for the preferred name unshifted ahead of it and the other pushed behind, and the whole order reverses only when `SHELL` holds `bash`.
+Read out of the shipped binary in the 2.1.270 CLI and in the 2.1.275 the desktop app runs -- 882 bytes in each and alpha-equivalent rather than byte-identical, since the minifier renames 10 of its 16 identifiers between builds, so the two carry the same ladder and not the same bytes.
+So a machine whose `SHELL` is unset, or names `fish` or `/bin/sh`, gets zsh.
+Do not read that lean as the common case: the thing that names a shell is almost always the login shell, and it reaches the ladder on every machine that has one.
 
-**That login shell is a per-account setting whose default varies by operating
-system, by version and by distribution, so it is a constant in neither
-direction.** macOS is the documented case and it is dated: macOS 10.15
-Catalina, 2019, made zsh the default for **newly created** accounts, which
-leaves an account created before it on bash through every upgrade since -- so a
-Mac running this month's release can still hand the harness `SHELL=/bin/bash`.
-[Apple's note](https://support.apple.com/102360) scopes it to newly created
-accounts; that an upgrade leaves an older account alone follows from that scope
-rather than being stated there. No other operating system is cited or measured.
+**That login shell is a per-account setting whose default varies by operating system, by version and by distribution, so it is a constant in neither direction.** macOS is the documented case and it is dated: macOS 10.15 Catalina, 2019, made zsh the default for **newly created** accounts, which leaves an account created before it on bash through every upgrade since -- so a Mac running this month's release can still hand the harness `SHELL=/bin/bash`.
+[Apple's note](https://support.apple.com/102360) scopes it to newly created accounts; that an upgrade leaves an older account alone follows from that scope rather than being stated there.
+No other operating system is cited or measured.
 
-This machine ran zsh for a month and the switch is dated. Recovered from 2,232
-session transcripts, 1,374,388 records, 231 naming a shell snapshot: 212
-distinct tool shells, 96 zsh and 116 bash, with no interleaving -- re-taken
-independently two days later over 2,247 transcripts as 96 and 117, the same two
-runs with the same boundary seconds, the zsh count closed and only the bash one
-accruing, which is what a switched machine looks like. The last zsh
-tool shell is 2026-08-24 09:17:09, a `CLAUDE_CODE_SHELL` was committed to
-`~/.claude/settings.json` at 10:01:55, and the first bash tool shell is
-14:13:07. `dscl . -read /Users/karl UserShell` still reports `/bin/zsh`, so the
-96 are what this machine does with the setting removed rather than an old
-harness.
+This machine ran zsh for a month and the switch is dated.
+Recovered from 2,232 session transcripts, 1,374,388 records, 231 naming a shell snapshot: 212 distinct tool shells, 96 zsh and 116 bash, with no interleaving -- re-taken independently two days later over 2,247 transcripts as 96 and 117, the same two runs with the same boundary seconds, the zsh count closed and only the bash one accruing, which is what a switched machine looks like.
+The last zsh tool shell is 2026-08-24 09:17:09, a `CLAUDE_CODE_SHELL` was committed to `~/.claude/settings.json` at 10:01:55, and the first bash tool shell is 14:13:07.
+`dscl . -read /Users/karl UserShell` still reports `/bin/zsh`, so the 96 are what this machine does with the setting removed rather than an old harness.
 
-**The switch is not an exogenous event, which strengthens that reading rather
-than weakening it.** `ea91c63` records the change and not its reason. The
-reason -- from the maintainer, who made it, rather than measured here -- is
-that bash-assuming tooling was failing under zsh, and forcing bash was cheaper
-than teaching each tool to survive the difference. So the zsh count stops where
-somebody hit this class of defect and mitigated it at the config layer, one
-level above any scanner, which makes the 96 corroboration rather than
-coincidence. What is exposed is the **zsh subset** of the machines that have not
-been bitten into making the same override -- a bash login shell is not exposed
-to this at all, because the expansion it assumes is the one it gets -- and the
-paragraph on the login shell above is why nothing here can size that subset.
+**The switch is not an exogenous event, which strengthens that reading rather than weakening it.** `ea91c63` records the change and not its reason.
+The reason -- from the maintainer, who made it, rather than measured here -- is that bash-assuming tooling was failing under zsh, and forcing bash was cheaper than teaching each tool to survive the difference.
+So the zsh count stops where somebody hit this class of defect and mitigated it at the config layer, one level above any scanner, which makes the 96 corroboration rather than coincidence.
+What is exposed is the **zsh subset** of the machines that have not been bitten into making the same override -- a bash login shell is not exposed to this at all, because the expansion it assumes is the one it gets -- and the paragraph on the login shell above is why nothing here can size that subset.
 
-**zsh recurses `**` by default and bash does not, and that was a fail-open.**
-Over a fixture holding `top.env`, `sub/mid.env` and `sub/deep/low.env` with an
-AWS-shaped key in the deepest, driven through binaries built either side of the
-change:
+**zsh recurses `**` by default and bash does not, and that was a fail-open.** Over a fixture holding `top.env`, `sub/mid.env` and `sub/deep/low.env` with an AWS-shaped key in the deepest, driven through binaries built either side of the change:
 
 | call | shell | before | after |
 |---|---|---|---|
@@ -3040,39 +1822,20 @@ change:
 | `cat sub/deep/low.env` | zsh | deny | deny |
 | `cat *.env` | bash | allow, silent | allow, silent |
 
-Read the third and fourth rows before the second. The key crossed on a clean
-exit with nothing written to the coverage log, and the controls are what make
-that an allow over the bash file set rather than a call that did nothing: the
-same payload denies once the key sits in the one file bash's expansion reaches,
-and the deep file named directly denies under zsh, so the scanner could read it
-and the expansion is what hid it.
+Read the third and fourth rows before the second.
+The key crossed on a clean exit with nothing written to the coverage log, and the controls are what make that an allow over the bash file set rather than a call that did nothing: the same payload denies once the key sits in the one file bash's expansion reaches, and the deep file named directly denies under zsh, so the scanner could read it and the expansion is what hid it.
 
-**Both controls are load-bearing and a re-take fails quietly without them.** A
-silent allow is what this scanner does for a clean file, for one it could not
-read and for one it never opened, so the first arm on its own distinguishes
-nothing. The independent review of the row lost a cycle to exactly that: its
-first fixture planted `AKIAIOSFODNN7EXAMPLE`, which the `aws-placeholder`
-validator rejects by design, so the control exited 0 and the silent arm would
-have reproduced for the wrong reason.
+**Both controls are load-bearing and a re-take fails quietly without them.** A silent allow is what this scanner does for a clean file, for one it could not read and for one it never opened, so the first arm on its own distinguishes nothing.
+The independent review of the row lost a cycle to exactly that: its first fixture planted `AKIAIOSFODNN7EXAMPLE`, which the `aws-placeholder` validator rejects by design, so the control exited 0 and the silent arm would have reproduced for the wrong reason.
 
-**So a glob operand zsh would expand differently is a coverage failure** --
-`internal/hook/shell.go` resolves the ladder, `expand` refuses ahead of the
-options, and the call defers. It costs nothing where the shell is bash, which
-is the only shape this repo's own worktrees run under, and under zsh it
-replaces a silent allow with a record **for a glob operand**. A shell that is
-neither, and a ladder that settles on nothing, refuse every glob.
+**So a glob operand zsh would expand differently is a coverage failure** -- `internal/hook/shell.go` resolves the ladder, `expand` refuses ahead of the options, and the call defers.
+It costs nothing where the shell is bash, which is the only shape this repo's own worktrees run under, and under zsh it replaces a silent allow with a record **for a glob operand**.
+A shell that is neither, and a ladder that settles on nothing, refuse every glob.
 
-**Under zsh the refusal is narrowed to where the two expansions disagree, and
-that narrowing is Q194.** Q163 shipped the whole-expansion refusal, and on a zsh
-machine it turned `cat *.env` over a key from a deny on v0.4.1 into no verdict:
-driven 2026-09-26 on binaries built from `v0.4.1` and `abe6cf5`, with a
-named-file control denying on both. So the 37 patterns of
-`TestTheExpansionAgreesWithBash` were driven through zsh 5.9 with `-f` over the
-same fixture, and 30 print what bash prints. Of the other seven, two are
-refused here anyway, four read nothing in either shell -- bash passes through a
-name no file has, zsh stops on `NOMATCH` -- and `d/x[1].txt` stops zsh while
-bash reads the literal file, so the bash set is a superset there and costs
-precision rather than recall. What disagrees on reads, and so stays refused:
+**Under zsh the refusal is narrowed to where the two expansions disagree, and that narrowing is Q194.** Q163 shipped the whole-expansion refusal, and on a zsh machine it turned `cat *.env` over a key from a deny on v0.4.1 into no verdict: driven 2026-09-26 on binaries built from `v0.4.1` and `abe6cf5`, with a named-file control denying on both.
+So the 37 patterns of `TestTheExpansionAgreesWithBash` were driven through zsh 5.9 with `-f` over the same fixture, and 30 print what bash prints.
+Of the other seven, two are refused here anyway, four read nothing in either shell -- bash passes through a name no file has, zsh stops on `NOMATCH` -- and `d/x[1].txt` stops zsh while bash reads the literal file, so the bash set is a superset there and costs precision rather than recall.
+What disagrees on reads, and so stays refused:
 
 | shape | zsh 5.9 reads | why it is refused |
 |---|---|---|
@@ -3080,400 +1843,195 @@ precision rather than recall. What disagrees on reads, and so stays refused:
 | a `(` glued to the word, `cat *(D)` | `.env` beside the rest | a qualifier: `(D)` adds dotfiles, `(P:.env:)` prepends a word, `(e:…:)` replaces the matches. `Segments` splits it off as a subshell, so it is read off the lexer's own tokens, where an unquoted `(` stands alone after the word and a quoted `'docs(queue): x'` stays one token |
 | `setopt globdots; cat *` | `.env` beside the rest | an option change, and so is `set -o globdots`, `set -4`, `unsetopt`, `emulate` and an assignment to the `options` array. Read twice: as whole tokens over the whole command, because `builtin setopt globdots`, a `setopt` inside a function body, and one before a `$(cat *)` whose body holds only its own text are reached from no segment's head; and on each substituted head, where `o=setopt; $o globdots` resolves. A head nothing resolves, `${:-setopt}`, counts as well, because it could run any of them. The review of Q194 drove nine spellings through its first two heads as silent allows |
 
-The one zsh snapshot on this machine sets no glob option -- its option section
-is `nohashdirs` and `login` -- so the defaults are the baseline, on the same
-standing as bash's 62 of 62 and with the same residual: an rc file that turns
-`GLOB_DOTS` or `EXTENDED_GLOB` on is not readable from `PreToolUse`.
+The one zsh snapshot on this machine sets no glob option -- its option section is `nohashdirs` and `login` -- so the defaults are the baseline, on the same standing as bash's 62 of 62 and with the same residual: an rc file that turns `GLOB_DOTS` or `EXTENDED_GLOB` on is not readable from `PreToolUse`.
 
-Read that scope as written, because the class is wider than the fix. Any
-zsh-only expansion that names a file bash would not open is the same
-under-scan, and `cat =ls` -- which zsh resolves to `/bin/ls` -- carries no glob
-metacharacter at all, so nothing here sees it and an operand naming no file
-allows silently. `Q184` owns that half. What this section establishes is that
-one member of the class is closed, not the class.
+Read that scope as written, because the class is wider than the fix.
+Any zsh-only expansion that names a file bash would not open is the same under-scan, and `cat =ls` -- which zsh resolves to `/bin/ls` -- carries no glob metacharacter at all, so nothing here sees it and an operand naming no file allows silently.
+`Q184` owns that half.
+What this section establishes is that one member of the class is closed, not the class.
 
-Three readings in that are narrower than the harness on purpose. The harness's
-substring decides whether it *accepts* a path; what the file **is** decides how
-it globs, so the base name is read for that, and a `sh` under a directory named
-`bash-builds` is spawned by the harness and is not bash here. The executable
-test asks `access(2)` rather than reading `os.Stat`'s mode bits, because the
-two disagree on ownership, on an ACL and on a `noexec` mount, and one direction
-of that is an under-scan: where the
-bits say executable and `access` would refuse, the harness throws, falls through
-to detection and may spawn zsh, while a reading off the bits answers *bash* and
-expands under bash's rules. The other direction costs a record. `syscall.Access`
-is stdlib and is not portable -- it does not exist on Windows, which
-`cross-compile` gates -- so the split is by build tag rather than by choice. Windows has no
-execute bit and reads the bits instead, which is `Q192`'s platform anyway.
+Three readings in that are narrower than the harness on purpose.
+The harness's substring decides whether it *accepts* a path; what the file **is** decides how it globs, so the base name is read for that, and a `sh` under a directory named `bash-builds` is spawned by the harness and is not bash here.
+The executable test asks `access(2)` rather than reading `os.Stat`'s mode bits, because the two disagree on ownership, on an ACL and on a `noexec` mount, and one direction of that is an under-scan: where the bits say executable and `access` would refuse, the harness throws, falls through to detection and may spawn zsh, while a reading off the bits answers *bash* and expands under bash's rules.
+The other direction costs a record.
+`syscall.Access` is stdlib and is not portable -- it does not exist on Windows, which `cross-compile` gates -- so the split is by build tag rather than by choice.
+Windows has no execute bit and reads the bits instead, which is `Q192`'s platform anyway.
 
-And the third step is not reproduced. It is settled -- the expression is
-name-major, zsh at all four directories before bash at any of them, the two
-swapped when `SHELL` holds `bash`, so no arrangement of the directories changes
-the answer -- and reproducing it could only turn a deferral into an expansion.
-It reaches bash on two machines: one whose `SHELL` names a bash the harness
-could not spawn, and one with no zsh installed at all. Both already have nothing
-naming a usable shell, so answering *not bash* costs them a record and never
-expands under a shell this did not identify.
+And the third step is not reproduced.
+It is settled -- the expression is name-major, zsh at all four directories before bash at any of them, the two swapped when `SHELL` holds `bash`, so no arrangement of the directories changes the answer -- and reproducing it could only turn a deferral into an expansion.
+It reaches bash on two machines: one whose `SHELL` names a bash the harness could not spawn, and one with no zsh installed at all.
+Both already have nothing naming a usable shell, so answering *not bash* costs them a record and never expands under a shell this did not identify.
 
-**What the narrowing does not reach is the segmentation, and that is `Q184`.**
-A zsh-only shape `Segments` splits as a bash operator never arrives as a glob
-operand: `cat (a|b).env` is a pipeline to it and `cat k<1-2>.env` a redirect,
-and both read the key file under zsh while the hook writes nothing -- driven on
-the Q194 build and on `v0.4.1` alike, so not a regression. `=cmd` and named
-directories are the same list.
+**What the narrowing does not reach is the segmentation, and that is `Q184`.** A zsh-only shape `Segments` splits as a bash operator never arrives as a glob operand: `cat (a|b).env` is a pipeline to it and `cat k<1-2>.env` a redirect, and both read the key file under zsh while the hook writes nothing -- driven on the Q194 build and on `v0.4.1` alike, so not a regression.
+`=cmd` and named directories are the same list.
 
-**`SHELL` inside a tool process does not say what the harness read.** bash
-rewrites it in its own process, so `printenv SHELL` in a `Bash` call reports
-`/opt/homebrew/bin/bash` on this machine while the hook, a child of the harness
-rather than of the tool shell, reads `/bin/zsh`. Both are correct and only the
-second is the ladder's input, so anyone cross-checking this section the first
-way concludes it is wrong.
+**`SHELL` inside a tool process does not say what the harness read.** bash rewrites it in its own process, so `printenv SHELL` in a `Bash` call reports `/opt/homebrew/bin/bash` on this machine while the hook, a child of the harness rather than of the tool shell, reads `/bin/zsh`.
+Both are correct and only the second is the ladder's input, so anyone cross-checking this section the first way concludes it is wrong.
 
-**How the ladder's later steps were driven, since a live one cannot be.**
-`claude -p` refuses to authenticate, on the CLI and the desktop binary both and
-from two sessions independently, so no arm of the fallback can be watched in a
-real run -- that is a property of the harness here rather than of one session's
-credentials. What was done instead: the 882-byte selection function extracted
-from the 2.1.270 binary verbatim, its three externals stubbed, and the result
-run under `jsc` across nine environment arms. All nine agree with the reading
-above, including the decoy: `CLAUDE_CODE_SHELL=/opt/bashful/bin/fish` holds
-`bash` as a substring, so the harness accepts that path and **spawns fish**.
-It is the sharpest case for reading the dialect off the base name rather than
-off the path, and it applies at **both** rungs: the substring is tested on
-`SHELL` too, and an executable hit there is unshifted ahead of every fallback
-candidate, so `SHELL=/opt/bashful/bin/fish` is spawned where that file exists
-and merely flips the step-3 ordering where it does not. A resolver that took
-the substring for the answer would report bash, expand the glob and allow --
-over a shell that recurses `**` as zsh does, so the under-scan this section
-exists to close would have been reintroduced by the fix for it. A substring hit
-means *not certainly bash*; only a base name of `bash` earns the bash answer.
-Driven against the built binary at both rungs: `/opt/bashful/bin/fish` and
-`/home/zshaw/bin/fish`, made executable, defer -- against a real bash allowing
-and a real zsh deferring in the same run. An authenticated drive was declined rather than unavailable for one arm
-of it: writing a synthetic zsh snapshot would contaminate the population the
-96-of-212 count is drawn from.
+**How the ladder's later steps were driven, since a live one cannot be.** `claude -p` refuses to authenticate, on the CLI and the desktop binary both and from two sessions independently, so no arm of the fallback can be watched in a real run -- that is a property of the harness here rather than of one session's credentials.
+What was done instead: the 882-byte selection function extracted from the 2.1.270 binary verbatim, its three externals stubbed, and the result run under `jsc` across nine environment arms.
+All nine agree with the reading above, including the decoy: `CLAUDE_CODE_SHELL=/opt/bashful/bin/fish` holds `bash` as a substring, so the harness accepts that path and **spawns fish**.
+It is the sharpest case for reading the dialect off the base name rather than off the path, and it applies at **both** rungs: the substring is tested on `SHELL` too, and an executable hit there is unshifted ahead of every fallback candidate, so `SHELL=/opt/bashful/bin/fish` is spawned where that file exists and merely flips the step-3 ordering where it does not.
+A resolver that took the substring for the answer would report bash, expand the glob and allow -- over a shell that recurses `**` as zsh does, so the under-scan this section exists to close would have been reintroduced by the fix for it.
+A substring hit means *not certainly bash*; only a base name of `bash` earns the bash answer.
+Driven against the built binary at both rungs: `/opt/bashful/bin/fish` and `/home/zshaw/bin/fish`, made executable, defer -- against a real bash allowing and a real zsh deferring in the same run.
+An authenticated drive was declined rather than unavailable for one arm of it: writing a synthetic zsh snapshot would contaminate the population the 96-of-212 count is drawn from.
 
-**What it does not establish, stated rather than closed.** How often a
-recursive glob reaches a reader is bounded and not counted -- 447 of 188,898
-real `Bash` calls carried a `**/`-shaped word on 2026-09-19, an upper bound,
-since most sit inside a heredoc or a quoted `git grep` pathspec where no shell
-expands them. Classified on a re-take two days later: 525 of 191,385, of which
-374 are inside heredocs, 105 quoted and 46 bare -- and several of the 46 are
-regex artifacts rather than globs. **The metric contaminates itself**: total
-calls grew 1.3% over those two days and `**/` hits grew 17%, because writing
-about the shape is what puts it in the transcripts. And Windows is unmeasured: the harness
-carries a PowerShell provider beside the posix one, nothing here establishes
-whether a `Bash` tool call can reach it, and the launcher ships for Windows.
+**What it does not establish, stated rather than closed.** How often a recursive glob reaches a reader is bounded and not counted -- 447 of 188,898 real `Bash` calls carried a `**/`-shaped word on 2026-09-19, an upper bound, since most sit inside a heredoc or a quoted `git grep` pathspec where no shell expands them.
+Classified on a re-take two days later: 525 of 191,385, of which 374 are inside heredocs, 105 quoted and 46 bare -- and several of the 46 are regex artifacts rather than globs.
+**The metric contaminates itself**: total calls grew 1.3% over those two days and `**/` hits grew 17%, because writing about the shape is what puts it in the transcripts.
+And Windows is unmeasured: the harness carries a PowerShell provider beside the posix one, nothing here establishes whether a `Bash` tool call can reach it, and the launcher ships for Windows.
 
-**The instrument was in hand a fortnight before it was used, which is the part
-worth remembering.** The drive above that went looking for a shell snapshot
-reported 55 environment variables and no route to one. That was true of the
-snapshot. `CLAUDE_CODE_SHELL` and `SHELL` were in the same environment, and
-they answer a question nobody had asked of it: not *which options did this
-shell restore* but *which shell is it*. A probe is read for what it was sent
-to find, and the rest of what it returned goes unread.
+**The instrument was in hand a fortnight before it was used, which is the part worth remembering.** The drive above that went looking for a shell snapshot reported 55 environment variables and no route to one.
+That was true of the snapshot.
+`CLAUDE_CODE_SHELL` and `SHELL` were in the same environment, and they answer a question nobody had asked of it: not *which options did this shell restore* but *which shell is it*.
+A probe is read for what it was sent to find, and the rest of what it returned goes unread.
 
 ### A loop variable is one operand per value bash iterates
 
-`for f in a.env b.env; do cat "$f"; done` reads both files, so both are
-scanned. That is the same reading the directory refusal above turns on, pointed
-the other way: a candidate set is the file set the command sends, computed from
-the list the string carries rather than from a walk of a tree, and no reader
-flag alters it.
+`for f in a.env b.env; do cat "$f"; done` reads both files, so both are scanned.
+That is the same reading the directory refusal above turns on, pointed the other way: a candidate set is the file set the command sends, computed from the list the string carries rather than from a walk of a tree, and no reader flag alters it.
 
-The binding is a port of `bash-workspace-guard.py`'s `for_loop_binding`,
-`literal_for_item` and `expand_loop_candidates` (its issues 70 and 99), in
-`internal/hook/vars.go`. A list of literals and globs is recorded. An item
-carrying a `$` or a backtick, or a brace item — bash brace-expands a for-list
-item where it does not an assignment value — binds as a stand-in that records
-the operand, beside the literals, which are still read (Q254); upstream poisons
-the name there. A `for NAME` over `"$@"`, an empty list, and the `for ((…))`
-arithmetic form, which lexes a `(` where the name would be, poison it, which is
-the coverage record the operand had before any of this.
+The binding is a port of `bash-workspace-guard.py`'s `for_loop_binding`, `literal_for_item` and `expand_loop_candidates` (its issues 70 and 99), in `internal/hook/vars.go`.
+A list of literals and globs is recorded.
+An item carrying a `$` or a backtick, or a brace item — bash brace-expands a for-list item where it does not an assignment value — binds as a stand-in that records the operand, beside the literals, which are still read (Q254); upstream poisons the name there. A `for NAME` over `"$@"`, an empty list, and the `for ((…))` arithmetic form, which lexes a `(` where the name would be, poison it, which is the coverage record the operand had before any of this.
 
-**Measured 2026-09-07** over a week of this machine's transcripts, in one
-pass: 28,763 Bash calls, of which 3,351 carry a `for NAME in`, 746 of those
-point a command in the reader table at `$NAME`, and 464 of those 746 have a
-list this binds. So about 1.6% of Bash calls move from a coverage record to a
-scan.
+**Measured 2026-09-07** over a week of this machine's transcripts, in one pass: 28,763 Bash calls, of which 3,351 carry a `for NAME in`, 746 of those point a command in the reader table at `$NAME`, and 464 of those 746 have a list this binds.
+So about 1.6% of Bash calls move from a coverage record to a scan.
 
-Read the ratio rather than the counts. The corpus is this machine's live
-session transcripts, so it grows while the sweep runs — three passes within
-the hour put the denominator at 28,265, 28,276 and 28,763 — and every figure
-in this section is from the last of them, because figures from two passes read
-as one measurement and are not. The census is also a regex over the command
-strings rather than a run of the resolver, so it is the shape of the traffic
-and not a verdict count.
+Read the ratio rather than the counts.
+The corpus is this machine's live session transcripts, so it grows while the sweep runs — three passes within the hour put the denominator at 28,265, 28,276 and 28,763 — and every figure in this section is from the last of them, because figures from two passes read as one measurement and are not.
+The census is also a regex over the command strings rather than a run of the resolver, so it is the shape of the traffic and not a verdict count.
 
-**Three things diverge from upstream, and each is the same difference: it asks
-where a path lands and this opens the file.**
+**Three things diverge from upstream, and each is the same difference: it asks where a path lands and this opens the file.**
 
-A glob item is kept as the pattern, and for a different reason. There a pattern
-proxies its whole expansion because `*`, `?` and `[…]` never match `/`, so
-every path it expands to resolves in the same directory. Here a proxy settles
-nothing — what makes it sound is that the candidate goes on to the expansion
-above, which globs it into the files bash would hand the command. A token built
-around the candidate keeps that: `cat "$f".bak` over `docs/*.md` reaches the
-expansion as `docs/*.md.bak`, which matches every file bash reads that exists,
-and one that does not exist sends nothing either way.
+A glob item is kept as the pattern, and for a different reason.
+There a pattern proxies its whole expansion because `*`, `?` and `[…]` never match `/`, so every path it expands to resolves in the same directory.
+Here a proxy settles nothing — what makes it sound is that the candidate goes on to the expansion above, which globs it into the files bash would hand the command.
+A token built around the candidate keeps that: `cat "$f".bak` over `docs/*.md` reaches the expansion as `docs/*.md.bak`, which matches every file bash reads that exists, and one that does not exist sends nothing either way.
 
-A header the shell may not have reached, or whose loop runs where the segments
-after it are not, poisons the name where upstream binds it — a subshell, a
-pipeline stage, a background job, a `||`, an `&&` after a command whose status
-nothing here knows. `follow` refuses a `cd` on the same reading. Upstream can
-bind through all five because a candidate bash never took only adds a prompt
-there.
+A header the shell may not have reached, or whose loop runs where the segments after it are not, poisons the name where upstream binds it — a subshell, a pipeline stage, a background job, a `||`, an `&&` after a command whose status nothing here knows.
+`follow` refuses a `cd` on the same reading.
+Upstream can bind through all five because a candidate bash never took only adds a prompt there.
 
-And the cap stays at upstream's 256 rather than deferring to the scanner's own
-budget. The budget bounds how much time there is; the cap bounds where it goes.
-Three nested loops over 256 literals each make `cat $a/$b/$c` 16.7M tokens to
-build before a byte is read, so the budget would be spent producing paths and
-the verdict at the end of it is the coverage record the cap reaches at once.
-The product is known before any expansion happens, so nothing is materialised
-to find out, and over the cap it poisons rather than truncating — checking a
-prefix of the candidates would report a clean scan for the files after it.
+And the cap stays at upstream's 256 rather than deferring to the scanner's own budget.
+The budget bounds how much time there is; the cap bounds where it goes.
+Three nested loops over 256 literals each make `cat $a/$b/$c` 16.7M tokens to build before a byte is read, so the budget would be spent producing paths and the verdict at the end of it is the coverage record the cap reaches at once.
+The product is known before any expansion happens, so nothing is materialised to find out, and over the cap it poisons rather than truncating — checking a prefix of the candidates would report a clean scan for the files after it.
 
-**What it over-scans is a use after `done`.** bash leaves the variable at the
-last item and the candidate set holds all of them, so `for f in a b; do :;
-done; cat "$f"` scans `a` as well. Every such file is one the same call already
-read inside the loop, which is what bounds it; 95 of that pass's 1,465
-loop-variable uses sit after a `done`.
+**What it over-scans is a use after `done`.** bash leaves the variable at the last item and the candidate set holds all of them, so `for f in a b; do :; done; cat "$f"` scans `a` as well.
+Every such file is one the same call already read inside the loop, which is what bounds it; 95 of that pass's 1,465 loop-variable uses sit after a `done`.
 
 ### A `case` arm is conditional, and the segmenter had no word for it
 
-`case $v in 1) P=/a;; 2) P=/b;; esac; cat "$P/f"` runs at most one of those
-assignments and this cannot say which, so `$P` is a coverage record. Before
-this, both arms were read as ordinary segments and the last one seen won: the
-resolver scanned `/b/f`, a path bash reaches only when `$v` is 2. The same
-reading made a `cd` in an arm move the working directory for everything after
-`esac`, and made a `for` header there bind its name.
+`case $v in 1) P=/a;; 2) P=/b;; esac; cat "$P/f"` runs at most one of those assignments and this cannot say which, so `$P` is a coverage record. Before this, both arms were read as ordinary segments and the last one seen won: the resolver scanned `/b/f`, a path bash reaches only when `$v` is 2.
+The same reading made a `cd` in an arm move the working directory for everything after `esac`, and made a `for` header there bind its name.
 
-`internal/bash` marks it now. `Segment.CaseArm` is true for every segment from
-a pattern's `)` to the matching `esac`, tracked by a `case`/`in`/`)`/`esac`
-state machine in `Segments`, nested, with the `case` word taken only in command
-position. `internal/hook` reads the flag in three places, each the arm of a
-rule that already existed: `persists` refuses to carry an assignment past the
-segment, `follow` refuses the `cd`, and `enter` leaves the and-or list
-unsettled, which is what stops a header in an arm binding.
+`internal/bash` marks it now.
+`Segment.CaseArm` is true for every segment from a pattern's `)` to the matching `esac`, tracked by a `case`/`in`/`)`/`esac` state machine in `Segments`, nested, with the `case` word taken only in command position.
+`internal/hook` reads the flag in three places, each the arm of a rule that already existed: `persists` refuses to carry an assignment past the segment, `follow` refuses the `cd`, and `enter` leaves the and-or list unsettled, which is what stops a header in an arm binding.
 
-`;;` needs no handling. It lexes to two `;` separators, which the and-or list
-already treats as statement boundaries, and every segment between the first
-`)` and `esac` is marked regardless of where the arms divide.
+`;;` needs no handling.
+It lexes to two `;` separators, which the and-or list already treats as statement boundaries, and every segment between the first `)` and `esac` is marked regardless of where the arms divide.
 
-**The row proposed a different rule, and driving it is what rejected it.** It
-asserted that a `)` at paren depth 0 with no `(` open is a case pattern's
-close. Driven on the segmenter, `cat <(grep foo bar); P=/after` flushes exactly
-that: `<` consumes the `(` as a redirect target without incrementing the depth
-counter, so the closing paren arrives at depth 0 and the rule would have marked
-`P=/after` as an arm and dropped a resolvable assignment. A precision loss, in
-the direction this repo calls the product. Reading the keywords costs a
-five-line state machine and cannot confuse the two.
+**The row proposed a different rule, and driving it is what rejected it.** It asserted that a `)` at paren depth 0 with no `(` open is a case pattern's close.
+Driven on the segmenter, `cat <(grep foo bar); P=/after` flushes exactly that: `<` consumes the `(` as a redirect target without incrementing the depth counter, so the closing paren arrives at depth 0 and the rule would have marked `P=/after` as an arm and dropped a resolvable assignment.
+A precision loss, in the direction this repo calls the product.
+Reading the keywords costs a five-line state machine and cannot confuse the two.
 
-**Measured 2026-09-07**, in its own pass over a week of this machine's
-transcripts: 26 of 26,855 Bash calls carry a `case` in command position once
-heredoc bodies are stripped, and 5 of those assign a name inside an arm — all
-five read by hand, all five real, and none of them a `cd`. Counts from this
-pass and not the loop section's; the corpus grows between passes and two
-denominators presented as one measurement are not one. Whether a reader is then
-pointed at one of those names is a further condition and was not measured, so
-5 is a ceiling on the calls this changes rather than a count of them. Small
-either way, which is the argument for a rule this narrow rather than against
-having one: an arm assignment is where a wrong branch's path comes from.
+**Measured 2026-09-07**, in its own pass over a week of this machine's transcripts: 26 of 26,855 Bash calls carry a `case` in command position once heredoc bodies are stripped, and 5 of those assign a name inside an arm — all five read by hand, all five real, and none of them a `cd`.
+Counts from this pass and not the loop section's; the corpus grows between passes and two denominators presented as one measurement are not one.
+Whether a reader is then pointed at one of those names is a further condition and was not measured, so 5 is a ceiling on the calls this changes rather than a count of them.
+Small either way, which is the argument for a rule this narrow rather than against having one: an arm assignment is where a wrong branch's path comes from.
 
-Upstream has neither the field nor the reading. It asks where a path lands, so
-an arm it never enters costs a prompt; this opens the file.
+Upstream has neither the field nor the reading.
+It asks where a path lands, so an arm it never enters costs a prompt; this opens the file.
 
 ### A word that runs code in this shell loses the directory
 
-`eval cd w; cat x` reads `w/x` on bash 5.3.15, and so do `source` and `.` of a
-file holding the `cd`, `trap 'cd w' DEBUG`, `mapfile -C 'cd w;:'`, and bash 5.3's
-two substitutions that run in the current shell, `${ cd w; }` and `${| cd w; }`.
-Until Q226 and Q228 the tracker read none of them as a move, so with the key in
-`w/x` each crossed with no verdict and no record. Q212 had covered them only
-where the words called a moving function.
+`eval cd w; cat x` reads `w/x` on bash 5.3.15, and so do `source` and `.` of a file holding the `cd`, `trap 'cd w' DEBUG`, `mapfile -C 'cd w;:'`, and bash 5.3's two substitutions that run in the current shell, `${ cd w; }` and `${| cd w; }`.
+Until Q226 and Q228 the tracker read none of them as a move, so with the key in `w/x` each crossed with no verdict and no record.
+Q212 had covered them only where the words called a moving function.
 
-Each loses the directory now, so a relative operand after one is recorded, and a
-function whose body runs one moves the shell that calls it, as a body running
-`cd` already did. It is kept where the shape says nothing moves: an `eval` whose
-words past a leading `--` are all literal and whose re-parsed text holds no `cd`,
-no such word and no moving call, so `cd w; eval true; cat x` still reads `w/x`; a
-trap that resets, ignores, prints, or fires only on EXIT; and any of them in a
-pipeline stage. Upstream does none of
-this. Workspace-guard at `c1e1f81` lists `eval`, `source` and `.` as poisoning the
-variable map and keeps the directory, and it has no reading of a funsub.
+Each loses the directory now, so a relative operand after one is recorded, and a function whose body runs one moves the shell that calls it, as a body running `cd` already did.
+It is kept where the shape says nothing moves: an `eval` whose words past a leading `--` are all literal and whose re-parsed text holds no `cd`, no such word and no moving call, so `cd w; eval true; cat x` still reads `w/x`; a trap that resets, ignores, prints, or fires only on EXIT; and any of them in a pipeline stage.
+Upstream does none of this.
+Workspace-guard at `c1e1f81` lists `eval`, `source` and `.` as poisoning the variable map and keeps the directory, and it has no reading of a funsub.
 
-A funsub is a coverage failure in its own right, because `internal/bash` does not
-lex one. It splits `${ cd w; }` at the inner `;` and reads `${|` as a pipe, so the
-body's words join the command around it and no reader there is judged: on `main`,
-`echo ${ cat key.txt; }` exited 0 with no record while bash printed the key. It is
-recorded now, and reading the body is Q261. The opener is matched on a token, and
-a token arrives with its quoting removed, so a single-quoted `'${ x; }'`, an
-escaped `\${ x; }` and a zsh `${(…)}`, which the lexer splits at its `(`, are
-recorded too. The same removal is why no backslash before the `$` is read as an
-escape: `\\${ cd w; }` reaches the match as `\${`, and bash runs that body.
+A funsub is a coverage failure in its own right, because `internal/bash` does not lex one.
+It splits `${ cd w; }` at the inner `;` and reads `${|` as a pipe, so the body's words join the command around it and no reader there is judged: on `main`, `echo ${ cat key.txt; }` exited 0 with no record while bash printed the key. It is recorded now, and reading the body is Q261. The opener is matched on a token, and a token arrives with its quoting removed, so a single-quoted `'${ x; }'`, an escaped `\${ x; }` and a zsh `${(…)}`, which the lexer splits at its `(`, are recorded too.
+The same removal is why no backslash before the `$` is read as an escape: `\\${ cd w; }` reaches the match as `\${`, and bash runs that body.
 
-Over the 240,454 distinct `Bash` commands in this machine's transcripts on
-2026-11-09, 4 changed: each gained a coverage record, and none changed verdict.
-One is `trap 'rm -f …' EXIT INT TERM`, which can fire before the end. The other
-three are the over-records just named, two single-quoted and one zsh. None was a
-real move. Two runs of `main` differed on one command, a glob over files that
-changed between the runs, which is the noise in that comparison.
+Over the 240,454 distinct `Bash` commands in this machine's transcripts on 2026-11-09, 4 changed: each gained a coverage record, and none changed verdict.
+One is `trap 'rm -f …' EXIT INT TERM`, which can fire before the end.
+The other three are the over-records just named, two single-quoted and one zsh.
+None was a real move.
+Two runs of `main` differed on one command, a glob over files that changed between the runs, which is the noise in that comparison.
 
-Reading no backslash as an escape costs more, and was measured on 2026-11-10 over
-246,901 distinct commands against the head that still read one: 16 gained a
-record, none changed verdict, and every one quotes the opener as text, in a grep
-pattern, a commit message or a heredoc editing these tests. 6 more differed only
-in the files they collected, and two further runs of the older head over those 22
-commands reproduced the 16 and none of the 6.
+Reading no backslash as an escape costs more, and was measured on 2026-11-10 over 246,901 distinct commands against the head that still read one: 16 gained a record, none changed verdict, and every one quotes the opener as text, in a grep pattern, a commit message or a heredoc editing these tests.
+6 more differed only in the files they collected, and two further runs of the older head over those 22 commands reproduced the 16 and none of the 6.
 
 ### A substitution body is resolved where it was written
 
-`cd sub && echo $(cat x)` reads `x` under `sub`, and it was a coverage record
-while `cd sub && cat x` beside it got a verdict. A body queued for a pass of its
-own inherited the directory its parent ended in, and none of it if the parent
-had moved at all, because neither half of the parse could name the other's
-place: the tracker walks post-lex tokens, which carry no position, and the scan
-that finds the bodies reads the raw string, which is what reads quoting right.
+`cd sub && echo $(cat x)` reads `x` under `sub`, and it was a coverage record while `cd sub && cat x` beside it got a verdict.
+A body queued for a pass of its own inherited the directory its parent ended in, and none of it if the parent had moved at all, because neither half of the parse could name the other's place: the tracker walks post-lex tokens, which carry no position, and the scan that finds the bodies reads the raw string, which is what reads quoting right.
 
-Marking joins them. Each substitution is replaced, in the string, by a word
-standing in for it, so the token stream carries the position and the same
-`classifyCd`/`follow` pair answers for the marker. No offset arithmetic to
-survive a strip pass, and no keying on body text, which would collapse two
-identical bodies written at different points onto one answer -- `cd a; echo
-$(cat f); cd ../b; echo $(cat f)` writes the same body twice and the two answers
-differ. `substStates` in `internal/hook/bash.go` is the walk and
-`bash.CommandSubstitutionSpans` is what gives it the positions.
+Marking joins them.
+Each substitution is replaced, in the string, by a word standing in for it, so the token stream carries the position and the same `classifyCd`/`follow` pair answers for the marker.
+No offset arithmetic to survive a strip pass, and no keying on body text, which would collapse two identical bodies written at different points onto one answer -- `cd a; echo $(cat f); cd ../b; echo $(cat f)` writes the same body twice and the two answers differ.
+`substStates` in `internal/hook/bash.go` is the walk and `bash.CommandSubstitutionSpans` is what gives it the positions.
 
-**The directory is not the only thing read there.** A body runs with the
-variables the string had assigned by that point and the glob options in force
-there, and those are one shell state with the directory rather than three
-facts. So the marker records a `substState` carrying all four, and a body
-starts its own pass from a snapshot of it: `SP=/x; echo "$(cat $SP/f)"`
-resolves where `SP=/x; cat $SP/f` does, and `echo "$(cat *.env)"; shopt -s
-dotglob` expands its pattern under the options bash actually had.
+**The directory is not the only thing read there.** A body runs with the variables the string had assigned by that point and the glob options in force there, and those are one shell state with the directory rather than three facts.
+So the marker records a `substState` carrying all four, and a body starts its own pass from a snapshot of it: `SP=/x; echo "$(cat $SP/f)"` resolves where `SP=/x; cat $SP/f` does, and `echo "$(cat *.env)"; shopt -s dotglob` expands its pattern under the options bash actually had.
 
-Positionally, and never whole. The end-of-string map is the direction this must
-not take -- it would substitute a value assigned *after* the body, opening a
-file bash never opened, where an unresolved operand merely defers. Upstream
-reaches the same position with a `stable_vars`/`usable` pair, because its
-substitution walk carries no value map of its own; this one has carried the
-real map since marking arrived, so the snapshot is the state rather than a
-proxy for it. The two differ in both directions: narrower on value, since
-upstream may substitute a name's only literal from anywhere in the string,
-and wider on membership, since a name assigned twice is dropped by
-`stable_vars` outright and is held here at the value bash had where the body
-sits.
+Positionally, and never whole.
+The end-of-string map is the direction this must not take -- it would substitute a value assigned *after* the body, opening a file bash never opened, where an unresolved operand merely defers.
+Upstream reaches the same position with a `stable_vars`/`usable` pair, because its substitution walk carries no value map of its own; this one has carried the real map since marking arrived, so the snapshot is the state rather than a proxy for it.
+The two differ in both directions: narrower on value, since upstream may substitute a name's only literal from anywhere in the string, and wider on membership, since a name assigned twice is dropped by `stable_vars` outright and is held here at the value bash had where the body sits.
 
-**The marker is `\x1e<n>\x1e`, and the sentinel is a measurement rather than a
-convention.** Measured 2026-09-09, over 1,962 of this machine's session
-transcripts, 0 of 161,818
-`Bash` commands carry a `U+001E`; the same sweep found one carrying a `U+0007`,
-which is the positive control that says an answer of 0 is a reading and not an
-empty probe. A string carrying one anyway is left unmarked rather than
-mismarked, which is the fallback below and not a refusal.
+**The marker is `\x1e<n>\x1e`, and the sentinel is a measurement rather than a convention.** Measured 2026-09-09, over 1,962 of this machine's session transcripts, 0 of 161,818 `Bash` commands carry a `U+001E`; the same sweep found one carrying a `U+0007`, which is the positive control that says an answer of 0 is a reading and not an empty probe.
+A string carrying one anyway is left unmarked rather than mismarked, which is the fallback below and not a refusal.
 
-**Four cases fall back to what every body inherited before this** -- the
-parent's directory and none of it if the parent moved, an empty map, and the
-glob options settled over the whole string: the sentinel case above, a span set
-that does not run forward, a marked string the segmenter cannot read, and a
-body found inside a heredoc body, which the own-level strip lifted out of the
-string before there was anything to mark. Each of those is the conservative
-side of its own axis, so none is a new refusal.
+**Four cases fall back to what every body inherited before this** -- the parent's directory and none of it if the parent moved, an empty map, and the glob options settled over the whole string: the sentinel case above, a span set that does not run forward, a marked string the segmenter cannot read, and a body found inside a heredoc body, which the own-level strip lifted out of the string before there was anything to mark.
+Each of those is the conservative side of its own axis, so none is a new refusal.
 
-**The `$(…)` half is a cost recovered rather than a read gained**, and the
-backtick half is not. `Segments` flattens an unquoted `$(…)` into the in-order
-pass, where the tracker already resolved its operand correctly, and the queued
-pass then re-resolved the same operand against the lost directory and deferred
-the whole call on it. A backtick body reaches no flattened pass at all, so its
-operand had only ever been the queued one.
+**The `$(…)` half is a cost recovered rather than a read gained**, and the backtick half is not. `Segments` flattens an unquoted `$(…)` into the in-order pass, where the tracker already resolved its operand correctly, and the queued pass then re-resolved the same operand against the lost directory and deferred the whole call on it.
+A backtick body reaches no flattened pass at all, so its operand had only ever been the queued one.
 
-**Measured 2026-09-06**, in Q147 and not re-taken for this change: 137 coverage
-records on the relative-after-`cd` arm carry a cd-family command, and 11 of them
-carry a `$(…)` or a backtick after it. Those 11 are the population this moves.
+**Measured 2026-09-06**, in Q147 and not re-taken for this change: 137 coverage records on the relative-after-`cd` arm carry a cd-family command, and 11 of them carry a `$(…)` or a backtick after it.
+Those 11 are the population this moves.
 
-**It is a port, and it did not have to be a divergence.** Q147 read the two
-readings it could see -- a kind per body, or an offset per body -- as changes to
-the shape of `internal/bash` that `CLAUDE.md` holds structurally identical to
-its upstream, and concluded the row should wait on a fix there. Upstream took
-one: `mark_substitutions` and `substitution_bodies` in `bash-workspace-guard.py`,
-its Q169, merged as `claude-bouncer` #109 on 2026-09-07, with `spans` added to
-`command_substitutions` in the shared `lib/bouncer_parse.py`. So the marking, the
-sentinel and the read-before-the-`cd` ordering are read across rather than
-invented, and the two names Go forced -- `CommandSubstitutionSpans` and
-`SegmentsOfStripped`, each a keyword argument upstream -- say so where they
-stand.
+**It is a port, and it did not have to be a divergence.** Q147 read the two readings it could see -- a kind per body, or an offset per body -- as changes to the shape of `internal/bash` that `CLAUDE.md` holds structurally identical to its upstream, and concluded the row should wait on a fix there.
+Upstream took one: `mark_substitutions` and `substitution_bodies` in `bash-workspace-guard.py`, its Q169, merged as `claude-bouncer` #109 on 2026-09-07, with `spans` added to `command_substitutions` in the shared `lib/bouncer_parse.py`.
+So the marking, the sentinel and the read-before-the-`cd` ordering are read across rather than invented, and the two names Go forced -- `CommandSubstitutionSpans` and `SegmentsOfStripped`, each a keyword argument upstream -- say so where they stand.
 
-**One step of it is not upstream's, and driving it is what settled that.**
-Upstream restores a marker only into the words it is about to read a `cd` from,
-and peels the command prefix off the *marked* tokens to avoid re-reading a
-quoted word; here the walk restores every token before anything reads it. A
-marker is a bare word with no `$` in it, so a variable map built over the marked
-tokens reads `SP=$(pwd)` as a literal assignment where the walk in `bashTargets`
-poisons the name -- and the `cd $SP` after it is then followed to a directory
-bash is not in. Driven on the marked ordering, with a backtick body after
-`cd a; SP=$(pwd); cd ../b; cd $SP`: exit 0 and nothing on stderr, having read
-the clean file in `b` where bash reads the key in `a`. Restored first, the same
-call records the move it cannot follow, which
-`TestASubstitutionBodyResolvesWhereItWasWritten` holds.
+**One step of it is not upstream's, and driving it is what settled that.** Upstream restores a marker only into the words it is about to read a `cd` from, and peels the command prefix off the *marked* tokens to avoid re-reading a quoted word; here the walk restores every token before anything reads it.
+A marker is a bare word with no `$` in it, so a variable map built over the marked tokens reads `SP=$(pwd)` as a literal assignment where the walk in `bashTargets` poisons the name -- and the `cd $SP` after it is then followed to a directory bash is not in. Driven on the marked ordering, with a backtick body after `cd a; SP=$(pwd); cd ../b; cd $SP`: exit 0 and nothing on stderr, having read the clean file in `b` where bash reads the key in `a`.
+Restored first, the same call records the move it cannot follow, which `TestASubstitutionBodyResolvesWhereItWasWritten` holds.
 
-**What upstream's ordering buys it is quote provenance, and this repo has that
-now.** Q92 ported it — `Segment.QuotedFrom`, one offset per token — after this
-walk was written, so restoring first has to say what it does to the provenance
-rather than being silent about it. It rides along unchanged. The restore rebuilds
-token for token, so the two stay index-aligned; and a marker's provenance is the
-provenance of the **word** the substitution was written in, which is bash's own
-reading, since it settles whether a word is an assignment or a keyword before it
-removes the quotes. Putting the substitution's text back cannot move where
-quoting appeared in that word. So `"$(pwd)"` reads as a word quoted from offset
-0 whether it is marked or restored, and `SP=$(pwd)` as one quoted nowhere — which
-is what makes the first not an assignment and the second one.
+**What upstream's ordering buys it is quote provenance, and this repo has that now.** Q92 ported it — `Segment.QuotedFrom`, one offset per token — after this walk was written, so restoring first has to say what it does to the provenance rather than being silent about it.
+It rides along unchanged.
+The restore rebuilds token for token, so the two stay index-aligned; and a marker's provenance is the provenance of the **word** the substitution was written in, which is bash's own reading, since it settles whether a word is an assignment or a keyword before it removes the quotes.
+Putting the substitution's text back cannot move where quoting appeared in that word.
+So `"$(pwd)"` reads as a word quoted from offset 0 whether it is marked or restored, and `SP=$(pwd)` as one quoted nowhere — which is what makes the first not an assignment and the second one.
 
-**Restoring is per segment and not per rule, because a marker is dangerous by
-looking like ordinary text.** It carries neither a `$` nor a backtick, so a rule
-that looks for either answers as though the substitution were not there, and
-that is not a rule failing to fire -- it is a rule firing on the wrong reading.
-Two such rules exist and the second was found in review of #153, after the first
-had been fixed by hand: `andOr.assigned` unsettles the and-or list for an
-assignment whose value runs a command, and against a marked ``SP=`false` `` it
-found nothing, so the `cd` after the `&&` stayed certain where the other walk
-made it tentative and the statement end dropped it. Driven at that head, with
-the key in the payload's own directory and a clean file of the same name under
-`sub`: ``SP=`false` && cd sub ; echo "$(cat q)"`` exits 0 with an empty stderr,
-having read the clean file where bash reads the key. So the whole segment is
-restored once, ahead of every consumer, rather than each site being repaired as
-it is noticed. The two spellings that can show it are the two `Segments` does
-not flatten -- a quoted `"$(…)"` and a backtick -- and both are pinned in
-`TestACdThisCannotFollowLeavesTheOperandUnsettled`.
+**Restoring is per segment and not per rule, because a marker is dangerous by looking like ordinary text.** It carries neither a `$` nor a backtick, so a rule that looks for either answers as though the substitution were not there, and that is not a rule failing to fire -- it is a rule firing on the wrong reading. Two such rules exist and the second was found in review of #153, after the first had been fixed by hand: `andOr.assigned` unsettles the and-or list for an assignment whose value runs a command, and against a marked ``SP=`false` `` it found nothing, so the `cd` after the `&&` stayed certain where the other walk made it tentative and the statement end dropped it. Driven at that head, with the key in the payload's own directory and a clean file of the same name under `sub`: ``SP=`false` && cd sub ; echo "$(cat q)"`` exits 0 with an empty stderr, having read the clean file where bash reads the key.
+So the whole segment is restored once, ahead of every consumer, rather than each site being repaired as it is noticed.
+The two spellings that can show it are the two `Segments` does not flatten -- a quoted `"$(…)"` and a backtick -- and both are pinned in `TestACdThisCannotFollowLeavesTheOperandUnsettled`.
 
-**The two walks are deliberately not identical, and only one direction is a
-defect.** Marking removes the `(` and `)` that `Segments` inserts when it
-flattens an unquoted `$(…)`, so `Persists`, `Conditional`, `CaseArm` and `Pipe`
-all differ for the same point in the same string: a `case` or a subshell written
-inside a body no longer reaches the top-level clause stack, and a segment the
-main loop reads through `""` this one reads through `&&`. Traced rather than
-proved exhaustively, every such difference leaves `substStates` equal to or **less**
-certain than the main loop, which is bash-correct, since a substitution body is
-a subshell and its `cd`, its `case` and its assignments never reach the parent.
-More certain is the direction that scans the wrong file and reports clean, and
-it is the one the paragraph above closed.
+**The two walks are deliberately not identical, and only one direction is a defect.** Marking removes the `(` and `)` that `Segments` inserts when it flattens an unquoted `$(…)`, so `Persists`, `Conditional`, `CaseArm` and `Pipe` all differ for the same point in the same string: a `case` or a subshell written inside a body no longer reaches the top-level clause stack, and a segment the main loop reads through `""` this one reads through `&&`.
+Traced rather than proved exhaustively, every such difference leaves `substStates` equal to or **less** certain than the main loop, which is bash-correct, since a substitution body is a subshell and its `cd`, its `case` and its assignments never reach the parent.
+More certain is the direction that scans the wrong file and reports clean, and it is the one the paragraph above closed.
 
-**`SegmentsOfStripped` exists because stripping twice is not idempotent.** The
-first pass leaves the `<<WORD` operator behind with its body and terminator
-gone, and a second re-arms it and swallows everything after it. Driven on this
-segmenter: `cat <<EOF\nbody\nEOF\ncd sub && cat x`, stripped own-level and
-segmented again, comes back as `cat` alone, with the `cd` and the read after it
-gone.
+**`SegmentsOfStripped` exists because stripping twice is not idempotent.** The first pass leaves the `<<WORD` operator behind with its body and terminator gone, and a second re-arms it and swallows everything after it. Driven on this segmenter: `cat <<EOF\nbody\nEOF\ncd sub && cat x`, stripped own-level and segmented again, comes back as `cat` alone, with the `cd` and the read after it gone.
 
 ### A refusal is whole-call, and the reason names one segment of it
 
-A `PreToolUse` deny refuses the tool call. It does not refuse the segment the
-reason names, and there is no partial form -- the command string never reaches
-a shell, so every segment in it is equally unrun.
+A `PreToolUse` deny refuses the tool call.
+It does not refuse the segment the reason names, and there is no partial form -- the command string never reaches a shell, so every segment in it is equally unrun.
 
-That is the safe direction and it is not obvious from the reason, which names a
-single command because that is the only caller-derived token it can safely
-carry. A call bundling a mutation with a verification reads as though the
-verification alone was at issue.
+That is the safe direction and it is not obvious from the reason, which names a single command because that is the only caller-derived token it can safely carry.
+A call bundling a mutation with a verification reads as though the verification alone was at issue.
 
 **Driven 2026-09-04**, with the marker file confirmed absent first:
 
@@ -3481,94 +2039,47 @@ verification alone was at issue.
 echo "the mutation ran" > <scratchpad>/marker.txt && grep -ln 'anything' docs/queue/*.md
 ```
 
-The refusal named the `grep`'s glob operand. `marker.txt` was still absent
-afterwards, so the `echo` ahead of the `&&` never ran either.
+The refusal named the `grep`'s glob operand.
+`marker.txt` was still absent afterwards, so the `echo` ahead of the `&&` never ran either.
 
-That exhibit was driven on a build where an unresolvable operand denied. A glob
-operand defers since 2026-09-05 and expands since 2026-09-06, so the same
-command runs whole today with every `Q*.md` scanned, and the mechanism is now
-exercised by the refusals that remain — a finding, an `env` dump, a guarded
-path — where it holds unchanged: a deny is still whole-call.
+That exhibit was driven on a build where an unresolvable operand denied.
+A glob operand defers since 2026-09-05 and expands since 2026-09-06, so the same command runs whole today with every `Q*.md` scanned, and the mechanism is now exercised by the refusals that remain — a finding, an `env` dump, a guarded path — where it holds unchanged: a deny is still whole-call.
 
-So a session that bundles an edit with the grep that checks it loses the edit,
-and the only thing in the transcript is a scanner error about the grep. Split a
-mutation into its own call -- which is what
-[`CLAUDE.md`](../../CLAUDE.md) already asks for on a different ground, that a
-file change is confirmed by reading the file rather than by the exit status of
-the call that wrote it. The two rules meet here: the call that bundles the
-write with its own check is the one whose refusal is silent in both directions.
+So a session that bundles an edit with the grep that checks it loses the edit, and the only thing in the transcript is a scanner error about the grep.
+Split a mutation into its own call -- which is what [`CLAUDE.md`](../../CLAUDE.md) already asks for on a different ground, that a file change is confirmed by reading the file rather than by the exit status of the call that wrote it.
+The two rules meet here: the call that bundles the write with its own check is the one whose refusal is silent in both directions.
 
 ## Output discipline
 
-**The raw secret never enters a struct that outlives the match.** The
-predecessor's `Finding` carried `secretValue` beside `matchRedacted`; tracing
-showed it was used only as a dedup key and never printed, but the field's
-existence is a standing hazard. Findings here carry a truncated
-`sha256(rule_id || value)` for dedup and nothing else.
+**The raw secret never enters a struct that outlives the match.** The predecessor's `Finding` carried `secretValue` beside `matchRedacted`; tracing showed it was used only as a dedup key and never printed, but the field's existence is a standing hazard.
+Findings here carry a truncated `sha256(rule_id || value)` for dedup and nothing else.
 
-**Findings emit rule ID, path, and byte offset — no fragment, not even a
-redacted one.** Everything a hook writes to stderr reaches the API, so an
-8-character redacted window is 8 characters of the secret sent to the place the
-scanner exists to keep it away from.
+**Findings emit rule ID, path, and byte offset — no fragment, not even a redacted one.** Everything a hook writes to stderr reaches the API, so an 8-character redacted window is 8 characters of the secret sent to the place the scanner exists to keep it away from.
 
-**Control characters are escaped in every emitted string.** Paths and rule
-descriptions both reach a terminal; C0, DEL, and the bidi overrides get escaped
-before anything is written.
+**Control characters are escaped in every emitted string.** Paths and rule descriptions both reach a terminal; C0, DEL, and the bidi overrides get escaped before anything is written.
 
-**There is no in-band bypass tag.** A magic string that turns the scanner off is
-a prompt-injection surface, because any content the model reads can contain it —
-including the file being scanned. The escape hatch is `SPILL_GUARD_OVERRIDE=`
-in command position, matching `WORKSPACE_GUARD_OVERRIDE` and
-`PROD_GUARD_OVERRIDE`. `internal/hook/override.go` reads it from an inline
-assignment prefix on a `Bash` command and from nowhere else — not from
-`os.Getenv`, because an exported variable and a `settings.json` `env` block are
-both durable, both silent, and both writable by the model, one of them at
-`.claude/settings.local.json`.
+**There is no in-band bypass tag.** A magic string that turns the scanner off is a prompt-injection surface, because any content the model reads can contain it — including the file being scanned.
+The escape hatch is `SPILL_GUARD_OVERRIDE=` in command position, matching `WORKSPACE_GUARD_OVERRIDE` and `PROD_GUARD_OVERRIDE`.
+`internal/hook/override.go` reads it from an inline assignment prefix on a `Bash` command and from nowhere else — not from `os.Getenv`, because an exported variable and a `settings.json` `env` block are both durable, both silent, and both writable by the model, one of them at `.claude/settings.local.json`.
 
-**The prefix is one bash would call a prefix, and that took a lexer change.**
-A shell settles what a word IS before it removes the quotes, so
-`'SPILL_GUARD_OVERRIDE=x' cmd` is not an assignment at all -- bash looks for a
-program of that name, fails, and runs nothing. The lexer used to hand this
-layer a quote-stripped token with no record that a quote had been there, so
-nine spellings armed a hatch bash never applied, and `'if'` reached it too by
-being peeled as a reserved word. Both now read the word the way bash does:
-`lex` returns each token's quote provenance beside it, and quoting up to and
-including the `=` disarms the assignment where quoting inside the value
-(`SPILL_GUARD_OVERRIDE='a reason'`, the documented form) does not. What that
-cost was never an allow -- the destination is a confirmation -- but the whole
-defence of command-position-only is **legibility**, that a reader of the prompt
-can see the override in the command they are approving, and these are spellings
-no reader would have called one.
+**The prefix is one bash would call a prefix, and that took a lexer change.** A shell settles what a word IS before it removes the quotes, so `'SPILL_GUARD_OVERRIDE=x' cmd` is not an assignment at all -- bash looks for a program of that name, fails, and runs nothing.
+The lexer used to hand this layer a quote-stripped token with no record that a quote had been there, so nine spellings armed a hatch bash never applied, and `'if'` reached it too by being peeled as a reserved word.
+Both now read the word the way bash does: `lex` returns each token's quote provenance beside it, and quoting up to and including the `=` disarms the assignment where quoting inside the value (`SPILL_GUARD_OVERRIDE='a reason'`, the documented form) does not.
+What that cost was never an allow -- the destination is a confirmation -- but the whole defence of command-position-only is **legibility**, that a reader of the prompt can see the override in the command they are approving, and these are spellings no reader would have called one.
 
-An array subscript disarms it too, and for the other reason. `FOO[0]=x cmd` is
-a prefix bash peels, so Q175 taught the scan to peel it -- and bash exports
-nothing from it, reporting that `FOO[0]` is `not a valid identifier` and leaving the
-name alone, driven on 5.3.15. So the word is a prefix and arms no variable, and
-`SPILL_GUARD_OVERRIDE[0]=r` has to be read that way at both sites rather than
-one: peeled, so the reader behind it is found, and refused, so the hatch is
-not opened by a spelling the shell never wrote. The name comparison does not
-give this for free -- a `Cut` on `=` leaves `SPILL_GUARD_OVERRIDE[0]`, which
-compares unequal by accident and would stop doing so the moment the subscript
-moved -- so `override.go` reads the form `SplitAssignment` reports.
+An array subscript disarms it too, and for the other reason.
+`FOO[0]=x cmd` is a prefix bash peels, so Q175 taught the scan to peel it -- and bash exports nothing from it, reporting that `FOO[0]` is `not a valid identifier` and leaving the name alone, driven on 5.3.15.
+So the word is a prefix and arms no variable, and `SPILL_GUARD_OVERRIDE[0]=r` has to be read that way at both sites rather than one: peeled, so the reader behind it is found, and refused, so the hatch is not opened by a spelling the shell never wrote.
+The name comparison does not give this for free -- a `Cut` on `=` leaves `SPILL_GUARD_OVERRIDE[0]`, which compares unequal by accident and would stop doing so the moment the subscript moved -- so `override.go` reads the form `SplitAssignment` reports.
 
-**It downgrades a block to a confirmation, never to an allow.** That is the
-half of "matching those two" that decides what the hatch is worth: both of them
-downgrade to a prompt as well. The argument is this document's own opening —
-what is missing today is any moment where somebody is told a credential is
-about to leave the machine, and an override that allowed silently would delete
-that moment in exactly the calls that have one to lose. So the scan runs on an
-overridden call, and the findings are what the confirmation carries. A call
-that scans clean is silent with a prefix exactly as it is without one — except
-where the prefix carries no reason, which is refused before the scan runs and
-so blocks a call that would otherwise have been allowed. That is deliberate:
-articulating why is the whole of what this hatch controls for, and an empty
-value skips exactly that.
+**It downgrades a block to a confirmation, never to an allow.** That is the half of "matching those two" that decides what the hatch is worth: both of them downgrade to a prompt as well.
+The argument is this document's own opening — what is missing today is any moment where somebody is told a credential is about to leave the machine, and an override that allowed silently would delete that moment in exactly the calls that have one to lose.
+So the scan runs on an overridden call, and the findings are what the confirmation carries.
+A call that scans clean is silent with a prefix exactly as it is without one — except where the prefix carries no reason, which is refused before the scan runs and so blocks a call that would otherwise have been allowed.
+That is deliberate: articulating why is the whole of what this hatch controls for, and an empty value skips exactly that.
 
-The encoding is `permissionDecision: "ask"`, and it needed measuring for the
-reason the block encodings did — a shape that is accepted and ignored runs the
-call. Measured 2026-08-28 against Claude Code 2.1.238 on darwin/arm64, driving
-a real hook under `-p --output-format stream-json`, with the observable the
-marker a `Bash` call echoes coming back in a `tool_result`:
+The encoding is `permissionDecision: "ask"`, and it needed measuring for the reason the block encodings did — a shape that is accepted and ignored runs the call.
+Measured 2026-08-28 against Claude Code 2.1.238 on darwin/arm64, driving a real hook under `-p --output-format stream-json`, with the observable the marker a `Bash` call echoes coming back in a `tool_result`:
 
 | Hook stdout | Permission mode | The marker | What the model receives |
 |---|---|---|---|
@@ -3576,102 +2087,57 @@ marker a `Bash` call echoes coming back in a `tool_result`:
 | a `deny` object — control | default | **absent** | the reason, verbatim |
 | an `ask` object | default | **absent** | the reason, verbatim |
 
-So an ask nobody can answer withholds the result exactly as a deny does. Both
-controls fired, which is what separates that from a probe reporting every arm
-blocked.
+So an ask nobody can answer withholds the result exactly as a deny does.
+Both controls fired, which is what separates that from a probe reporting every arm blocked.
 
-**What this table cannot show, and a fourth row that pretended otherwise.** An
-earlier version carried an `ask` arm under `bypassPermissions`, returning the
-same result. It was not evidence: `-p` has no permission UI for the mode to act
-on, so the two arms differ by a flag that does nothing there, and a control
-whose result does not move when you vary its input is a reading about the
-instrument. It is dropped rather than kept with a caveat.
+**What this table cannot show, and a fourth row that pretended otherwise.** An earlier version carried an `ask` arm under `bypassPermissions`, returning the same result.
+It was not evidence: `-p` has no permission UI for the mode to act on, so the two arms differ by a flag that does nothing there, and a control whose result does not move when you vary its input is a reading about the instrument.
+It is dropped rather than kept with a caveat.
 
-So an ask reaching a person is **undriven here** and rests on prod-guard 2.5.2
-shipping this encoding for its own override downgrade. The arm that matters —
-an interactive session under `bypassPermissions`, where an ask might be
-approved with nobody reading it — cannot be driven from a harness with no human
-in it, and is not driven.
+So an ask reaching a person is **undriven here** and rests on prod-guard 2.5.2 shipping this encoding for its own override downgrade.
+The arm that matters — an interactive session under `bypassPermissions`, where an ask might be approved with nobody reading it — cannot be driven from a harness with no human in it, and is not driven.
 
-**Which is why the downgrade does not fire in that mode at all.** For a
-fail-closed tool the undriven arm must not be the permissive one, so
-`permission_mode` of `bypassPermissions` keeps the block and says so in the
-reason. That costs the user nothing they had — an ask nobody answers stops the
-call too — and it sends the reason to the model instead of stalling the session
-on an unanswerable prompt. prod-guard takes the same branch at
-`scripts/bash-prod-guard.py:2547`, for both halves of that argument.
+**Which is why the downgrade does not fire in that mode at all.** For a fail-closed tool the undriven arm must not be the permissive one, so `permission_mode` of `bypassPermissions` keeps the block and says so in the reason.
+That costs the user nothing they had — an ask nobody answers stops the call too — and it sends the reason to the model instead of stalling the session on an unanswerable prompt. prod-guard takes the same branch at `scripts/bash-prod-guard.py:2547`, for both halves of that argument.
 
-The mode is read from the payload, driven 2026-08-28: every PreToolUse payload
-from 2.1.238 carried `permission_mode`, reading `default` and
-`bypassPermissions` to match the flag the session started with.
+The mode is read from the payload, driven 2026-08-28: every PreToolUse payload from 2.1.238 carried `permission_mode`, reading `default` and `bypassPermissions` to match the flag the session started with.
 
-**That reading is the whole of the evidence that this branch is live rather than
-dead code, and no test can add to it.** A unit test hands the decoder a payload
-carrying the field, so it exercises the branch whether or not Claude Code ever
-sends one — the fixture supplies the value the mechanism depends on. The tests
-below pin what the branch *does*; only the raw payload says it will ever be
-reached. Re-take it by logging a real payload, not by reading the suite.
+**That reading is the whole of the evidence that this branch is live rather than dead code, and no test can add to it.** A unit test hands the decoder a payload carrying the field, so it exercises the branch whether or not Claude Code ever sends one — the fixture supplies the value the mechanism depends on.
+The tests below pin what the branch *does*; only the raw payload says it will ever be reached.
+Re-take it by logging a real payload, not by reading the suite.
 
-Only `bypassPermissions` suppresses the downgrade; absent, empty and unknown all
-still downgrade. An allowlist of interactive modes would turn every mode Claude
-Code adds into a hatch that silently stops working, and branch-guard's #33 is
-the measurement against it: an ask in `auto` reaches a prompt somebody answers,
-so treating it as human-free was the defect there.
+Only `bypassPermissions` suppresses the downgrade; absent, empty and unknown all still downgrade.
+An allowlist of interactive modes would turn every mode Claude Code adds into a hatch that silently stops working, and branch-guard's #33 is the measurement against it: an ask in `auto` reaches a prompt somebody answers, so treating it as human-free was the defect there.
 
-**The residual, stated rather than implied.** The two choices fail in opposite
-directions and neither is free. A denylist means a future human-free mode under
-a new name still downgrades to an ask nobody reads. An allowlist means every
-interactive mode Claude Code adds is a hatch that stops working until this
-binary is updated, which is #33's failure re-opened. The denylist is what both
-sibling guards chose, and it is the one whose failure needs Claude Code to add a
-*new* unattended mode rather than merely to add a mode.
+**The residual, stated rather than implied.** The two choices fail in opposite directions and neither is free.
+A denylist means a future human-free mode under a new name still downgrades to an ask nobody reads.
+An allowlist means every interactive mode Claude Code adds is a hatch that stops working until this binary is updated, which is #33's failure re-opened.
+The denylist is what both sibling guards chose, and it is the one whose failure needs Claude Code to add a *new* unattended mode rather than merely to add a mode.
 
-**Per-rule disablement in `.claude/spill-guard.json` is retired, and it was
-never the same kind of thing.** The design once had `internal/rules` merge a
-project ruleset over the shipped one, with `Load` taking both as bytes, so
-honouring the file was one argument away. What that argument would admit is a
-two-step bypass: write the file with `{"id": "…", "enabled": false}`, then read
-the secret. Neither step is caught. `Write` and `Edit` are not in the scanned
-set, and a `cat > .claude/spill-guard.json` heredoc that *is* scanned carries no
-secret, so a scanner looking for credentials passes it either way.
+**Per-rule disablement in `.claude/spill-guard.json` is retired, and it was never the same kind of thing.** The design once had `internal/rules` merge a project ruleset over the shipped one, with `Load` taking both as bytes, so honouring the file was one argument away.
+What that argument would admit is a two-step bypass: write the file with `{"id": "…", "enabled": false}`, then read the secret.
+Neither step is caught.
+`Write` and `Edit` are not in the scanned set, and a `cat > .claude/spill-guard.json` heredoc that *is* scanned carries no secret, so a scanner looking for credentials passes it either way.
 
-Saying the model can author both hatches is true and settles nothing, because
-the design does not defend against a user who means it. What separates them is
-scope and legibility. The prefix excuses one call and sits in the command the
-human is being asked to approve; a config entry disables a rule for every later
-call in every later session, and the write that made it is one line of
-scrollback. One is a decision somebody takes; the other is a decision somebody
-took once and nobody re-reads.
+Saying the model can author both hatches is true and settles nothing, because the design does not defend against a user who means it.
+What separates them is scope and legibility.
+The prefix excuses one call and sits in the command the human is being asked to approve; a config entry disables a rule for every later call in every later session, and the write that made it is one line of scrollback.
+One is a decision somebody takes; the other is a decision somebody took once and nobody re-reads.
 
 The three guards that suggest themselves each fail on their own terms:
 
-- **Scan `Write` and `Edit`.** Does not close it. The bypass is the
-  disablement, and the disablement carries no secret to find.
-- **Let a project entry make a rule stricter and never weaker.** Not decidable
-  from the schema, because every field an override can set has a weakening
-  direction — `enabled: false`, a regex that matches nothing, keywords the
-  prefilter will never find in the buffer, a raised entropy floor under the
-  ceiling `compile` already enforces. The one mechanically clean version is *a
-  project entry may add a rule and may not touch a shipped one*, which the
-  merge was shaped to express and which removes the reason the file exists:
-  turning a noisy rule off is the precision case the whole ruleset is tuned
-  for.
-- **Require a signature from outside the workspace.** Needs a key, a verifier
-  and somebody to hold both, in a binary whose stated property is an empty
-  supply chain.
+- **Scan `Write` and `Edit`.** Does not close it.
+  The bypass is the disablement, and the disablement carries no secret to find.
+- **Let a project entry make a rule stricter and never weaker.** Not decidable from the schema, because every field an override can set has a weakening direction — `enabled: false`, a regex that matches nothing, keywords the prefilter will never find in the buffer, a raised entropy floor under the ceiling `compile` already enforces.
+  The one mechanically clean version is *a project entry may add a rule and may not touch a shipped one*, which the merge was shaped to express and which removes the reason the file exists: turning a noisy rule off is the precision case the whole ruleset is tuned for.
+- **Require a signature from outside the workspace.** Needs a key, a verifier and somebody to hold both, in a binary whose stated property is an empty supply chain.
 
-So the fourth answer is the one taken: there is no project ruleset. A
-precision complaint is answered by changing the shipped set, which is a pull
-request somebody reviews, rather than by a local override the model can author
-through an unscanned `Write`. That removes the bypass instead of guarding it
-and keeps the empty supply chain — no key, no verifier, nobody holding both.
-What it costs is local tuning, which nobody has measured and the shipped set
-absorbs. The removal reached the loader: `Load` takes one argument, and the
-merge, its overlay and the file reader that opened either path are gone, so
-restoring the feature is a diff somebody reviews rather than a token somebody
-passes — the same reasoning this document applies to a raw secret in a struct
-that outlives the match. The environment prefix had no such question, which is
-why it landed first.
+So the fourth answer is the one taken: there is no project ruleset.
+A precision complaint is answered by changing the shipped set, which is a pull request somebody reviews, rather than by a local override the model can author through an unscanned `Write`.
+That removes the bypass instead of guarding it and keeps the empty supply chain — no key, no verifier, nobody holding both.
+What it costs is local tuning, which nobody has measured and the shipped set absorbs.
+The removal reached the loader: `Load` takes one argument, and the merge, its overlay and the file reader that opened either path are gone, so restoring the feature is a diff somebody reviews rather than a token somebody passes — the same reasoning this document applies to a raw secret in a struct that outlives the match.
+The environment prefix had no such question, which is why it landed first.
 
 ## Repo layout
 
@@ -3693,170 +2159,89 @@ testdata/corpus/          Precision fixtures — clean files that must not flag.
 docs/design/              This directory.
 ```
 
-The launcher is load-bearing, not glue: `hooks.json` invoking the binary
-directly would fail open when the binary is absent. See
-[`distribution.md`](distribution.md).
+The launcher is load-bearing, not glue: `hooks.json` invoking the binary directly would fail open when the binary is absent.
+See [`distribution.md`](distribution.md).
 
 ## CI
 
-Every property this project claims is enforced by a job, because a property
-stated in a README and checked by nobody is a property that decays.
+Every property this project claims is enforced by a job, because a property stated in a README and checked by nobody is a property that decays.
 
-What runs today is not enumerated here, because a second copy of a list is a
-copy that drifts. `GATES` in the `Makefile` is the source of truth; `make
-list-gates` names every gate with what it covers, the workflow's job list is
-asserted against it by the `gate-drift` gate, and
-[`CLAUDE.md`](../../CLAUDE.md#running-the-gates) carries the table generated
-from it. `make check` runs the lot.
+What runs today is not enumerated here, because a second copy of a list is a copy that drifts.
+`GATES` in the `Makefile` is the source of truth; `make list-gates` names every gate with what it covers, the workflow's job list is asserted against it by the `gate-drift` gate, and [`CLAUDE.md`](../../CLAUDE.md#running-the-gates) carries the table generated from it.
+`make check` runs the lot.
 
-The `precision` job is the one that matters most. Recall regressions are
-visible — somebody reports a missed secret. Precision regressions are invisible
-until the noise has trained everyone to ignore the tool, which is how the
-inherited ruleset arrived at more than 5,600 matches and zero true positives. It
-runs the shipped ruleset over `testdata/corpus/`, pins the false-positive count on the
-clean half at zero, and requires each planted file to produce exactly one
-finding.
+The `precision` job is the one that matters most.
+Recall regressions are visible — somebody reports a missed secret.
+Precision regressions are invisible until the noise has trained everyone to ignore the tool, which is how the inherited ruleset arrived at more than 5,600 matches and zero true positives.
+It runs the shipped ruleset over `testdata/corpus/`, pins the false-positive count on the clean half at zero, and requires each planted file to produce exactly one finding.
 
-**A second job disabling one rule is not separate from it.** The design asked
-for one, and every gate here is already paired with a mutation control that
-breaks its property and requires it to go red — so turning a rule off is a step
-of `precision-mutation-control` rather than a job of its own, which is also the
-only shape `gate-drift` accepts: a job in no gate's name is one `make check`
-does not cover. The other three steps break the corpus rather than the ruleset,
-because a zero over an empty corpus, a zero over a corpus nothing adversarial
-is left in, and a zero from a test that quietly stopped running are all the same
-zero from outside.
+**A second job disabling one rule is not separate from it.** The design asked for one, and every gate here is already paired with a mutation control that breaks its property and requires it to go red — so turning a rule off is a step of `precision-mutation-control` rather than a job of its own, which is also the only shape `gate-drift` accepts: a job in no gate's name is one `make check` does not cover.
+The other three steps break the corpus rather than the ruleset, because a zero over an empty corpus, a zero over a corpus nothing adversarial is left in, and a zero from a test that quietly stopped running are all the same zero from outside.
 
 ### Which surfaces a gate can drive
 
-Every gate above runs the scanner. None of them runs Claude Code, and the
-defects this project exists to prevent are found on the far side of that
-line: the batch of 2026-08-28 filed seven — Q85, Q86, Q91 and the rest — every
-one found by driving a real session, none by reading, and all seven under a
-green `make check` at the moment they were found. Five were fail-opens, a file
-crossing into the model's context with the scanner reporting clean. That class
-has no symptom and no reporter; a user's whole experience of it is a session
-that felt fine. So which surfaces a gate *can* drive is a stated property of
-this repository, and the answer is one of three.
+Every gate above runs the scanner.
+None of them runs Claude Code, and the defects this project exists to prevent are found on the far side of that line: the batch of 2026-08-28 filed seven — Q85, Q86, Q91 and the rest — every one found by driving a real session, none by reading, and all seven under a green `make check` at the moment they were found.
+Five were fail-opens, a file crossing into the model's context with the scanner reporting clean.
+That class has no symptom and no reporter; a user's whole experience of it is a session that felt fine.
+So which surfaces a gate *can* drive is a stated property of this repository, and the answer is one of three.
 
-**The boundary is the first API call, not prompt-against-tool.** Everything
-before it is free and everything after it costs a credential. Driven 2026-09-01
-against Claude Code 2.1.251 on darwin/arm64: `claude -p` under a clean `HOME`
-holding no credential reports `Not logged in · Please run /login`, bills 0
-input and 0 output tokens at `total_cost_usd` 0 — and before it gets there it
-has already resolved the `@` tokens it recognises, written each resolved file to
-the transcript as an attachment whose `attachment.type` is `file`, and fired
-`UserPromptSubmit` with the payload `internal/hook` decodes. All 24 cases of
-`internal/hook/testdata/prompt-oracle.json` were replayed that way over the
-fixture's own tree, and 24 of 24 agreed with the recorded `harness_files`: 87
-seconds for the set, 3.63s a case, 14 cases expecting a non-empty splice, 33
-files crossing. Two controls, because a uniform 24 of 24 is usually a fact
-about the instrument: dropping one `@` token from the `positives` prompt moved
-the harness's own answer from three files to two, and a prompt naming
-`@secret.txt @sub/inner.txt @nosuchfile.txt @notafile` produced `file` records
-for the two that resolve and none for the two that do not.
+**The boundary is the first API call, not prompt-against-tool.** Everything before it is free and everything after it costs a credential.
+Driven 2026-09-01 against Claude Code 2.1.251 on darwin/arm64: `claude -p` under a clean `HOME` holding no credential reports `Not logged in · Please run /login`, bills 0 input and 0 output tokens at `total_cost_usd` 0 — and before it gets there it has already resolved the `@` tokens it recognises, written each resolved file to the transcript as an attachment whose `attachment.type` is `file`, and fired `UserPromptSubmit` with the payload `internal/hook` decodes.
+All 24 cases of `internal/hook/testdata/prompt-oracle.json` were replayed that way over the fixture's own tree, and 24 of 24 agreed with the recorded `harness_files`: 87 seconds for the set, 3.63s a case, 14 cases expecting a non-empty splice, 33 files crossing.
+Two controls, because a uniform 24 of 24 is usually a fact about the instrument: dropping one `@` token from the `positives` prompt moved the harness's own answer from three files to two, and a prompt naming `@secret.txt @sub/inner.txt @nosuchfile.txt @notafile` produced `file` records for the two that resolve and none for the two that do not.
 
-A `Read` path or a `Bash` operand reaches a hook only once the model has chosen
-a tool call, and choosing one is an API call. The observation beside that
-mechanism is 25 unauthenticated runs with the `PreToolUse` matcher wired the
-whole time, in which the recording hook fired `UserPromptSubmit` 25 times and
-`PreToolUse` **0** times. Neither alone would settle it; together they do.
+A `Read` path or a `Bash` operand reaches a hook only once the model has chosen a tool call, and choosing one is an API call.
+The observation beside that mechanism is 25 unauthenticated runs with the `PreToolUse` matcher wired the whole time, in which the recording hook fired `UserPromptSubmit` 25 times and `PreToolUse` **0** times.
+Neither alone would settle it; together they do.
 
-**So without a model only the prompt surface can be driven, and the boundary
-turned out to be a model rather than a credential.** Driven 2026-11-04 on 2.1.290:
-with `ANTHROPIC_BASE_URL` at a loopback fake answering one `tool_use`, and a dummy
-key, the real binary fires `PreToolUse`, spawns the real hook and acts on its
-verdict, and the fake reads the result in the next request. That is
-[`hook-harness.yml`](../../.github/workflows/hook-harness.yml), and
-[the shell the harness picks](#the-hook-command-has-to-parse-under-two-shells) is
-what it found. A fake chooses the call the script asks for, so it says nothing
-about what a model would choose. The job over the prompt surface is `.github/workflows/prompt-oracle.yml`, which downloads
-a pinned `claude`, replays every case in the census over the fixture's own
-tree, and compares what the harness spliced against what the census says it
-splices. It is a workflow rather than a `make` gate: the gates run on a fresh
-clone against the tool tier `make doctor` requires, and Claude Code is not in
-it.
+**So without a model only the prompt surface can be driven, and the boundary turned out to be a model rather than a credential.** Driven 2026-11-04 on 2.1.290: with `ANTHROPIC_BASE_URL` at a loopback fake answering one `tool_use`, and a dummy key, the real binary fires `PreToolUse`, spawns the real hook and acts on its verdict, and the fake reads the result in the next request.
+That is [`hook-harness.yml`](../../.github/workflows/hook-harness.yml), and [the shell the harness picks](#the-hook-command-has-to-parse-under-two-shells) is what it found.
+A fake chooses the call the script asks for, so it says nothing about what a model would choose.
+The job over the prompt surface is `.github/workflows/prompt-oracle.yml`, which downloads a pinned `claude`, replays every case in the census over the fixture's own tree, and compares what the harness spliced against what the census says it splices.
+It is a workflow rather than a `make` gate: the gates run on a fresh clone against the tool tier `make doctor` requires, and Claude Code is not in it.
 
-Three things it carries that the drive above did not, all of them there so a
-run that established nothing cannot read as a run that found no drift.
+Three things it carries that the drive above did not, all of them there so a run that established nothing cannot read as a run that found no drift.
 
-- **The census names the harness it was confirmed against.** `harness.version`
-  in the fixture, and the job asserts the binary it downloaded reports that
-  same version — so moving the pin without re-taking the census fails rather
-  than confirming nothing under a version nobody checked. Re-taking it is
-  `--record` against the new binary, `--compare --allow-version-drift` to read
-  what moved, then both numbers in one commit.
-- **A floor on what was observed, not on what the fixture holds.** Ten of the
-  twenty-four cases expect an empty splice, so a replay that drove nothing at
-  all — a binary that failed to download, a `HOME` the harness would not write
-  under — agrees with ten of them and reports green. The job requires the
-  replay to have seen the census's own 14 non-empty cases and 33 files.
-- **A mutation control, over the recording rather than a second drive.**
-  Observing and comparing are separate invocations, so the control mutates the
-  census and holds it against the run that already happened: a moved
-  expectation and a recording that spliced nothing, both of which must go red.
+- **The census names the harness it was confirmed against.** `harness.version` in the fixture, and the job asserts the binary it downloaded reports that same version — so moving the pin without re-taking the census fails rather than confirming nothing under a version nobody checked.
+  Re-taking it is `--record` against the new binary, `--compare --allow-version-drift` to read what moved, then both numbers in one commit.
+- **A floor on what was observed, not on what the fixture holds.** Ten of the twenty-four cases expect an empty splice, so a replay that drove nothing at all — a binary that failed to download, a `HOME` the harness would not write under — agrees with ten of them and reports green.
+  The job requires the replay to have seen the census's own 14 non-empty cases and 33 files.
+- **A mutation control, over the recording rather than a second drive.** Observing and comparing are separate invocations, so the control mutates the census and holds it against the run that already happened: a moved expectation and a recording that spliced nothing, both of which must go red.
 
-The tree the probes run in lives in the census beside the cases, because this
-and the Go test build it separately and a tree written twice drifts — which
-reads exactly like the grammar having drifted.
+The tree the probes run in lives in the census beside the cases, because this and the Go test build it separately and a tree written twice drifts — which reads exactly like the grammar having drifted.
 
-Re-taken 2026-09-07 against 2.1.261 on darwin/arm64: 24 of 24 cases agree with
-the recording taken 2026-08-28 against 2.1.238, so the `@` grammar did not move
-across those twenty-three releases. The job runs on `ubuntu-latest`, which is
-the second platform the census has been confirmed on and the only one CI reads.
+Re-taken 2026-09-07 against 2.1.261 on darwin/arm64: 24 of 24 cases agree with the recording taken 2026-08-28 against 2.1.238, so the `@` grammar did not move across those twenty-three releases.
+The job runs on `ubuntu-latest`, which is the second platform the census has been confirmed on and the only one CI reads.
 
 For `Read` and `Bash`, what stands in:
 
-- `spill-guard selftest` drives canary payloads through `hook.Run` in-process
-  on every surface. It proves the binary scans and blocks; it cannot prove
-  Claude Code is invoking it, and its report says so rather than letting a
-  green run imply it.
-- The measurements this document rests on — [the exit-code
-  contract](#the-exit-code-contract-measured), [the
-  timeout](#the-third-shape-is-a-timeout-and-it-is-the-one-this-repo-configures),
-  the `systemMessage` channel — were each taken by hand against a real session
-  holding a credential, on both events, and are re-taken the same way. Their
-  dates are in the sections that carry them, which is the only currency such a
-  measurement has.
-- The scanner's own budget and what the harness does past it were observed
-  in one drive on the prompt surface, by hand on 2026-11-01 and [recorded under
-  the budget](#driven-end-to-end-on-built-binaries). On `Read` and `Bash` they
-  are still composed from two measurements, because a tool call reaches the
-  hook only after an API call, and that sits behind this same boundary.
+- `spill-guard selftest` drives canary payloads through `hook.Run` in-process on every surface.
+  It proves the binary scans and blocks; it cannot prove Claude Code is invoking it, and its report says so rather than letting a green run imply it.
+- The measurements this document rests on — [the exit-code contract](#the-exit-code-contract-measured), [the timeout](#the-third-shape-is-a-timeout-and-it-is-the-one-this-repo-configures), the `systemMessage` channel — were each taken by hand against a real session holding a credential, on both events, and are re-taken the same way.
+  Their dates are in the sections that carry them, which is the only currency such a measurement has.
+- The scanner's own budget and what the harness does past it were observed in one drive on the prompt surface, by hand on 2026-11-01 and [recorded under the budget](#driven-end-to-end-on-built-binaries).
+  On `Read` and `Bash` they are still composed from two measurements, because a tool call reaches the hook only after an API call, and that sits behind this same boundary.
 
-A stated limitation is worth more than a gate that cannot fail. A `PreToolUse`
-job that ran with no credential would fire nothing and report no check, which
-reads exactly like passing — and a job that ran with one needs a credential
-this repository neither has nor wants, on a job a fork's pull request could not
-run at all, so it would gate the maintainer's pushes and nothing else.
+A stated limitation is worth more than a gate that cannot fail.
+A `PreToolUse` job that ran with no credential would fire nothing and report no check, which reads exactly like passing — and a job that ran with one needs a credential this repository neither has nor wants, on a job a fork's pull request could not run at all, so it would gate the maintainer's pushes and nothing else.
 
 ## Benchmarking, if you benchmark at all
 
-Four rules, each of which was learned by getting it wrong
-([`language-choice.md` §2](language-choice.md)):
+Four rules, each of which was learned by getting it wrong ([`language-choice.md` §2](language-choice.md)):
 
-- **Never benchmark on a repeated chunk.** A 176-byte block repeated 47,662
-  times overstated Rust by roughly 10x — it keeps the DFA cache warm and lets
-  literal prefilters skip everything.
+- **Never benchmark on a repeated chunk.** A 176-byte block repeated 47,662 times overstated Rust by roughly 10x — it keeps the DFA cache warm and lets literal prefilters skip everything.
 - **Use real heterogeneous files.**
-- **Verify match counts are identical before comparing any two timings.** An
-  early run compared 75 Python patterns against 66 Go ones.
-- **Measure fixed startup cost separately from throughput.** Below about 8 KB of
-  input it dominates completely, and a per-invocation hook lives there.
+- **Verify match counts are identical before comparing any two timings.** An early run compared 75 Python patterns against 66 Go ones.
+- **Measure fixed startup cost separately from throughput.** Below about 8 KB of input it dominates completely, and a per-invocation hook lives there.
 
 ## Open questions
 
-None left in this file. The three it opened with are all settled, two by
-measurement and one by argument off them:
+None left in this file.
+The three it opened with are all settled, two by measurement and one by argument off them:
 
-- **`PostToolUse` cannot withhold a result**, so nothing is catchable after the
-  fact — [measured](#posttooluse-cannot-withhold-a-result).
-- **Only exit 2 blocks, and a `deny` object on stdout outranks the exit code** —
-  [measured](#the-exit-code-contract-measured).
-- **What counts as human-typed** was the wrong axis, and the requirement it came
-  from is met by asking whether a payload field's bytes have crossed the
-  filesystem-to-context boundary yet —
-  [above](#what-gets-scanned-is-the-crossing-not-the-hop).
+- **`PostToolUse` cannot withhold a result**, so nothing is catchable after the fact — [measured](#posttooluse-cannot-withhold-a-result).
+- **Only exit 2 blocks, and a `deny` object on stdout outranks the exit code** — [measured](#the-exit-code-contract-measured).
+- **What counts as human-typed** was the wrong axis, and the requirement it came from is met by asking whether a payload field's bytes have crossed the filesystem-to-context boundary yet — [above](#what-gets-scanned-is-the-crossing-not-the-hop).
 
-One remains outside it, at the end of [`distribution.md`](distribution.md):
-whether `install.sh` should refuse to proceed without `cosign`.
+One remains outside it, at the end of [`distribution.md`](distribution.md): whether `install.sh` should refuse to proceed without `cosign`.

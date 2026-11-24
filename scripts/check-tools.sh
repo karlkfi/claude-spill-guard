@@ -15,7 +15,7 @@
 # in .github/workflows/tests.yml.
 #
 # The pinned linters are deliberately NOT in the list. golangci-lint,
-# govulncheck and actionlint are versioned in tools/go.mod and run through
+# govulncheck, actionlint and mdreflow are versioned in tools/go.mod and run through
 # a build from `tools/` (see tools/tools.go), so a contributor never installs
 # them and their absence from PATH is correct rather than a finding. Go is what
 # they need.
@@ -162,9 +162,9 @@ if [[ "$tier" == release || "$tier" == all ]]; then
 	report 'release only -- needed to cut a release, not to fix a bug' "$release_tools"
 fi
 
-printf 'The pinned linters are not in this list. golangci-lint, govulncheck and\n'
-printf 'actionlint are versioned in tools/go.mod and built from there (see\n'
-printf 'tools/tools.go), so Go being present is what they need from you.\n'
+printf 'The pinned linters are not in this list. golangci-lint, govulncheck,\n'
+printf 'actionlint and mdreflow are versioned in tools/go.mod and built from there\n'
+printf '(see tools/tools.go), so Go being present is what they need from you.\n'
 
 if [[ "$missing_release" -gt 0 ]]; then
 	printf '\n%d release-only tool(s) missing. That is not a problem unless you are\n' "$missing_release"

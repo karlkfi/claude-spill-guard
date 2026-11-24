@@ -9,14 +9,10 @@ mode: sentence
 max-width: 0
 
 exclude:
-  # GitHub renders these as a comment body, where a newline is a <br>. Each
-  # release file is also the published body byte for byte, which the
-  # release-notes gate holds.
+  # GitHub renders a release body as a comment, where a newline is a <br>, and
+  # the release-notes gate holds each file to its published body.
   - "/docs/releases/v*.md"
-  - "/.github/pull_request_template.md"
-  # Fixtures. The corpus is read for match counts and byte offsets, and the
-  # release-note bodies are inputs to check-release-note.py. A directory takes
-  # `/**`: a trailing slash alone does not match a file named on the command
-  # line, which is how scripts/check-md-reflow.py names them.
+  # The precision corpus, read for match counts and byte offsets. A directory
+  # takes `/**`: a trailing slash alone does not match a file named on the
+  # command line, which is how scripts/check-md-reflow.py names them.
   - "/testdata/corpus/*/**"
-  - "/testdata/release-note/**"
