@@ -454,6 +454,8 @@ func TestAStageThatIsNotKnownToPassThroughDoesNotCount(t *testing.T) {
 		"grep -rn foo . | cp /dev/stdin /dev/stderr | spill-guard filter",
 		"grep -rn foo . | sort -o /dev/stderr | spill-guard filter",
 		"grep -rn foo . | sort -uo /dev/stderr | spill-guard filter",
+		"grep -rn foo . | gsort -o /dev/stderr | spill-guard filter",
+		"grep -rn foo . | gsed 'w /dev/stderr' | spill-guard filter",
 		"grep -rn foo . | sort --output=/dev/stderr | spill-guard filter",
 		"grep -rn foo . | sort --out /dev/stderr | spill-guard filter",
 		"grep -rn foo . | sort --compress-program=x | spill-guard filter",
@@ -487,6 +489,7 @@ func TestAStageThatIsNotKnownToPassThroughDoesNotCount(t *testing.T) {
 		"grep -rn foo . | uniq -f 1 | spill-guard filter",
 		"grep -rn foo . | tail -3 | tr a-z A-Z | wc -l | cat | spill-guard filter",
 		"grep -rn foo . | grep --invert-match test | spill-guard filter",
+		"ggrep -rn foo . | ggrep -v test | ghead -5 | gsort -u | spill-guard filter",
 		// The applied instruction: whatever follows the filter reads only what
 		// it passed.
 		`grep -rn foo . | spill-guard filter | awk '{print > "/dev/stderr"}'`,

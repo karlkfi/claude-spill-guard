@@ -471,6 +471,11 @@ func downstream(segments []bash.Segment, i, k int) bool {
 // long option of a grep stage that resolveLong cannot name, which takes in
 // ugrep's `--filter` and `--pager`.
 func passThrough(name string, args []string) bool {
+	// GNU's tools as Homebrew installs them, a g ahead of the name (Q263).
+	switch n := strings.TrimPrefix(name, "g"); n {
+	case "head", "tail", "cut", "tr", "wc", "cat", "grep", "egrep", "fgrep", "sort", "uniq":
+		name = n
+	}
 	switch name {
 	case "head", "tail", "cut", "tr", "wc", "cat":
 		return true
