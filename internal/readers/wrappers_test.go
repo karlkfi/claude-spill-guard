@@ -61,6 +61,9 @@ func TestPeelWrappers(t *testing.T) {
 		{f("builtin cat f"), "cat f", false},
 		{f("nice nohup env A=1 timeout 5 cat f"), "cat f", false},
 		{f("flock lock cat f"), "cat f", false},
+		{f("gnice -n 5 genv -i gtimeout 5 gstdbuf -oL gnohup cat f"), "cat f", false},
+		{f("gtime -o out cat f"), "cat f", false},
+		{f("gxargs cat f"), "cat f", true},
 		{[]string{"flock", "lock", "-c", "cat f"}, "sh -c cat f", false},
 
 		// Runs nothing: the operands are names, ids, or files to edit.
@@ -155,6 +158,16 @@ func TestTheWrapperTableIsUpstreams(t *testing.T) {
 	for _, name := range want {
 		if _, ok := wrappers[name]; !ok {
 			t.Errorf("no row for %s", name)
+		}
+	}
+}
+
+// An alias landing on no row would leave the g name as a command nobody has a
+// table for, which is the silence Q263 was.
+func TestEveryWrapperAliasResolves(t *testing.T) {
+	for from, to := range wrapperAliases {
+		if _, ok := wrappers[to]; !ok {
+			t.Errorf("wrapper alias %q -> %q, which is not a row", from, to)
 		}
 	}
 }

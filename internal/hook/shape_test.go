@@ -18,6 +18,8 @@ var (
 	dumps = []string{
 		"env",
 		"printenv",
+		"genv",
+		"gprintenv",
 		"set",
 		"export",
 		"export -p",

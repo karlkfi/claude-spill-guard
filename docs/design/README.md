@@ -148,7 +148,7 @@ That is what `Segment.Pipe` is read for, with `Segment.StdoutAway` beside it: a 
 A redirect to a file is not read as a filter, so `env > vars.txt` is refused too.
 Re-taken with that reading on 2026-11-01, over 241,535 real `Bash` calls from 2026-07-26 to 2026-11-02, no verdict moved; 16 driven control rows moved 5, and 19 commands the segmenter could not split were left out.
 
-**Only the bare form of each command**: `env`, `printenv`, `set`, `export`, `export -p`, `declare -p`, `typeset -p`, and an inline `python`/`node` script naming `os.environ` or `process.env` without subscripting it.
+**Only the bare form of each command**: `env`, `printenv`, their Homebrew names `genv` and `gprintenv`, `set`, `export`, `export -p`, `declare -p`, `typeset -p`, and an inline `python`/`node` script naming `os.environ` or `process.env` without subscripting it.
 `env -0` still dumps and is not refused, and neither is `os.environ.items()`.
 Widening to catch them costs the precision above — every option this learns to see is another way to be wrong about a form somebody wrote deliberately — and `.keys()` sits on the other side of that line and is genuinely careful.
 The accident is the bare one.
