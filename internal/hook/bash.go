@@ -125,6 +125,12 @@ func bashTargets(command, cwd string) ([]target, error) {
 	// substituted head, which is where `o=setopt; $o globdots` resolves.
 	qualified := bash.GluedParen(command)
 	zshOptions := toolShellIsZsh() && bash.ChangesZshOptions(command)
+	if !toolShellIsBash() {
+		if shape := bash.ZshOnlyWord(command); shape != "" {
+			note(fmt.Errorf("the command holds %s, and the Bash tool's shell is not "+
+				"bash, so which files it would read is not settled here", shape))
+		}
+	}
 	lastpipe := mayLastpipe(command)
 	for len(queue) > 0 {
 		cur := queue[0]
