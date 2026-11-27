@@ -148,8 +148,8 @@ func TestShippedRulesetFlagsNothingInTheCleanCorpus(t *testing.T) {
 var inherited = []struct {
 	id    string
 	regex string
-	// floor is under what each reported when the corpus was assembled on
-	// 2026-08-25 -- 30 and 8 -- with room for a fixture to be edited.
+	// floor sits under what each reports, with room for a fixture to be
+	// edited. The test logs the current count.
 	floor int
 }{
 	{"pii-postal-code", `\b\d{5}(?:-\d{4})?\b`, 20},

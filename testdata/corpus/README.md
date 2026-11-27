@@ -64,12 +64,13 @@ Further layouts cannot be files at all — a CRLF fixture depends on what git do
 ## `clean/` has to stay adversarial
 
 A corpus gate pinned at zero is worth exactly what its clean half is worth, and a bland clean half reports zero for a reason that has nothing to do with the ruleset.
-So the clean files are checked against two of the rules that produced the inherited false positives — [`docs/design/language-choice.md`](../../docs/design/language-choice.md) §3 has them — and both still have to fire:
+So the clean files are checked against two of the rules that produced the inherited false positives — [`docs/design/language-choice.md`](../../docs/design/language-choice.md) §3 has them — and both still have to fire, at least as often as the floor beside each.
+`make precision` prints what each matches now.
 
-| Inherited rule | Matches on `clean/`, 2026-08-27 | Floor |
-|---|---|---|
-| `pii-postal-code` `\b\d{5}(?:-\d{4})?\b` | 31 | 20 |
-| `pii-phone-cn` | 8 | 6 |
+| Inherited rule | Floor |
+|---|---|
+| `pii-postal-code` `\b\d{5}(?:-\d{4})?\b` | 20 |
+| `pii-phone-cn` | 6 |
 
 The three worked examples the design names are all in here deliberately: `65536` in `buffers.go` and `nginx.conf`, the NodePort `30443` in `k8s-service.yaml` and `main.tf`, and the amdgpu DKMS string `1:6.16.13.30300400-2341068` in `dkms-status.txt`, whose `0400-2341068` slice was reported 268 times as a Chinese phone number.
 

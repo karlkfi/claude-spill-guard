@@ -198,7 +198,7 @@ It is a slice of the amdgpu DKMS version string `1:6.16.13.30300400-2341068`.
 
 Numeric PII patterns cannot be made precise by regex alone, so precision here comes from checksum validators, context gating, entropy floors and placeholder checks, and a numeric rule that cannot clear that ships off.
 `make precision` holds that: the shipped rules must report zero findings on [`testdata/corpus/clean/`](testdata/corpus/) and exactly one on each planted fixture.
-The clean corpus is adversarial, since on 2026-11-03 the old `pii-postal-code` pattern reported 31 matches on it and `pii-phone-cn` reported 8.
+The clean corpus is adversarial: the same target runs the old `pii-postal-code` and `pii-phone-cn` patterns over it, and fails if either stops matching often enough.
 
 [`docs/design/language-choice.md`](docs/design/language-choice.md) has the full analysis, the benchmarks, and a list of confident claims that measurement killed.
 
