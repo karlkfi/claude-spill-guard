@@ -1873,12 +1873,12 @@ It reaches bash on two machines: one whose `SHELL` names a bash the harness coul
 Both already have nothing naming a usable shell, so answering *not bash* costs them a record and never expands under a shell this did not identify.
 
 **What the narrowing does not reach is the segmentation, so Q184 defers on it rather than modelling it.** A zsh-only shape `Segments` splits as a bash operator never arrives as a glob operand: `cat (a|b).env` is a pipeline to it and `cat k<1-2>.env` a redirect, and both read the key file under zsh while the hook wrote nothing -- driven on the Q194 build and on `v0.4.1` alike.
-Under any shell that is not bash, `bash.ZshOnlyWord` reads the command whole for four shapes and records the call: a `(` against a word, which is Q194's reading widened from a glob operand to any word; a `<n-m>` range, matched in the text as well as the tokens so that `cmd <1-1 >out` stays two redirects; an `=cmd` word; and `=(…)`.
+Under any shell that is not bash, `bash.ZshOnlyWord` reads each pass of the walk for four shapes and records the call: a `(` against a word, which is Q194's reading widened from a glob operand to any word; a `<n-m>` range, matched in the text as well as the tokens so that `cmd <1-1 >out` stays two redirects; an `=cmd` word; and `=(…)`.
 It reads each pass of the walk with its heredoc bodies and comments stripped, since neither is run, and a live substitution in an unquoted heredoc is a pass of its own.
 The walk goes on past the record, so a key in a plain operand beside one still blocks.
 Driven 2026-11-27 under zsh 5.9 and bash 5.3.15: the row's five shapes, plus `=cat k1.env` and `k<->.env`, each moved from a silent allow to a record under zsh, eleven zsh idioms around them stayed silent, and nothing moved under bash.
 Named directories were already a record.
-Over 26,125 distinct real `Bash` commands from this machine, 2026-11-13 to 11-27, the reading matches 12, against 4,569 over the raw text, which is what the review of Q184 measured first; the 12 are nested quoting the lexer loses and one it cannot lex.
+Over 26,125 distinct real `Bash` commands from this machine, taken from the top-level `tool_use` blocks of its transcripts timestamped 2026-11-13 to 11-27, the reading matches 12, against 4,569 over the raw text; the 12 are nested quoting the lexer loses and one it cannot lex.
 Those are commands sessions on a bash machine wrote, so the count bounds what the reading costs in records and says nothing about what a zsh machine's sessions write.
 
 **`SHELL` inside a tool process does not say what the harness read.** bash rewrites it in its own process, so `printenv SHELL` in a `Bash` call reports `/opt/homebrew/bin/bash` on this machine while the hook, a child of the harness rather than of the tool shell, reads `/bin/zsh`.
