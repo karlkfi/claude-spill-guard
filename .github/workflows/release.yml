@@ -99,17 +99,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Five mutations. Four are halves of check-release-artifacts.py -- a target
-  # the release config stopped building, an archive that stopped matching
-  # checksums.txt, an install script uploaded outside it, and a name inside it
-  # that nothing declares. The fifth is a GoReleaser archive that stopped
-  # matching the digest pinned in the tree, which is the install refusing
-  # rather than a check failing. Every one asserts its mutation landed before
-  # asking for red, and where landing and biting come apart -- an edit to
-  # .goreleaser.yaml that checksums.txt might not have followed -- the
-  # assertion is on the effect instead. A break that silently did not happen
-  # leaves the checker reading clean input, and a control that passes for that
-  # reason is indistinguishable from one that worked.
+  # One mutation per way a release can come apart. Against
+  # check-release-artifacts.py: a target the release config stopped building, an
+  # archive that stopped matching checksums.txt, an install script uploaded
+  # outside it, and a name inside it that nothing declares. Against the install:
+  # a GoReleaser archive that stopped matching the digest pinned in the tree,
+  # which is the install refusing rather than a check failing. Every one asserts
+  # its mutation landed before asking for red, and where landing and biting come
+  # apart -- an edit to .goreleaser.yaml that checksums.txt might not have
+  # followed -- the assertion is on the effect instead. A break that silently
+  # did not happen leaves the checker reading clean input, and a control that
+  # passes for that reason is indistinguishable from one that worked.
   dry-run-mutation-control:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

@@ -44,8 +44,8 @@ jobs:
   # to find Go, `go run` from tools/ to find a linter -- and both work on the
   # machine of whoever wrote them.
   #
-  # Two mutations, because "absent" has two shapes here: not on PATH, and
-  # present but with nothing fetched to run it with.
+  # One mutation per shape "absent" takes here: not on PATH, and present but
+  # with nothing fetched to run it with.
   doctor-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -161,8 +161,8 @@ jobs:
       - name: Every copy of the gate list still agrees with the Makefile
         run: make gate-drift
 
-  # Five mutations: four for the directions the lists can come apart, and one
-  # for the parse itself. A drift check that only catches a missing job says
+  # A mutation for each direction the lists can come apart, and one for the
+  # parse itself. A drift check that only catches a missing job says
   # nothing about a stale table, and the stale table is the one that reads as
   # authoritative while being wrong.
   gate-drift-mutation-control:
@@ -749,9 +749,9 @@ jobs:
       - name: PRIVACY.md still says what the hook reads and writes
         run: make privacy-drift
 
-  # Six mutations, one per way the page and the tree come apart. The first is
-  # the row's own defect, a bullet edited by hand. The next four are the tree
-  # moving under a block nobody re-read: a new environment read, one the script
+  # One mutation per way the page and the tree come apart. The first is the
+  # row's own defect, a bullet edited by hand. Then the tree moving under a
+  # block nobody re-read: a new environment read, one the script
   # cannot name, a new file written, a wider matcher. The last is the marker
   # pair, without which nothing is compared at all.
   privacy-drift-mutation-control:
@@ -973,16 +973,15 @@ jobs:
       - name: A shebang and the executable bit agree across the index
         run: make script-modes
 
-  # Five arms, and the last two are a pair rather than two arms. The first
-  # three take each branch the gate can fail on: a shebang whose mode refuses
-  # it, a bit with nothing to say what runs the file, and a named exemption
-  # that has stopped disagreeing and so is excusing nothing.
+  # The first arms take each branch the gate can fail on: a shebang whose mode
+  # refuses it, a bit with nothing to say what runs the file, and a named
+  # exemption that has stopped disagreeing and so is excusing nothing.
   #
-  # The pair is what says the exempt region is doing location work rather than
-  # being a blanket skip. The same file -- same bytes, same mode -- is planted
-  # inside `testdata/corpus/` and then outside it, and the gate has to pass on
-  # the first and fail on the second. Either arm alone is satisfied by a gate
-  # that checks nothing.
+  # Two of them are a pair rather than two arms, and the pair is what says the
+  # exempt region is doing location work rather than being a blanket skip. The
+  # same file -- same bytes, same mode -- is planted inside `testdata/corpus/`
+  # and then outside it, and the gate has to pass on the first and fail on the
+  # second. Either arm alone is satisfied by a gate that checks nothing.
   script-modes-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -1179,9 +1178,9 @@ jobs:
             exit 1
           fi
 
-  # Four mutations: the mode bit git reads, a name git never calls, a missing
-  # shebang, and an empty directory -- which is how every assertion in the gate
-  # passes over nothing at all.
+  # One mutation each for the mode bit git reads, a name git never calls, a
+  # missing shebang, and an empty directory -- which is how every assertion in
+  # the gate passes over nothing at all.
   hooks-check-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -1694,8 +1693,8 @@ jobs:
       - name: Every vendored copy still hashes to its declared digest
         run: make vendor
 
-  # Three mutations. The first is the defect the gate exists for. The second is
-  # the property that made the layout worth changing: the files checked come
+  # The first mutation is the defect the gate exists for. The second is the
+  # property that made the layout worth changing: the files checked come
   # from the tree, so a third copy nobody declared is a failure rather than a
   # row a manifest was never given. The third breaks the record instead of the
   # files -- a table this cannot find declares no digest at all, which is the
@@ -2264,9 +2263,9 @@ jobs:
   # anything here mutates it. Without the second, every red below could be
   # something else.
   #
-  # Then five arms. Three drive the checker: two are the directions the gate
-  # decides in, and one is the precision case a red-only control cannot reach.
-  # The fourth drives the gate target instead, because whether `make
+  # Then the arms. The first three drive the checker: two are the directions the
+  # gate decides in, and one is the precision case a red-only control cannot
+  # reach. The fourth drives the gate target instead, because whether `make
   # release-claims` runs the forced arms is a property none of the others can
   # see. The last is the failure this design is most likely to hide -- a read
   # that did not happen, reported as an answer about the prose; `vulns` carries
@@ -2879,10 +2878,9 @@ jobs:
       - name: The plugin manifests carry the same version
         run: make plugin-version
 
-  # Four arms. Two reds for the two claims the script makes, and two greens
-  # because a check whose passing answer is "they agree" has to be shown
-  # capable of saying anything else -- and shown not to say it about a tree
-  # that is fine.
+  # A red for each of the two claims the script makes, and greens because a
+  # check whose passing answer is "they agree" has to be shown capable of saying
+  # anything else -- and shown not to say it about a tree that is fine.
   plugin-version-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -2956,9 +2954,9 @@ jobs:
           python3 scripts/check-plugin-version.py --version "$want"
           python3 scripts/check-plugin-version.py --version "v$want"
 
-  # Six arms. The gate's passing answer is empty, so three of them are about
-  # whether it can produce any other answer, and three are the directions a
-  # red-only control cannot reach.
+  # The gate's passing answer is empty, so the reds are about whether it can
+  # produce any other answer, and the greens are the directions a red-only
+  # control cannot reach.
   #
   # The two reds are the real defects, verbatim from d790130, which removed them
   # by hand after a reviewer found them: `brew install karlkfi/tap/spill-guard`
@@ -3654,7 +3652,7 @@ jobs:
   # nothing: an empty corpus, a retired test, a rule that matches nothing, and a
   # clean half nobody kept adversarial all report the same zero.
   #
-  # Four mutations, one per way of reaching it. Each asserts its own effect
+  # One mutation per way of reaching it. Each asserts its own effect
   # before running the gate, because a mutation that silently did not land
   # leaves a green run that reads exactly like a control that worked.
   precision-mutation-control:
@@ -4074,7 +4072,7 @@ jobs:
       - name: Every `uses:` names an immutable revision
         run: make action-pins
 
-  # Two mutations, and they pull in opposite directions on purpose. The first
+  # The first two mutations pull in opposite directions on purpose. The first
   # is the ordinary one: unpin a ref and require red. The second is the reason
   # this gate parses YAML instead of matching lines, and it requires *green* --
   # a `uses:` inside a comment or a `run:` block is not a mapping key, and a
@@ -4198,7 +4196,7 @@ jobs:
       - name: No known vulnerability the build graph calls
         run: make vulns
 
-  # Two mutations, for the two ways this gate can end badly, because the whole
+  # One mutation for each way this gate can end badly, because the whole
   # design of check-vulns.py is telling them apart. The second one takes a real
   # dependency with a real advisory, which is the only way to reach the finding
   # branch -- and it is the one control here a third party can break. That is
