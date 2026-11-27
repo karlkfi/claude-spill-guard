@@ -194,16 +194,21 @@ func TestPositionInThePipelineDecidesIt(t *testing.T) {
 		"{ env; } | cut -d= -f1":           false,
 		"(env) | cut -d= -f1":              false,
 		// A stage between the dump and the filter that copies it around (Q258).
-		"env | tee /dev/stderr | cut -d= -f1":     true,
-		"env | cat >&2 | cut -d= -f1":             true,
-		"genv | tee /dev/stderr | cut -d= -f1":    true,
-		"genv | cut -d= -f1":                      false,
-		"env | tee vars.txt | cut -d= -f1":        true,
-		"env > vars.txt | cut -d= -f1":            true,
-		"env | sort | cut -d= -f1":                false,
-		"env | tee /dev/null | cut -d= -f1":       false,
-		"env | cut -d= -f1 | tee /dev/stderr":     false,
-		"env | grep -v ^PATH= 2>&1 | cut -d= -f1": false,
+		"env | tee /dev/stderr | cut -d= -f1":                           true,
+		"env | cat >&2 | cut -d= -f1":                                   true,
+		"genv | tee /dev/stderr | cut -d= -f1":                          true,
+		"genv | cut -d= -f1":                                            false,
+		"env | tee vars.txt | cut -d= -f1":                              true,
+		"env > vars.txt | cut -d= -f1":                                  true,
+		"env | sort | cut -d= -f1":                                      false,
+		"env | tee /dev/null | cut -d= -f1":                             false,
+		"env | cut -d= -f1 | tee /dev/stderr":                           false,
+		"env | grep -v ^PATH= 2>&1 | cut -d= -f1":                       false,
+		"env 2>err.log | cut -d= -f1":                                   false,
+		"env | sort 2>err.log | cut -d= -f1":                            false,
+		"env | grep -i -E 'claude|tmpdir' | sed 's/=.*/=<set>/' | sort": false,
+		// An under-fire, kept so the line above is never refused.
+		"env | sed 'w /dev/stderr' | cut -d= -f1": false,
 	} {
 		t.Run(command, func(t *testing.T) {
 			_, stdout, _ := drive(t, bashCall(t, command, t.TempDir()))

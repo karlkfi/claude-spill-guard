@@ -405,7 +405,8 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		"grep -rn foo . | tee out.log | spill-guard filter; cat out.log",
 		"grep -rn foo . | tee out.log | spill-guard filter | cat out.log",
 		"grep -rn foo . | cat > out.log | spill-guard filter; cat out.log",
-		"grep -rn foo . 2>err.log | spill-guard filter && cat err.log",
+		"grep -rn foo . | sort 1<>out.log | spill-guard filter; cat out.log",
+		"grep -rn foo . | sort >&/dev/stderr | spill-guard filter",
 		"cat out.log & grep -rn foo . | tee out.log | spill-guard filter",
 	) {
 		t.Run(command+" is refused", func(t *testing.T) {
@@ -427,6 +428,12 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		"grep -rn foo . | dd of=out.log status=none | spill-guard filter",
 		"grep -rn foo . | env -C sub tee out.log | spill-guard filter",
 		"grep -rn -f <(echo foo) . | spill-guard filter",
+		// Only fd 1 carries the matches, so where fd 2 or fd 3 goes is no copy.
+		"grep -rn foo . 2>/dev/stderr | spill-guard filter",
+		"grep -rn foo . 2>err.log | spill-guard filter && cat err.log",
+		"grep -rn foo . | sort 2>/dev/tty | spill-guard filter",
+		"grep -rn foo . | sort 3>/dev/stderr | spill-guard filter",
+		"grep -rn foo . | sort <>in.log | spill-guard filter",
 	} {
 		t.Run(command+" is allowed", func(t *testing.T) {
 			allowed(t, bashCall(t, command, dir))
@@ -549,6 +556,7 @@ func TestAProcessSubstitutionFeedingAStageIsReadAsOne(t *testing.T) {
 		"grep -rn foo . | grep -v -f <(cat > /dev/stderr) | spill-guard filter",
 		"grep -rn foo . | grep -v -f <(cat >&2) | spill-guard filter",
 		"grep -rn foo . | grep -v -f <(awk 1) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(cat 1<>o.log) | spill-guard filter",
 		"grep -rn foo . | grep -v -f <(echo n; sed 'w /dev/stderr') | spill-guard filter",
 		"grep -rn foo . | grep -v -f <(echo n | tee /dev/stderr) | spill-guard filter",
 		"grep -rn foo . | tee >(cat >&2) | spill-guard filter",
@@ -620,6 +628,8 @@ func TestABodyIsJudgedByItsWritesForEveryCaller(t *testing.T) {
 		{"env | grep -f <(awk 1) | cut -c1-9", false, true},
 		{`env | grep -f <(echo "$P") | cut -c1-9`, false, true},
 		{"env | grep -f <(echo n) | cut -c1-9", false, false},
+		{"env | grep -f <(cat 1<>o.log) | cut -c1-9", true, false},
+		{"env | grep -f <(cat 2>err.log) | cut -c1-9", false, false},
 	} {
 		segments, err := bash.Segments(tc.command)
 		if err != nil {

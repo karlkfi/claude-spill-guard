@@ -354,16 +354,10 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 		if k > i && downstream(segments, i, k) && substitutedAround(segments, i, k) {
 			return true
 		}
-		for _, r := range s.Redirects {
-			// A `<(` feeds the command, and its body is read above. On the
-			// grep itself a `>(` is no way out either, since `>>(` does not
-			// parse and `> >(` records `>`: the matches leave only by stdout.
-			if r == "<(" || k == i && r == ">(" {
-				continue
-			}
-			if !slices.Contains(s.Inputs, r) {
-				written = append(written, write{r, dir, dirUnknown})
-			}
+		// Only fd 1 carries what the next stage reads, so a `2>err.log` is no
+		// copy of it, and a `<(` body is read above.
+		if f := s.StdoutFile; f != "" {
+			written = append(written, write{f, dir, dirUnknown})
 		}
 		p := bash.ShKeywordPeel(s.Tokens, s.QuotedFrom)
 		wrap := readers.PeelWrappers(bash.StripEnvPrefix(s.Tokens[p:], s.QuotedFrom[p:]))
@@ -494,13 +488,8 @@ func downstream(segments []bash.Segment, i, k int) bool {
 // their own. What the body runs is unknownBody's to judge.
 func substitutedAround(segments []bash.Segment, i, k int) bool {
 	for _, body := range bodyOf(segments, i, k) {
-		if body.StdoutAway {
+		if body.StdoutAway || body.StdoutFile != "" {
 			return true
-		}
-		for _, r := range body.Redirects {
-			if r != "<(" && !slices.Contains(body.Inputs, r) {
-				return true
-			}
 		}
 		p := bash.ShKeywordPeel(body.Tokens, body.QuotedFrom)
 		if readers.PeelWrappers(bash.StripEnvPrefix(body.Tokens[p:], body.QuotedFrom[p:])).Opaque {

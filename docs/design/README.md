@@ -147,7 +147,9 @@ That is what `Segment.Pipe` is read for, with `Segment.StdoutAway` beside it: a 
 `env >&2 | cut -d= -f1` is refused, because the dump goes to stderr and the tool returns that, and `env 2>&1 | cut -d= -f1` is not.
 A redirect to a file is not read as a filter, so `env > vars.txt` is refused too.
 Re-taken with that reading on 2026-11-01, over 241,535 real `Bash` calls from 2026-07-26 to 2026-11-02, no verdict moved; 16 driven control rows moved 5, and 19 commands the segmenter could not split were left out.
-A stage between the dump and the last stage is a filter only where it sends nothing around the stages after it, which is the reading `copiedAround` takes for the grep filter: `env | tee /dev/stderr | cut -d= -f1` and `env | cat >&2 | cut -d= -f1` put the dump in the tool result and are refused (Q258).
+A stage between the dump and the last stage is a filter only where it sends nothing around the stages after it, read by `copiedAround` from the file each stage's fd 1 lands on and any `tee` or `dd`: `env | tee /dev/stderr | cut -d= -f1` and `env | cat >&2 | cut -d= -f1` put the dump in the tool result and are refused (Q258).
+A stage whose own program writes elsewhere is not read, so `env | sed 'w /dev/stderr' | cut -d= -f1` is still allowed.
+That is an under-fire, and it is kept: the pass-through list the grep filter uses would refuse `env | grep … | sed 's/=.*/=<set>/' | sort`, which is the careful form.
 The last stage is not read, because its stdout is the tool result whatever it copies, so `env | cat` is still allowed.
 Re-taken with that reading on 2026-11-27, over 309,504 real `Bash` calls in 3,415 transcript files, all of this machine's history to that day, 18 were refused before and the same 18 after; 23 commands the segmenter could not split were left out, and a planted `tee` dump moved.
 
@@ -1702,7 +1704,8 @@ Driven on bash 5.3.15 (Q208).
 
 **A stage between the grep and the filter can copy around it, and then the filter does not count.** Driven on bash 5.3.15 with the built filter and a planted key, `| tee /dev/stderr |`, `| tee >(cat >&2) |` and `| cat >&2 |` each put the key in the tool result while the filter withheld its own copy (Q233).
 So `copiedAround` refuses a stage that sends its stdout away, and one that writes to a device other than `/dev/null` or to a name it cannot settle.
-The names it reads are redirect targets, `tee` and `gtee` operands, and `dd`'s `of=`.
+The names it reads are the file a stage's redirects leave fd 1 on, `tee` and `gtee` operands, and `dd`'s `of=`.
+Only fd 1 carries what the next stage reads, so `2>err.log` and `2>/dev/stderr` on a stage copy nothing, and `1<>out.log` and `>&out.log` do: `<>` on fd 1 writes it, and `>&word` is `&>word`.
 A name is judged where it lands rather than how it is spelled: it is resolved against the directory the `cd` tracker holds and cleaned, so `//dev/stderr`, `../../dev/stderr` and `cd / && … | tee dev/stderr` count as the device, and a name that exists and is not a regular file is refused too, which takes in a symlink to `/dev/stderr`.
 An `env -C` or `sudo -D` ahead of the writer moves where its operands land, and a wrapper whose options this cannot read is refused, since the writer may be behind it.
 Each of those put the key on stderr before this, driven in review of #254.

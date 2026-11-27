@@ -119,6 +119,16 @@ func TestAReadOfAGuardedPathIsRefusedOnItsShape(t *testing.T) {
 			t.Errorf("the reason does not name the class: %q", reason)
 		}
 	})
+	// `<>` opens fd 0 for reading, as `<` does.
+	t.Run("Bash <>", func(t *testing.T) {
+		code, stdout, stderr := drive(t, bashCall(t, "cat <>"+name, dir))
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+		}
+		if reason := reasonOf(t, stdout); !strings.Contains(reason, "a dotenv file") {
+			t.Errorf("the reason does not name the class: %q", reason)
+		}
+	})
 	t.Run("Read", func(t *testing.T) {
 		code, stdout, stderr := drive(t,
 			`{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":`+
@@ -139,12 +149,21 @@ func TestAReadOfAGuardedPathIsRefusedOnItsShape(t *testing.T) {
 // measures as worse than no rule at all.
 func TestAFilteredReadOfAGuardedPathIsNotRefused(t *testing.T) {
 	dir, name := dotenv(t)
-	code, stdout, stderr := drive(t, bashCall(t, "cat "+name+" | cut -d= -f1", dir))
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
-	}
-	if stdout != "" {
-		t.Errorf("the filtered form was not allowed: %q", stdout)
+	// fd 2 carries none of the file, so where it goes changes nothing.
+	for _, command := range []string{
+		"cat " + name + " | cut -d= -f1",
+		"cat " + name + " 2>err.log | cut -d= -f1",
+		"cat " + name + " | sort 2>err.log | cut -d= -f1",
+	} {
+		t.Run(command, func(t *testing.T) {
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("the filtered form was not allowed: %q", stdout)
+			}
+		})
 	}
 }
 
