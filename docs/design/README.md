@@ -2210,7 +2210,7 @@ Three things it carries that the drive above did not, all of them there so a run
 
 - **The census names the harness it was confirmed against.** `harness.version` in the fixture, and the job asserts the binary it downloaded reports that same version — so moving the pin without re-taking the census fails rather than confirming nothing under a version nobody checked.
   Re-taking it is `--record` against the new binary, `--compare --allow-version-drift` to read what moved, then both numbers in one commit.
-- **A floor on what was observed, not on what the fixture holds.** Ten of the twenty-four cases expect an empty splice, so a replay that drove nothing at all — a binary that failed to download, a `HOME` the harness would not write under — agrees with ten of them and reports green.
+- **A floor on what was observed, not on what the fixture holds.** Ten of the twenty-five cases expect an empty splice, so a replay that drove nothing at all — a binary that failed to download, a `HOME` the harness would not write under — agrees with ten of them and reports green.
   The job requires the replay to have seen the census's own 14 non-empty cases and 33 files.
 - **A mutation control, over the recording rather than a second drive.** Observing and comparing are separate invocations, so the control mutates the census and holds it against the run that already happened: a moved expectation and a recording that spliced nothing, both of which must go red.
 

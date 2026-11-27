@@ -275,7 +275,7 @@
       ],
       "resolver_also_scans": [],
       "harness_also_splices": [],
-      "note": "Q267: placeholder expectation, to be replaced by what prompt-oracle.yml observes"
+      "note": "Q267: taken 2026-11-27 by prompt-oracle.yml against 2.1.261, run 46052885359 on 3c862fa. The harness splices both: a space-preceded @ is a token inside an inline code span whether it ends at the closing backtick or at a space, so a code span hides only an @ the backtick itself precedes"
     }
   ]
 }
