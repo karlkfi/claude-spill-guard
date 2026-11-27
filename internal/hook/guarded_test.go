@@ -28,6 +28,29 @@ var (
 		"/home/k/.kube/config",
 		"/w/app/kubeconfig",
 		"/w/app/staging.kubeconfig",
+		// Every one of these opens the lowercase file on APFS.
+		"/w/app/.ENV",
+		"/w/app/.Env",
+		"/w/app/.ENV.local",
+		"/home/k/.AWS/credentials",
+		"/home/k/.aws/Credentials",
+		"/home/k/.NETRC",
+		"/home/k/_NETRC",
+		"/home/k/.Git-Credentials",
+		"/home/k/.git-credentialſ",
+		"/home/k/.Docker/config.json",
+		"/home/k/.docker/Config.json",
+		"/home/k/.KUBE/config",
+		"/home/k/.Kube/config",
+		"/home/k/.kube/Config",
+		"/w/app/KUBECONFIG",
+		"/w/app/staging.KUBECONFIG",
+		"/home/k/.kube/conﬁg",
+		"/w/app/kubeconﬁg",
+		"/home/k/.docker/conﬁg.json",
+		// İ has no fold, and APFS keeps it apart from i, so this is not
+		// `.env.dist`.
+		"/w/app/.env.dİst",
 	}
 	openPaths = []string{
 		// Measured: 29 of 29 reads of these in a week, not one a credential.
@@ -38,6 +61,9 @@ var (
 		"/w/app/.env.sample",
 		"/w/app/.env.template",
 		"/w/app/.env.dist",
+		"/w/app/.env.EXAMPLE",
+		"/w/app/.ENV.Sample",
+		"/w/app/.env.diﬆ",
 		// A suffix is a name somebody chose, not a convention.
 		"/w/app/deploy.env",
 		// Ordinary basenames that are only credentials under their own parent.
@@ -307,6 +333,58 @@ func TestAnAtTokenNamingAGuardedPathIsRefused(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A guarded name in another case, on each surface that opens a file. Each
+// fixture is planted under the spelling the call uses, so the file exists on a
+// case-sensitive volume too, and holds nothing a rule matches. Before the fold
+// every one of these exited 0 in silence.
+func TestAGuardedNameInAnotherCaseIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	variants := map[string]string{
+		".ENV":                "a dotenv file",
+		".AWS/credentials":    "an AWS credentials file",
+		".NETRC":              "a netrc file",
+		".Git-Credentials":    "a git credential store",
+		".Docker/config.json": "a Docker registry auth file",
+		".kube/Config":        "a kubeconfig",
+		"staging.KUBECONFIG":  "a kubeconfig",
+		".kube/conﬁg":         "a kubeconfig",
+	}
+	for rel := range variants {
+		plant(t, dir, rel, "PORT=3000\n")
+	}
+	plant(t, dir, ".env.EXAMPLE", "PORT=3000\n")
+	for rel, class := range variants {
+		t.Run("cat "+rel, func(t *testing.T) {
+			_, stdout, _ := drive(t, bashCall(t, "cat "+rel, dir))
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, class) {
+				t.Errorf("the reason does not name the class %q: %q", class, reason)
+			}
+		})
+		t.Run("Read "+rel, func(t *testing.T) {
+			_, stdout, _ := drive(t,
+				`{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":`+
+					quote(t, filepath.Join(dir, rel))+`}}`)
+			if reason := reasonOf(t, stdout); !strings.Contains(reason, class) {
+				t.Errorf("the reason does not name the class %q: %q", class, reason)
+			}
+		})
+		t.Run("@"+rel, func(t *testing.T) {
+			if reason := promptAt(t, dir, "see @"+rel); !strings.Contains(reason, class) {
+				t.Errorf("the reason does not name the class %q: %q", class, reason)
+			}
+		})
+	}
+	t.Run("the template stays out", func(t *testing.T) {
+		if reason := promptAt(t, dir, "see @.env.EXAMPLE"); reason != "" {
+			t.Errorf("a template in another case was refused: %q", reason)
+		}
+		_, stdout, _ := drive(t, bashCall(t, "cat .env.EXAMPLE", dir))
+		if stdout != "" {
+			t.Errorf("a template in another case was refused: %q", stdout)
+		}
+	})
 }
 
 // The README's live check: an empty `.env` holds nothing to match, so only the
