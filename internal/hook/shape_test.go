@@ -196,6 +196,8 @@ func TestPositionInThePipelineDecidesIt(t *testing.T) {
 		// A stage between the dump and the filter that copies it around (Q258).
 		"env | tee /dev/stderr | cut -d= -f1":     true,
 		"env | cat >&2 | cut -d= -f1":             true,
+		"genv | tee /dev/stderr | cut -d= -f1":    true,
+		"genv | cut -d= -f1":                      false,
 		"env | tee vars.txt | cut -d= -f1":        true,
 		"env > vars.txt | cut -d= -f1":            true,
 		"env | sort | cut -d= -f1":                false,
