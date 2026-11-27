@@ -466,10 +466,11 @@ func downstream(segments []bash.Segment, i, k int) bool {
 // sed's `w`, `perl`, `python3 -c` and `cp /dev/stdin /dev/stderr` each put the
 // matches on stderr ahead of the filter, driven 2026-11-27.
 //
-// Each member's options that open an output or run a program are refused by
-// name: sort's `-o` and `--compress-program`, uniq's second operand, and any
-// long option of a grep stage that resolveLong cannot name, which takes in
-// ugrep's `--filter` and `--pager`.
+// Each member's options that open an output, run a program or report a line on
+// stderr are refused by name: sort's `-o`, `--compress-program` and `-c`, GNU
+// sort's and wc's `--files0-from=-`, which echoes the input back as a missing
+// file name, uniq's second operand, and any long option of a grep stage that
+// resolveLong cannot name, which takes in ugrep's `--filter` and `--pager`.
 func passThrough(name string, args []string) bool {
 	// GNU's tools as Homebrew installs them, a g ahead of the name (Q263).
 	switch n := strings.TrimPrefix(name, "g"); n {
@@ -477,7 +478,17 @@ func passThrough(name string, args []string) bool {
 		name = n
 	}
 	switch name {
-	case "head", "tail", "cut", "tr", "wc", "cat":
+	case "head", "tail", "cut", "tr", "cat":
+		return true
+	case "wc":
+		for _, a := range args {
+			if a == "--" {
+				break
+			}
+			if key, _, _ := strings.Cut(a, "="); len(key) > 2 && strings.HasPrefix("--files0-from", key) {
+				return false
+			}
+		}
 		return true
 	case "grep", "egrep", "fgrep":
 		for _, a := range args {
@@ -494,13 +505,15 @@ func passThrough(name string, args []string) bool {
 			if a == "--" {
 				break
 			}
-			key, _, _ := strings.Cut(a, "=")
+			key, value, _ := strings.Cut(a, "=")
 			if long, ok := strings.CutPrefix(key, "--"); ok {
 				if long == "" || strings.HasPrefix("output", long) ||
-					strings.HasPrefix("compress-program", long) {
+					strings.HasPrefix("compress-program", long) ||
+					strings.HasPrefix("files0-from", long) ||
+					strings.HasPrefix("check", long) && value != "quiet" && value != "silent" {
 					return false
 				}
-			} else if strings.HasPrefix(a, "-") && strings.Contains(a, "o") {
+			} else if strings.HasPrefix(a, "-") && strings.ContainsAny(a, "oc") {
 				return false
 			}
 		}
