@@ -88,7 +88,8 @@ type Segment struct {
 	// the last field, says where quoting first appeared in each of them.
 	Tokens []string
 	// Redirects is every redirect target written in this segment. A heredoc
-	// delimiter and a here-string's content are not paths and are not here.
+	// delimiter and a here-string's content are not paths and are not here,
+	// and a process substitution is here as its operator, `<(` or `>(`.
 	Redirects []string
 	// Inputs is the subset of Redirects written with `<`: a file the command
 	// reads through a descriptor rather than by name, so a reader's operand
@@ -180,6 +181,11 @@ type Segment struct {
 	// takes its closer's. This port's, and upstream has no question that
 	// turns on where stdout goes.
 	StdoutAway bool
+	// Here is true when the segment reads a heredoc or a here-string. Neither
+	// leaves a token or a redirect target, and bash expands both, so a `$(…)`
+	// in one runs with nothing here showing it. A compound piped as a whole
+	// takes its closer's.
+	Here bool
 }
 
 // definitionPrefix is whether a function definition can stand behind word:
@@ -265,8 +271,13 @@ func opensSubstitution(tokens []string, i int) bool {
 // read: "pipe" and "err" for where they started, the next stage and the
 // shell's stderr, "file" for a file or a closed descriptor, and "other" for a
 // descriptor this cannot follow. The zero value is the start. Only those two
-// are tracked, because only where fd 1 lands decides StdoutAway.
-type descriptors struct{ out, err string }
+// are tracked, because only where fd 1 lands decides StdoutAway. here is
+// whether a heredoc or here-string was written, which bash expands and which
+// leaves no token behind.
+type descriptors struct {
+	out, err string
+	here     bool
+}
 
 func (d descriptors) stdout() string { return cmp.Or(d.out, "pipe") }
 func (d descriptors) stderr() string { return cmp.Or(d.err, "err") }
@@ -485,7 +496,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				segs = append(segs, Segment{cur, curRedir, curInputs, persists,
 					conditional(prevSep), inCaseArm(clauses), pipe, curQF,
 					append([]int(nil), shells...), forked(lead, t),
-					lastStage(lead, t, lastClose), "", "", fds.away()})
+					lastStage(lead, t, lastClose), "", "", fds.away(), fds.here})
 				cur, curQF, curRedir, curInputs = nil, nil, nil, nil
 			}
 			lastClose = false
@@ -513,6 +524,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 					for k := first; k < len(segs); k++ {
 						segs[k].Pipe = pipe
 						segs[k].StdoutAway = segs[k].StdoutAway || fds.away()
+						segs[k].Here = segs[k].Here || fds.here
 					}
 				}
 			}
@@ -647,15 +659,23 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 				// `<<TAG` heredoc delimiter and `<<<STR` here-string content
 				// are not file paths -- skip without recording a target.
 				if t == "<<" || t == "<<<" {
+					fds.here = true
 					i += 2
 					continue
 				}
-				curRedir = append(curRedir, tokens[i+1])
 				// `<(cmd)` lexes as `<` and `(`, so upstream records the
 				// paren as a target. It is a process substitution and not a
 				// file, and the loop that reads Inputs would try to open it,
-				// so it is kept out of Inputs and left in Redirects as it is.
+				// so it is kept out of Inputs. It is recorded with its
+				// operator, `<(` or `>(`, because this is the last place that
+				// knows which: one feeds the command and the other is a copy
+				// of what it writes (Q264).
 				process := isOperator(tokens[i+1], quotedFrom[i+1], separators) && tokens[i+1] == "("
+				if process {
+					curRedir = append(curRedir, t+"(")
+				} else {
+					curRedir = append(curRedir, tokens[i+1])
+				}
 				if t == "<" && !process {
 					curInputs = append(curInputs, tokens[i+1])
 				}
@@ -734,7 +754,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 		segs = append(segs, Segment{cur, curRedir, curInputs, paren == 0 && !isPipe(prevSep),
 			conditional(prevSep), inCaseArm(clauses), pipe, curQF,
 			append([]int(nil), shells...), forked(lead, ""),
-			lastStage(lead, "", lastClose), "", "", fds.away()})
+			lastStage(lead, "", lastClose), "", "", fds.away(), fds.here})
 	}
 	// An unterminated substitution: the commands it interrupted still ran.
 	for n := len(stack) - 1; n >= 0; n-- {
@@ -743,7 +763,7 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 			segs = append(segs, Segment{f.cur, f.curRedir, f.curInputs, false,
 				conditional(f.prevSep), inCaseArm(clauses), f.pipe, f.curQF,
 				append([]int(nil), shells[:min(f.shells, len(shells))]...), forked(f.lead, ""),
-				lastStage(f.lead, "", f.lastClose), "", "", f.fds.away()})
+				lastStage(f.lead, "", f.lastClose), "", "", f.fds.away(), f.fds.here})
 		}
 	}
 	for k := range segs {

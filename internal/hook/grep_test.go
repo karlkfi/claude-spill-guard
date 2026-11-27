@@ -538,6 +538,103 @@ func TestCopiedAroundDoesNotReadThePassThroughList(t *testing.T) {
 	}
 }
 
+// A `<(…)` on a stage after the grep feeds it rather than copying it, so the
+// filter after it counts (Q264) -- but its body inherits the stage's stdin,
+// which is the grep's output, so the body is read as a stage is. Driven on
+// bash 5.3.15 with the built filter and a planted key: `<(echo nomatch)` put
+// it nowhere, and `<(cat > /dev/stderr)` and `tee >(cat >&2)` put it on stderr.
+func TestAProcessSubstitutionFeedingAStageIsReadAsOne(t *testing.T) {
+	dir := grepTree(t)
+	for _, command := range []string{
+		"grep -rn foo . | grep -v -f <(cat > /dev/stderr) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(cat >&2) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(awk 1) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(echo n; sed 'w /dev/stderr') | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(echo n | tee /dev/stderr) | spill-guard filter",
+		"grep -rn foo . | tee >(cat >&2) | spill-guard filter",
+		"grep -rn foo . | tee >(cat) | spill-guard filter",
+		// A substitution inside the body reads the same stdin, and stays in
+		// its word, driven by #297's review.
+		`grep -rn foo . | grep -f <(echo "$(cat >&2)") | spill-guard filter`,
+		"grep -rn foo . | grep -f <(echo `cat >&2`) | spill-guard filter",
+		`grep -rn foo . | grep -f <(printf %s "$(cat >&2)") | spill-guard filter`,
+		`grep -rn foo . | cat <(echo "$(cat >&2)") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "${ cat >&2; }") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "${| cat >&2; }") | spill-guard filter`,
+		// A word bash expands, an assignment, a printf -v, a heredoc or a
+		// here-string can run a command named only in a variable's value,
+		// `SUB='a[$(cat >&2)]'` in the environment; driven by #297's review.
+		`grep -rn foo . | grep -f <(echo "${HOME:SUB}") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "${a[SUB]}") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "${P@P}") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "${!x}") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "$P") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "${HOME}") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo '$HOME') | spill-guard filter`,
+		"grep -rn foo . | grep -f <(cat <<X\n$(cat >&2)\nX\n) | spill-guard filter",
+		"grep -rn foo . | grep -f <(cat <<X\nn\nX\n) | spill-guard filter",
+		`grep -rn foo . | grep -f <(cat <<< "$(cat >&2)") | spill-guard filter`,
+		"grep -rn foo . | grep -f <(cat <<< n) | spill-guard filter",
+		`grep -rn foo . | grep -f <(printf -v "a[SUB]" x; echo n) | spill-guard filter`,
+		`grep -rn foo . | grep -f <(printf -va x; echo n) | spill-guard filter`,
+		"grep -rn foo . | grep -f <(a[SUB]=1; echo n) | spill-guard filter",
+		"declare -i i; grep -rn foo . | grep -f <(i=SUB; echo n) | spill-guard filter",
+		"grep -rn foo . | grep -f <(i=SUB echo n) | spill-guard filter",
+		"grep -rn foo . | tee >(awk 1) | spill-guard filter",
+	} {
+		t.Run(command+" is refused", func(t *testing.T) {
+			denyReason(t, bashCall(t, command, dir))
+		})
+	}
+	for _, command := range []string{
+		"grep -rn foo . | grep -v -f <(echo nomatch) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(printf 'a\\nb\\n') | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(echo n | head -1) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(cat a.go) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(printf -- -v) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <({ echo a; }) | spill-guard filter",
+	} {
+		t.Run(command+" is allowed", func(t *testing.T) {
+			allowed(t, bashCall(t, command, dir))
+		})
+	}
+	// The loop the row was filed for: the form the reason asks for is the
+	// form it allows.
+	rewrite := rewriteIn(denyReason(t, bashCall(t, "grep -rn foo . | grep -v -f <(echo nomatch)", dir)))
+	if rewrite == "" {
+		t.Fatal("no rewrite for a stage fed by a process substitution")
+	}
+	allowed(t, bashCall(t, rewrite, dir))
+}
+
+// A body's writes are copiedAround's, for every caller; what it runs is the
+// grep's alone, as for a stage (Q264). Driven on bash 5.3.15, `echo SECRET=v |
+// cut -c1 - <(cat >&2)` put the line on stderr in 5 of 5 runs.
+func TestABodyIsJudgedByItsWritesForEveryCaller(t *testing.T) {
+	for _, tc := range []struct {
+		command      string
+		copied, grep bool
+	}{
+		{"env | grep -f <(cat >&2) | cut -c1-9", true, false},
+		{"env | grep -f <(cat > /dev/stderr) | cut -c1-9", true, false},
+		{"env | grep -f <(awk 1) | cut -c1-9", false, true},
+		{`env | grep -f <(echo "$P") | cut -c1-9`, false, true},
+		{"env | grep -f <(echo n) | cut -c1-9", false, false},
+	} {
+		segments, err := bash.Segments(tc.command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := len(segments) - 1
+		if got := copiedAround(segments, 0, j, t.TempDir(), false); got != tc.copied {
+			t.Errorf("copiedAround(%q) = %v, want %v", tc.command, got, tc.copied)
+		}
+		if got := unknownStage(segments, 0, j); got != tc.grep {
+			t.Errorf("unknownStage(%q) = %v, want %v", tc.command, got, tc.grep)
+		}
+	}
+}
+
 // The hatch reaches this refusal like the others: a confirmation, not an allow.
 func TestTheOverrideDowngradesAGrepRefusal(t *testing.T) {
 	code, stdout, stderr := drive(t, bashCall(t,

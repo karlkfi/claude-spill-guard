@@ -351,11 +351,14 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 			dirUnknown bool
 		}
 		var written []write
+		if k > i && downstream(segments, i, k) && substitutedAround(segments, i, k) {
+			return true
+		}
 		for _, r := range s.Redirects {
-			// On the grep itself a `(` is a `<(` or a `>(` operand, since
-			// `>>(` does not parse and `> >(` records `>`: neither is a way
-			// out for the matches, which leave only by stdout.
-			if k == i && r == "(" {
+			// A `<(` feeds the command, and its body is read above. On the
+			// grep itself a `>(` is no way out either, since `>>(` does not
+			// parse and `> >(` records `>`: the matches leave only by stdout.
+			if r == "<(" || k == i && r == ">(" {
 				continue
 			}
 			if !slices.Contains(s.Inputs, r) {
@@ -447,6 +450,9 @@ func unknownStage(segments []bash.Segment, i, j int) bool {
 		if s.Pipe != segments[i].Pipe || !downstream(segments, i, k) {
 			continue
 		}
+		if unknownBody(segments, i, k) {
+			return true
+		}
 		p := bash.ShKeywordPeel(s.Tokens, s.QuotedFrom)
 		argv := readers.PeelWrappers(bash.StripEnvPrefix(s.Tokens[p:], s.QuotedFrom[p:])).Argv
 		if len(argv) == 0 {
@@ -480,6 +486,71 @@ func downstream(segments []bash.Segment, i, k int) bool {
 	return k > i && (len(segments[k].Shells) < depth || !ended)
 }
 
+// substitutedAround reports whether a `<(…)` on the stage at k writes what it
+// reads somewhere else. The body inherits the stage's stdin, which is the
+// grep's output: driven on bash 5.3.15, `grep -rn x . | grep -v -f <(cat >
+// /dev/stderr) | spill-guard filter` put a planted key on stderr. Its segments
+// are the ones just ahead of the stage, in shells deeper than it and pipes of
+// their own. What the body runs is unknownBody's to judge.
+func substitutedAround(segments []bash.Segment, i, k int) bool {
+	for _, body := range bodyOf(segments, i, k) {
+		if body.StdoutAway {
+			return true
+		}
+		for _, r := range body.Redirects {
+			if r != "<(" && !slices.Contains(body.Inputs, r) {
+				return true
+			}
+		}
+		p := bash.ShKeywordPeel(body.Tokens, body.QuotedFrom)
+		if readers.PeelWrappers(bash.StripEnvPrefix(body.Tokens[p:], body.QuotedFrom[p:])).Opaque {
+			return true
+		}
+	}
+	return false
+}
+
+// unknownBody reports whether a `<(…)` on the stage at k runs anything but
+// commands passThrough knows, for the grep's stages as unknownStage does. A
+// word bash expands can run a command no token names: with `SUB='a[$(cat
+// >&2)]'` in the environment, `${HOME:SUB}`, `${a[SUB]}` and `${P@P}` each
+// put the key on stderr, and so do `a[SUB]=1` and `printf -v "a[SUB]"`, which
+// evaluate a subscript. So any `$` or backtick in a body word, whatever its
+// quoting, any assignment, and any heredoc or here-string refuse it.
+func unknownBody(segments []bash.Segment, i, k int) bool {
+	for _, body := range bodyOf(segments, i, k) {
+		if body.Here {
+			return true
+		}
+		for _, tok := range body.Tokens {
+			if strings.ContainsAny(tok, "$`") {
+				return true
+			}
+		}
+		p := bash.ShKeywordPeel(body.Tokens, body.QuotedFrom)
+		words := bash.StripEnvPrefix(body.Tokens[p:], body.QuotedFrom[p:])
+		if len(words) < len(body.Tokens)-p {
+			return true
+		}
+		// A segment left with no command is a reserved word or a closer.
+		argv := readers.PeelWrappers(words).Argv
+		if len(argv) > 0 && !passThrough(filepath.Base(argv[0]), argv[1:]) {
+			return true
+		}
+	}
+	return false
+}
+
+// bodyOf is the segments of the `<(…)` bodies on the stage at k.
+func bodyOf(segments []bash.Segment, i, k int) []bash.Segment {
+	m := k - 1
+	for m > i && segments[m].Pipe != segments[i].Pipe &&
+		len(segments[m].Shells) > len(segments[k].Shells) {
+		m--
+	}
+	return segments[m+1 : k]
+}
+
 // passThrough reports whether a stage named name, run with args, writes what it
 // reads nowhere but its stdout and its redirects. It is a short list rather
 // than a list of writers, because the writers have no end: awk's `print >`,
@@ -498,8 +569,11 @@ func passThrough(name string, args []string) bool {
 		name = n
 	}
 	switch name {
-	case "head", "tail", "cut", "tr", "cat":
+	case "head", "tail", "cut", "tr", "cat", "echo":
 		return true
+	case "printf":
+		// `-v NAME` assigns, and a subscript in NAME is evaluated.
+		return len(args) == 0 || !strings.HasPrefix(args[0], "-v")
 	case "wc":
 		for _, a := range args {
 			if a == "--" {
