@@ -125,12 +125,6 @@ func bashTargets(command, cwd string) ([]target, error) {
 	// substituted head, which is where `o=setopt; $o globdots` resolves.
 	qualified := bash.GluedParen(command)
 	zshOptions := toolShellIsZsh() && bash.ChangesZshOptions(command)
-	if !toolShellIsBash() {
-		if shape := bash.ZshOnlyWord(command); shape != "" {
-			note(fmt.Errorf("the command holds %s, and the Bash tool's shell is not "+
-				"bash, so which files it would read is not settled here", shape))
-		}
-	}
 	lastpipe := mayLastpipe(command)
 	for len(queue) > 0 {
 		cur := queue[0]
@@ -141,6 +135,17 @@ func bashTargets(command, cwd string) ([]target, error) {
 			note(fmt.Errorf("the Bash command could not be parsed, so what "+
 				"it would send is unknown: %w", err))
 			continue
+		}
+
+		// Per pass, over the text with its heredoc bodies and comments gone,
+		// since neither is run: a body's live substitutions are queued as
+		// passes of their own below.
+		if !toolShellIsBash() {
+			live := bash.StripComments(bash.StripHeredocBodies(cur.text, nil, false))
+			if shape := bash.ZshOnlyWord(live); shape != "" {
+				note(fmt.Errorf("the command holds %s, and the Bash tool's shell is not "+
+					"bash, so which files it would read is not settled here", shape))
+			}
 		}
 
 		// Ahead of the operands, because this refusal is not about them. A

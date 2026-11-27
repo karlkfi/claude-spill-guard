@@ -468,6 +468,9 @@ func TestAShapeOnlyZshReadsDefers(t *testing.T) {
 		"echo $(cat (k1).env)":  "alternation",
 		"cat a.txt | cat =ls":   "`=cmd`",
 		"cat k<0-9>.env > o.tx": "numeric range",
+		// An unquoted heredoc runs its substitutions, which are passes of
+		// their own once the body is stripped.
+		"cat <<EOF\n$(cat (k1).env)\nEOF": "alternation",
 	} {
 		t.Run(command, func(t *testing.T) {
 			shellNamed(t, "zsh")
@@ -512,6 +515,13 @@ func TestAShapeOnlyZshReadsDefers(t *testing.T) {
 		"git log --format=%H -1",
 		"sort -t= -k2 a.txt",
 		"cat <1-1 >o.txt",
+		// Text that is never run, which the review found carrying a `(`
+		// against a word in 47,730 real commands: a heredoc body and a
+		// comment.
+		"python3 - <<'EOF'\nimport pathlib\nprint(pathlib.Path('a.txt').read_text())\nEOF",
+		"git commit --dry-run -F - <<'EOF'\nfix(hook): x\nEOF",
+		"cat <<EOF\nfix(hook): =ls k<1-1>\nEOF",
+		"cat a.txt # see f(x) and =ls",
 	} {
 		t.Run("control: "+command, func(t *testing.T) {
 			shellNamed(t, "zsh")
