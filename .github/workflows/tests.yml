@@ -300,13 +300,14 @@ jobs:
       - name: Every job in the workflows nothing derives is one somebody declared
         run: make job-drift
 
-  # Three mutations, one per direction the declaration can come apart from the
-  # tree. The first is the defect this gate was written for: a job deleted from
+  # One mutation per direction the declaration can come apart from the tree.
+  # The first is the defect this gate was written for: a job deleted from
   # release.yml reports no check, and no check reads exactly like a passing
   # one, so nothing anywhere went red. The third is the direction a declared
   # list fails in silently -- a new workflow lands, nothing declares it, and a
   # check whose whole subject is "is every job accounted for" accounts for none
-  # of that file's jobs and still exits 0.
+  # of that file's jobs and still exits 0. The last two are the same pair one
+  # level down, on matrix legs, where every job key survives the mutation.
   job-drift-mutation-control:
     runs-on: ubuntu-latest
     steps:
@@ -446,6 +447,63 @@ jobs:
           fi
           if ! grep -q 'tests.yml is left to another gate' mutant.log; then
             echo "::error::job-drift failed, but not on the missing derived workflow" >&2
+            exit 1
+          fi
+
+      # The leg the row was filed on: one line narrows install-dry-run to
+      # Linux, which deletes the macOS and Windows exercise of both install
+      # scripts while every job key stays where it was.
+      - name: A matrix narrowed to one leg must fail the check
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path(".github/workflows/release.yml")
+          t = p.read_text()
+          old = "        os: [ubuntu-latest, macos-latest, windows-latest]\n"
+          assert t.count(old) == 1, "the mutation did not land -- install-dry-run's matrix line is not where it was"
+          p.write_text(t.replace(old, "        os: [ubuntu-latest]\n"))
+          PY
+          if git diff --quiet -- .github/workflows/release.yml; then
+            echo "::error::the mutation changed nothing -- the matrix was not narrowed" >&2
+            exit 1
+          fi
+          make job-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .github/workflows/release.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::job-drift passed with install-dry-run narrowed to Linux, so two platforms stopped running and nothing went red" >&2
+            exit 1
+          fi
+          if ! grep -q 'no longer runs the leg `install-dry-run (windows-latest)`' mutant.log; then
+            echo "::error::job-drift failed, but not on the narrowed matrix" >&2
+            exit 1
+          fi
+
+      - name: A matrix leg nothing declares must fail the check
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path(".github/workflows/hook-harness.yml")
+          t = p.read_text()
+          old = "        os: [ubuntu-latest, windows-latest]\n"
+          assert t.count(old) == 1, "the mutation did not land -- hook-harness's matrix line is not where it was"
+          p.write_text(t.replace(old, "        os: [ubuntu-latest, windows-latest, macos-latest]\n"))
+          PY
+          if git diff --quiet -- .github/workflows/hook-harness.yml; then
+            echo "::error::the mutation changed nothing -- the matrix was not widened" >&2
+            exit 1
+          fi
+          make job-drift > mutant.log 2>&1 && rc=0 || rc=$?
+          echo "check exit: $rc"
+          cat mutant.log
+          git checkout -- .github/workflows/hook-harness.yml
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::job-drift passed with a leg no declaration names" >&2
+            exit 1
+          fi
+          if ! grep -q 'runs the leg `hook-harness (macos-latest)` and nothing declares it' mutant.log; then
+            echo "::error::job-drift failed, but not on the undeclared leg" >&2
             exit 1
           fi
 

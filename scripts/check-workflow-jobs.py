@@ -32,17 +32,21 @@ direction a declared list fails in silently: a fourth file lands, nothing here
 names it, and a check whose whole subject is "is every job accounted for"
 accounts for none of that file's and still exits 0.
 
-**The unit is the job key, and a matrix leg is not one.** Five of the eight
-check runs release.yml posts are legs, and a leg's rendered name is not its YAML
-key -- `install-dry-run (windows-latest)` is one job here and three check runs
-there. So narrowing `os: [ubuntu-latest, macos-latest, windows-latest]` to one
-entry deletes the macOS and Windows exercise of the install scripts and this
-still exits 0, which is this gate's own symptom one level down. It is a gap
-rather than a decision: `tools/cmd/workflow`'s job model is `{Name, Runs}` and
-carries no matrix, so closing it means extending the Go parser, and Q174 holds
-it. Read a declared reason as describing what the job is *for*, not as a claim
-about which legs run -- `install-dry-run` says "on Linux, macOS and Windows"
-and nothing here holds that half.
+**A matrix leg is a check run too, so a matrix job declares its legs.** Five
+of the eight check runs release.yml posts are legs, and narrowing `os:
+[ubuntu-latest, macos-latest, windows-latest]` to one entry deletes the macOS
+and Windows exercise of the install scripts while every job key stays put. So a
+job with a matrix is declared as a reason and the legs it expands to, each
+written as the values GitHub renders after the job key in the check run's
+name -- `install-dry-run (windows-latest)` is declared as `windows-latest`. Both
+directions hold here as they do for jobs: a leg that stops running is a
+finding, and so is one nothing declares.
+
+Legs and not a leg count, because a count holds the narrowing and not a swap:
+trading `macos-latest` for a second Linux image keeps three legs and drops the
+platform the reason names. The cost is that a matrix edit is a two-file change,
+which is the decision a declared job already asks for: a new matrix job has to
+come here regardless, and narrowing one should have to.
 """
 
 import sys
@@ -58,7 +62,9 @@ DERIVED = {
 
 # Every job the other workflows run, and what each is for. The reason is the
 # part that makes this more than a name list: a deletion has to take the
-# sentence with it, and a reviewer reading the diff sees what was given up.
+# sentence with it, and a reviewer reading the diff sees what was given up. A
+# job with a matrix is a (reason, legs) pair instead, and a reason that names
+# platforms is then a claim the legs beside it hold.
 DECLARED = {
     ".github/workflows/release.yml": {
         "dry-run":
@@ -68,13 +74,17 @@ DECLARED = {
         "dry-run-mutation-control":
             "drops a target, corrupts an archive and edits checksums.txt in "
             "both directions, and requires the dry run to fail on each",
-        "install-dry-run":
+        "install-dry-run": (
             "runs install.sh and install.ps1 against a served dist directory "
             "on Linux, macOS and Windows, and asserts the binary they install "
             "runs",
-        "install-dry-run-mutation-control":
+            ["ubuntu-latest", "macos-latest", "windows-latest"]),
+        "install-dry-run-mutation-control": (
             "stops an install script comparing the digest and requires the "
-            "install to fail",
+            "install to fail, once per script, since the comparison is written "
+            "twice in two languages",
+            ["ubuntu-latest, install/install.sh",
+             "windows-latest, install/install.ps1"]),
         "published-release-verify":
             "verifies the signature on whatever /releases/latest serves -- the "
             "only exercise the verification path gets outside a tag, and the "
@@ -90,12 +100,13 @@ DECLARED = {
             "the tier `make doctor` requires",
     },
     ".github/workflows/hook-harness.yml": {
-        "hook-harness":
+        "hook-harness": (
             "drives the shipped plugin through a pinned `claude` and a loopback "
             "fake of the Messages API, with Git Bash present and out of reach, "
             "which is the only thing here that reaches the shell the harness "
             "picks; a workflow because Claude Code is not in the tier `make "
             "doctor` requires",
+            ["ubuntu-latest", "windows-latest"]),
     },
     ".github/workflows/release-note.yml": {
         "release-note":
@@ -109,11 +120,59 @@ DECLARED = {
 }
 
 
+def split(declaration):
+    """(reason, legs), where legs is None for a job declared with no matrix."""
+    if isinstance(declaration, tuple):
+        return declaration
+    return declaration, None
+
+
+def rendered(job):
+    """The legs a modelled job runs, as declared, or None with no matrix."""
+    if job.get("legs") is None:
+        return None
+    return [", ".join(pair["value"] for pair in leg) for leg in job["legs"]]
+
+
+def legs_findings(path, name, declared, found):
+    if declared is None and found is None:
+        return []
+    if declared is None:
+        return [
+            f"{path} runs `{name}` as a matrix of {len(found)} leg(s), "
+            f"{', '.join(f'`{name} ({leg})`' for leg in found)}, and its "
+            f"declaration names none. Declare it as a (reason, legs) pair, so "
+            f"narrowing the matrix later is a decision rather than an accident"]
+    if found is None:
+        return [
+            f"{path} no longer runs `{name}` as a matrix, and its declaration "
+            f"names {len(declared)} leg(s): {', '.join(declared)}. Every leg "
+            f"but one stopped running -- restore the matrix, or declare the "
+            f"job with a reason alone and say in the commit why"]
+    if not declared:
+        return [
+            f"{path} declares `{name}` with an empty list of legs, so nothing "
+            f"below could have found one missing"]
+    out = []
+    for leg in sorted(set(declared) - set(found)):
+        out.append(
+            f"{path} no longer runs the leg `{name} ({leg})`. A leg is a check "
+            f"run, and one that does not run reads the same as one that "
+            f"passed -- restore it, or delete it from the declaration and say "
+            f"in the commit why the platform it covered is no longer wanted")
+    for leg in sorted(set(found) - set(declared)):
+        out.append(
+            f"{path} runs the leg `{name} ({leg})` and nothing declares it. "
+            f"Add it to the legs beside `{name}` in DECLARED")
+    return out
+
+
 def main():
     files = workflow_model.load()
 
     findings = []
     checked = 0
+    legs_checked = 0
     derived_seen = []
     for path, entry in sorted(files.items()):
         if path in DERIVED:
@@ -141,7 +200,8 @@ def main():
             continue
 
         checked += len(found)
-        for name in sorted(n for n in declared if not declared[n].strip()):
+        for name in sorted(n for n in declared
+                           if not split(declared[n])[0].strip()):
             findings.append(
                 f"{path} declares `{name}` with an empty reason, so the "
                 f"declaration is a name list after all. The reason is what "
@@ -150,8 +210,9 @@ def main():
         for name in sorted(set(declared) - set(found)):
             findings.append(
                 f"{path} no longer runs `{name}`, which is declared as: "
-                f"{declared[name]}. A job that does not run reports no check, "
-                f"and no check reads the same as a passing one -- so restore "
+                f"{split(declared[name])[0]}. A job that does not run reports "
+                f"no check, and no check reads the same as a passing one -- so "
+                f"restore "
                 f"it, or delete the declaration and say in the commit why the "
                 f"coverage it names is no longer wanted")
         for name in sorted(set(found) - set(declared)):
@@ -160,6 +221,14 @@ def main():
                 f"DECLARED in scripts/check-workflow-jobs.py with one line "
                 f"saying what it is for, so its deletion later is a decision "
                 f"rather than an accident")
+
+        for job in entry["jobs"]:
+            if job["name"] not in declared:
+                continue
+            legs = rendered(job)
+            legs_checked += len(legs or ())
+            findings.extend(legs_findings(
+                path, job["name"], split(declared[job["name"]])[1], legs))
 
     for path in sorted(set(DERIVED) - set(files)):
         findings.append(
@@ -186,10 +255,9 @@ def main():
               file=sys.stderr)
         return 1
 
-    print(f"job-drift: {checked} job(s) across "
-          f"{len(files) - len(derived_seen)} workflow(s), every one declared; "
-          f"{len(derived_seen)} left to the gate that derives it. A matrix "
-          f"leg is not a job here -- see the module docstring")
+    print(f"job-drift: {checked} job(s) and {legs_checked} matrix leg(s) "
+          f"across {len(files) - len(derived_seen)} workflow(s), every one "
+          f"declared; {len(derived_seen)} left to the gate that derives it")
     return 0
 
 
