@@ -337,9 +337,9 @@ func filteredLater(segments []bash.Segment, i int, dir string, dirUnknown bool) 
 // is not a regular file, and a name this cannot settle -- a `$`, a glob, a `>(`,
 // a relative name where the directory is lost -- are refused outright.
 //
-// Stages that write a file from their own program -- awk's `print >`, sed's
-// `w` -- are not read, and neither is any writer but tee and dd; Q257 holds
-// them.
+// Any other command in a stage between them has to be one passThrough knows
+// (Q257). A command beside the grep in a `{ …; }` or `( … )` piped as a whole
+// is not a stage, and only its redirects are read.
 func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool) bool {
 	toFile := false
 	for k := i; k < j; k++ {
@@ -399,6 +399,10 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 					written = append(written, write{out, cmdDir, cmdDirUnknown})
 				}
 			}
+		default:
+			if len(argv) > 0 && downstream(segments, i, k) && !passThrough(name, argv[1:]) {
+				return true
+			}
 		}
 		for _, wr := range written {
 			w := wr.name
@@ -435,6 +439,89 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 		if !inSpan && (k > i || s.Forked) {
 			return true
 		}
+	}
+	return false
+}
+
+// downstream reports whether segment k, later in the pipe of the grep at i,
+// reads what the grep writes. Inside a group piped as a whole the pipe number
+// is the group's, so `{ grep -rn x . | head; ls d | head; } | f` numbers every
+// command alike: the grep's own pipeline ends at its LastStage, or at the
+// grep where it is not a stage at all, and the group's closer hands what the
+// group wrote to the stages outside it, which sit in fewer shells.
+func downstream(segments []bash.Segment, i, k int) bool {
+	depth := len(segments[i].Shells)
+	ended := !segments[i].Forked || segments[i].LastStage
+	for m := i + 1; m < k; m++ {
+		if s := segments[m]; s.Pipe == segments[i].Pipe && len(s.Shells) == depth && s.LastStage {
+			ended = true
+		}
+	}
+	return k > i && (len(segments[k].Shells) < depth || !ended)
+}
+
+// passThrough reports whether a stage named name, run with args, writes what it
+// reads nowhere but its stdout and its redirects. It is a short list rather
+// than a list of writers, because the writers have no end: awk's `print >`,
+// sed's `w`, `perl`, `python3 -c` and `cp /dev/stdin /dev/stderr` each put the
+// matches on stderr ahead of the filter, driven 2026-11-27.
+//
+// Each member's options that open an output or run a program are refused by
+// name: sort's `-o` and `--compress-program`, uniq's second operand, and any
+// long option of a grep stage that resolveLong cannot name, which takes in
+// ugrep's `--filter` and `--pager`.
+func passThrough(name string, args []string) bool {
+	switch name {
+	case "head", "tail", "cut", "tr", "wc", "cat":
+		return true
+	case "grep", "egrep", "fgrep":
+		for _, a := range args {
+			if a == "--" {
+				break
+			}
+			if key, _, _ := strings.Cut(a, "="); strings.HasPrefix(key, "--") && resolveLong(key) == "" {
+				return false
+			}
+		}
+		return true
+	case "sort":
+		for _, a := range args {
+			if a == "--" {
+				break
+			}
+			key, _, _ := strings.Cut(a, "=")
+			if long, ok := strings.CutPrefix(key, "--"); ok {
+				if long == "" || strings.HasPrefix("output", long) ||
+					strings.HasPrefix("compress-program", long) {
+					return false
+				}
+			} else if strings.HasPrefix(a, "-") && strings.Contains(a, "o") {
+				return false
+			}
+		}
+		return true
+	case "uniq":
+		operands := 0
+		for n := 0; n < len(args); n++ {
+			a := args[n]
+			if a == "--" {
+				operands += len(args) - n - 1
+				break
+			}
+			switch {
+			case a == "-" || !strings.HasPrefix(a, "-"):
+				operands++
+			case strings.HasPrefix(a, "--"):
+				if !strings.Contains(a, "=") && (strings.HasPrefix(a, "--s") || strings.HasPrefix(a, "--ch")) {
+					n++
+				}
+			default:
+				if c := strings.IndexAny(a[1:], "fsw"); c >= 0 && c == len(a)-2 {
+					n++
+				}
+			}
+		}
+		return operands < 2
 	}
 	return false
 }
