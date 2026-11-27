@@ -431,9 +431,10 @@ The workflow's job list, `make list-gates` and the table above are all derived f
 `make hooks` points `core.hooksPath` at the tracked [`.githooks/`](.githooks), so the store gates run before a commit rather than at review.
 `git commit --no-verify` skips them.
 
-One gate is weaker on a branch than on the trunk, and only on purpose.
+Two gates are weaker on a branch than on the trunk, both on purpose and both through `MERGED`.
 `queue` holds `dangling-link` back on a pull request, because a row may link an item a sibling PR is still filing.
-`make queue MERGED=true` runs the trunk's set, and it is the only local command that sees what the push to `main` will see.
+`release-notes` reports a published body that has drifted from its notes file and exits 0, because no pull request can repair it: the repair is `gh release edit`.
+`make check MERGED=true` passes the variable to both, so it is the local run that sees what the push to `main` will see; `make queue MERGED=true` alone sees half of it.
 
 ## The backlog
 
