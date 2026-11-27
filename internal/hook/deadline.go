@@ -39,7 +39,7 @@ const hookTimeout = 60 * time.Second
 // still wakes it late by an amount no measurement here generalises to.
 const margin = 15 * time.Second
 
-// budget is how long the scan gets before it stops and blocks.
+// budget is how long the scan gets before the hook stops waiting for it.
 //
 // It is the timeout minus the margin rather than a number of its own, because
 // the quantity that matters is the distance between them: every second the
@@ -47,12 +47,15 @@ const margin = 15 * time.Second
 // so, and every second the margin takes is a second of scanning given up for
 // nothing.
 //
-// A scan that overruns it blocks, which is the only verdict that keeps this
-// tool's promise. Past the timeout the process is killed, whatever it was going
-// to say is discarded, and the call proceeds -- measured on both events, and no
-// exit code reaches it, because a killed process writes none. So the choice is
-// not between blocking and allowing. It is between blocking and allowing
-// silently fifteen seconds later.
+// A scan that overruns it blocks on a finding in what it got through, and
+// otherwise defers with a coverage record; overran in verdict.go says why the
+// budget outlived the block, and hook.go argues the deferral at its branch.
+// Past the timeout the process is killed, whatever it was going to say is
+// discarded, and the call proceeds -- measured on both events, and no exit code
+// reaches it, because a killed process writes none. So what the budget buys is
+// not a block. It is a record, or a block on what was read, where the
+// alternative is an allow whose only trace is a hook_cancelled attachment
+// fifteen seconds later.
 //
 // What it costs is the calls that would have finished between 45 and 60
 // seconds. At the worst rate measured before rules ran at their keyword

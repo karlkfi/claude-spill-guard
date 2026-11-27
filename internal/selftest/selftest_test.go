@@ -203,7 +203,7 @@ func TestTheCanaryIsMatchedByTheRuleItNames(t *testing.T) {
 	}
 }
 
-// The unread-buffer arm is blocked by a skip reason and by no rule at all,
+// The unread-buffer arm defers on a skip reason and on no rule at all,
 // and the same payload is still an anomaly to an arm that expects a rule.
 //
 // Both halves are needed. The first is the branch the arm was added for: a

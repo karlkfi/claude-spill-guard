@@ -43,12 +43,11 @@ const canary = "AKIA0123456789ABCDEF"
 
 // The rule the canary has to be blocked *by*.
 //
-// This is what separates a block from a block. Every internal error blocks
-// too -- that is the fail-closed inversion this project makes -- so a binary
-// whose ruleset would not compile denies every call there is, and each
-// blocking arm below would go green on it while the tool was completely
-// broken. The controls catch that as well, and this catches it first and says
-// which of the two happened.
+// This is what separates a block from a block. A call also blocks on its
+// shape, and on a payload that does not decode, with no rule involved, so a
+// blocking arm asking only for a block could go green while the rule it was
+// written for matched nothing. The controls catch that as well, and this
+// catches it first and says which of the two happened.
 const canaryRule = "aws-access-key-id"
 
 // A block reason and a confirmation both open with the plugin's own name. This

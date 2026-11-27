@@ -72,7 +72,7 @@ UTF-8's, `EF BB BF`, is a declaration it has no arm for, so such a buffer falls 
 It now says so rather than saying nothing, which is a notice about an unread buffer and not a block on a secret.
 On a prompt the raw pass reaches that key and blocks, which closes the consequence on one surface and none of the law: the verdict on the reason is untouched, and a `Read` of the same file still exits 0.
 Do not repair the law by redefining the axis as whichever declaration this build routes on: that is true by construction, cannot be falsified by a fourth encoding, and is how this one got through.
-`blocks` in [`internal/hook/hook.go`](internal/hook/hook.go) carries the argument, and a skip reason it has not been taught blocks, which is how the middle case gets its verdict without a case of its own.
+`blocks` in [`internal/hook/hook.go`](internal/hook/hook.go) carries the argument, and a skip reason it has not been taught is recorded as a declared one is, which is how the middle case reaches the coverage log without a case of its own.
 
 **Two things about that middle case are settled and should not be re-derived.** It does not turn on frequency: over `~/go/pkg/mod` and this tree, 43 files in 245,397 carry a UTF-16 mark and none decodes to binary — 21 of them organic, across seven unrelated Go modules, so a mark is not itself a Windows artifact.
 But the decode exists for Windows PowerShell 5.1 and nothing here runs `pwsh`, so that zero measures the platform rather than the population.
@@ -101,11 +101,12 @@ The hook is killed, its verdict discarded, and the only trace is a `hook_cancell
 A killed process writes nothing, so no exit code reaches this and the budget has to be the scanner's own.
 The table is in [`docs/design/README.md`](docs/design/README.md#the-third-shape-is-a-timeout-and-it-is-the-one-this-repo-configures).
 
-**It has one now: 45 seconds, and a scan still running at the end of it blocks.** The verdict is the one a buffer nothing could read already gets, on the same branch, and an override downgrades it like any other.
+**It has one now: 45 seconds, and a scan still running at the end of it defers with a coverage record, as a buffer nothing could read does.** A finding in what it got through by then still blocks (Q227), and an override downgrades that block like any other.
 Two things about it are settled and should not be re-derived.
 A size cap is not the cheaper version of this — cost is not a function of size (the same 64 MiB is 9,746 MiB/s binary, 1,055 MiB/s inert text and 6.5 MiB/s keyword-bearing text, the third since re-measured at 32.84), a call adds up rather than arriving one file at a time, and a directory operand has no size to cap.
 And "`os.ReadFile` takes no context" is true and is an argument about *interrupting* a read, not about timing one: the scan runs on its own goroutine and the verdict is written by the one waiting on it, so the deadline outruns the work rather than cancelling it.
-Driven on built binaries — a 500 MiB fixture that took 68.130s on `main`, 8s past the ceiling, blocked at 45.011s, while a 128 MiB one denies on the same rule either side.
+Driven on built binaries on 2026-09-04, when an overrun still blocked — a 500 MiB fixture that took 68.130s on `main`, 8s past the ceiling, blocked at 45.011s, while a 128 MiB one denies on the same rule either side.
+Those times were not re-taken for the deferral, which changes what is written at 45.011s and not when.
 That fixture no longer reaches the budget at all: since rules run at their keyword positions it denies at 14.9–17.7s, and Q132 owes one that does.
 Past each limit the harness is observed now, on the prompt surface: at the budget the record is written and the prompt proceeds; past 60s it is `hook_cancelled`.
 `internal/hook/deadline.go` carries the argument and `docs/design/README.md` under *The scanner's own budget* carries the table.

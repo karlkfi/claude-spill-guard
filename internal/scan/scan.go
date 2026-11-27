@@ -95,7 +95,7 @@ const (
 	//
 	// The verdict. A buffer this stage decoded is text it read, so it can hold
 	// credential-shaped bytes whatever its decoded prefix looks like, and
-	// internal/hook blocks on that where it allows the undecoded class.
+	// internal/hook records it where it allows the undecoded class.
 	//
 	// Declaration is the axis the design keys on, and decode reads two of the
 	// three marks: UTF-8's is a declaration it does not read. EF BB BF is a
@@ -117,8 +117,8 @@ const (
 	// followed by U+0000; decode resolves them the way the Unicode standard
 	// does, longer mark first. So before this constant existed the same UTF-16
 	// buffer got two different verdicts depending on where its NUL sat -- a
-	// leading one returned SkippedUTF32, which internal/hook blocks, and one
-	// character later returned SkippedBinary, which it allows. The pair is
+	// leading one returned SkippedUTF32, which internal/hook blocked, and one
+	// character later returned SkippedBinary, which it allowed. The pair is
 	// TestAUTF16NULIsNamedAsDeclaredWhereverItSits here and
 	// TestADeclaredUTF16BufferWithANULBlocks in internal/hook.
 	SkippedUTF16Binary Skip = "UTF-16: declared by a byte-order mark, and a NUL byte in the first 8 KiB of the decoded text"
@@ -212,10 +212,11 @@ func BufferEach(path string, buf []byte, ruleset []rules.Rule, each func(Result)
 // now, and it works by outrunning the scan rather than by stopping it.
 //
 // That does not retire this limit, because the two answer differently above
-// their thresholds. Past the deadline the verdict is a block. Past this limit
-// it is the allow the skip already gives, with the notice going out in 39ms --
-// which is the right answer for the 306 MiB executable that is the commonest
-// binary operand in the corpus, and a block is not.
+// their thresholds. Past the deadline a call with no finding defers with a
+// coverage record. Past this limit it is the allow the skip already gives, with
+// the notice going out in 39ms -- which is the right answer for the 306 MiB
+// executable that is the commonest binary operand in the corpus, where
+// reaching the deadline instead would leave the person no notice at all.
 const rawLimit = 32 << 20
 
 // BufferIncludingBinary is Buffer for a caller whose buffer reaches the model
@@ -246,8 +247,8 @@ const rawLimit = 32 << 20
 // why this is a second entry point rather than the only one.
 //
 // Only SkippedBinary. Every other Skip is a declaration the buffer made about
-// itself that this build could not act on, two of them block, and matching
-// their raw bytes would find nothing in any case -- a UTF-32 buffer's
+// itself that this build could not act on, two of them are recorded, and
+// matching their raw bytes would find nothing in any case -- a UTF-32 buffer's
 // credential is three NULs to the byte.
 //
 // And only up to rawLimit, which is what keeps this from being worse than the

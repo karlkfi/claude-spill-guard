@@ -24,11 +24,12 @@ import (
 // place.
 //
 // It is only the sentence now. FF FE 00 00 is genuinely both marks, so which
-// one wins here used to decide block against allow -- the UTF-32 arm blocks and
-// the binary skip does not. Since the UTF-16 arm returns SkippedUTF16Binary the
-// two readings agree on the verdict and disagree only about which encoding to
-// name, which is the most an ambiguity the standard leaves open should ever
-// cost. TestAUTF16NULIsNamedAsDeclaredWhereverItSits is the pair.
+// one wins here used to decide block against allow -- the UTF-32 arm blocked
+// and the binary skip did not. Since the UTF-16 arm returns
+// SkippedUTF16Binary the two readings agree on the verdict and disagree only
+// about which encoding to name, which is the most an ambiguity the standard
+// leaves open should ever cost. TestAUTF16NULIsNamedAsDeclaredWhereverItSits is
+// the pair.
 var (
 	bomUTF32LE = []byte{0xFF, 0xFE, 0x00, 0x00}
 	bomUTF32BE = []byte{0x00, 0x00, 0xFE, 0xFF}

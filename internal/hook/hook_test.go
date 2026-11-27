@@ -535,27 +535,27 @@ func TestAnUnreadBufferIsRecordedByTheReasonItWentUnread(t *testing.T) {
 // unknown one through would allow a buffer nothing opened.
 func TestASkipReasonThisPackageWasNotTaughtBlocks(t *testing.T) {
 	if !blocks(scan.Skip("a reason internal/scan grew after this switch was written")) {
-		t.Error("an unrecognised skip reason does not block, which is the fail-open direction")
+		t.Error("an unrecognised skip reason is allowed rather than recorded, which is the fail-open direction")
 	}
 	// The three it was taught, so a default arm wide enough to swallow them all
 	// fails here rather than passing as a stricter policy.
 	if blocks(scan.Scanned) {
-		t.Error("a buffer the pipeline read blocks")
+		t.Error("a buffer the pipeline read is recorded as unread")
 	}
 	if blocks(scan.SkippedBinary) {
-		t.Error("SkippedBinary blocks; blocks() is where the argument for it not to lives")
+		t.Error("SkippedBinary is recorded; blocks() is where the argument against that lives")
 	}
 	if !blocks(scan.SkippedUTF32) {
-		t.Error("SkippedUTF32 does not block")
+		t.Error("SkippedUTF32 is not recorded")
 	}
 	// Q91's constant reaches the default arm on purpose rather than by
-	// omission: it is a declared encoding, so it blocks for the reason
-	// SkippedUTF32 does, and there is no case for it because the default
+	// omission: it is a declared encoding, so it is recorded for the reason
+	// SkippedUTF32 is, and there is no case for it because the default
 	// already gives that answer. Asserted here so the reasoning is exercised
 	// and not merely written down -- adding a case returning false would leave
 	// every other assertion in this test green.
 	if !blocks(scan.SkippedUTF16Binary) {
-		t.Error("SkippedUTF16Binary does not block; a declared encoding whose " +
+		t.Error("SkippedUTF16Binary is not recorded; a declared encoding whose " +
 			"decoded text is binary is still a buffer that declared itself text")
 	}
 }

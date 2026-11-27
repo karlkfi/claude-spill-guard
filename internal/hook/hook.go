@@ -2,17 +2,20 @@
 // decides what of the call can be scanned, runs internal/scan over that, and
 // writes a verdict.
 //
-// The fail-closed inversion this project makes against its sibling guards is
-// decided here or nowhere. They fail silent, on the grounds that a hook on
-// every call must never be the reason ordinary work breaks; a secret scanner
-// cannot afford that trade, because one that fails quietly reports a safety it
-// is not providing. So every internal error blocks with a reason, and so does a
-// buffer whose text the pipeline could not read. The one exception is the
-// binary skip, which the design chose with a measurement rather than for want
-// of a decoder; blocks() is where that is argued. It is allowed and it is no
-// longer silent: the call goes through carrying a systemMessage that names the
-// buffer and says nothing decoded it, so the one path here that does not block
-// still tells the person it happened.
+// How this project fails, against its sibling guards, is decided here or
+// nowhere. They fail silent, on the grounds that a hook on every call must
+// never be the reason ordinary work breaks; a secret scanner cannot afford that
+// trade, because one that fails quietly reports a safety it is not providing.
+// So a finding blocks, a call refused on its shape blocks, and a payload that
+// does not decode blocks on exit 2. A gap -- an operand that will not resolve,
+// a buffer whose text the pipeline could not read, a scan past its budget --
+// defers with a coverage record instead; abstain is that path and coverage.go
+// has the measurement that put it there. The one gap that writes no record is
+// the binary skip, which the design chose with a measurement rather than for
+// want of a decoder; blocks() is where that is argued. It is allowed and it is
+// no longer silent: the call goes through carrying a systemMessage that names
+// the buffer and says nothing decoded it, so the one gap here that is not
+// recorded still tells the person it happened.
 //
 // On a prompt the match loop runs over those raw bytes anyway, because the
 // harness splices such a file into the context whole and the skip's cost trade
@@ -457,18 +460,20 @@ type skipped struct {
 	why   scan.Skip
 }
 
-// blocks reports whether a skip reason means this call cannot be allowed.
+// blocks reports whether a skip reason means this call cannot be allowed on
+// what was read. Such a call defers, and the buffer goes on its coverage
+// record rather than in a notice.
 //
 // The axis is the one the decode stage already runs on: a byte-order mark is a
 // declaration the buffer makes about itself, and a NUL in the sniff window is an
-// inference drawn from its bytes. What blocks is a buffer that declared itself
-// text and this build could not read.
+// inference drawn from its bytes. What this reports is a buffer that declared
+// itself text and this build could not read.
 //
 // SkippedUTF32 is that. The class is text by declaration, so credential-shaped
 // bytes can be in it, and internal/scan skips it because no measurement said the
 // class was worth decoding -- a capability this build does not have rather than
-// a trade it made. Blocking costs close to nothing, because close to nothing is
-// written in UTF-32, and the reason names a remedy the user can act on.
+// a trade it made. Recording it costs close to nothing, because close to
+// nothing is written in UTF-32.
 //
 // SkippedBinary is the trade, and it was taken against a measurement: one PNG
 // was 55% of the benchmark corpus. Denying every image read is not a
@@ -492,8 +497,8 @@ type skipped struct {
 // anything, so separating it is the heuristic the NUL check was chosen instead
 // of, and it stays here. The second did declare itself -- a UTF-16 mark whose
 // decoded sniff window holds a U+0000 -- and it satisfied the description of
-// what blocks and was allowed anyway, because internal/scan routes on decoded
-// content where this routes on declaration.
+// what this reports and was allowed anyway, because internal/scan routes on
+// decoded content where this routes on declaration.
 //
 // That one is now scan.SkippedUTF16Binary and lands on the default arm below,
 // which is the whole of the change: no case here, no signature, and the reason
@@ -507,8 +512,8 @@ type skipped struct {
 // that FF FE 00 00 is both the UTF-32LE mark and a UTF-16LE mark followed by
 // U+0000, so before the split the same UTF-16 buffer blocked or was allowed
 // depending on where its NUL sat. A verdict should not turn on an ambiguity the
-// Unicode standard leaves open, and now it does not: both readings block, and
-// they differ only over which encoding to name.
+// Unicode standard leaves open, and now it does not: both readings defer with a
+// record, and they differ only over which encoding to name.
 //
 // scan.ScannedRaw is SkippedBinary's buffer after the match loop has run over
 // its raw bytes, so it allows for SkippedBinary's reason and no other. It is a
@@ -520,10 +525,10 @@ type skipped struct {
 // learns which event it was, so the extra coverage arrives with no second axis
 // under it.
 //
-// Anything else blocks. A Skip this switch does not know is internal/scan having
-// grown a reason internal/hook was not taught, and allowing it would be the
-// fail-open direction -- the reading passes() already takes in the pipeline for
-// a validator name it does not run.
+// Anything else defers. A Skip this switch does not know is internal/scan
+// having grown a reason internal/hook was not taught, and allowing it would be
+// the fail-open direction -- the reading passes() already takes in the
+// pipeline for a validator name it does not run.
 func blocks(why scan.Skip) bool {
 	switch why {
 	case scan.Scanned, scan.SkippedBinary, scan.ScannedRaw:
@@ -592,7 +597,7 @@ func targets(call payload, event Event) ([]target, error) {
 func toolTargets(call payload) ([]target, error) {
 	// A tool this package has no strategy for is a matcher wider than the
 	// scanner, and it is judged below. A payload that names no tool at all is
-	// a different thing: there is nothing to decide with, so it blocks.
+	// a different thing: there is nothing to decide with, so it defers.
 	if call.ToolName == nil || *call.ToolName == "" {
 		return nil, errors.New("the PreToolUse payload names no tool, so what " +
 			"the call would send cannot be decided")
