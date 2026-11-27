@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // A second class of call refused on its shape, and its argument is not the
@@ -120,9 +121,15 @@ var dotenvTemplates = map[string]bool{
 // ordinary: `config` and `credentials` and `config.json` are names anything
 // might have, and it is `.aws/credentials` rather than `credentials` that is
 // credentials by convention.
+//
+// Both are compared case-folded, the templates included, and without asking the
+// volume. Driven on APFS here, `.ENV`, `.git-credentialſ` and `.Kube/config`
+// (a Kelvin sign) each open the lowercase file. On a case-sensitive volume the
+// fold refuses a file literally named `.ENV`, which is credentials by the same
+// convention.
 func guardedClass(path string) string {
-	base := filepath.Base(path)
-	dir := filepath.Base(filepath.Dir(path))
+	base := foldCase(filepath.Base(path))
+	dir := foldCase(filepath.Base(filepath.Dir(path)))
 	switch {
 	case base == ".env" || strings.HasPrefix(base, ".env."):
 		if dotenvTemplates[base] {
@@ -143,4 +150,17 @@ func guardedClass(path string) string {
 		return "a kubeconfig"
 	}
 	return ""
+}
+
+// foldCase maps every rune to one member of its Unicode simple case-folding
+// orbit, lowercase where the orbit has one. strings.ToLower is not enough:
+// it leaves `ſ` alone, and APFS opens `.git-credentials` by that spelling.
+func foldCase(s string) string {
+	return strings.Map(func(r rune) rune {
+		least := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			least = min(least, f)
+		}
+		return unicode.ToLower(least)
+	}, s)
 }

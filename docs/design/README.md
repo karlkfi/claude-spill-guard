@@ -287,6 +287,10 @@ And the whole `*.env` family: `deploy.env` is a name somebody chose where `.env`
 This repo is its own example — `testdata/corpus/` holds `aws-access-key-id.env` and `stripe-live-secret-key.env`, and the selftest plants `deploy.env`, so the suffix would refuse three of the fixtures the tool is tested with.
 Under-firing on a spelling is the trade the environment half already takes for `env -0`.
 
+**Membership is read case-folded, the templates included.** Driven on APFS here, `.ENV`, `.aws/Credentials` and `.git-credentialſ` each open the lowercase file, and until Q266 every such spelling of every member exited 0 silent on `cat`, `Read` and an `@` token.
+The fold is Unicode simple case folding rather than lowercasing, because `strings.ToLower` leaves `ſ` alone.
+It asks the volume nothing: on a case-sensitive one it refuses a file literally named `.ENV`, which is credentials by the same convention, and `.env.EXAMPLE` is a template on either.
+
 ### What gets scanned is the crossing, not the hop
 
 Scanning every field of every hook payload is the safe-looking default and it is how a scanner becomes noise: one secret reported at the `Read`, again at the `Write` that copies it, again at the heredoc that echoes it.
