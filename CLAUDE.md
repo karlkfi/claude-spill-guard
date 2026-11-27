@@ -362,12 +362,11 @@ That is the instance; the rule recurs.
 On 2026-08-25 a Windows control asserted "uniform LF, block present", both true, while the launcher went on denying: the mutation landed and did not bite.
 Five such controls in one batch, three carrying an explicit precondition that passed.
 
-The checkable form is comparison against a case already measured, and what the mutation acts on decides which case.
-On **behaviour**, drive the mutated subject and assert the symptom, since no file can stand in: the `test` control's mutated binary must exit 0 on an unknown command, `doctor`'s `go -C tools list -deps ./...` must fail, and `vulns`' govulncheck must name `GO-2021-0113`.
-On an **artifact**, whose exact bytes are the property, **the case is a file, not a recipe for producing one**: the Windows control copies `testdata/launcher/lf-uniform-failing.cmd` over the launcher and asserts its sha256, byte count and uniform LF first — 7,214 bytes, `d28a64b3…`, the exact file a `windows-latest` runner was measured failing on.
-The test between them is whether the mutation's effect depends on anything besides its own edit, and only there does a hashed file earn its cost.
+The checkable form is comparison against a case already measured, and what picks the case is whether the property is a file's exact bytes.
+Where it is not, drive the mutated subject and assert the symptom, since no file can stand in: the `test` control's mutated binary must exit 0 on an unknown command, `doctor`'s `go -C tools list -deps ./...` must fail, and `vulns`' govulncheck must name `GO-2021-0113`.
+Where it is, **the case is a file, not a recipe for producing one**: the Windows control copies `testdata/launcher/lf-uniform-failing.cmd` over the launcher and asserts its sha256, byte count and uniform LF first — 7,214 bytes, `d28a64b3…`, the exact file a `windows-latest` runner was measured failing on.
 
-**A mutation is only valid against the artifact it was measured on**, and the recipe that file replaced is the case.
+**A mutation is only valid against the artifact it was measured on**, and the recipe that file replaced is the instance.
 It patched whichever launcher was in the tree, so its "7,214 bytes verified identical" was true of the substitution text, and of the result only on `origin/main`.
 On a branch that shortened four deny strings the result was 7,824 bytes, and padding the block to forty lines took it to 8,304: cmd.exe went on denying correctly, and the step failed three heads running for the wrong reason.
 Where no such case exists, build one, and give any probe whose answer matters when it is *empty* a positive control proving it can come back non-empty.
