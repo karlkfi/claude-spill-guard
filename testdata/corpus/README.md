@@ -19,7 +19,7 @@ The credential values carry one of two marks.
 The older is the stem `ZmT4bXn9Ld6VcP1`, matched case-insensitively — `aws-access-key-id.env` holds it uppercase, that rule being `[A-Z0-9]{16}`.
 The newer is `0SPILLGUARD`, which `aws-access-key-id-utf16le.env`, `aws-access-key-id-asia.env` and the four `anthropic-*` files carry, and it is the mark to reach for now, for the reason **Adding to it** gives below.
 That is deliberate: it makes "fabricated" something a reader can grep for rather than something this file asserts.
-The exceptions are `github-fine-grained-pat.txt`, which carries the stem with an underscore through the middle because its rule admits one; the PEM blocks, whose bodies are base64 of ordinary ASCII; and `slack-webhook-url.yaml`, which predates both marks.
+The exceptions are `github-fine-grained-pat.txt`, which carries the stem with an underscore through the middle because its rule admits one; the PEM blocks, whose bodies are base64 of ordinary ASCII; `slack-webhook-url.yaml`, which predates both marks; and `us-ssn.txt`, which is not a credential and is covered below.
 
 `aws-access-key-id.env` used to carry `AKIAIOSFODNN7EXAMPLE`, the key AWS publishes in its own documentation, and the rule now drops that key on the `EXAMPLE` suffix.
 A fixture proving a rule can fire cannot be a value the rule is supposed to stay quiet on.
