@@ -572,9 +572,9 @@ func TestAnOverrideOnACoverageFailureIsInert(t *testing.T) {
 
 // The budget is spent before the scan starts, not after.
 //
-// Everything ahead of the scan is bounded by the payload rather than by the
-// files a call names, so charging it costs nothing in the ordinary case. It is
-// the case where it is not bounded that this is for: a budget started at the
+// Everything ahead of the scan is fast in the ordinary case, so charging it
+// costs nothing there. It is the case where it is not that this is for: a
+// budget started at the
 // scan would give the whole timeout away to a prelude that hung, and the harness
 // would kill the process rather than this blocking.
 func TestThePreludeIsChargedAgainstTheBudget(t *testing.T) {
@@ -636,5 +636,89 @@ func TestASpentBudgetIsNotRacedByTheScan(t *testing.T) {
 	}
 	if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
 		t.Fatalf("the control reason = %q, want the planted key found", reason)
+	}
+}
+
+// A call refused on its shape is refused however the budget stands, because no
+// buffer has to be read to decide it (Q270). Before this, both ways the budget
+// could run out ahead of the refusal deferred the call with no verdict.
+//
+// Two arms, because a fix for one leaves the other open. A start an hour ago
+// spends the budget before within is reached, which within answered by never
+// starting the walk. A context ended before the walk can return is the deadline
+// arriving while targets() still runs, where within answered with whatever had
+// been published, and nothing is published until the walk is through. A
+// refusal decided ahead of within answers both; one published early from inside
+// the scan answers neither, since the context here ends before the walk returns.
+//
+// Each arm's verdict is held to the unhurried one byte for byte, so the
+// assertion is that the budget changed nothing rather than that something
+// blocked.
+func TestARefusalOnItsShapeDoesNotWaitOnTheBudget(t *testing.T) {
+	dir, name := dotenv(t)
+	plant(t, dir, "sub/a.go", "package a\n")
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"an env dump", bashCall(t, "env", dir)},
+		{"a guarded Bash operand", bashCall(t, "cat "+name, dir)},
+		{"a guarded Read", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":` +
+			quote(t, filepath.Join(dir, name)) + `}}`},
+		{"a guarded @ token", `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
+			`,"prompt":` + quote(t, "see @"+name) + `}`},
+		{"an unfiltered recursive grep", bashCall(t, "grep -rn foo sub", dir)},
+		{"the Grep tool over a directory", grepToolCall(t, dir,
+			map[string]string{"pattern": "foo", "path": "sub", "output_mode": "content"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			var out, errs bytes.Buffer
+			if code := run(time.Now(), unhurried, strings.NewReader(tc.payload), &out, &errs); code != 0 || out.Len() == 0 {
+				t.Fatalf("the control exited %d with stdout %q (stderr %q), want a refusal", code, out.String(), errs.String())
+			}
+			want := out.String()
+			reasonOf(t, want)
+			for arm, drive := range map[string]func(stdout, stderr *bytes.Buffer) int{
+				"a spent budget": func(stdout, stderr *bytes.Buffer) int {
+					return run(time.Now().Add(-unhurried), unhurried, strings.NewReader(tc.payload), stdout, stderr)
+				},
+				"a deadline ahead of the walk": func(stdout, stderr *bytes.Buffer) int {
+					return runPaced(ended, func(string) {}, time.Now(), unhurried, strings.NewReader(tc.payload), stdout, stderr)
+				},
+			} {
+				var out, errs bytes.Buffer
+				if code := drive(&out, &errs); code != 0 || out.String() != want {
+					t.Errorf("%s: exited %d with stdout %q (stderr %q), want the control's %q",
+						arm, code, out.String(), errs.String(), want)
+				}
+			}
+		})
+	}
+}
+
+// An override still downgrades a refusal the budget ran out on, and the
+// confirmation says the files beside it went unread: approving it sends them
+// without anything having looked.
+func TestAnOverrideDowngradesARefusalTheBudgetRanOutOn(t *testing.T) {
+	dir, name := dotenv(t)
+	writeFile(t, dir, "notes.txt", "AWS_ACCESS_KEY_ID="+secret+"\n")
+	payload := bashCall(t, "SPILL_GUARD_OVERRIDE='a fixture' cat notes.txt "+name, dir)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var out, errs bytes.Buffer
+	if code := run(time.Now().Add(-unhurried), unhurried, strings.NewReader(payload), &out, &errs); code != 0 {
+		t.Fatalf("exited %d (stderr %q)", code, errs.String())
+	}
+	if !strings.Contains(out.String(), `"permissionDecision":"ask"`) {
+		t.Fatalf("stdout = %q, want a confirmation", out.String())
+	}
+	reason := reasonOf(t, out.String())
+	if !strings.Contains(reason, "a dotenv file") {
+		t.Errorf("reason = %q, want the refusal's class named", reason)
+	}
+	if strings.Contains(reason, "aws-access-key-id") {
+		t.Errorf("reason = %q, want no finding from a scan that never ran", reason)
 	}
 }

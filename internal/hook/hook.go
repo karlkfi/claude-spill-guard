@@ -99,9 +99,11 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 // the match loop over a fixture.
 //
 // start is taken before anything is read, so the budget covers the whole
-// invocation and not just the scan. Everything ahead of the scan is bounded by
-// the payload -- reading stdin, decoding it, looking for an override -- and
-// charging it here costs nothing when it is fast and is the honest answer when
+// invocation and not just the scan. Reading stdin, decoding it and looking for
+// an override are bounded by the payload. The walk that decides what to scan is
+// not, since it stats what the call names and expands its globs, and it runs
+// outside the budget so that a refusal it reaches is never deferred. Charging
+// all of it here costs nothing when it is fast and is the honest answer when
 // it is not.
 func runPaced(ctx context.Context, pace func(label string), start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(stdin)
@@ -122,7 +124,20 @@ func runPaced(ctx context.Context, pace func(label string), start time.Time, bud
 		return deny(stdout, stderr, event, blockedLead+noReasonGiven, "")
 	}
 
-	got, finished := within(ctx, pace, call, event, overridden, budget-time.Since(start))
+	// The walk runs ahead of the budget rather than inside it, because a
+	// refusal comes out of it and needs no buffer read: inside, a budget spent
+	// before the scan or ending while the walk still ran deferred an env dump
+	// or a `cat .env` with no verdict (Q270). Its time is still charged, since
+	// what the scan gets is what is left after it. The cost is a walk that
+	// reaches the hook's timeout, which is killed where it used to defer with a
+	// record; docs/design/README.md, "The walk is outside the budget", has how
+	// long real walks take.
+	buffers, gap := targets(call, event)
+	var refused refusal
+	if errors.As(gap, &refused) && !overridden {
+		return decide(stdout, stderr, call, event, false, refused.body(), "")
+	}
+	got, finished := within(ctx, pace, buffers, gap, event, budget-time.Since(start))
 	findings, skips, err := got.findings, got.skips, got.err
 	// A refusal blocks whatever the buffers hold, so they are scanned only
 	// under an override, where the confirmation has to name what approving
@@ -130,15 +145,14 @@ func runPaced(ctx context.Context, pace func(label string), start time.Time, bud
 	// that mentioned only the `.env`. Ahead of the deadline, because a scan
 	// that ran out is still a call stopped for its shape. Not failed(), whose
 	// sentence is that the scan stopped short, which is not the reason.
-	var refused refusal
-	if errors.As(err, &refused) {
+	if refused != nil {
 		body, notice := refused.body(), ""
 		if len(findings) > 0 {
 			body += " " + found(findings)
 		}
-		// Anything joined to the refusal is a gap beside it. Only an override
-		// scans past a refusal, so without one nothing was read to fall short.
-		if overridden && (!finished || err != error(refused)) {
+		// Anything joined to the refusal is a gap beside it, and so is a scan
+		// that did not finish.
+		if !finished || err != error(refused) {
 			notice = restUnread
 			if len(findings) > 0 {
 				notice = partlyRead
@@ -346,13 +360,12 @@ const bypassPermissions = "bypassPermissions"
 // and those are scanned, with the error returned beside the findings. The
 // failure is a reason the rest of the call cannot be decided, not a reason to
 // skip the part that can: before Q204 a key typed beside an `@` token that
-// would not resolve crossed with no verdict. A refusal is the exception, since
-// it blocks whatever the buffers hold, and is scanned past only when overridden.
-func scanCall(call payload, event Event, overridden bool, pace func(label string), publish func(func() scanned)) ([]scan.Finding, []skipped, error) {
-	buffers, gap := targets(call, event)
+// would not resolve crossed with no verdict. A refusal blocks whatever the
+// buffers hold, so runPaced hands one here only when it is overridden.
+func scanCall(buffers []target, gap error, event Event, pace func(label string), publish func(func() scanned)) ([]scan.Finding, []skipped, error) {
 	var refused refusal
 	isRefused := errors.As(gap, &refused)
-	if isRefused && !overridden || len(buffers) == 0 {
+	if len(buffers) == 0 {
 		return nil, nil, gap
 	}
 	set, err := rules.Load(embedded.Shipped)
@@ -385,15 +398,9 @@ func scanCall(call payload, event Event, overridden bool, pace func(label string
 		return cmp.Compare(buffers[a].size, buffers[b].size)
 	})
 	results := make([]atomic.Pointer[scan.Result], len(buffers))
-	// A refusal travels with what a deadline hands back, or an overridden one
-	// that ran out would defer and wave the call through.
-	var stands error
-	if isRefused {
-		stands = gap
-	}
 	publish(func() scanned {
 		findings, skips, _ := settled(buffers, results)
-		return scanned{findings: findings, skips: skips, err: stands}
+		return scanned{findings: findings, skips: skips}
 	})
 	for _, i := range order {
 		t := buffers[i]

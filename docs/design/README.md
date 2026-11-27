@@ -1460,10 +1460,22 @@ What the rows measure — that the deadline outruns a scan the harness would oth
 
 **A deadline is available even though nothing here takes a `context`.** `os.ReadFile` takes none and neither does the match loop, which is why a fifo had to be refused up front rather than read with a limit — `fifo_unix_test.go` says so, against that question.
 That argument is about *interrupting* the work, and a deadline does not have to: a budget with time left runs the scan on its own goroutine, the verdict is written by the one waiting on it, and the process exit collects whatever was still running.
-A budget already spent when `within` is entered starts no scan and no goroutine, and the call defers on nothing read.
+A budget already spent when `within` is entered starts no scan and no goroutine, and the call defers on nothing read — unless the walk ahead of it refused the call on its shape, below.
 Go preempts a goroutine in a tight match loop asynchronously, so the timer is scheduled without the scan yielding.
 That is the load-bearing mechanism claim and it is driven rather than read — `TestTheDeadlineFiresWhileTheMatchLoopIsRunning` stops on the clock over a buffer that its control arm, given time, blocks on for a key planted in it.
 The control is timed and has to take at least 30 times the short arm's budget, so a faster match loop fails the test outright rather than making it flaky.
+
+#### The walk is outside the budget
+
+The walk that decides what a call would send runs before the budget is consulted, and the scan gets whatever is left after it.
+Five refusals come out of that walk and need no buffer read: an `env` dump, a read of a guarded credential path, the same path behind a prompt's `@` token, an unfiltered recursive grep, and the `Grep` tool in `content` mode over a directory.
+Inside the budget, a budget spent before the scan began deferred every one of them with no verdict, and so did a deadline that arrived while the walk was still running, because nothing was handed back until the walk returned (Q270).
+`TestARefusalOnItsShapeDoesNotWaitOnTheBudget` drives both arms over all five, the guarded path on `Bash` and on `Read`, and holds each verdict to the unhurried one byte for byte; on the tree before the change all twelve deferred.
+
+What that costs is a walk long enough to reach the hook's 60-second timeout, which is killed where it used to defer with a record at 45.
+Timed 2026-11-27 by replaying this machine's transcripts through `bashTargets` and `promptTargets` against today's filesystem, from each entry's recorded `cwd` where it still exists: 211,428 `Bash` commands took 123.5µs at the median, 7.07ms at p99.9 and 408ms at worst, and 25,868 prompts took 393µs at worst.
+The filesystem is today's, not the one each command met, and 192,390 transcript entries were skipped because their `cwd` is gone, so this bounds the population rather than closing it.
+No walk in it came within two orders of magnitude of the budget.
 
 #### Driven end to end, on built binaries
 

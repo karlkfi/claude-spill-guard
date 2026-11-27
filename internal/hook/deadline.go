@@ -102,7 +102,7 @@ type scanned struct {
 // the runtime collects everything on the way out. In a test, which is the one
 // caller that outlives a verdict, the goroutine finishes the buffer it was
 // given and exits on its own.
-func within(ctx context.Context, pace func(label string), call payload, event Event, overridden bool, left time.Duration) (scanned, bool) {
+func within(ctx context.Context, pace func(label string), buffers []target, gap error, event Event, left time.Duration) (scanned, bool) {
 	// A budget already spent is answered here rather than below, because the
 	// select cannot answer it twice the same way. Both of its cases are ready
 	// at once in that case -- the timer from the first instant, the scan as
@@ -127,7 +127,7 @@ func within(ctx context.Context, pace func(label string), call payload, event Ev
 	var settle atomic.Pointer[func() scanned]
 	done := make(chan scanned, 1)
 	go func() {
-		findings, skips, err := scanCall(call, event, overridden, pace, func(s func() scanned) { settle.Store(&s) })
+		findings, skips, err := scanCall(buffers, gap, event, pace, func(s func() scanned) { settle.Store(&s) })
 		done <- scanned{findings, skips, err}
 	}()
 	select {
