@@ -553,6 +553,12 @@ func TestAProcessSubstitutionFeedingAStageIsReadAsOne(t *testing.T) {
 		"grep -rn foo . | grep -v -f <(echo n | tee /dev/stderr) | spill-guard filter",
 		"grep -rn foo . | tee >(cat >&2) | spill-guard filter",
 		"grep -rn foo . | tee >(cat) | spill-guard filter",
+		// A substitution inside the body reads the same stdin, and stays in
+		// its word, driven by #297's review.
+		`grep -rn foo . | grep -f <(echo "$(cat >&2)") | spill-guard filter`,
+		"grep -rn foo . | grep -f <(echo `cat >&2`) | spill-guard filter",
+		`grep -rn foo . | grep -f <(printf %s "$(cat >&2)") | spill-guard filter`,
+		`grep -rn foo . | cat <(echo "$(cat >&2)") | spill-guard filter`,
 	} {
 		t.Run(command+" is refused", func(t *testing.T) {
 			denyReason(t, bashCall(t, command, dir))

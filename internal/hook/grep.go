@@ -501,6 +501,13 @@ func substitutedAround(segments []bash.Segment, i, k int) bool {
 				return true
 			}
 		}
+		// A quoted `$(…)` or a backtick stays inside its word rather than
+		// becoming segments here, and its body reads the same stdin (Q274).
+		for _, tok := range body.Tokens {
+			if strings.Contains(tok, "$(") || strings.Contains(tok, "`") {
+				return true
+			}
+		}
 		p := bash.ShKeywordPeel(body.Tokens, body.QuotedFrom)
 		wrap := readers.PeelWrappers(bash.StripEnvPrefix(body.Tokens[p:], body.QuotedFrom[p:]))
 		if wrap.Opaque || len(wrap.Argv) > 0 && !passThrough(filepath.Base(wrap.Argv[0]), wrap.Argv[1:]) {
