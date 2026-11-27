@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/karlkfi/claude-spill-guard/internal/bash"
 	"github.com/karlkfi/claude-spill-guard/internal/readers"
 )
 
@@ -94,5 +95,10 @@ func toolShellIsZsh() bool {
 }
 
 // The peel in internal/readers needs the same bit for zsh's precommand
-// modifiers, and reads it as glob.go does: not bash is read as zsh.
-func init() { readers.MaybeZsh = func() bool { return !toolShellIsBash() } }
+// modifiers, and reads it as glob.go does: not bash is read as zsh. The `time`
+// options internal/bash peels want the stricter bit, because not peeling them
+// is the reading that opens fewer files.
+func init() {
+	readers.MaybeZsh = func() bool { return !toolShellIsBash() }
+	bash.IsZsh = toolShellIsZsh
+}

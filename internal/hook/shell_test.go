@@ -532,6 +532,64 @@ func TestAShapeOnlyZshReadsDefers(t *testing.T) {
 	}
 }
 
+// zsh's `time` takes no options, so it runs `-p` or `--` as the command and
+// never opens the file; its command position ends there too, so a `;` bash
+// reads inside an assignment's subscript separates commands. A shell this
+// cannot settle keeps bash's reading of both (Q223).
+func TestTimeTakesOptionsOnlyOutsideZsh(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "k1.env", "AWS_ACCESS_KEY_ID="+secret+"\n")
+	for _, tc := range []struct {
+		command              string
+		zsh, bash, unsettled bool // whether the call blocks
+	}{
+		{"time -p cat k1.env", false, true, true},
+		{"time -- cat k1.env", false, true, true},
+		{"time -p -- cat k1.env", false, true, true},
+		{"time -p FOO=1 cat k1.env", false, true, true},
+		{"time cat k1.env", true, true, true},
+		{"time FOO=1 cat k1.env", true, true, true},
+		{"time -p FOO[a;cat k1.env;b]=x", true, false, false},
+		{"time -p -- FOO[a;cat k1.env;b]=x", true, false, false},
+		{"time -p -- FOO[a;b]=x cat k1.env", false, true, true},
+		// Inside a pipeline a `time` already times, zsh runs /usr/bin/time,
+		// which takes options; bash reads the keyword, which takes `-p`.
+		{"time time -p cat k1.env", true, true, true},
+		{"time time -- cat k1.env", true, true, true},
+		{"time time time -p cat k1.env", true, true, true},
+		{"! time time -p cat k1.env", true, true, true},
+		{"time ! time -p cat k1.env", true, true, true},
+		{"echo x | time time -p cat k1.env", true, true, true},
+		{"time true | time -p cat k1.env", true, true, true},
+		{"time { time -p cat k1.env; }", true, true, true},
+		{"time (time -p cat k1.env)", true, true, true},
+		{"time if time -p cat k1.env; then :; fi", true, true, true},
+		{"time time -l cat k1.env", true, false, false},
+		// The pipeline's end is not tracked, so zsh's keyword after it is
+		// still read as the binary: a false deny, as on main.
+		{"time true; time -p cat k1.env", true, true, true},
+	} {
+		for shell, blocks := range map[string]bool{"zsh": tc.zsh, "bash": tc.bash, "": tc.unsettled} {
+			t.Run(tc.command+"/"+shell, func(t *testing.T) {
+				if shell == "" {
+					t.Setenv("CLAUDE_CODE_SHELL", "")
+					t.Setenv("SHELL", "")
+				} else {
+					shellNamed(t, shell)
+				}
+				code, stdout, stderr := drive(t, bashCall(t, tc.command, dir))
+				if blocks {
+					if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+						t.Errorf("reason = %q, want the rule named", reason)
+					}
+				} else if code != 0 || stdout != "" || stderr != "" {
+					t.Errorf("exit %d, stdout %q, stderr %q, want a silent allow", code, stdout, stderr)
+				}
+			})
+		}
+	}
+}
+
 // A shell the harness accepts that is neither bash nor zsh has no measured
 // expansion, so every glob still defers under it. The harness takes a path by
 // substring, so a `sh` under a directory named for zsh is spawned.

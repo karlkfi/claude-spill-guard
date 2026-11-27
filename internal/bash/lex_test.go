@@ -1,6 +1,7 @@
 package bash
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -282,6 +283,37 @@ func TestStripShKeywords(t *testing.T) {
 			got := StripEnvPrefix(tc.in[k:], qf[k:])
 			if !equalStrings(got, tc.want) {
 				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// zsh's `time` takes no options: `-p` is the command it runs, and the word
+// after it is an argument, where a `;` ends the command (Q223).
+func TestTimeTakesOptionsOnlyOutsideZsh(t *testing.T) {
+	in := []string{"time", "-p", "--", "cat", "f"}
+	for zsh, want := range map[bool]struct{ peel, segments int }{false: {3, 1}, true: {1, 2}} {
+		t.Run(fmt.Sprintf("zsh=%v", zsh), func(t *testing.T) {
+			IsZsh = func() bool { return zsh }
+			t.Cleanup(func() { IsZsh = func() bool { return false } })
+			if got := ShKeywordPeel(in, Unquoted(len(in))); got != want.peel {
+				t.Errorf("ShKeywordPeel(%q) = %d, want %d", in, got, want.peel)
+			}
+			segs, err := Segments("time -p FOO[a;b]=x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(segs) != want.segments {
+				t.Errorf("Segments = %d segments, want %d", len(segs), want.segments)
+			}
+			// A `time` inside one a `time` already times is /usr/bin/time to
+			// zsh, a command rather than a keyword, so the peel stops at it.
+			toks, qf, err := lex("time time -p cat f")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, wantNested := ShKeywordPeel(toks, qf), map[bool]int{false: 3, true: 1}[zsh]; got != wantNested {
+				t.Errorf("ShKeywordPeel(%q) = %d, want %d", toks, got, wantNested)
 			}
 		})
 	}
