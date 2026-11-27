@@ -6,7 +6,7 @@ Two are copies, and this page is where the tree records that.
 
 ## Modes, and what the executable bit means here
 
-Nineteen Python files here are this repo's own, and eighteen of them are entry points: a `#!/usr/bin/env python3` line, a `main()`, an `if __name__ == "__main__"` block, and mode `755`.
+Every Python file here outside `vendor/` is this repo's own, and all but one are entry points: a `#!/usr/bin/env python3` line, a `main()`, an `if __name__ == "__main__"` block, and mode `755`.
 [`workflow_model.py`](workflow_model.py) is the one that is not — nothing runs it, [`check-action-pins.py`](check-action-pins.py) and [`gates.py`](gates.py) import it — so it is tracked at `644` and carries no shebang.
 
 None of this reaches `vendor/`, which keeps whatever mode upstream shipped.
@@ -33,9 +33,18 @@ So the rule is the same and something reads it now: `make script-modes` asserts 
 Until Q56 the split tracked nothing but the order the files were added — eight at `755`, five at `644`, every one of them with a shebang.
 Its row is gone, so this names it rather than linking it.
 
-**The counts above are hand-kept and nothing re-reads them.** Measured 2026-08-31 at `793abbe`, before Q12 added `check-install-scripts.py`, they said thirteen and twelve against a real fifteen and fourteen — two behind, for however long.
-[Q98](../docs/queue/Q98.md) is the row.
-The paragraph above argues that the *modes* are ungated on purpose, and that argument does not reach the counts.
+**This page does not say how many files there are, on purpose.** It used to, and nothing re-read the number: on 2026-11-26 it said nineteen own files and eighteen entry points against a real 33 and 32, fourteen behind.
+What the pair let a reader check — that the files carrying a shebang and the files at `755` are the same set — is what `script-modes` asserts now, across the whole index, so the number had no job left.
+
+To count them anyway, anchor the filter:
+
+```bash
+git ls-files 'scripts/*.py' | grep -v '^scripts/vendor/'
+```
+
+Both obvious forms are wrong, in opposite directions.
+A git pathspec's `*` crosses `/`, so the bare glob counts `vendor/claude-skills/queue.py`; `grep -v vendor` then drops [`check-vendor.py`](check-vendor.py) too, because its name holds the word.
+On 2026-11-26 the three forms read 34, 32 and 33, and only the last is right.
 
 ## Vendored from the skills repo
 

@@ -14,8 +14,8 @@ moves: the corpus grows by specification, so a new rule brings a planted
 fixture, and the tracked total drops each time a merged pull request deletes a
 backlog row. Both moved while this file was being written, in opposite
 directions. The gate prints the live numbers on every run, which is where to
-read them -- pinning them in a comment nothing re-reads is the shape Q98 is
-about.
+read them -- pinning them in a comment nothing re-reads is how
+scripts/README.md came to say nineteen files against a real 33.
 
 Two ways a file is allowed to match, and they are different kinds of claim:
 
