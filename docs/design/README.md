@@ -1705,7 +1705,7 @@ The plain reason asks for the filter straight after the grep rather than as the 
 
 The cost was counted over this machine's transcripts on 2026-11-27, 283,783 `Bash` calls in 3,419 files, by shape rather than by verdict.
 Of 534 recursive greps already piped into the filter, none is refused now; before the `LastStage` reading, 4 were, each a group holding a second pipeline beside the grep.
-Of 12,776 with no filter, 171 have a later stage this refuses, 115 of them `sed` and 40 `awk`; their shape is refused already, and 106 of them lose the rewrite, which appended the filter after the very stage that writes around it, while the other 65 were never offered one, because their grep is not in the string's last pipeline (counted in review of #296).
+Of 12,776 with no filter, 171 have a later stage this refuses, 115 of them `sed` and 40 `awk`; their shape is refused already, and 106 of them lose the rewrite, which appended the filter after the very stage that writes around it, while the other 65 were never offered one, most because their grep is not in the string's last pipeline (counted in review of #296).
 The count does not say how many were refused when they ran: it reads the shape, so a call made before the refusal shipped counts too.
 
 The recursion flags are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`, `--dereference-recursive`, `-d recurse`, and a digit option such as `-2` — and a flag after an operand counts, because the greps permute: driven, `grep hello d -r -l` on BSD grep 2.6.0 and on ugrep 7.8.4 lists the file.
