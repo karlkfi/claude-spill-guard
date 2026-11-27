@@ -88,7 +88,8 @@ type Segment struct {
 	// the last field, says where quoting first appeared in each of them.
 	Tokens []string
 	// Redirects is every redirect target written in this segment. A heredoc
-	// delimiter and a here-string's content are not paths and are not here.
+	// delimiter and a here-string's content are not paths and are not here,
+	// and a process substitution is here as its operator, `<(` or `>(`.
 	Redirects []string
 	// Inputs is the subset of Redirects written with `<`: a file the command
 	// reads through a descriptor rather than by name, so a reader's operand
@@ -650,12 +651,19 @@ func segments(cmd string, stripHeredocs bool) ([]Segment, error) {
 					i += 2
 					continue
 				}
-				curRedir = append(curRedir, tokens[i+1])
 				// `<(cmd)` lexes as `<` and `(`, so upstream records the
 				// paren as a target. It is a process substitution and not a
 				// file, and the loop that reads Inputs would try to open it,
-				// so it is kept out of Inputs and left in Redirects as it is.
+				// so it is kept out of Inputs. It is recorded with its
+				// operator, `<(` or `>(`, because this is the last place that
+				// knows which: one feeds the command and the other is a copy
+				// of what it writes (Q264).
 				process := isOperator(tokens[i+1], quotedFrom[i+1], separators) && tokens[i+1] == "("
+				if process {
+					curRedir = append(curRedir, t+"(")
+				} else {
+					curRedir = append(curRedir, tokens[i+1])
+				}
 				if t == "<" && !process {
 					curInputs = append(curInputs, tokens[i+1])
 				}

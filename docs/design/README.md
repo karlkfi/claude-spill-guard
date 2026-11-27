@@ -260,7 +260,7 @@ Three decisions come off that table.
 **Every reader in the table**, not only the ones that emit content: `wc` is 155 of the 219, `wc -l big.log` is already scanned as an operand and blocks on a finding, so a split would allow `wc -l < big.log` on the finding that blocks it written the other way — the row's own inconsistency, inverted.
 The precision cost Q131 weighed is the operand path's and not a new one.
 **Known readers only**: `python3 - < script.py` is the limitation the operand path already states, that what a command does with its stdin is not something the tokens say, and 77 of the 141 are that shape.
-**A `<(…)` is not an input**: the lexer leaves it as `<` and `(`, upstream records the paren as a target, 49 of the 219 were that shape, and a `(` handed to the resolver is a relative path that defers whenever the payload has no `cwd`.
+**A `<(…)` is not an input**: the lexer leaves it as `<` and `(`, upstream records the paren as a target and this port records it as `<(` (Q264), 49 of the 219 were that shape, and a `(` handed to the resolver is a relative path that defers whenever the payload has no `cwd`.
 
 Driven on binaries built from `main` and from this change, over every one of the 1,431 calls in that week whose command carries a bare `<`, each with its own `cwd`:
 
@@ -1702,11 +1702,16 @@ A copy to a regular file is allowed when nothing else in the string can read it.
 `grep -rn pat dir | tee out.log | spill-guard filter` is allowed, because a later call that reads `out.log` is scanned when it runs.
 Adding `; cat out.log` gets it refused, because the hook resolves that operand before the file is written.
 **Any other stage between them has to be one known to pass its input through, because a program can write what it reads anywhere.** Driven on bash 5.3.15 with the built filter and a planted key, `| awk '{print > "/dev/stderr"}' |`, `| sed 'w /dev/stderr' |`, `| perl -pe 'print STDERR' |`, a `python3 -c` writing to `sys.stderr`, `| cp /dev/stdin /dev/stderr |`, `| sort -o /dev/stderr |` and `| uniq - /dev/stderr |` each put the key on stderr and got no verdict (Q257).
-A list of writers has no end, so `passThrough` in `internal/hook/grep.go` is a short list of readers instead: `head`, `tail`, `cut`, `tr`, `cat`, a grep whose long options are ones it can name, `sort` without `-o`, `--compress-program`, `-c` or `--files0-from`, `wc` without `--files0-from`, and `uniq` with at most one operand, each under its Homebrew `g` name too, beside the `tee` and `dd` reading above.
+A list of writers has no end, so `passThrough` in `internal/hook/grep.go` is a short list of readers instead: `head`, `tail`, `cut`, `tr`, `cat`, `echo`, `printf`, a grep whose long options are ones it can name, `sort` without `-o`, `--compress-program`, `-c` or `--files0-from`, `wc` without `--files0-from`, and `uniq` with at most one operand, each under its Homebrew `g` name too, beside the `tee` and `dd` reading above.
 The options are refused because each one writes input to stderr or hands it to something else: driven in review of #296, `sort -c` reports the first line out of order on stderr, and GNU `sort` and `wc` given `--files0-from=-` echo the whole input back there as missing file names.
 A command is known by its base name, so `./head`, or a `head` function the same string defines, passes as `head`; the filter's own name check has the same shape.
 A command beside the grep in a `{ …; }` or `( … )` piped as a whole is not a stage, since it reads none of the grep's output, and neither is a pipeline of its own there: `Segment.Pipe` numbers every command in the group alike, so the grep's own pipeline is taken to end at its `LastStage`.
 The plain reason asks for the filter straight after the grep rather than as the last stage, because `grep -rn pat dir | awk … | spill-guard filter` already has it last.
+
+**A `<(…)` on a stage feeds it, and its body is read as a stage is.** The lexer records a process substitution as `<(` or `>(`, so `copiedAround` can tell the two apart; before that both arrived as `(`, and `grep -rn pat dir | grep -v -f <(echo nomatch) | spill-guard filter` was refused with the reason that asked for it (Q264).
+A `>(…)` is a copy of what the stage writes, and `| tee >(cat >&2) |` stays refused.
+The body of a `<(…)` is not inert, though: it inherits the stage's stdin, which is the grep's output, and driven on bash 5.3.15 `echo hi | cat <(cat >&2)` prints `hi` on stderr, as `| grep -v -f <(cat > /dev/stderr) |` put a planted key there.
+So each segment of the body has to pass what a stage passes, and `echo` and `printf`, which read nothing, are on the list for that.
 
 The cost was counted over this machine's transcripts on 2026-11-27, 283,783 `Bash` calls in 3,419 files, by shape rather than by verdict.
 Of 534 recursive greps already piped into the filter, none is refused now; before the `LastStage` reading, 4 were, each a group holding a second pipeline beside the grep.

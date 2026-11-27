@@ -351,11 +351,14 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 			dirUnknown bool
 		}
 		var written []write
+		if k > i && downstream(segments, i, k) && substitutedAround(segments, i, k) {
+			return true
+		}
 		for _, r := range s.Redirects {
-			// On the grep itself a `(` is a `<(` or a `>(` operand, since
-			// `>>(` does not parse and `> >(` records `>`: neither is a way
-			// out for the matches, which leave only by stdout.
-			if k == i && r == "(" {
+			// A `<(` feeds the command, and its body is read above. On the
+			// grep itself a `>(` is no way out either, since `>>(` does not
+			// parse and `> >(` records `>`: the matches leave only by stdout.
+			if r == "<(" || k == i && r == ">(" {
 				continue
 			}
 			if !slices.Contains(s.Inputs, r) {
@@ -480,6 +483,33 @@ func downstream(segments []bash.Segment, i, k int) bool {
 	return k > i && (len(segments[k].Shells) < depth || !ended)
 }
 
+// substitutedAround reports whether a `<(…)` on the stage at k runs a command
+// that can write what it reads somewhere else. The body inherits the stage's
+// stdin, which is the grep's output: driven on bash 5.3.15, `grep -rn x . |
+// grep -v -f <(cat > /dev/stderr) | spill-guard filter` put a planted key on
+// stderr. So the body is read as a stage is. Its segments are the ones just
+// ahead of the stage, in shells deeper than it and pipes of their own.
+func substitutedAround(segments []bash.Segment, i, k int) bool {
+	for m := k - 1; m > i && segments[m].Pipe != segments[i].Pipe &&
+		len(segments[m].Shells) > len(segments[k].Shells); m-- {
+		body := segments[m]
+		if body.StdoutAway {
+			return true
+		}
+		for _, r := range body.Redirects {
+			if r != "<(" && !slices.Contains(body.Inputs, r) {
+				return true
+			}
+		}
+		p := bash.ShKeywordPeel(body.Tokens, body.QuotedFrom)
+		wrap := readers.PeelWrappers(bash.StripEnvPrefix(body.Tokens[p:], body.QuotedFrom[p:]))
+		if wrap.Opaque || len(wrap.Argv) > 0 && !passThrough(filepath.Base(wrap.Argv[0]), wrap.Argv[1:]) {
+			return true
+		}
+	}
+	return false
+}
+
 // passThrough reports whether a stage named name, run with args, writes what it
 // reads nowhere but its stdout and its redirects. It is a short list rather
 // than a list of writers, because the writers have no end: awk's `print >`,
@@ -498,7 +528,7 @@ func passThrough(name string, args []string) bool {
 		name = n
 	}
 	switch name {
-	case "head", "tail", "cut", "tr", "cat":
+	case "head", "tail", "cut", "tr", "cat", "echo", "printf":
 		return true
 	case "wc":
 		for _, a := range args {

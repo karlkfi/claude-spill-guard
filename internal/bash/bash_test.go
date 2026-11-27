@@ -452,13 +452,22 @@ func TestSegments(t *testing.T) {
 		// target, absorbs the substitution's tokens into the command, and
 		// splits on the closing paren -- all kept here -- but the paren is not
 		// a file and is not an input. Measured over the week to 2026-09-04, 49
-		// of 219 input redirects on a known reader were this shape.
+		// of 219 input redirects on a known reader were this shape. It is
+		// recorded with its operator, so a reader of Redirects can tell the
+		// substitution that feeds a command from one that copies its output
+		// (Q264).
 		{"a process substitution is a redirect target and not an input",
 			"diff <(sort a) <(sort b)",
 			[]Segment{
 				{[]string{"sort", "a"}, nil, nil, false, "", false, 1, nil, []int{1}, false, false, "", "", false},
 				{[]string{"sort", "b"}, nil, nil, false, "", false, 2, nil, []int{2}, false, false, "", "", false},
-				{[]string{"diff", ProcessSubstitution, ProcessSubstitution}, []string{"(", "("}, nil, true, "", false, 0, nil, nil, false, false, "", "", false},
+				{[]string{"diff", ProcessSubstitution, ProcessSubstitution}, []string{"<(", "<("}, nil, true, "", false, 0, nil, nil, false, false, "", "", false},
+			}},
+		{"an output one is recorded as one",
+			"tee >(cat) f",
+			[]Segment{
+				{[]string{"cat"}, nil, nil, false, "", false, 1, nil, []int{1}, false, false, "", "", false},
+				{[]string{"tee", ProcessSubstitution, "f"}, []string{">("}, nil, true, "", false, 0, nil, nil, false, false, "", "", false},
 			}},
 
 		// The operator a segment is reached through, which Persists never

@@ -538,6 +538,45 @@ func TestCopiedAroundDoesNotReadThePassThroughList(t *testing.T) {
 	}
 }
 
+// A `<(…)` on a stage after the grep feeds it rather than copying it, so the
+// filter after it counts (Q264) -- but its body inherits the stage's stdin,
+// which is the grep's output, so the body is read as a stage is. Driven on
+// bash 5.3.15 with the built filter and a planted key: `<(echo nomatch)` put
+// it nowhere, and `<(cat > /dev/stderr)` and `tee >(cat >&2)` put it on stderr.
+func TestAProcessSubstitutionFeedingAStageIsReadAsOne(t *testing.T) {
+	dir := grepTree(t)
+	for _, command := range []string{
+		"grep -rn foo . | grep -v -f <(cat > /dev/stderr) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(cat >&2) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(awk 1) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(echo n; sed 'w /dev/stderr') | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(echo n | tee /dev/stderr) | spill-guard filter",
+		"grep -rn foo . | tee >(cat >&2) | spill-guard filter",
+		"grep -rn foo . | tee >(cat) | spill-guard filter",
+	} {
+		t.Run(command+" is refused", func(t *testing.T) {
+			denyReason(t, bashCall(t, command, dir))
+		})
+	}
+	for _, command := range []string{
+		"grep -rn foo . | grep -v -f <(echo nomatch) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(printf 'a\\nb\\n') | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(echo n | head -1) | spill-guard filter",
+		"grep -rn foo . | grep -v -f <(cat a.go) | spill-guard filter",
+	} {
+		t.Run(command+" is allowed", func(t *testing.T) {
+			allowed(t, bashCall(t, command, dir))
+		})
+	}
+	// The loop the row was filed for: the form the reason asks for is the
+	// form it allows.
+	rewrite := rewriteIn(denyReason(t, bashCall(t, "grep -rn foo . | grep -v -f <(echo nomatch)", dir)))
+	if rewrite == "" {
+		t.Fatal("no rewrite for a stage fed by a process substitution")
+	}
+	allowed(t, bashCall(t, rewrite, dir))
+}
+
 // The hatch reaches this refusal like the others: a confirmation, not an allow.
 func TestTheOverrideDowngradesAGrepRefusal(t *testing.T) {
 	code, stdout, stderr := drive(t, bashCall(t,
