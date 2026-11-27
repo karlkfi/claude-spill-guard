@@ -552,6 +552,22 @@ func TestTimeTakesOptionsOnlyOutsideZsh(t *testing.T) {
 		{"time -p FOO[a;cat k1.env;b]=x", true, false, false},
 		{"time -p -- FOO[a;cat k1.env;b]=x", true, false, false},
 		{"time -p -- FOO[a;b]=x cat k1.env", false, true, true},
+		// Inside a pipeline a `time` already times, zsh runs /usr/bin/time,
+		// which takes options; bash reads the keyword, which takes `-p`.
+		{"time time -p cat k1.env", true, true, true},
+		{"time time -- cat k1.env", true, true, true},
+		{"time time time -p cat k1.env", true, true, true},
+		{"! time time -p cat k1.env", true, true, true},
+		{"time ! time -p cat k1.env", true, true, true},
+		{"echo x | time time -p cat k1.env", true, true, true},
+		{"time true | time -p cat k1.env", true, true, true},
+		{"time { time -p cat k1.env; }", true, true, true},
+		{"time (time -p cat k1.env)", true, true, true},
+		{"time if time -p cat k1.env; then :; fi", true, true, true},
+		{"time time -l cat k1.env", true, false, false},
+		// The pipeline's end is not tracked, so zsh's keyword after it is
+		// still read as the binary: a false deny, as on main.
+		{"time true; time -p cat k1.env", true, true, true},
 	} {
 		for shell, blocks := range map[string]bool{"zsh": tc.zsh, "bash": tc.bash, "": tc.unsettled} {
 			t.Run(tc.command+"/"+shell, func(t *testing.T) {

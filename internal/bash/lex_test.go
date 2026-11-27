@@ -306,6 +306,15 @@ func TestTimeTakesOptionsOnlyOutsideZsh(t *testing.T) {
 			if len(segs) != want.segments {
 				t.Errorf("Segments = %d segments, want %d", len(segs), want.segments)
 			}
+			// A `time` inside one a `time` already times is /usr/bin/time to
+			// zsh, a command rather than a keyword, so the peel stops at it.
+			toks, qf, err := lex("time time -p cat f")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, wantNested := ShKeywordPeel(toks, qf), map[bool]int{false: 3, true: 1}[zsh]; got != wantNested {
+				t.Errorf("ShKeywordPeel(%q) = %d, want %d", toks, got, wantNested)
+			}
 		})
 	}
 }

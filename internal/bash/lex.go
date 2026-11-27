@@ -227,6 +227,11 @@ const gluedToClose = math.MinInt
 // the `((` of a `$((…))`.
 const arithmeticOpen = math.MinInt + 1
 
+// plainTime is the QuotedFrom of a `time` zsh runs as a command rather than
+// reads as its keyword, so it is peeled as the /usr/bin/time wrapper it is, as
+// a quoted one is.
+const plainTime = math.MinInt + 2
+
 // Unquoted is the provenance list for a caller that holds none, reading every
 // word as though it were written without quotes -- which is what this repo did
 // before the provenance existed.
@@ -637,6 +642,10 @@ type lexer struct {
 	redirTarget bool
 	frames      []lexFrame
 	afterTime   []string
+	// Whether a reserved `time` has been read. zsh 5.9 runs any later `time`
+	// inside the pipeline it times as /usr/bin/time, which takes options; the
+	// pipeline's end is not tracked, so a later one anywhere is read that way.
+	timed bool
 }
 
 // A lexFrame is an open `(`, holding the command position to restore at its
@@ -701,6 +710,9 @@ func (l *lexer) readToken() (string, int, bool, error) {
 		glued = l.pos < len(l.src) && isPunct(l.src[l.pos])
 	}
 	out := prefix + tok
+	if l.timed && l.cmdPos && out == "time" && from == NotQuoted && IsZsh() {
+		from = plainTime
+	}
 	l.trackCmdPos(out, from, glued)
 	return out, from, false, nil
 }
@@ -800,8 +812,11 @@ func (l *lexer) trackCmdPos(tok string, quotedFrom int, glued bool) {
 		}
 	}
 	l.afterTime = nil
-	if l.cmdPos && tok == "time" && reserved && !IsZsh() {
-		l.afterTime = []string{"-p", "--"}
+	if l.cmdPos && tok == "time" && reserved {
+		l.timed = true
+		if !IsZsh() {
+			l.afterTime = []string{"-p", "--"}
+		}
 	}
 	l.cmdPos = l.cmdPos && (isAssignment(tok, quotedFrom) || reserved && assignPosKeywords[tok])
 }
