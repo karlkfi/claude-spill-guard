@@ -6,8 +6,9 @@ Two are copies, and this page is where the tree records that.
 
 ## Modes, and what the executable bit means here
 
-Every Python file here outside `vendor/` is this repo's own, and all but one are entry points: a `#!/usr/bin/env python3` line, a `main()`, an `if __name__ == "__main__"` block, and mode `755`.
-[`workflow_model.py`](workflow_model.py) is the one that is not — nothing runs it, [`check-action-pins.py`](check-action-pins.py) and [`gates.py`](gates.py) import it — so it is tracked at `644` and carries no shebang.
+Every Python file here outside `vendor/` is this repo's own, and each is one of two kinds.
+An entry point has a `#!/usr/bin/env python3` line, a `main()`, an `if __name__ == "__main__"` block, and mode `755`.
+A library is imported rather than run, so it is tracked at `644` and carries no shebang: [`workflow_model.py`](workflow_model.py) is one, imported by every gate script that parses a workflow.
 
 None of this reaches `vendor/`, which keeps whatever mode upstream shipped.
 
