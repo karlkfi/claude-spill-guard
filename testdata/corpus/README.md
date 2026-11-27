@@ -141,13 +141,15 @@ Which leaves a fixture needing some other mark, and this is where a reader matte
 `aws-access-key-id.env` now carries the stem above.
 The mark that came later, `0SPILLGUARD`, is in the other two AWS files, `aws-access-key-id-utf16le.env` and `aws-access-key-id-asia.env`.
 This directory is public and it ships inside a security tool, so someone finding a credential-shaped string here has only the sentence above to tell them it is inert — and in the UTF-16 one they cannot read it at all without decoding the file first.
-`AKIA0SPILLGUARD98107` carries this project's name, which anyone can grep for and no issued credential would contain.
+`0SPILLGUARD` carries this project's name, which anyone can grep for and no issued credential would contain.
 That costs nothing and needs no argument about AWS.
 
-The digits in it are a second and weaker signal.
+The digits in the rest of that fixture's key are a second and weaker signal.
 A widely used technique recovers an AWS account ID by base32-decoding a key ID's body, which would rule `0`, `1`, `8` and `9` out of a real one — and nobody in this repository has verified that against an authoritative source.
 AWS's [IAM identifiers reference][iam-ids] documents the unique-ID prefixes and says nothing about the alphabet.
-So the digits in `AKIA0SPILLGUARD98107` are a hedge rather than a proof, and the greppable name is what carries the claim.
-The canary in `internal/selftest/selftest.go` has the same shape, `AKIA0123456789ABCDEF`.
+So those digits are a hedge rather than a proof, and the greppable name is what carries the claim.
+
+**Name a fixture's value here by its file and its mark, never by quoting it.**
+spill-guard has no path arm, so one quoted key that a rule matches makes it refuse a `Read` or a `cat` of this README, and `self-scan` fails over it.
 
 [iam-ids]: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html

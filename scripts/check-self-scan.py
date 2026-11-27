@@ -87,9 +87,6 @@ REGIONS = {
 # here is a decision somebody took, not a note that the file was already like
 # this when the list was written.
 ALLOWED = {
-    "testdata/corpus/README.md":
-        "prose about the canary values, which quotes them to explain what "
-        "makes each one inert",
     "internal/selftest/selftest.go":
         "the canary is compiled in rather than read from a file, because a "
         "canary a broken install fails to find is one whose absence looks "
