@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/karlkfi/claude-spill-guard/internal/bash"
 	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 )
 
@@ -512,6 +513,28 @@ func TestAStageThatIsNotKnownToPassThroughDoesNotCount(t *testing.T) {
 		t.Run(command+" is allowed", func(t *testing.T) {
 			allowed(t, bashCall(t, command, dir))
 		})
+	}
+}
+
+// The pass-through list is the grep's and not copiedAround's: a command it does
+// not know is no copy, so another caller of copiedAround is not refused over a
+// `sed` or an `awk` stage.
+func TestCopiedAroundDoesNotReadThePassThroughList(t *testing.T) {
+	for _, command := range []string{
+		"grep -rn foo . | sed 1q | spill-guard filter",
+		"env | sed 's/=.*//' | cut -c1-9",
+	} {
+		segments, err := bash.Segments(command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := len(segments) - 1
+		if copiedAround(segments, 0, j, t.TempDir(), false) {
+			t.Errorf("copiedAround(%q) = true", command)
+		}
+		if !unknownStage(segments, 0, j) {
+			t.Errorf("unknownStage(%q) = false", command)
+		}
 	}
 }
 

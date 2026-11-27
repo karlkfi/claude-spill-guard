@@ -317,7 +317,7 @@ func filteredLater(segments []bash.Segment, i int, dir string, dirUnknown bool) 
 		name := filepath.Base(tokens[0])
 		if name == "spill-guard" || name == "spill-guard.exe" ||
 			filepath.ToSlash(tokens[0]) == self() {
-			return !copiedAround(segments, i, j, dir, dirUnknown)
+			return !copiedAround(segments, i, j, dir, dirUnknown) && !unknownStage(segments, i, j)
 		}
 	}
 	return false
@@ -336,10 +336,6 @@ func filteredLater(segments []bash.Segment, i int, dir string, dirUnknown bool) 
 // under /dev or /proc other than stdout and /dev/null, anything that exists and
 // is not a regular file, and a name this cannot settle -- a `$`, a glob, a `>(`,
 // a relative name where the directory is lost -- are refused outright.
-//
-// Any other command in a stage between them has to be one passThrough knows
-// (Q257). A command beside the grep in a `{ …; }` or `( … )` piped as a whole
-// is not a stage, and only its redirects are read.
 func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool) bool {
 	toFile := false
 	for k := i; k < j; k++ {
@@ -399,10 +395,6 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 					written = append(written, write{out, cmdDir, cmdDirUnknown})
 				}
 			}
-		default:
-			if len(argv) > 0 && downstream(segments, i, k) && !passThrough(name, argv[1:]) {
-				return true
-			}
 		}
 		for _, wr := range written {
 			w := wr.name
@@ -438,6 +430,34 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 		inSpan := k >= i && k <= j && s.Pipe == segments[i].Pipe
 		if !inSpan && (k > i || s.Forked) {
 			return true
+		}
+	}
+	return false
+}
+
+// unknownStage reports whether a stage between the grep at i and the filter at
+// j runs a command passThrough does not know (Q257), since an awk or sed
+// program can write anywhere and its text is not read. tee and dd are
+// copiedAround's to judge. A command beside the grep in a `{ …; }` or `( … )`
+// piped as a whole is not a stage. It is kept out of copiedAround, which judges
+// writes alone.
+func unknownStage(segments []bash.Segment, i, j int) bool {
+	for k := i + 1; k < j; k++ {
+		s := segments[k]
+		if s.Pipe != segments[i].Pipe || !downstream(segments, i, k) {
+			continue
+		}
+		p := bash.ShKeywordPeel(s.Tokens, s.QuotedFrom)
+		argv := readers.PeelWrappers(bash.StripEnvPrefix(s.Tokens[p:], s.QuotedFrom[p:])).Argv
+		if len(argv) == 0 {
+			continue
+		}
+		switch name := filepath.Base(argv[0]); name {
+		case "tee", "gtee", "dd", "gdd":
+		default:
+			if !passThrough(name, argv[1:]) {
+				return true
+			}
 		}
 	}
 	return false
