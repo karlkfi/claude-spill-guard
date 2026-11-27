@@ -180,8 +180,9 @@ func record(stderr io.Writer, call payload, event Event, reason string, operands
 	// transcript is attributable to none of them without it.
 	//
 	// stderr on exit 0 reaches neither the model nor the person -- which is
-	// the property wanted here -- and the harness records it in the
-	// hook_success attachment beside the invocation. That capture is Claude
+	// the property wanted here -- and on PreToolUse the harness records it in
+	// the hook_success attachment beside the invocation. On UserPromptSubmit,
+	// driven twice, it records nothing at all. That capture is Claude
 	// Code's behaviour rather than this binary's, and it is thin: over 14 days
 	// and 47,494 exit-0 hook runs on this machine, one carried non-empty
 	// stderr, and that one was a probe driving this exact question. So it is
