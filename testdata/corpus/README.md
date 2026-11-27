@@ -149,7 +149,6 @@ A widely used technique recovers an AWS account ID by base32-decoding a key ID's
 AWS's [IAM identifiers reference][iam-ids] documents the unique-ID prefixes and says nothing about the alphabet.
 So those digits are a hedge rather than a proof, and the greppable name is what carries the claim.
 
-**Name a fixture's value here by its file and its mark, never by quoting it.**
-spill-guard has no path arm, so one quoted key that a rule matches makes it refuse a `Read` or a `cat` of this README, and `self-scan` fails over it.
+**Name a fixture's value here by its file and its mark, never by quoting it.** spill-guard has no path arm, so one quoted key that a rule matches makes it refuse a `Read` or a `cat` of this README, and `self-scan` fails over it.
 
 [iam-ids]: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html
