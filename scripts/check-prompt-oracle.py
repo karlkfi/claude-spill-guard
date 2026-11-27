@@ -42,7 +42,7 @@ Go test carries the same floor for the same reason.
 
 A failed floor is also the whole report. With nothing observed, every case the
 census holds files for disagrees, and each of those lines says the grammar
-moved -- one per non-empty case, fourteen on the census as it stands, all of
+moved -- one per non-empty case, fifteen on the census as it stands, all of
 them sending a reader to `internal/hook` and to re-taking the census for a
 harness that produced nothing. The floor has already said so once.
 """
