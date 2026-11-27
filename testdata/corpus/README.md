@@ -15,9 +15,11 @@ It holds the strings the unit tests elsewhere read, and the section below says w
 
 Every value is fabricated to the shape its rule matches and works against nothing, and every one of them was written for this directory.
 
-Most of them carry the stem `ZmT4bXn9Ld6VcP1`, matched case-insensitively — `aws-access-key-id.env` holds it uppercase, that rule being `[A-Z0-9]{16}`.
+The credential values carry one of two marks.
+The older is the stem `ZmT4bXn9Ld6VcP1`, matched case-insensitively — `aws-access-key-id.env` holds it uppercase, that rule being `[A-Z0-9]{16}`.
+The newer is `0SPILLGUARD`, which `aws-access-key-id-utf16le.env`, `aws-access-key-id-asia.env` and the four `anthropic-*` files carry, and it is the mark to reach for now, for the reason **Adding to it** gives below.
 That is deliberate: it makes "fabricated" something a reader can grep for rather than something this file asserts.
-The exceptions are `github-fine-grained-pat.txt`, which carries the stem with an underscore through the middle because its rule admits one; the PEM blocks, whose bodies are base64 of ordinary ASCII; `slack-webhook-url.yaml`, which predates the convention; and the two AWS files that carry `0SPILLGUARD` instead — `aws-access-key-id-utf16le.env` and `aws-access-key-id-asia.env` — for the reason **Adding to it** gives below, which is the mark to reach for now.
+The exceptions are `github-fine-grained-pat.txt`, which carries the stem with an underscore through the middle because its rule admits one; the PEM blocks, whose bodies are base64 of ordinary ASCII; and `slack-webhook-url.yaml`, which predates both marks.
 
 `aws-access-key-id.env` used to carry `AKIAIOSFODNN7EXAMPLE`, the key AWS publishes in its own documentation, and the rule now drops that key on the `EXAMPLE` suffix.
 A fixture proving a rule can fire cannot be a value the rule is supposed to stay quiet on.
@@ -131,12 +133,14 @@ The in-memory pair in `internal/scan/decode_test.go` is where identical text is 
 **A planted value cannot rely on a marker the ruleset rejects, and this is the one rule here that is `planted/`-only.** Everything else in this file is about what a rule may match; this is about what a fixture is allowed to be, and it binds nowhere else in the repository — a unit test elsewhere needs its value to match a regex, not to survive every validator.
 
 `aws-access-key-id.env` is the worked example.
-It carries `AKIAIOSFODNN7EXAMPLE`, which is fabricated in the most authoritative way available: AWS publishes it, so a reader who greps it lands in AWS's own documentation.
+It used to carry `AKIAIOSFODNN7EXAMPLE`, which is fabricated in the most authoritative way available: AWS publishes it, so a reader who greps it lands in AWS's own documentation.
 That makes it an excellent value for a unit test and a disqualified one here, because `aws-placeholder` drops exactly that suffix.
 A planted fixture has to be **found**, so it cannot be marked by the string the scanner is being taught to reject.
 
 Which leaves a fixture needing some other mark, and this is where a reader matters as well as the rule.
-This directory is public and it ships inside a security tool, so someone finding a credential-shaped string here has only the sentence above to tell them it is inert — and in `aws-access-key-id-utf16le.env` they cannot read it at all without decoding the file first.
+`aws-access-key-id.env` now carries the stem above.
+The mark that came later, `0SPILLGUARD`, is in the other two AWS files, `aws-access-key-id-utf16le.env` and `aws-access-key-id-asia.env`.
+This directory is public and it ships inside a security tool, so someone finding a credential-shaped string here has only the sentence above to tell them it is inert — and in the UTF-16 one they cannot read it at all without decoding the file first.
 `AKIA0SPILLGUARD98107` carries this project's name, which anyone can grep for and no issued credential would contain.
 That costs nothing and needs no argument about AWS.
 
@@ -144,6 +148,6 @@ The digits in it are a second and weaker signal.
 A widely used technique recovers an AWS account ID by base32-decoding a key ID's body, which would rule `0`, `1`, `8` and `9` out of a real one — and nobody in this repository has verified that against an authoritative source.
 AWS's [IAM identifiers reference][iam-ids] documents the unique-ID prefixes and says nothing about the alphabet.
 So the digits in `AKIA0SPILLGUARD98107` are a hedge rather than a proof, and the greppable name is what carries the claim.
-`internal/rules/capture_test.go` reached the same shape first, with `AKIA0123456789ABCDEF`.
+The canary in `internal/selftest/selftest.go` has the same shape, `AKIA0123456789ABCDEF`.
 
 [iam-ids]: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html
