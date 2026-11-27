@@ -362,16 +362,14 @@ That is the instance; the rule recurs.
 On 2026-08-25 a Windows control asserted "uniform LF, block present", both true, while the launcher went on denying: the mutation landed and did not bite.
 Five such controls in one batch, three carrying an explicit precondition that passed.
 
-The checkable form is comparison against a case already measured, and **the case is a file, not a recipe for producing one.** That control copies `testdata/launcher/lf-uniform-failing.cmd` over the launcher and asserts its sha256, byte count and uniform LF before driving it — 7,214 bytes, `d28a64b3…`, checked in because it is the exact artifact a `windows-latest` runner was measured failing on.
-The hash assertion is the load-bearing half: a fixture nobody checks drifts silently, which is what happened to the thing it replaced.
+The checkable form is comparison against a case already measured, and what the mutation acts on decides which case.
+On **behaviour**, drive the mutated subject and assert the symptom, since no file can stand in: the `test` control's mutated binary must exit 0 on an unknown command, `doctor`'s `go -C tools list -deps ./...` must fail, and `vulns`' govulncheck must name `GO-2021-0113`.
+On an **artifact**, whose exact bytes are the property, **the case is a file, not a recipe for producing one**: the Windows control copies `testdata/launcher/lf-uniform-failing.cmd` over the launcher and asserts its sha256, byte count and uniform LF first — 7,214 bytes, `d28a64b3…`, the exact file a `windows-latest` runner was measured failing on.
+The test between them is whether the mutation's effect depends on anything besides its own edit, and only there does a hashed file earn its cost.
 
-What it replaced *read* as that and was not.
-It rebuilt the failing arm by patching whichever launcher was in the tree, so it landed on the measured file only while the launcher was the one it had been measured against — and the sentence describing it, "transplants the failing arm byte for byte, 7,214 bytes verified identical", was true of the *substitution text* and false of the resulting file, which is what made it read as rigorous.
-Shortening four deny strings moved the reconstruction 610 bytes, cmd.exe went on denying correctly, and the step failed three heads running saying the gate had failed for the wrong reason.
-Padding the mutation to raise the drift made it worse, because it moved the file further from 7,214 rather than nearer.
-
-**A mutation is only valid against the artifact it was measured on**, and nothing anywhere said the reconstruction was a reconstruction.
-Q110 carries the byte table and the class.
+**A mutation is only valid against the artifact it was measured on**, and the recipe that file replaced is the case.
+It patched whichever launcher was in the tree, so its "7,214 bytes verified identical" was true of the substitution text, and of the result only on `origin/main`.
+On a branch that shortened four deny strings the result was 7,824 bytes, and padding the block to forty lines took it to 8,304: cmd.exe went on denying correctly, and the step failed three heads running for the wrong reason.
 Where no such case exists, build one, and give any probe whose answer matters when it is *empty* a positive control proving it can come back non-empty.
 
 **The launcher's line endings are load-bearing, and split.** CRLF down to the `CMDBLOCK` terminator, LF after it, `-text` in `.gitattributes` so git cannot normalise the split away.
