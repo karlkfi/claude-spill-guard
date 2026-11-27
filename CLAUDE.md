@@ -265,7 +265,7 @@ Why, measured over the week to 2026-09-05 across 100 sessions on one machine:
 - All 31 content findings in the window fired inside this repo's own worktrees, on its own corpus fixtures.
 
 What replaces the block is a record, on two sinks: a line on stderr, which reaches neither the model nor the person, and a capped JSONL under `$XDG_STATE_HOME` that `spill-guard coverage` groups and counts.
-The stderr line rides into the transcript's `hook_success` attachment on `PreToolUse` and, driven twice, leaves no attachment on `UserPromptSubmit`, so on a prompt the JSONL is the only record; `docs/design/README.md` under *Block on a finding, defer on a gap, and prove both* has the counts and the drives.
+The stderr line rides into the transcript's `hook_success` attachment on `PreToolUse` and, driven twice with empty stdout, leaves no attachment on `UserPromptSubmit`, so on a prompt the JSONL is the only record; `docs/design/README.md` under *Block on a finding, defer on a gap, and prove both* has the counts and the drives.
 Both are best-effort — a sink that cannot be written must never change the verdict, or a full disk rebuilds the friction on the machines least able to diagnose it.
 
 **A payload that does not decode at all still blocks on exit 2.** Not JSON, no event, an event this binary cannot withhold at: that is not a scanner failing to resolve an operand, it is the hook being invoked wrongly, and it is the signal that says a broken install is broken.

@@ -937,8 +937,9 @@ A scanner that trains its users to click through is one that gets uninstalled, a
 
 What replaces the block is a **coverage record**, on two sinks: a line on stderr, which reaches neither the model nor the person, and a capped JSONL under `$XDG_STATE_HOME/spill-guard/` that `spill-guard coverage` groups and counts.
 Whether the stderr line reaches the transcript turns on the event.
-On `PreToolUse` it rides into the `hook_success` attachment: 884 such attachments carry it across the 400 most recent session transcripts of this repo, 2026-09-06 to 2026-11-27, on Claude Code 2.1.260 to 2.1.331, all of them `PreToolUse`.
-On `UserPromptSubmit` it leaves no attachment of any kind, driven under `claude -p` on 2.1.251 in the channel table under *An allowed skip says so* and again on 2.1.290 under *Driven end to end, on built binaries*, so on a prompt the JSONL is the only record a deferral leaves; the same transcripts hold one spill-guard `UserPromptSubmit` attachment in total, from an interactive session, with empty stderr, which is consistent with that and does not test it.
+On `PreToolUse` it rides into the `hook_success` attachment: across the 503 session transcripts of this repo, 881 such attachments stamped before 2026-11-27 carry it, from 2026-09-06 to 2026-11-17 on Claude Code 2.1.260 to 2.1.321, all of them `PreToolUse`.
+On `UserPromptSubmit` a deferral with nothing else to say, so with empty stdout, leaves no attachment of any kind, driven under `claude -p` on 2.1.251 in the channel table under *An allowed skip says so* and again on 2.1.290 under *Driven end to end, on built binaries*, so on a prompt the JSONL is the only record such a deferral leaves.
+The same transcripts hold no `hook_success` from the shipped hook on `UserPromptSubmit` at all, which is consistent with that and does not test it, and a deferral that also writes a `systemMessage` for an allowed skip is not measured: an interactive `UserPromptSubmit` hook that exits 0 with stdout does get a `hook_success`.
 Both are best-effort — a sink that cannot be written must never change the verdict, or a full disk rebuilds the friction on the machines least able to diagnose it.
 
 The record is what keeps this from being a retreat.

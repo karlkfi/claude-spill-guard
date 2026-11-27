@@ -181,12 +181,14 @@ func record(stderr io.Writer, call payload, event Event, reason string, operands
 	//
 	// stderr on exit 0 reaches neither the model nor the person -- which is
 	// the property wanted here -- and on PreToolUse the harness records it in
-	// the hook_success attachment beside the invocation. On UserPromptSubmit,
-	// driven twice, it records nothing at all. That capture is Claude
-	// Code's behaviour rather than this binary's, and it is thin: over 14 days
-	// and 47,494 exit-0 hook runs on this machine, one carried non-empty
-	// stderr, and that one was a probe driving this exact question. So it is
-	// the free sink, never the only one.
+	// the hook_success attachment beside the invocation. On UserPromptSubmit
+	// with empty stdout, driven twice, it records nothing at all. That capture
+	// is Claude Code's behaviour rather than this binary's, and it was
+	// unproven when this was written: over the 14 days to 2026-09-05 and
+	// 47,494 exit-0 hook runs on this machine, one carried non-empty stderr,
+	// and that one was a probe driving this exact question. This path is what
+	// has written such stderr since. So it is the free sink, never the only
+	// one.
 	fmt.Fprintf(stderr, "%s%s\n", noticeLead, reason)
 	appendCoverage(c)
 }
