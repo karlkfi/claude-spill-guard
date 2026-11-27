@@ -139,6 +139,7 @@ func TestARecursiveGrepIsRefusedAndItsRewriteIsAllowed(t *testing.T) {
 		"grep -r foo sub",
 		"grep --recursive foo .",
 		"egrep -R 'a|b' . 2>/dev/null",
+		"ggrep -rn foo", // GNU grep as Homebrew installs it (Q263)
 		"grep -r foo . | head -5",
 		"cd sub && grep -r foo .",
 		"grep -rn foo . ;",

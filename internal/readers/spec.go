@@ -122,6 +122,14 @@ var specs = map[string]spec{
 		fileFlags:   map[string]flagFiles{"-i": {1, []int{0}}},
 		firstOutput: -1,
 	},
+	// GNU's base64, which Homebrew installs as gbase64. The row above is BSD's
+	// with GNU's -w added, and its -i takes the input file; GNU's -i is
+	// --ignore-garbage and takes nothing, so `gbase64 -i -w0 f` read under it
+	// takes -w0 for a file.
+	"gbase64": {
+		consume:     map[string]int{"--wrap": 1, "-w": 1},
+		firstOutput: -1,
+	},
 	"cat": {
 		firstOutput: -1,
 	},
@@ -220,12 +228,32 @@ var specs = map[string]spec{
 
 // aliases are commands whose argument shape another row already describes.
 // Upstream's `unlink` -> `rm` is dropped with rm itself.
+//
+// The g names are GNU coreutils, grep and sed as Homebrew installs them on a
+// Mac (Q263). No row they land on takes a value GNU's tool would read as a
+// file, and sed's one BSD reading, the empty -i suffix, drops only a file GNU
+// edits in place and prints nothing of. base64's -i is the one that differs,
+// so gbase64 has a row of its own.
 var aliases = map[string]string{
 	"bzcat":   "cat",
 	"cmp":     "cat",
 	"egrep":   "grep",
 	"fgrep":   "grep",
 	"gawk":    "awk",
+	"gcat":    "cat",
+	"gcut":    "cut",
+	"gegrep":  "grep",
+	"gfgrep":  "grep",
+	"ggrep":   "grep",
+	"ghead":   "head",
+	"gnl":     "cat",
+	"god":     "cat",
+	"gsed":    "sed",
+	"gsort":   "sort",
+	"gtac":    "cat",
+	"gtail":   "tail",
+	"guniq":   "uniq",
+	"gwc":     "wc",
 	"gzcat":   "cat",
 	"less":    "cat",
 	"mawk":    "awk",

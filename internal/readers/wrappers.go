@@ -113,6 +113,24 @@ var wrappers = map[string]wrapper{
 	"exec":    {"cl", "a", "", map[string]string{}, true},
 }
 
+// wrapperAliases are the GNU wrappers under the g names Homebrew gives them
+// (Q263): coreutils, findutils' xargs and gnu-time. Each row above is already
+// the BSD and GNU union, so the name is all that differs.
+var wrapperAliases = map[string]string{
+	"genv": "env", "gnice": "nice", "gnohup": "nohup", "gstdbuf": "stdbuf",
+	"gtime": "time", "gtimeout": "timeout", "gxargs": "xargs",
+}
+
+// wrapperNamed is the row for a command name and the name the peel keys on.
+func wrapperNamed(word string) (string, wrapper, bool) {
+	name := path.Base(word)
+	if target, ok := wrapperAliases[name]; ok {
+		name = target
+	}
+	w, ok := wrappers[name]
+	return name, w, ok
+}
+
 // shortLong names the short flags whose meaning the peel acts on, by the long
 // spelling the rest of it keys on.
 var shortLong = map[string]map[byte]string{
@@ -248,8 +266,7 @@ func PeelWrappers(tokens []string) Peel {
 			p.Builtin = false // `builtin noglob cat f` prints f
 			continue
 		}
-		name := path.Base(argv[0])
-		w, ok := wrappers[name]
+		name, w, ok := wrapperNamed(argv[0])
 		if !ok {
 			break
 		}
@@ -285,7 +302,7 @@ func scanForCommand(tokens []string) []string {
 		if _, ok := lookup(name); ok && !unreadableWord(t) {
 			return tokens[i:]
 		}
-		if _, ok := wrappers[name]; ok && !unreadableWord(t) {
+		if _, _, ok := wrapperNamed(t); ok && !unreadableWord(t) {
 			return tokens[i:]
 		}
 	}

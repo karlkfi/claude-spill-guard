@@ -160,7 +160,7 @@ func lastInPipeline(segments []bash.Segment, i int) bool {
 // them writes the environment anywhere.
 func dumpsEverything(name string, tokens []string) bool {
 	switch name {
-	case "env", "printenv", "set":
+	case "env", "printenv", "genv", "gprintenv", "set":
 		return len(tokens) == 1
 	case "export":
 		// Bare `export` lists the exported variables with their values, the

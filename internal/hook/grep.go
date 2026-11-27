@@ -47,7 +47,8 @@ import (
 // it is read as `.` now, so it reaches the same refusal.
 
 // grepNames is the reader-table row and its aliases.
-var grepNames = map[string]bool{"grep": true, "egrep": true, "fgrep": true}
+var grepNames = map[string]bool{"grep": true, "egrep": true, "fgrep": true,
+	"ggrep": true, "gegrep": true, "gfgrep": true}
 
 // The short options that take a value, attached or in the next token. Once one
 // is reached in a cluster the rest of the cluster is its value: `-rnA3`.
