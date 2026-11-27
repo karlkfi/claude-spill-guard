@@ -1790,10 +1790,11 @@ jobs:
   # the fragment are separate reads and a control over one says nothing about
   # the other.
   #
-  # The rest run the other way. Four shapes must not fail the gate: a link
+  # The rest run the other way. These shapes must not fail the gate: a link
   # quoted in a code span, a link shown inside an indented code block, a link to
-  # a setext heading, and a link inside a fence nested in another. Three must
-  # still fail it, because the obvious way to reach those greens overshoots --
+  # a setext heading, and a link inside a fence nested in another. Beside them
+  # are the cases that must still fail, because the obvious way to reach those
+  # greens overshoots --
   # reading setext without dropping frontmatter first turns `size: S` into an
   # anchor in every row of the store, stripping four-space indentation without
   # list context drops every link nested at that column, and reading a fence
