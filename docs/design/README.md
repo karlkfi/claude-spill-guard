@@ -1711,8 +1711,13 @@ The plain reason asks for the filter straight after the grep rather than as the 
 **A `<(…)` on a stage feeds it, and its body is read as a stage is.** The lexer records a process substitution as `<(` or `>(`, so `copiedAround` can tell the two apart; before that both arrived as `(`, and `grep -rn pat dir | grep -v -f <(echo nomatch) | spill-guard filter` was refused with the reason that asked for it (Q264).
 A `>(…)` is a copy of what the stage writes, and `| tee >(cat >&2) |` stays refused.
 The body of a `<(…)` is not inert, though: it inherits the stage's stdin, which is the grep's output, and driven on bash 5.3.15 `echo hi | cat <(cat >&2)` prints `hi` on stderr, as `| grep -v -f <(cat > /dev/stderr) |` put a planted key there.
-So each segment of the body has to pass what a stage passes, and `echo` and `printf`, which read nothing, are on the list for that.
-A quoted `$(…)`, a backtick or a bash 5.3 `${ …; }` in the body is refused outright: each stays inside its word rather than becoming segments, and driven in review of #297, `| grep -f <(echo "$(cat >&2)") |` and `| grep -f <(echo "${ cat >&2; }") |` put the matches on stderr.
+So each segment of the body has to pass what a stage passes, and `echo` and `printf` without `-v`, which read nothing, are on the list for that.
+A body that writes anywhere but its stdout is refused by `copiedAround`, which `env` reaches too; what a body runs is judged for the grep alone, beside the stage list.
+
+The rule for what a body runs is about the class rather than its spellings, because the spellings kept arriving: a quoted `$(…)`, a backtick and a bash 5.3 `${ …; }` stay inside their word rather than becoming segments, and each put the matches on stderr in review of #297.
+A word with no `$(` in it does the same. With `SUB='a[$(cat >&2)]'` in the environment, driven on bash 5.3.15, a substring offset `${HOME:SUB}`, a subscript `${a[SUB]}`, `${P@P}`, an indirection, a nameref, `a[SUB]=1`, `printf -v "a[SUB]"`, a heredoc holding a `$(…)` and a here-string holding one each ran the hidden `cat` on the grep's output; a plain `$P`, `${P}` and a single-quoted `'$(cat >&2)'` did not. So a body word holding any `$` or backtick, whatever its quoting, a body segment carrying an assignment, and a body that reads a heredoc or here-string are refused, and the segmenter marks the last in `Segment.Here`, since neither leaves a token.
+That refuses the safe `<(echo "$PAT")` and `<(echo '$HOME')` with the rest: allowing a plain `$NAME` would have to track every `declare -n` that can make it a subscript, and quoting is read as where it began rather than which kind it was.
+Q264 counted this whole shape at about zero real traffic, 7 calls, 6 of them development probes, and that was not re-taken.
 
 The cost was counted over this machine's transcripts on 2026-11-27, 283,783 `Bash` calls in 3,419 files, by shape rather than by verdict.
 Of 534 recursive greps already piped into the filter, none is refused now; before the `LastStage` reading, 4 were, each a group holding a second pipeline beside the grep.
