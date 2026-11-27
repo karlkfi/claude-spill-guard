@@ -152,15 +152,34 @@ func guardedClass(path string) string {
 	return ""
 }
 
-// foldCase maps every rune to one member of its Unicode simple case-folding
-// orbit, lowercase where the orbit has one. strings.ToLower is not enough:
-// it leaves `ſ` alone, and APFS opens `.git-credentials` by that spelling.
+// fullFolds are the CaseFolding.txt status-F entries whose expansion is ASCII.
+// SimpleFold maps one rune to one and cannot reach them, and APFS opens
+// `.kube/config` as `.kube/conﬁg`.
+var fullFolds = map[rune]string{
+	'ß': "ss", 'ẞ': "ss",
+	'ﬀ': "ff", 'ﬁ': "fi", 'ﬂ': "fl", 'ﬃ': "ffi", 'ﬄ': "ffl",
+	'ﬅ': "st", 'ﬆ': "st",
+}
+
+// foldCase maps every rune to one member of its Unicode case-folding orbit,
+// lowercase where the orbit has one. strings.ToLower is not enough: it leaves
+// `ſ` alone, which APFS reads as `s`, and takes `İ` to `i`, which APFS does not.
 func foldCase(s string) string {
-	return strings.Map(func(r rune) rune {
+	var b strings.Builder
+	for _, r := range s {
+		if full, ok := fullFolds[r]; ok {
+			b.WriteString(full)
+			continue
+		}
+		if unicode.SimpleFold(r) == r {
+			b.WriteRune(r)
+			continue
+		}
 		least := r
 		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
 			least = min(least, f)
 		}
-		return unicode.ToLower(least)
-	}, s)
+		b.WriteRune(unicode.ToLower(least))
+	}
+	return b.String()
 }

@@ -288,7 +288,8 @@ This repo is its own example — `testdata/corpus/` holds `aws-access-key-id.env
 Under-firing on a spelling is the trade the environment half already takes for `env -0`.
 
 **Membership is read case-folded, the templates included.** Driven on APFS here, `.ENV`, `.aws/Credentials` and `.git-credentialſ` each open the lowercase file, and until Q266 every such spelling of every member exited 0 silent on `cat`, `Read` and an `@` token.
-The fold is Unicode simple case folding rather than lowercasing, because `strings.ToLower` leaves `ſ` alone.
+The fold is Unicode case folding rather than lowercasing: simple folding, plus the nine full folds whose expansion is ASCII, so `.kube/conﬁg` and `.env.diﬆ` read as APFS reads them, and nothing for a rune with no fold, so `.env.dİst` is not the `.env.dist` template, which APFS agrees with.
+`strings.ToLower` gets two of those wrong, leaving `ſ` alone and taking `İ` to `i`.
 It asks the volume nothing: on a case-sensitive one it refuses a file literally named `.ENV`, which is credentials by the same convention, and `.env.EXAMPLE` is a template on either.
 
 ### What gets scanned is the crossing, not the hop

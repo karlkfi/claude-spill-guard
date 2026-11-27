@@ -45,6 +45,12 @@ var (
 		"/home/k/.kube/Config",
 		"/w/app/KUBECONFIG",
 		"/w/app/staging.KUBECONFIG",
+		"/home/k/.kube/conﬁg",
+		"/w/app/kubeconﬁg",
+		"/home/k/.docker/conﬁg.json",
+		// İ has no fold, and APFS keeps it apart from i, so this is not
+		// `.env.dist`.
+		"/w/app/.env.dİst",
 	}
 	openPaths = []string{
 		// Measured: 29 of 29 reads of these in a week, not one a credential.
@@ -57,6 +63,7 @@ var (
 		"/w/app/.env.dist",
 		"/w/app/.env.EXAMPLE",
 		"/w/app/.ENV.Sample",
+		"/w/app/.env.diﬆ",
 		// A suffix is a name somebody chose, not a convention.
 		"/w/app/deploy.env",
 		// Ordinary basenames that are only credentials under their own parent.
@@ -342,6 +349,7 @@ func TestAGuardedNameInAnotherCaseIsRefused(t *testing.T) {
 		".Docker/config.json": "a Docker registry auth file",
 		".kube/Config":        "a kubeconfig",
 		"staging.KUBECONFIG":  "a kubeconfig",
+		".kube/conﬁg":         "a kubeconfig",
 	}
 	for rel := range variants {
 		plant(t, dir, rel, "PORT=3000\n")
