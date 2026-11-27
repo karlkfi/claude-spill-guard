@@ -800,7 +800,7 @@ func (l *lexer) trackCmdPos(tok string, quotedFrom int, glued bool) {
 		}
 	}
 	l.afterTime = nil
-	if l.cmdPos && tok == "time" && reserved {
+	if l.cmdPos && tok == "time" && reserved && !IsZsh() {
 		l.afterTime = []string{"-p", "--"}
 	}
 	l.cmdPos = l.cmdPos && (isAssignment(tok, quotedFrom) || reserved && assignPosKeywords[tok])
@@ -1183,7 +1183,7 @@ func ShKeywordPeel(tokens []string, quotedFrom []int) int {
 
 // timeOptionPeel reports how many of tokens are options of the `time` before
 // them: bash reads one `-p` then one `--`, in that order and unquoted, as part
-// of the keyword.
+// of the keyword. zsh's `time` takes no options and runs `-p` as the command.
 func timeOptionPeel(tokens []string, quotedFrom []int) int {
 	i := 0
 	for _, opt := range []string{"-p", "--"} {
@@ -1191,8 +1191,16 @@ func timeOptionPeel(tokens []string, quotedFrom []int) int {
 			i++
 		}
 	}
+	if i > 0 && IsZsh() {
+		return 0
+	}
 	return i
 }
+
+// IsZsh reports whether the Bash tool's shell is known to be zsh. internal/hook,
+// which reads the shell, sets it; the default is bash's reading, which an
+// unsettled shell keeps, since mixing the two can read fewer files than either.
+var IsZsh = func() bool { return false }
 
 func EnvPrefixPeel(tokens []string, quotedFrom []int) int {
 	i := 0

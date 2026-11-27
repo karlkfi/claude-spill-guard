@@ -891,6 +891,8 @@ Some shapes denied only because of the split, and they had to keep working by an
   After an assignment it holds none, or it would take the command's place in `X=<(x) cat f`, so `X=1 <(x) cat f` blocks though bash runs the pipe and opens no `f`.
 - **`time`** takes one `-p` then one `--` as its keyword.
   `time -p cat f` crossed silently on `main`, and `time -p $(x) cat f` blocked only because of the split.
+  That is bash's keyword: zsh 5.9's takes no options and runs `-p` as the command, so where the shell is known to be zsh neither is peeled and `time -p cat f` opens nothing, as it does there (Q223).
+  A shell this cannot settle keeps bash's reading, which is the one that opens the file.
 
 A substitution anywhere in the command word writes a record, since its output can name any program and any file, so `$(echo cat) f`, `"$(echo cat)" f` and `$(x)/python3 f`, silent on `main`, now say so.
 That is the floor for what follows.
