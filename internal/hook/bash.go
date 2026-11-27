@@ -137,6 +137,17 @@ func bashTargets(command, cwd string) ([]target, error) {
 			continue
 		}
 
+		// Per pass, over the text with its heredoc bodies and comments gone,
+		// since neither is run: a body's live substitutions are queued as
+		// passes of their own below.
+		if !toolShellIsBash() {
+			live := bash.StripComments(bash.StripHeredocBodies(cur.text, nil, false))
+			if shape := bash.ZshOnlyWord(live); shape != "" {
+				note(fmt.Errorf("the command holds %s, and the Bash tool's shell is not "+
+					"bash, so which files it would read is not settled here", shape))
+			}
+		}
+
 		// Ahead of the operands, because this refusal is not about them. A
 		// command that writes the whole environment opens no file, so there is
 		// nothing here for the loop below to find and nothing on disk for a

@@ -444,6 +444,94 @@ func TestAGlobZshReadsDifferentlyDefers(t *testing.T) {
 	})
 }
 
+// Q184: words zsh reads as naming files that the segmenter splits as bash
+// operators or leaves literal. Driven on zsh 5.9 under `env -i zsh -f -c`, each
+// command prints the key in k1.env, or for `=ls` the ls binary, and each
+// crossed this hook silent under zsh. Under bash each is a syntax error or a
+// missing file, and stays a silent allow.
+func TestAShapeOnlyZshReadsDefers(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "k1.env", "AWS_ACCESS_KEY_ID="+secret+"\n")
+	writeFile(t, dir, "a.txt", "hello\n")
+	for command, cause := range map[string]string{
+		"cat (k1|zz).env":       "alternation",
+		"cat a.txt(P:k1.env:)":  "qualifier",
+		"cat k<1-1>.env":        "numeric range",
+		"cat k<->.env":          "numeric range",
+		"cat =ls":               "`=cmd`",
+		"=cat k1.env":           "`=cmd`",
+		"cat =(echo a) k1.env":  "`=(…)`",
+		"cat a.txt =(echo a)":   "`=(…)`",
+		"cat \"a.txt\" =ls":     "`=cmd`",
+		"x=1; cat k<1-1>.env":   "numeric range",
+		"cd . && cat (k1).env":  "alternation",
+		"echo $(cat (k1).env)":  "alternation",
+		"cat a.txt | cat =ls":   "`=cmd`",
+		"cat k<0-9>.env > o.tx": "numeric range",
+		// An unquoted heredoc runs its substitutions, which are passes of
+		// their own once the body is stripped.
+		"cat <<EOF\n$(cat (k1).env)\nEOF": "alternation",
+	} {
+		t.Run(command, func(t *testing.T) {
+			shellNamed(t, "zsh")
+			code, stdout, stderr := drive(t, bashCall(t, command, dir))
+			if reason := deferred(t, code, stdout, stderr); !strings.Contains(reason, cause) {
+				t.Errorf("coverage reason = %q, want it to name %q", reason, cause)
+			}
+		})
+		t.Run(command+"/bash", func(t *testing.T) {
+			bashShell(t)
+			if code, stdout, stderr := drive(t, bashCall(t, command, dir)); code != 0 || stdout != "" || stderr != "" {
+				t.Errorf("exit %d, stdout %q, stderr %q, want a silent allow", code, stdout, stderr)
+			}
+		})
+	}
+	// A gap does not hide a finding beside it (Q204), so the plain operand
+	// still blocks, under both shells.
+	for _, command := range []string{"cat k1.env", "cat =ls k1.env"} {
+		for _, shell := range []string{"zsh", "bash"} {
+			t.Run(command+"/"+shell, func(t *testing.T) {
+				shellNamed(t, shell)
+				_, stdout, _ := drive(t, bashCall(t, command, dir))
+				if reason := reasonOf(t, stdout); !strings.Contains(reason, "aws-access-key-id") {
+					t.Errorf("reason = %q, want the rule named", reason)
+				}
+			})
+		}
+	}
+	// What the check must not read as one of those, each run under zsh.
+	for _, command := range []string{
+		"cat a.txt",
+		"echo $(cat a.txt)",
+		"diff <(cat a.txt) a.txt",
+		"a=(x y); cat a.txt",
+		"f() { cat a.txt; }; f",
+		"cat a.txt 2>&1",
+		"cat < a.txt > o.txt",
+		"[[ a == b ]] || cat a.txt",
+		"cat a.txt | (grep h | wc -l)",
+		"cat 'k<1-1>.env'",
+		`echo "=ls"`,
+		"git log --format=%H -1",
+		"sort -t= -k2 a.txt",
+		"cat <1-1 >o.txt",
+		// Text that is never run, which the review found carrying a `(`
+		// against a word in 47,730 real commands: a heredoc body and a
+		// comment.
+		"python3 - <<'EOF'\nimport pathlib\nprint(pathlib.Path('a.txt').read_text())\nEOF",
+		"git commit --dry-run -F - <<'EOF'\nfix(hook): x\nEOF",
+		"cat <<EOF\nfix(hook): =ls k<1-1>\nEOF",
+		"cat a.txt # see f(x) and =ls",
+	} {
+		t.Run("control: "+command, func(t *testing.T) {
+			shellNamed(t, "zsh")
+			if code, stdout, stderr := drive(t, bashCall(t, command, dir)); code != 0 || stdout != "" || stderr != "" {
+				t.Errorf("exit %d, stdout %q, stderr %q, want a silent allow", code, stdout, stderr)
+			}
+		})
+	}
+}
+
 // A shell the harness accepts that is neither bash nor zsh has no measured
 // expansion, so every glob still defers under it. The harness takes a path by
 // substring, so a `sh` under a directory named for zsh is spawned.
