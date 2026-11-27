@@ -434,7 +434,7 @@ The workflow's job list, `make list-gates` and the table above are all derived f
 Two gates are weaker on a branch than on the trunk, both on purpose and both through `MERGED`.
 `queue` holds `dangling-link` back on a pull request, because a row may link an item a sibling PR is still filing.
 `release-notes` reports a published body that has drifted from its notes file and exits 0, because no pull request can repair it: the repair is `gh release edit`.
-`make check MERGED=true` passes the variable to both, so it is the local run that sees what the push to `main` will see; `make queue MERGED=true` alone sees half of it.
+`make check MERGED=true` passes the variable to both, so it is the local run that sees what the push to `main` will see; `make queue MERGED=true` alone sees half of it, and without an authenticated `gh` the release-notes half fails rather than reporting.
 
 ## The backlog
 
@@ -449,7 +449,7 @@ Pick the top ready item, after `gh pr list` — an open PR is the in-flight sign
 The tooling that files one is vendored, so it sits a directory deeper than the gate scripts: `./scripts/vendor/claude-skills/alloc-queue-id.sh 'title'` for the ID, `python3 scripts/vendor/claude-skills/queue.py rank` for the key; never hand-type a rank.
 Lint with `make queue`, and commit backlog edits in isolation from code.
 A clean bare `queue.py lint` is not the CI verdict — it reports several classes as notes at exit 0.
-`make queue` promotes four of them; the `queue` job adds `dangling-link` on a push to `main`, and `make queue MERGED=true` is the only local command that runs that stronger set.
+`make queue` promotes four of them; the `queue` job adds `dangling-link` on a push to `main`, and `make queue MERGED=true` runs that stronger set locally, as `make check MERGED=true` does.
 `stale-citation` catches a citation your own diff moved; one a sibling moves leaves your branch green and reddens `main`, so the trunk's run is still what closes it.
 It is promoted whole, so a row whose pointer describes the merged tree rather than your branch — a file, a fragment, or a line number a sibling PR is still adding — is red on your branch until that PR lands.
 Mark it `exhibit:`, or write it afterwards.
