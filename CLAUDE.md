@@ -104,7 +104,7 @@ The table is in [`docs/design/README.md`](docs/design/README.md#the-third-shape-
 **It has one now: 45 seconds, and a scan still running at the end of it defers with a coverage record, as a buffer nothing could read does.** A finding in what it got through by then still blocks (Q227), and an override downgrades that block like any other.
 Two things about it are settled and should not be re-derived.
 A size cap is not the cheaper version of this — cost is not a function of size (the same 64 MiB is 9,746 MiB/s binary, 1,055 MiB/s inert text and 6.5 MiB/s keyword-bearing text, the third since re-measured at 32.84), a call adds up rather than arriving one file at a time, and a directory operand has no size to cap.
-And "`os.ReadFile` takes no context" is true and is an argument about *interrupting* a read, not about timing one: the scan runs on its own goroutine and the verdict is written by the one waiting on it, so the deadline outruns the work rather than cancelling it.
+And "`os.ReadFile` takes no context" is true and is an argument about *interrupting* a read, not about timing one: a scan with budget left runs on its own goroutine and the verdict is written by the one waiting on it, so the deadline outruns the work rather than cancelling it; a budget already spent starts no scan at all.
 Driven on built binaries on 2026-09-04, when an overrun still blocked — a 500 MiB fixture that took 68.130s on `main`, 8s past the ceiling, blocked at 45.011s, while a 128 MiB one denies on the same rule either side.
 Those times were not re-taken for the deferral, which changes what is written at 45.011s and not when.
 That fixture no longer reaches the budget at all: since rules run at their keyword positions it denies at 14.9–17.7s, and Q132 owes one that does.
