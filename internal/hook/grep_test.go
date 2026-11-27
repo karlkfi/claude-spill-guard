@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/karlkfi/claude-spill-guard/internal/bash"
 	"github.com/karlkfi/claude-spill-guard/internal/testvec"
 )
 
@@ -437,6 +438,104 @@ func TestAStageThatCopiesAroundTheFilterDoesNotCount(t *testing.T) {
 		t.Fatal("no rewrite for a tee to a file")
 	}
 	allowed(t, bashCall(t, rewrite, dir))
+}
+
+// A stage between the grep and the filter has to be one passThrough knows,
+// because a program can write what it reads anywhere (Q257). Driven on bash
+// 5.3.15 with the built filter and a planted key, the first five shapes, `sort
+// -o` and `uniq - /dev/stderr` each put the key on stderr and got no verdict
+// before this; the allowed pass-through stages put it nowhere.
+func TestAStageThatIsNotKnownToPassThroughDoesNotCount(t *testing.T) {
+	dir := grepTree(t)
+	for _, command := range []string{
+		`grep -rn foo . | awk '{print > "/dev/stderr"}' | spill-guard filter`,
+		`grep -rn foo . | sed 'w /dev/stderr' | spill-guard filter`,
+		`grep -rn foo . | perl -pe 'print STDERR' | spill-guard filter`,
+		`grep -rn foo . | python3 -c 'import sys; sys.stderr.write(sys.stdin.read())' | spill-guard filter`,
+		"grep -rn foo . | cp /dev/stdin /dev/stderr | spill-guard filter",
+		"grep -rn foo . | sort -o /dev/stderr | spill-guard filter",
+		"grep -rn foo . | sort -uo /dev/stderr | spill-guard filter",
+		"grep -rn foo . | gsort -o /dev/stderr | spill-guard filter",
+		// Each reports an input line on stderr, driven by #296's review.
+		"grep -rn foo . | sort -r | sort -c | spill-guard filter",
+		"grep -rn foo . | sort -rc | spill-guard filter",
+		"grep -rn foo . | sort --check | spill-guard filter",
+		"grep -rn foo . | sort --check=diagnose-first | spill-guard filter",
+		"grep -rn foo . | gsort --files0-from=- | spill-guard filter",
+		"grep -rn foo . | gwc --files0-from=- | spill-guard filter",
+		"grep -rn foo . | wc --files0=- | spill-guard filter",
+		"grep -rn foo . | gsed 'w /dev/stderr' | spill-guard filter",
+		"grep -rn foo . | sort --output=/dev/stderr | spill-guard filter",
+		"grep -rn foo . | sort --out /dev/stderr | spill-guard filter",
+		"grep -rn foo . | sort --compress-program=x | spill-guard filter",
+		"grep -rn foo . | uniq - /dev/stderr | spill-guard filter",
+		"grep -rn foo . | uniq -f 1 - /dev/stderr | spill-guard filter",
+		"grep -rn foo . | grep --pager=x foo | spill-guard filter",
+		"grep -rn foo . | grep --filter=x foo | spill-guard filter",
+		"grep -rn foo . | nice awk 1 | spill-guard filter",
+		// A head that the grep feeds is still a stage behind a writer.
+		"grep -rn foo . | awk 1 | head | spill-guard filter",
+		// In a group and out of it.
+		"{ ls; grep -rn foo . | awk 1; } | spill-guard filter",
+		"{ grep -rn foo . | head; ls sub; } | awk 1 | spill-guard filter",
+	} {
+		t.Run(command+" is refused", func(t *testing.T) {
+			reason := denyReason(t, bashCall(t, command, dir))
+			if rewrite := rewriteIn(reason); rewrite != "" {
+				t.Errorf("the reason names a rewrite %q", rewrite)
+			}
+			// The plain reason asks for the filter straight after the grep,
+			// which the command already had last, so last would loop.
+			if !strings.Contains(reason, "straight into") {
+				t.Errorf("the reason %q does not say where the filter goes", reason)
+			}
+		})
+	}
+	for _, command := range []string{
+		"grep -rn foo . | grep -v test | head -20 | spill-guard filter",
+		"grep -rn foo . | cut -d: -f1 | sort -u | uniq -c | spill-guard filter",
+		"grep -rn foo . | sort -k2 -t: | spill-guard filter",
+		"grep -rn foo . | sort -C | sort --check=quiet | wc -l | spill-guard filter",
+		"grep -rn foo . | uniq -f 1 | spill-guard filter",
+		"grep -rn foo . | tail -3 | tr a-z A-Z | wc -l | cat | spill-guard filter",
+		"grep -rn foo . | grep --invert-match test | spill-guard filter",
+		"ggrep -rn foo . | ggrep -v test | ghead -5 | gsort -u | spill-guard filter",
+		// The applied instruction: whatever follows the filter reads only what
+		// it passed.
+		`grep -rn foo . | spill-guard filter | awk '{print > "/dev/stderr"}'`,
+		// Beside the grep in a group is not a stage, since it reads none of
+		// the grep's output, and neither is a pipeline of its own there.
+		"{ grep -rn foo .; echo ---; } | spill-guard filter",
+		"(grep -rn foo .; ls) | spill-guard filter",
+		"{ grep -rn foo . | head; ls sub | sed 1q; } | spill-guard filter",
+		"{ grep -rn foo .; ls sub | sed 1q; } | spill-guard filter",
+	} {
+		t.Run(command+" is allowed", func(t *testing.T) {
+			allowed(t, bashCall(t, command, dir))
+		})
+	}
+}
+
+// The pass-through list is the grep's and not copiedAround's: a command it does
+// not know is no copy, so another caller of copiedAround is not refused over a
+// `sed` or an `awk` stage.
+func TestCopiedAroundDoesNotReadThePassThroughList(t *testing.T) {
+	for _, command := range []string{
+		"grep -rn foo . | sed 1q | spill-guard filter",
+		"env | sed 's/=.*//' | cut -c1-9",
+	} {
+		segments, err := bash.Segments(command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := len(segments) - 1
+		if copiedAround(segments, 0, j, t.TempDir(), false) {
+			t.Errorf("copiedAround(%q) = true", command)
+		}
+		if !unknownStage(segments, 0, j) {
+			t.Errorf("unknownStage(%q) = false", command)
+		}
+	}
 }
 
 // The hatch reaches this refusal like the others: a confirmation, not an allow.

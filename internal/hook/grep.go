@@ -317,7 +317,7 @@ func filteredLater(segments []bash.Segment, i int, dir string, dirUnknown bool) 
 		name := filepath.Base(tokens[0])
 		if name == "spill-guard" || name == "spill-guard.exe" ||
 			filepath.ToSlash(tokens[0]) == self() {
-			return !copiedAround(segments, i, j, dir, dirUnknown)
+			return !copiedAround(segments, i, j, dir, dirUnknown) && !unknownStage(segments, i, j)
 		}
 	}
 	return false
@@ -336,10 +336,6 @@ func filteredLater(segments []bash.Segment, i int, dir string, dirUnknown bool) 
 // under /dev or /proc other than stdout and /dev/null, anything that exists and
 // is not a regular file, and a name this cannot settle -- a `$`, a glob, a `>(`,
 // a relative name where the directory is lost -- are refused outright.
-//
-// Stages that write a file from their own program -- awk's `print >`, sed's
-// `w` -- are not read, and neither is any writer but tee and dd; Q257 holds
-// them.
 func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool) bool {
 	toFile := false
 	for k := i; k < j; k++ {
@@ -435,6 +431,135 @@ func copiedAround(segments []bash.Segment, i, j int, dir string, dirUnknown bool
 		if !inSpan && (k > i || s.Forked) {
 			return true
 		}
+	}
+	return false
+}
+
+// unknownStage reports whether a stage between the grep at i and the filter at
+// j runs a command passThrough does not know (Q257), since an awk or sed
+// program can write anywhere and its text is not read. tee and dd are
+// copiedAround's to judge. A command beside the grep in a `{ …; }` or `( … )`
+// piped as a whole is not a stage. It is kept out of copiedAround, which judges
+// writes alone.
+func unknownStage(segments []bash.Segment, i, j int) bool {
+	for k := i + 1; k < j; k++ {
+		s := segments[k]
+		if s.Pipe != segments[i].Pipe || !downstream(segments, i, k) {
+			continue
+		}
+		p := bash.ShKeywordPeel(s.Tokens, s.QuotedFrom)
+		argv := readers.PeelWrappers(bash.StripEnvPrefix(s.Tokens[p:], s.QuotedFrom[p:])).Argv
+		if len(argv) == 0 {
+			continue
+		}
+		switch name := filepath.Base(argv[0]); name {
+		case "tee", "gtee", "dd", "gdd":
+		default:
+			if !passThrough(name, argv[1:]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// downstream reports whether segment k, later in the pipe of the grep at i,
+// reads what the grep writes. Inside a group piped as a whole the pipe number
+// is the group's, so `{ grep -rn x . | head; ls d | head; } | f` numbers every
+// command alike: the grep's own pipeline ends at its LastStage, or at the
+// grep where it is not a stage at all, and the group's closer hands what the
+// group wrote to the stages outside it, which sit in fewer shells.
+func downstream(segments []bash.Segment, i, k int) bool {
+	depth := len(segments[i].Shells)
+	ended := !segments[i].Forked || segments[i].LastStage
+	for m := i + 1; m < k; m++ {
+		if s := segments[m]; s.Pipe == segments[i].Pipe && len(s.Shells) == depth && s.LastStage {
+			ended = true
+		}
+	}
+	return k > i && (len(segments[k].Shells) < depth || !ended)
+}
+
+// passThrough reports whether a stage named name, run with args, writes what it
+// reads nowhere but its stdout and its redirects. It is a short list rather
+// than a list of writers, because the writers have no end: awk's `print >`,
+// sed's `w`, `perl`, `python3 -c` and `cp /dev/stdin /dev/stderr` each put the
+// matches on stderr ahead of the filter, driven 2026-11-27.
+//
+// Each member's options that open an output, run a program or report a line on
+// stderr are refused by name: sort's `-o`, `--compress-program` and `-c`, GNU
+// sort's and wc's `--files0-from=-`, which echoes the input back as a missing
+// file name, uniq's second operand, and any long option of a grep stage that
+// resolveLong cannot name, which takes in ugrep's `--filter` and `--pager`.
+func passThrough(name string, args []string) bool {
+	// GNU's tools as Homebrew installs them, a g ahead of the name (Q263).
+	switch n := strings.TrimPrefix(name, "g"); n {
+	case "head", "tail", "cut", "tr", "wc", "cat", "grep", "egrep", "fgrep", "sort", "uniq":
+		name = n
+	}
+	switch name {
+	case "head", "tail", "cut", "tr", "cat":
+		return true
+	case "wc":
+		for _, a := range args {
+			if a == "--" {
+				break
+			}
+			if key, _, _ := strings.Cut(a, "="); len(key) > 2 && strings.HasPrefix("--files0-from", key) {
+				return false
+			}
+		}
+		return true
+	case "grep", "egrep", "fgrep":
+		for _, a := range args {
+			if a == "--" {
+				break
+			}
+			if key, _, _ := strings.Cut(a, "="); strings.HasPrefix(key, "--") && resolveLong(key) == "" {
+				return false
+			}
+		}
+		return true
+	case "sort":
+		for _, a := range args {
+			if a == "--" {
+				break
+			}
+			key, value, _ := strings.Cut(a, "=")
+			if long, ok := strings.CutPrefix(key, "--"); ok {
+				if long == "" || strings.HasPrefix("output", long) ||
+					strings.HasPrefix("compress-program", long) ||
+					strings.HasPrefix("files0-from", long) ||
+					strings.HasPrefix("check", long) && value != "quiet" && value != "silent" {
+					return false
+				}
+			} else if strings.HasPrefix(a, "-") && strings.ContainsAny(a, "oc") {
+				return false
+			}
+		}
+		return true
+	case "uniq":
+		operands := 0
+		for n := 0; n < len(args); n++ {
+			a := args[n]
+			if a == "--" {
+				operands += len(args) - n - 1
+				break
+			}
+			switch {
+			case a == "-" || !strings.HasPrefix(a, "-"):
+				operands++
+			case strings.HasPrefix(a, "--"):
+				if !strings.Contains(a, "=") && (strings.HasPrefix(a, "--s") || strings.HasPrefix(a, "--ch")) {
+					n++
+				}
+			default:
+				if c := strings.IndexAny(a[1:], "fsw"); c >= 0 && c == len(a)-2 {
+					n++
+				}
+			}
+		}
+		return operands < 2
 	}
 	return false
 }

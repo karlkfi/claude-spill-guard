@@ -349,7 +349,9 @@ func dumped(command string) string {
 // model applies a command it is handed and a description costs it a guess. The
 // `set -o pipefail` is part of the fix rather than decoration: without it the
 // pipeline reports the filter's status, so grep's 1 for "no match" would read
-// as 0. Where no rewrite was safe to build, it says what to append.
+// as 0. Where no rewrite was safe to build, it says to put the filter straight
+// after the grep: a stage between them may be the reason there is no rewrite,
+// and "last stage" sent `grep -rn x . | awk … | filter` back unchanged.
 //
 // It names the bare forms that stay allowed, since -l and -c are what a
 // session reaches for when it wants to know where a pattern is rather than
@@ -357,7 +359,7 @@ func dumped(command string) string {
 //
 // %q on the command name, which is a key of grepNames, so a closed set.
 func walked(command, rewrite string) string {
-	fix := fmt.Sprintf("pipe it through `%s` as its last stage, with `set -o "+
+	fix := fmt.Sprintf("pipe the grep straight into `%s`, with `set -o "+
 		"pipefail;` ahead of the command so grep's own exit status survives",
 		filterCommand())
 	if rewrite != "" {

@@ -1701,7 +1701,17 @@ Each of those put the key on stderr before this, driven in review of #254.
 A copy to a regular file is allowed when nothing else in the string can read it.
 `grep -rn pat dir | tee out.log | spill-guard filter` is allowed, because a later call that reads `out.log` is scanned when it runs.
 Adding `; cat out.log` gets it refused, because the hook resolves that operand before the file is written.
-The program of an awk or sed stage is not read, and neither is any other command that takes an output path: Q257.
+**Any other stage between them has to be one known to pass its input through, because a program can write what it reads anywhere.** Driven on bash 5.3.15 with the built filter and a planted key, `| awk '{print > "/dev/stderr"}' |`, `| sed 'w /dev/stderr' |`, `| perl -pe 'print STDERR' |`, a `python3 -c` writing to `sys.stderr`, `| cp /dev/stdin /dev/stderr |`, `| sort -o /dev/stderr |` and `| uniq - /dev/stderr |` each put the key on stderr and got no verdict (Q257).
+A list of writers has no end, so `passThrough` in `internal/hook/grep.go` is a short list of readers instead: `head`, `tail`, `cut`, `tr`, `cat`, a grep whose long options are ones it can name, `sort` without `-o`, `--compress-program`, `-c` or `--files0-from`, `wc` without `--files0-from`, and `uniq` with at most one operand, each under its Homebrew `g` name too, beside the `tee` and `dd` reading above.
+The options are refused because each one writes input to stderr or hands it to something else: driven in review of #296, `sort -c` reports the first line out of order on stderr, and GNU `sort` and `wc` given `--files0-from=-` echo the whole input back there as missing file names.
+A command is known by its base name, so `./head`, or a `head` function the same string defines, passes as `head`; the filter's own name check has the same shape.
+A command beside the grep in a `{ …; }` or `( … )` piped as a whole is not a stage, since it reads none of the grep's output, and neither is a pipeline of its own there: `Segment.Pipe` numbers every command in the group alike, so the grep's own pipeline is taken to end at its `LastStage`.
+The plain reason asks for the filter straight after the grep rather than as the last stage, because `grep -rn pat dir | awk … | spill-guard filter` already has it last.
+
+The cost was counted over this machine's transcripts on 2026-11-27, 283,783 `Bash` calls in 3,419 files, by shape rather than by verdict.
+Of 534 recursive greps already piped into the filter, none is refused now; before the `LastStage` reading, 4 were, each a group holding a second pipeline beside the grep.
+Of 12,776 with no filter, 171 have a later stage this refuses, 115 of them `sed` and 40 `awk`; their shape is refused already, and 106 of them lose the rewrite, which appended the filter after the very stage that writes around it, while the other 65 were never offered one, most because their grep is not in the string's last pipeline (counted in review of #296).
+The count does not say how many were refused when they ran: it reads the shape, so a call made before the refusal shipped counts too.
 
 The recursion flags are parsed in `internal/hook/grep.go` — `-r`, `-R`, `--recursive`, `--dereference-recursive`, `-d recurse`, and a digit option such as `-2` — and a flag after an operand counts, because the greps permute: driven, `grep hello d -r -l` on BSD grep 2.6.0 and on ugrep 7.8.4 lists the file.
 
