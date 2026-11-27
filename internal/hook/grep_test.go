@@ -559,6 +559,8 @@ func TestAProcessSubstitutionFeedingAStageIsReadAsOne(t *testing.T) {
 		"grep -rn foo . | grep -f <(echo `cat >&2`) | spill-guard filter",
 		`grep -rn foo . | grep -f <(printf %s "$(cat >&2)") | spill-guard filter`,
 		`grep -rn foo . | cat <(echo "$(cat >&2)") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "${ cat >&2; }") | spill-guard filter`,
+		`grep -rn foo . | grep -f <(echo "${| cat >&2; }") | spill-guard filter`,
 	} {
 		t.Run(command+" is refused", func(t *testing.T) {
 			denyReason(t, bashCall(t, command, dir))
@@ -569,6 +571,7 @@ func TestAProcessSubstitutionFeedingAStageIsReadAsOne(t *testing.T) {
 		"grep -rn foo . | grep -v -f <(printf 'a\\nb\\n') | spill-guard filter",
 		"grep -rn foo . | grep -v -f <(echo n | head -1) | spill-guard filter",
 		"grep -rn foo . | grep -v -f <(cat a.go) | spill-guard filter",
+		`grep -rn foo . | grep -v -f <(echo "${HOME}") | spill-guard filter`,
 	} {
 		t.Run(command+" is allowed", func(t *testing.T) {
 			allowed(t, bashCall(t, command, dir))

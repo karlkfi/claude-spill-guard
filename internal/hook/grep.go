@@ -501,10 +501,11 @@ func substitutedAround(segments []bash.Segment, i, k int) bool {
 				return true
 			}
 		}
-		// A quoted `$(…)` or a backtick stays inside its word rather than
-		// becoming segments here, and its body reads the same stdin (Q274).
+		// A quoted `$(…)`, a backtick or a `${ …; }` stays inside its word
+		// rather than becoming segments here, and its body reads the same
+		// stdin (Q274).
 		for _, tok := range body.Tokens {
-			if strings.Contains(tok, "$(") || strings.Contains(tok, "`") {
+			if strings.Contains(tok, "$(") || strings.Contains(tok, "`") || opensFunsub(tok) {
 				return true
 			}
 		}

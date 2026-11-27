@@ -1712,7 +1712,7 @@ The plain reason asks for the filter straight after the grep rather than as the 
 A `>(…)` is a copy of what the stage writes, and `| tee >(cat >&2) |` stays refused.
 The body of a `<(…)` is not inert, though: it inherits the stage's stdin, which is the grep's output, and driven on bash 5.3.15 `echo hi | cat <(cat >&2)` prints `hi` on stderr, as `| grep -v -f <(cat > /dev/stderr) |` put a planted key there.
 So each segment of the body has to pass what a stage passes, and `echo` and `printf`, which read nothing, are on the list for that.
-A quoted `$(…)` or a backtick in the body is refused outright: it stays inside its word rather than becoming segments, and driven in review of #297, `| grep -f <(echo "$(cat >&2)") |` put the matches on stderr.
+A quoted `$(…)`, a backtick or a bash 5.3 `${ …; }` in the body is refused outright: each stays inside its word rather than becoming segments, and driven in review of #297, `| grep -f <(echo "$(cat >&2)") |` and `| grep -f <(echo "${ cat >&2; }") |` put the matches on stderr.
 
 The cost was counted over this machine's transcripts on 2026-11-27, 283,783 `Bash` calls in 3,419 files, by shape rather than by verdict.
 Of 534 recursive greps already piped into the filter, none is refused now; before the `LastStage` reading, 4 were, each a group holding a second pipeline beside the grep.
