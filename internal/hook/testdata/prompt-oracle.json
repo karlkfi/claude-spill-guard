@@ -29,7 +29,9 @@
     "x1.txt": "MARKER_x1.txt\n",
     "x2.txt": "MARKER_x2.txt\n",
     "...": "MARKER_...\n",
-    "~/.zshrc": "export PATH=$PATH\n"
+    "~/.zshrc": "export PATH=$PATH\n",
+    "c1.txt": "MARKER_c1.txt\n",
+    "c2.txt": "MARKER_c2.txt\n"
   },
   "cases": [
     {
@@ -263,6 +265,17 @@
       "resolver_also_scans": [],
       "harness_also_splices": [],
       "note": "`...` is a legal filename rather than a dot segment, and the skip added for `@.`/`@..` swallows it -- so this case exists to show the skip's width is measured and not merely convenient. The fixture tree really does hold a file called `...`, and the harness splices nothing for `@...` or `@....` anyway."
+    },
+    {
+      "name": "space-preceded-at-inside-a-code-span",
+      "prompt": "Say OK. Do not use any tool. run `see @c1.txt` here and `cat @c2.txt now` too",
+      "harness_files": [
+        "c1.txt",
+        "c2.txt"
+      ],
+      "resolver_also_scans": [],
+      "harness_also_splices": [],
+      "note": "Q267: taken 2026-11-27 by prompt-oracle.yml against 2.1.261, run 46052885359 on 3c862fa. The harness splices both: a space-preceded @ is a token inside an inline code span whether it ends at the closing backtick or at a space, so a code span hides only an @ the backtick itself precedes"
     }
   ]
 }
