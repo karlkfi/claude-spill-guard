@@ -148,6 +148,19 @@ func TestAFilteredReadOfAGuardedPathIsNotRefused(t *testing.T) {
 	}
 }
 
+// A stage that copies the file around the filter is not the careful form, by
+// shape.go's reading (Q258).
+func TestAReadCopiedAroundTheFilterIsRefused(t *testing.T) {
+	dir, name := dotenv(t)
+	code, stdout, stderr := drive(t, bashCall(t, "cat "+name+" | tee /dev/stderr | cut -d= -f1", dir))
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %q)", code, stderr)
+	}
+	if reason := reasonOf(t, stdout); !strings.Contains(reason, "a dotenv file") {
+		t.Errorf("the reason does not name the class: %q", reason)
+	}
+}
+
 // And what the careful form keeps, which the environment case has nothing to
 // keep. `env | cut` leaves the values unexamined because there was never a
 // buffer; a filtered read of a file still opens it and still matches every

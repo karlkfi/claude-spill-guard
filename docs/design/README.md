@@ -147,6 +147,9 @@ That is what `Segment.Pipe` is read for, with `Segment.StdoutAway` beside it: a 
 `env >&2 | cut -d= -f1` is refused, because the dump goes to stderr and the tool returns that, and `env 2>&1 | cut -d= -f1` is not.
 A redirect to a file is not read as a filter, so `env > vars.txt` is refused too.
 Re-taken with that reading on 2026-11-01, over 241,535 real `Bash` calls from 2026-07-26 to 2026-11-02, no verdict moved; 16 driven control rows moved 5, and 19 commands the segmenter could not split were left out.
+A stage between the dump and the last stage is a filter only where it sends nothing around the stages after it, which is the reading `copiedAround` takes for the grep filter: `env | tee /dev/stderr | cut -d= -f1` and `env | cat >&2 | cut -d= -f1` put the dump in the tool result and are refused (Q258).
+The last stage is not read, because its stdout is the tool result whatever it copies, so `env | cat` is still allowed.
+Re-taken with that reading on 2026-11-27, over 309,504 real `Bash` calls in 3,415 transcript files, all of this machine's history to that day, 18 were refused before and the same 18 after; 23 commands the segmenter could not split were left out, and a planted `tee` dump moved.
 
 **Only the bare form of each command**: `env`, `printenv`, their Homebrew names `genv` and `gprintenv`, `set`, `export`, `export -p`, `declare -p`, `typeset -p`, and an inline `python`/`node` script naming `os.environ` or `process.env` without subscripting it.
 `env -0` still dumps and is not refused, and neither is `os.environ.items()`.
@@ -222,6 +225,7 @@ It is deliberately the narrow reading, because membership here is read off a nam
 So the sweep fires on every member it should and declines the one it should, which is more than a uniform 12 would have said.
 
 **The careful form is a pipeline position, the same reading `env` gets.** `cat .env | cut -d= -f1` sends the names alone, so refusing it would fire on the careful form; a segment with a stage after it is writing to that stage, and one with nothing after it is writing to the tool result.
+A stage that copies the file around that filter is not the careful form, so `cat .env | tee /dev/stderr | cut -d= -f1` is refused; over the 2026-11-27 sweep above, no real call reading a guarded path changed answer.
 Here that test buys something the environment case has nothing to buy with: the file is a buffer, so the filtered form is still opened and still matched against every rule.
 Driven — `cat matches.env | cut -d= -f1` blocks naming `aws-access-key-id`.
 The careful form keeps its content coverage instead of trading it for the deny, which is why the reason recommends it.
