@@ -20,7 +20,8 @@ const hookTimeout = 60 * time.Second
 // Two things are charged to it. Everything before the clock starts -- the
 // shell, the launcher, this binary's own startup -- and everything after it
 // stops, which is one JSON object of a few hundred bytes onto a pipe with a
-// 64 KiB buffer.
+// 64 KiB buffer. walkFloor is a third, and only where the budget was spent
+// before the walk was through.
 //
 // Measured 2026-09-04 on an M5 Max, warm, on a machine already carrying other
 // work. A hook invocation over a payload naming no file, driven through the
@@ -69,6 +70,89 @@ const margin = 15 * time.Second
 // budget", has the table and what a slower machine does to it.
 const budget = hookTimeout - margin
 
+// walkFloor is how long the walk gets when the budget leaves it less, which it
+// takes out of the margin. A refusal comes out of the walk and needs no buffer
+// read, so a budget spent before the walk began, or ending just after, would
+// otherwise defer an `env` dump that a walk of microseconds decides (Q270).
+//
+// The slowest of 211,428 Bash walks replayed from this machine's transcripts
+// on 2026-11-27 took 408ms, so the floor is two and a half times that. It
+// leaves fourteen seconds of the margin for the verdict, against the 0.39s
+// the margin's own measurement puts on the worst case.
+const walkFloor = time.Second
+
+// What pace hears as the walk starts and when it reaches a refusal, which are
+// the two points inside the walk a test can stop it at.
+const (
+	walkLabel    = "<walk>"
+	refusedLabel = "<refused>"
+)
+
+// reached tells reach of a refusal, if anyone is listening.
+func reached(reach func(error), err error) {
+	if reach != nil {
+		reach(err)
+	}
+}
+
+// walk runs targets under the deadline within runs the scan under, or under
+// walkFloor where that is later, and reports whether the walk finished.
+//
+// A walk that did not finish hands back the first refusal it reached, as the
+// error, and no buffers: the refusal is settled when reached, and the rest of
+// the walk -- a glob over a home directory was driven at 206s -- has no bearing
+// on it. With settle set, which is a call nobody overrode, it hands the refusal
+// back the moment it is reached rather than at the deadline, because the
+// buffers past it would be read only for a confirmation. A walk that reached none hands back nothing, and the call defers with
+// a record, as a scan the deadline ran out on does. A walk with no bound is
+// killed at the hook's timeout instead, and writes nothing.
+//
+// The goroutine is left running for within's reason.
+func walk(ctx context.Context, pace func(label string), call payload, event Event, left time.Duration, settle bool) ([]target, error, bool) {
+	type walked struct {
+		buffers []target
+		gap     error
+	}
+	var first atomic.Pointer[error]
+	refused := make(chan struct{})
+	done := make(chan walked, 1)
+	go func() {
+		pace(walkLabel)
+		buffers, gap := targets(call, event, func(err error) {
+			if first.CompareAndSwap(nil, &err) {
+				close(refused)
+				pace(refusedLabel)
+			}
+		})
+		done <- walked{buffers, gap}
+	}()
+	deadline, cancel := context.WithTimeout(ctx, left)
+	defer cancel()
+	floor := time.NewTimer(walkFloor)
+	defer floor.Stop()
+	ended, floored := deadline.Done(), floor.C
+	reached := (<-chan struct{})(nil)
+	if settle {
+		reached = refused
+	}
+	for ended != nil || floored != nil {
+		select {
+		case w := <-done:
+			return w.buffers, w.gap, true
+		case <-reached:
+			return nil, *first.Load(), false
+		case <-ended:
+			ended = nil
+		case <-floored:
+			floored = nil
+		}
+	}
+	if err := first.Load(); err != nil {
+		return nil, *err, false
+	}
+	return nil, nil, false
+}
+
 // A scanned is what scanCall made of a call, boxed so that the goroutine below
 // can hand back all three at once. err is unset on what is gathered partway.
 type scanned struct {
@@ -102,7 +186,7 @@ type scanned struct {
 // the runtime collects everything on the way out. In a test, which is the one
 // caller that outlives a verdict, the goroutine finishes the buffer it was
 // given and exits on its own.
-func within(ctx context.Context, pace func(label string), call payload, event Event, overridden bool, left time.Duration) (scanned, bool) {
+func within(ctx context.Context, pace func(label string), buffers []target, gap error, event Event, left time.Duration) (scanned, bool) {
 	// A budget already spent is answered here rather than below, because the
 	// select cannot answer it twice the same way. Both of its cases are ready
 	// at once in that case -- the timer from the first instant, the scan as
@@ -127,7 +211,7 @@ func within(ctx context.Context, pace func(label string), call payload, event Ev
 	var settle atomic.Pointer[func() scanned]
 	done := make(chan scanned, 1)
 	go func() {
-		findings, skips, err := scanCall(call, event, overridden, pace, func(s func() scanned) { settle.Store(&s) })
+		findings, skips, err := scanCall(buffers, gap, event, pace, func(s func() scanned) { settle.Store(&s) })
 		done <- scanned{findings, skips, err}
 	}()
 	select {

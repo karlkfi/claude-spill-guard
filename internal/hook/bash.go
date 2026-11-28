@@ -68,7 +68,7 @@ const heredocLabel = "<heredoc>"
 // What IS fail-closed is an operand of a command we know reads files and whose
 // path we cannot settle -- there the scanner would report a clean result for a
 // file it never opened.
-func bashTargets(command, cwd string) ([]target, error) {
+func bashTargets(command, cwd string, reach func(error)) ([]target, error) {
 	targets := []target{text(commandLabel, []byte(command))}
 	// The loop below names its reader `command`, so the string is kept here
 	// for the one reason that repeats it.
@@ -88,11 +88,13 @@ func bashTargets(command, cwd string) ([]target, error) {
 	var unnamed error
 	// The first refusal, kept while the walk goes on for the gap's reason: an
 	// override turns it into a confirmation, and that has to name a key in a
-	// file the walk would otherwise have stopped short of.
+	// file the walk would otherwise have stopped short of. reach hears of it
+	// at once, since the rest of the walk can outlast the budget.
 	var refused error
 	stop := func(err error) {
 		if refused == nil {
 			refused = err
+			reached(reach, err)
 		}
 	}
 

@@ -186,6 +186,12 @@ func TestTheBudgetFitsInsideTheTimeoutTheManifestGives(t *testing.T) {
 		t.Errorf("the budget leaves %s of the timeout, which is not long enough "+
 			"to be sure of writing a verdict in", hookTimeout-budget)
 	}
+	// The walk's floor comes out of the same margin, since a walk that began
+	// once the budget was spent runs past it by up to the floor.
+	if left := hookTimeout - budget - walkFloor; left < time.Second {
+		t.Errorf("the walk's %s floor leaves %s of the timeout, which is not "+
+			"long enough to be sure of writing a verdict in", walkFloor, left)
+	}
 }
 
 // setDiff reports what one set has that the other does not, or "" when they

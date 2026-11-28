@@ -83,7 +83,7 @@ func TestThePromptResolverAgreesWithTheHarnessOracle(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
 			prompt := strings.ReplaceAll(c.Prompt, "{{root}}", root)
-			got, err := promptTargets(prompt, root)
+			got, err := promptTargets(prompt, root, nil)
 			if err != nil {
 				t.Fatalf("promptTargets: %v", err)
 			}
@@ -390,7 +390,7 @@ func TestABinaryTokenIsStillOpenedAndHandedOn(t *testing.T) {
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := promptTargets("look at @heap.dump", dir)
+	got, err := promptTargets("look at @heap.dump", dir, nil)
 	if err != nil {
 		t.Fatalf("promptTargets: %v", err)
 	}
