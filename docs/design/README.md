@@ -1460,22 +1460,45 @@ What the rows measure — that the deadline outruns a scan the harness would oth
 
 **A deadline is available even though nothing here takes a `context`.** `os.ReadFile` takes none and neither does the match loop, which is why a fifo had to be refused up front rather than read with a limit — `fifo_unix_test.go` says so, against that question.
 That argument is about *interrupting* the work, and a deadline does not have to: a budget with time left runs the scan on its own goroutine, the verdict is written by the one waiting on it, and the process exit collects whatever was still running.
-A budget already spent when `within` is entered starts no scan and no goroutine, and the call defers on nothing read — unless the walk ahead of it refused the call on its shape, below.
+A budget already spent when `within` is entered starts no scan and no goroutine, and the call defers on nothing read — unless the walk ahead of it reached a refusal, below.
 Go preempts a goroutine in a tight match loop asynchronously, so the timer is scheduled without the scan yielding.
 That is the load-bearing mechanism claim and it is driven rather than read — `TestTheDeadlineFiresWhileTheMatchLoopIsRunning` stops on the clock over a buffer that its control arm, given time, blocks on for a key planted in it.
 The control is timed and has to take at least 30 times the short arm's budget, so a faster match loop fails the test outright rather than making it flaky.
 
-#### The walk is outside the budget
+#### The walk is settled before the scan
 
-The walk that decides what a call would send runs before the budget is consulted, and the scan gets whatever is left after it.
+The walk that decides what a call would send runs on its own goroutine ahead of the scan, under the same deadline, and the scan gets whatever is left after it.
 Five refusals come out of that walk and need no buffer read: an `env` dump, a read of a guarded credential path, the same path behind a prompt's `@` token, an unfiltered recursive grep, and the `Grep` tool in `content` mode over a directory.
-Inside the budget, a budget spent before the scan began deferred every one of them with no verdict, and so did a deadline that arrived while the walk was still running, because nothing was handed back until the walk returned (Q270).
-`TestARefusalOnItsShapeDoesNotWaitOnTheBudget` drives both arms over all five, the guarded path on `Bash` and on `Read`, and holds each verdict to the unhurried one byte for byte; on the tree before the change all twelve deferred.
+While the walk ran inside the scan, a budget spent before the scan began deferred every one of them with no verdict, and so did a deadline that arrived while the walk was still running, because nothing was handed back until the walk returned (Q270).
 
-What that costs is a walk long enough to reach the hook's 60-second timeout, which is killed where it used to defer with a record at 45.
-Timed 2026-11-27 by replaying this machine's transcripts through `bashTargets` and `promptTargets` against today's filesystem, from each entry's recorded `cwd` where it still exists: 211,428 `Bash` commands took 123.5µs at the median, 7.07ms at p99.9 and 408ms at worst, and 25,868 prompts took 393µs at worst.
-The filesystem is today's, not the one each command met, and 192,390 transcript entries were skipped because their `cwd` is gone, so this bounds the population rather than closing it.
-No walk in it came within two orders of magnitude of the budget.
+So the walk hands a refusal back as it reaches one, and a call nobody overrode is decided on it there, whatever the rest of the walk still has to stat.
+An overridden one waits for the walk, because the confirmation has to name what else the call would send; a deadline that arrives first decides it on the refusal, naming the rest as unread.
+A walk the deadline outlasts with no refusal reached defers with a coverage record, as a scan does.
+Where the budget leaves the walk less than a second, it gets the second, which comes out of the margin: a walk that began once the budget was spent still reaches an `env` dump in microseconds.
+
+`TestARefusalOnItsShapeDoesNotWaitOnTheBudget` drives four arms over the five, with the guarded path taken on `Bash` and on `Read`, and holds each verdict to the unhurried one byte for byte.
+The arms are a spent budget, a deadline ahead of the walk, a walk stalled at the refusal it reached with the deadline ended there, and the same stall with the deadline an hour off; the last two run where the walk goes on past a refusal, which `Read` and the `Grep` tool do not.
+On the tree before the change every arm of the first two deferred.
+`TestAnOverrideDowngradesARefusalTheBudgetRanOutOn` takes the spent budget and the stall under an override, and `TestAWalkTheDeadlineOutlastsDefersWithARecord` stalls the walk before it reaches anything and wants the record.
+Four mutations of the walk each fail one of them: deciding at the deadline rather than on reaching fails the far-deadline arm, dropping the refusal when the deadline cuts the walk fails the override's stall, a floor of zero fails the first two arms, and a walk with no deadline hangs until the test binary's timeout.
+
+The bound is what a walk needs, rather than a precaution, because one glob is enough to reach it.
+Driven 2026-11-27 on built binaries, `PreToolUse` `Bash` with the home directory as `cwd`:
+
+| Command | before the change | walk outside the budget | this change |
+|---|---|---|---|
+| `env; cat ~/*/*/*/*/*/*.zzqq` | 45.04s, record | 206.44s, deny | 0.26s, deny |
+| `env; cat ~/*/*/*/*/*/*/*.zzqq` | 45.01s, record | 206.91s, deny | 0.00s, deny |
+| `cat ~/*/*/*/*/*/*.zzqq; env` | not taken | not taken | 0.00s, deny |
+| `cat ~/*/*/*/*/*/*.zzqq` | not taken | 237.20s cold, record | 45.02s, record |
+| the first row under `SPILL_GUARD_OVERRIDE=` | not taken | not taken | 45.02s, confirmation |
+
+The first two columns were taken by the PR's reviewer on binaries built at `0fed400` and at the PR's first head, and the last on this tree.
+The harness kills the hook at 60 seconds and allows the call, so every cell past 60 is a call that crossed with nothing written, however its verdict reads here.
+`env` is refused before any glob is expanded, wherever it sits in the string, because the shape check reads each pass's segments ahead of their operands.
+
+Timed the same day by replaying this machine's transcripts through `bashTargets` and `promptTargets` against today's filesystem, from each entry's recorded `cwd` where it still exists, real walks are far shorter: 211,428 `Bash` commands took 123.5µs at the median, 7.07ms at p99.9 and 408ms at worst, and 25,868 prompts took 393µs at worst.
+The filesystem is today's, not the one each command met, and 192,390 transcript entries were skipped because their `cwd` is gone, so that bounds the replayed population and says nothing about a glob nobody has typed yet.
 
 #### Driven end to end, on built binaries
 

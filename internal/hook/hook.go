@@ -94,17 +94,17 @@ func run(start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr 
 
 // runPaced is run with the scan's progress handed to the caller: pace is called
 // before each buffer is read and again each time a rule settles a finding in
-// one, and ending ctx is the deadline arriving. A test
-// can then end the budget on a named buffer, where a timer would make it race
-// the match loop over a fixture.
+// one, with walkLabel as the walk starts and refusedLabel when it reaches a
+// refusal; ending ctx is the deadline arriving. A test can then end the budget
+// on a named buffer, where a timer would make it race the match loop over a
+// fixture.
 //
 // start is taken before anything is read, so the budget covers the whole
 // invocation and not just the scan. Reading stdin, decoding it and looking for
 // an override are bounded by the payload. The walk that decides what to scan is
-// not, since it stats what the call names and expands its globs, and it runs
-// outside the budget so that a refusal it reaches is never deferred. Charging
-// all of it here costs nothing when it is fast and is the honest answer when
-// it is not.
+// not, since it stats what the call names and expands its globs. Charging all
+// of it here costs nothing when it is fast and is the honest answer when it is
+// not.
 func runPaced(ctx context.Context, pace func(label string), start time.Time, budget time.Duration, stdin io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
@@ -124,18 +124,26 @@ func runPaced(ctx context.Context, pace func(label string), start time.Time, bud
 		return deny(stdout, stderr, event, blockedLead+noReasonGiven, "")
 	}
 
-	// The walk runs ahead of the budget rather than inside it, because a
-	// refusal comes out of it and needs no buffer read: inside, a budget spent
-	// before the scan or ending while the walk still ran deferred an env dump
-	// or a `cat .env` with no verdict (Q270). Its time is still charged, since
-	// what the scan gets is what is left after it. The cost is a walk that
-	// reaches the hook's timeout, which is killed where it used to defer with a
-	// record; docs/design/README.md, "The walk is outside the budget", has how
-	// long real walks take.
-	buffers, gap := targets(call, event)
+	// The walk is settled ahead of the scan, because a refusal comes out of it
+	// and needs no buffer read: inside the scan, a budget spent before it or
+	// ending while the walk still ran deferred an env dump or a `cat .env` with
+	// no verdict (Q270). walk keeps it under the budget and hands back a
+	// refusal as it reaches one, so an `env` dump beside a slow glob is not
+	// left to the deadline; docs/design/README.md, "The walk is settled before
+	// the scan", has the arms.
+	buffers, gap, walked := walk(ctx, pace, call, event, budget-time.Since(start), !overridden)
 	var refused refusal
-	if errors.As(gap, &refused) && !overridden {
+	errors.As(gap, &refused)
+	if !walked && refused == nil {
+		return abstain(stdout, stderr, call, event, overran(budget), nil)
+	}
+	if !overridden && refused != nil {
 		return decide(stdout, stderr, call, event, false, refused.body(), "")
+	}
+	if !walked {
+		// The buffers beside the refusal were never collected, so the
+		// confirmation can name none of them.
+		return decide(stdout, stderr, call, event, true, refused.body(), restUnread)
 	}
 	got, finished := within(ctx, pace, buffers, gap, event, budget-time.Since(start))
 	findings, skips, err := got.findings, got.skips, got.err
@@ -581,7 +589,7 @@ func file(path string, size int64, failed func(error) error) target {
 // an error and is why the two are separate returns. An error means something
 // that should have been scannable could not be read, and it comes back with the
 // targets collected ahead of it, which scanCall still reads.
-func targets(call payload, event Event) ([]target, error) {
+func targets(call payload, event Event, reach func(error)) ([]target, error) {
 	switch event {
 	case UserPromptSubmit:
 		if call.Prompt == nil {
@@ -591,9 +599,9 @@ func targets(call payload, event Event) ([]target, error) {
 		// splices a file into the model's context with no hook of any kind
 		// running for it, so this event is where that crossing is stopped or
 		// nowhere -- see prompt.go.
-		return promptTargets(*call.Prompt, call.CWD)
+		return promptTargets(*call.Prompt, call.CWD, reach)
 	case PreToolUse:
-		return toolTargets(call)
+		return toolTargets(call, reach)
 	default:
 		// decode returns errNoEvent rather than an event this switch does not
 		// handle, so reaching here means the two disagree.
@@ -601,7 +609,7 @@ func targets(call payload, event Event) ([]target, error) {
 	}
 }
 
-func toolTargets(call payload) ([]target, error) {
+func toolTargets(call payload, reach func(error)) ([]target, error) {
 	// A tool this package has no strategy for is a matcher wider than the
 	// scanner, and it is judged below. A payload that names no tool at all is
 	// a different thing: there is nothing to decide with, so it defers.
@@ -696,7 +704,7 @@ func toolTargets(call payload) ([]target, error) {
 		}
 		// The command string, and the files its readers are pointed at.
 		// internal/readers is what decides which token of a segment is a path.
-		return bashTargets(*in.Command, call.CWD)
+		return bashTargets(*in.Command, call.CWD, reach)
 	case ToolGrep:
 		var in grepToolInput
 		if err := unmarshalToolInput(ToolGrep, call.ToolInput, &in); err != nil {

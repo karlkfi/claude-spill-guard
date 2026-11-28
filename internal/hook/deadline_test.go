@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -643,13 +644,17 @@ func TestASpentBudgetIsNotRacedByTheScan(t *testing.T) {
 // buffer has to be read to decide it (Q270). Before this, both ways the budget
 // could run out ahead of the refusal deferred the call with no verdict.
 //
-// Two arms, because a fix for one leaves the other open. A start an hour ago
-// spends the budget before within is reached, which within answered by never
-// starting the walk. A context ended before the walk can return is the deadline
-// arriving while targets() still runs, where within answered with whatever had
-// been published, and nothing is published until the walk is through. A
-// refusal decided ahead of within answers both; one published early from inside
-// the scan answers neither, since the context here ends before the walk returns.
+// Four arms, because a fix for one leaves the others open. A start an hour ago
+// spends the budget before the walk begins. A context ended before the walk
+// can return is the deadline arriving while targets() still runs, where within
+// answered with whatever the scan had published, and the scan published nothing
+// until the walk was through. Both are answered by the walk's floor. The third
+// stalls the walk at the refusal it reached and ends the context there, which
+// is a glob that outlasts the budget beside an `env`: an unbounded walk waits
+// on it, and a refusal published only once the walk returns is never seen. The
+// fourth stalls it there with the deadline an hour off, and a refusal that
+// waits for the deadline or the walk is never decided. The last two run where
+// the walk goes on past a refusal, which a Read or a Grep tool call does not.
 //
 // Each arm's verdict is held to the unhurried one byte for byte, so the
 // assertion is that the budget changed nothing rather than that something
@@ -662,16 +667,17 @@ func TestARefusalOnItsShapeDoesNotWaitOnTheBudget(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		payload string
+		walks   bool
 	}{
-		{"an env dump", bashCall(t, "env", dir)},
-		{"a guarded Bash operand", bashCall(t, "cat "+name, dir)},
+		{"an env dump", bashCall(t, "env", dir), true},
+		{"a guarded Bash operand", bashCall(t, "cat "+name, dir), true},
 		{"a guarded Read", `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":` +
-			quote(t, filepath.Join(dir, name)) + `}}`},
+			quote(t, filepath.Join(dir, name)) + `}}`, false},
 		{"a guarded @ token", `{"hook_event_name":"UserPromptSubmit","cwd":` + quote(t, dir) +
-			`,"prompt":` + quote(t, "see @"+name) + `}`},
-		{"an unfiltered recursive grep", bashCall(t, "grep -rn foo sub", dir)},
+			`,"prompt":` + quote(t, "see @"+name) + `}`, true},
+		{"an unfiltered recursive grep", bashCall(t, "grep -rn foo sub", dir), true},
 		{"the Grep tool over a directory", grepToolCall(t, dir,
-			map[string]string{"pattern": "foo", "path": "sub", "output_mode": "content"})},
+			map[string]string{"pattern": "foo", "path": "sub", "output_mode": "content"}), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -681,14 +687,45 @@ func TestARefusalOnItsShapeDoesNotWaitOnTheBudget(t *testing.T) {
 			}
 			want := out.String()
 			reasonOf(t, want)
-			for arm, drive := range map[string]func(stdout, stderr *bytes.Buffer) int{
+			arms := map[string]func(stdout, stderr *bytes.Buffer) int{
 				"a spent budget": func(stdout, stderr *bytes.Buffer) int {
 					return run(time.Now().Add(-unhurried), unhurried, strings.NewReader(tc.payload), stdout, stderr)
 				},
 				"a deadline ahead of the walk": func(stdout, stderr *bytes.Buffer) int {
 					return runPaced(ended, func(string) {}, time.Now(), unhurried, strings.NewReader(tc.payload), stdout, stderr)
 				},
-			} {
+			}
+			if tc.walks {
+				arms["a walk that outlasts the deadline"] = func(stdout, stderr *bytes.Buffer) int {
+					ctx, pace, stalled := stallOn(refusedLabel, true)
+					code := runPaced(ctx, pace, time.Now(), unhurried, strings.NewReader(tc.payload), stdout, stderr)
+					if !stalled.Load() {
+						t.Error("the walk never reached the refusal, so this arm stalled nothing")
+					}
+					return code
+				}
+				arms["a walk still running with the deadline an hour off"] = func(stdout, stderr *bytes.Buffer) int {
+					ctx, pace, stalled := stallOn(refusedLabel, false)
+					var out, errs bytes.Buffer
+					done := make(chan int, 1)
+					go func() {
+						done <- runPaced(ctx, pace, time.Now(), unhurried, strings.NewReader(tc.payload), &out, &errs)
+					}()
+					select {
+					case code := <-done:
+						if !stalled.Load() {
+							t.Error("the walk never reached the refusal, so this arm stalled nothing")
+						}
+						stdout.Write(out.Bytes())
+						stderr.Write(errs.Bytes())
+						return code
+					case <-time.After(10 * time.Second):
+						t.Error("the refusal waited on the rest of the walk")
+						return -1
+					}
+				}
+			}
+			for arm, drive := range arms {
 				var out, errs bytes.Buffer
 				if code := drive(&out, &errs); code != 0 || out.String() != want {
 					t.Errorf("%s: exited %d with stdout %q (stderr %q), want the control's %q",
@@ -696,6 +733,55 @@ func TestARefusalOnItsShapeDoesNotWaitOnTheBudget(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// stallOn holds the goroutine that calls pace with label until the test binary
+// exits, so whatever was walking or scanning there never finishes, and ends
+// the deadline there first unless told to leave it an hour off. stalled
+// reports whether it fired.
+func stallOn(label string, expire bool) (context.Context, func(string), *atomic.Bool) {
+	ctx, end := context.WithCancel(context.Background())
+	stalled := new(atomic.Bool)
+	return ctx, func(at string) {
+		if at == label && stalled.CompareAndSwap(false, true) {
+			if expire {
+				end()
+			}
+			select {}
+		}
+	}, stalled
+}
+
+// A walk the deadline outlasts without reaching a refusal defers with a record,
+// as a scan the deadline ran out on does. Unbounded, it ran until the hook's
+// timeout killed it, and a killed process writes no record at all: a glob over
+// a home directory was driven at 206s.
+func TestAWalkTheDeadlineOutlastsDefersWithARecord(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "planted.log", "AWS_ACCESS_KEY_ID="+secret+"\n")
+	payload := bashCall(t, "cat planted.log", dir)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	ctx, pace, stalled := stallOn(walkLabel, true)
+	var out, errs bytes.Buffer
+	code := runPaced(ctx, pace, time.Now(), unhurried, strings.NewReader(payload), &out, &errs)
+	if !stalled.Load() {
+		t.Fatal("the walk was never stalled, so the deferral below is not about it")
+	}
+	if reason := deferred(t, code, out.String(), errs.String()); !strings.Contains(reason, "did not finish inside its") {
+		t.Errorf("coverage reason = %q, want the deadline recorded", reason)
+	}
+
+	// The control: unstalled, the same call is a finding, so the deferral is
+	// the walk going unfinished and not a file with nothing in it.
+	out.Reset()
+	errs.Reset()
+	if code := run(time.Now(), unhurried, strings.NewReader(payload), &out, &errs); code != 0 {
+		t.Fatalf("the control exited %d (stderr %q)", code, errs.String())
+	}
+	if reason := reasonOf(t, out.String()); !strings.Contains(reason, "aws-access-key-id") {
+		t.Fatalf("the control reason = %q, want the planted key found", reason)
 	}
 }
 
@@ -707,18 +793,35 @@ func TestAnOverrideDowngradesARefusalTheBudgetRanOutOn(t *testing.T) {
 	writeFile(t, dir, "notes.txt", "AWS_ACCESS_KEY_ID="+secret+"\n")
 	payload := bashCall(t, "SPILL_GUARD_OVERRIDE='a fixture' cat notes.txt "+name, dir)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	var out, errs bytes.Buffer
-	if code := run(time.Now().Add(-unhurried), unhurried, strings.NewReader(payload), &out, &errs); code != 0 {
-		t.Fatalf("exited %d (stderr %q)", code, errs.String())
-	}
-	if !strings.Contains(out.String(), `"permissionDecision":"ask"`) {
-		t.Fatalf("stdout = %q, want a confirmation", out.String())
-	}
-	reason := reasonOf(t, out.String())
-	if !strings.Contains(reason, "a dotenv file") {
-		t.Errorf("reason = %q, want the refusal's class named", reason)
-	}
-	if strings.Contains(reason, "aws-access-key-id") {
-		t.Errorf("reason = %q, want no finding from a scan that never ran", reason)
+	for arm, drive := range map[string]func(stdout, stderr *bytes.Buffer) int{
+		"a spent budget": func(stdout, stderr *bytes.Buffer) int {
+			return run(time.Now().Add(-unhurried), unhurried, strings.NewReader(payload), stdout, stderr)
+		},
+		"a walk that outlasts the deadline": func(stdout, stderr *bytes.Buffer) int {
+			ctx, pace, stalled := stallOn(refusedLabel, true)
+			code := runPaced(ctx, pace, time.Now(), unhurried, strings.NewReader(payload), stdout, stderr)
+			if !stalled.Load() {
+				t.Error("the walk never reached the refusal, so this arm stalled nothing")
+			}
+			return code
+		},
+	} {
+		var out, errs bytes.Buffer
+		if code := drive(&out, &errs); code != 0 {
+			t.Fatalf("%s: exited %d (stderr %q)", arm, code, errs.String())
+		}
+		if !strings.Contains(out.String(), `"permissionDecision":"ask"`) {
+			t.Fatalf("%s: stdout = %q, want a confirmation", arm, out.String())
+		}
+		reason := reasonOf(t, out.String())
+		if !strings.Contains(reason, "a dotenv file") {
+			t.Errorf("%s: reason = %q, want the refusal's class named", arm, reason)
+		}
+		if strings.Contains(reason, "aws-access-key-id") {
+			t.Errorf("%s: reason = %q, want no finding from a scan that never ran", arm, reason)
+		}
+		if !strings.Contains(out.String(), "could not be") {
+			t.Errorf("%s: stdout = %q, want the rest named as unread", arm, out.String())
+		}
 	}
 }

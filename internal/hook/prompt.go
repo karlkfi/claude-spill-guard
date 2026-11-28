@@ -60,7 +60,7 @@ var errFileUnreadable = errors.New("a prompt names a file that could not be " +
 // only place the crossing can be stopped; the token arrives here unexpanded,
 // which is what makes resolving it possible at all. docs/design/README.md,
 // "`@path` is an operand, not a hop", carries that measurement.
-func promptTargets(prompt, cwd string) ([]target, error) {
+func promptTargets(prompt, cwd string, reach func(error)) ([]target, error) {
 	targets := []target{text(promptLabel, []byte(prompt))}
 	seen := make(map[string]bool)
 	// The first token that would not resolve, kept while the rest are read,
@@ -110,6 +110,7 @@ func promptTargets(prompt, cwd string) ([]target, error) {
 				if class := guardedClass(path); class != "" {
 					if refused == nil {
 						refused = &splicedRefusal{pathRefusal{path, class}}
+						reached(reach, refused)
 					}
 					continue
 				}
