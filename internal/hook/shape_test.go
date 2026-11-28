@@ -209,6 +209,10 @@ func TestPositionInThePipelineDecidesIt(t *testing.T) {
 		"env | grep -i -E 'claude|tmpdir' | sed 's/=.*/=<set>/' | sort": false,
 		// An under-fire, kept so the line above is never refused.
 		"env | sed 'w /dev/stderr' | cut -d= -f1": false,
+		// A `<(…)` body reads the stage's stdin, which is the dump (Q264).
+		"env | grep -f <(cat >&2) | cut -d= -f1":      true,
+		"env | grep -f <(cat 1<>o.log) | cut -d= -f1": true,
+		"env | grep -f <(echo n) | cut -d= -f1":       false,
 	} {
 		t.Run(command, func(t *testing.T) {
 			_, stdout, _ := drive(t, bashCall(t, command, t.TempDir()))
