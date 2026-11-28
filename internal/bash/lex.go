@@ -25,9 +25,11 @@ var (
 		"|": true, "|&": true, "||": true, "&&": true, "&": true,
 		";": true, "\n": true, "(": true, ")": true,
 	}
+	// `<>` is this port's: upstream lexes it as `<` then `>`, which takes `>`
+	// for the target and leaves the file an operand.
 	redir = map[string]bool{
 		">": true, ">>": true, "<": true, "<<": true, "<<<": true,
-		">|": true, "&>": true, "&>>": true,
+		">|": true, "&>": true, "&>>": true, "<>": true,
 	}
 	dup = map[string]bool{">&": true, "<&": true}
 )
@@ -38,7 +40,7 @@ var (
 // deterministic where the Python builds it from a set.
 var operators = []string{
 	"<<<", "&>>",
-	"|&", "||", "&&", ">>", "<<", ">|", "&>", ">&", "<&",
+	"|&", "||", "&&", ">>", "<<", ">|", "&>", ">&", "<&", "<>",
 	"|", "&", ";", "\n", "(", ")", ">", "<",
 }
 

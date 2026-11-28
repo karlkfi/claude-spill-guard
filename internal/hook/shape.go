@@ -140,16 +140,25 @@ func envDumped(segments []bash.Segment) string {
 // `env >&2 | cut -d= -f1` puts the dump in the tool result and gives cut
 // nothing. Segment.StdoutAway is that reading, and a compound piped as a
 // whole carries its closer's, so `{ env; } >&2 | cut` fires too.
+//
+// A stage between this one and the last is a filter only if it sends nothing
+// around the stages after it, which copiedAround reads: `env | tee /dev/stderr
+// | cut -d= -f1` and `env | cat >&2 | cut -d= -f1` both put the dump in the
+// tool result (Q258). The directory is passed as unknown because envDumped
+// runs ahead of the tracker, so a copy to a relative name fires. The last
+// stage is not read: whatever it copies, its stdout is the tool result, and
+// `env | cat` is allowed by the same reading.
 func lastInPipeline(segments []bash.Segment, i int) bool {
 	if segments[i].StdoutAway {
 		return true
 	}
-	for _, later := range segments[i+1:] {
-		if later.Pipe == segments[i].Pipe {
-			return false
+	last := i
+	for j := i + 1; j < len(segments); j++ {
+		if segments[j].Pipe == segments[i].Pipe {
+			last = j
 		}
 	}
-	return true
+	return last == i || copiedAround(segments, i, last, "", true)
 }
 
 // dumpsEverything reports whether these tokens print every variable.
